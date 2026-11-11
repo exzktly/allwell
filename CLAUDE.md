@@ -638,6 +638,59 @@ Project settings only apply once the harness trusts them; a remote session that
 still prompts is loading none of the file. The fix there is the same allowlist in
 the user-level `~/.claude/settings.json`, which needs no trust step.
 
+**What a PR subscription tells you, and what it never will.** After opening a PR,
+`subscribe_pr_activity` delivers GitHub events into the session that subscribed.
+Some kinds of trouble arrive as events and some never do, and the ones that never
+arrive are exactly the ones that leave a PR broken while the session believes
+it is watching it.
+
+- **Arrive within seconds:** a check run finishing (red or green), a review or
+  review comment, and the PR being merged or closed. CI here runs as GitHub
+  Actions jobs, which are check runs, so a red job does wake the session — on
+  PR #1302 all three failed jobs were delivered within ten seconds of failing.
+- **Never arrive as their own event: merge conflicts.** GitHub sends no webhook
+  when a PR *becomes* unmergeable because something else landed on `main`. It
+  works out mergeability lazily, only when someone asks, and the harness's
+  mergeability notices are best-effort. On this repository that is the common
+  case, not an edge one: several sessions merge PRs into `main` on the same day,
+  and the version-bump bot pushes to `main` after every merge, so a PR that was
+  clean when it opened can conflict an hour later with nothing announcing it.
+- **Also silent:** CI reported through the commit-status API rather than as
+  check runs, pushes to the branch by someone else, a lost delivery, and any PR
+  this session is not subscribed to. A PR's events go to **one session at a
+  time**: if another session already holds the subscription, this one is told
+  so and receives nothing, and a session that never subscribed gets nothing at
+  all. Subscribe in the same turn the PR is opened, and read the subscription
+  result rather than assuming it worked.
+
+So the subscription covers CI and reviews; **mergeability is your own job, and
+the check-in is how you do it.** Keep a `send_later` check-in armed for as long
+as the PR is open — first about 50 minutes after the last activity, then about
+every four hours — and at that check-in, and at the start of handling *any* PR
+event, read the PR's merge state before anything else:
+
+1. `pull_request_read` (`method: "get"`) and read `mergeable_state`. `dirty` is a
+   conflict. `unknown` (or a `mergeable` of `null`) means GitHub has not worked it
+   out yet — the read itself starts that, so read again a minute later rather
+   than treating it as clean. `unstable` means mergeable but some check is not
+   green, which is a CI question, not a conflict. `clean` is clean.
+2. Confirm it locally, because the API's answer can lag a push to `main`:
+   `git fetch origin main` and then `git merge-tree --write-tree HEAD origin/main`,
+   which prints conflicted paths and exits non-zero on a conflict without
+   touching the working tree.
+3. On a conflict, merge `origin/main` into the branch and resolve it per the
+   paragraph on conflict markers above, run what the resolution touched, and
+   push it as one round.
+
+A check-in that finds nothing new re-arms silently. Stop re-arming only when the
+PR is merged or closed, or the user says stop — not because the last few
+check-ins were quiet: a conflict is exactly the thing that arrives after a long
+quiet stretch. When CI fails on a runner problem rather than on the code (the
+runner failing to resolve the Ubuntu mirrors during `apt-get install`, before any
+test ran, is the shape seen here), note it once on the PR and re-run the failed
+jobs once; GitHub refuses a re-run while any job in the same run is still in
+progress, so re-run when the last job has finished.
+
 **Pull requests do not bump the version; `main` does, after each merge.**
 `.github/workflows/version-bump.yml` runs on every push to `main`, bumps
 `version.py` by one increment (`scripts/bump_version.py`) and commits it back as

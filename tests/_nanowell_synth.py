@@ -7,6 +7,8 @@ point-set evidence only, not a simulation of phase optics or detection.
 
 from __future__ import annotations
 
+import copy
+from collections import OrderedDict
 from dataclasses import dataclass
 import math
 
@@ -158,7 +160,7 @@ def tile_id(plan: TilePlan, row: int, col: int) -> str:
     return f"F{row * plan.cols + col}"
 
 
-def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_um: float,
+def _render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_um: float,
                  rotation_deg: float = 0.0, stage_jitter_um: float = 0.0, vignette: float = 0.0,
                  noise_sigma: float = 0.0, cells: int = 0, debris: int = 0,
                  bubble=None, blur_px: float = 1.2, seed: int = 0,
@@ -272,3 +274,39 @@ def render_tiles(plan: TilePlan, *, pitch_um: float, diameter_um: float, radius_
                 image = image + rng.normal(0, noise_sigma, image.shape)
             images[name] = image.astype(np.float32)
     return RenderedTiles(plan, images, true_lt, recorded_lt, array, sites, bubble)
+
+
+#: Rendered wells kept per process, keyed on the full argument list. A tile render is ~1 s, and the nanowell
+#: end-to-end lane renders 454 wells of which 165 are distinct (most tests take ``build_well``'s defaults), so about
+#: 200 s of the lane was rendering a well its worker had already rendered. Bounded by the tiles' bytes, least recently
+#: used out first, since a well is 8 MB at the default 2 x 2 and several times that on a larger plan.
+_RENDERED: "OrderedDict[str, RenderedTiles]" = OrderedDict()
+_RENDERED_MAX_BYTES = 160 * 2**20
+
+
+def _plain(value) -> bool:
+    """A value whose ``repr`` is the whole of it — what a cache key may be built from (an array's is elided)."""
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return True
+    if isinstance(value, (tuple, list)):
+        return all(_plain(v) for v in value)
+    return False
+
+
+def _nbytes(rendered: RenderedTiles) -> int:
+    return sum(image.nbytes for image in rendered.images.values())
+
+
+def render_tiles(plan: TilePlan, **kwargs) -> RenderedTiles:
+    """:func:`_render_tiles`, remembered: the same arguments give a fresh deep copy of the same tiles, so a test that
+    paints into its images (``paint_cell``) changes nothing another test is handed. The render is deterministic —
+    everything random comes from ``default_rng(seed)`` — so a copy is the render it replaces, byte for byte."""
+    if not _plain(list(kwargs.values())):
+        return _render_tiles(plan, **kwargs)
+    key = repr((plan, sorted(kwargs.items())))
+    if key not in _RENDERED:
+        _RENDERED[key] = _render_tiles(plan, **kwargs)
+        while len(_RENDERED) > 1 and sum(_nbytes(r) for r in _RENDERED.values()) > _RENDERED_MAX_BYTES:
+            _RENDERED.popitem(last=False)
+    _RENDERED.move_to_end(key)
+    return copy.deepcopy(_RENDERED[key])

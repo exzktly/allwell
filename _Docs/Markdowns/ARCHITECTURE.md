@@ -8037,7 +8037,14 @@ first in full with a count of the rest, every one in its tooltip. A timer
 (`_LIVE_CHECK_MS`, only while the pane is on screen and no run is going) re-asks
 the checks that read nothing from disk and draws the list muted; once Run or +
 Queue has been pressed with problems outstanding it is drawn in the error
-colour until it empties. Pressing Run with a problem open unfolds the first
+colour until it empties. A refusal that timer cannot re-ask — a disk check
+(packed file, a blank or control well missing from the input, the nanowell
+input report) or one `_validate_run_request` adds beside the roster — is kept
+in `_carried_run_problems` and drawn with the timer's own list until Run is
+pressed again or the input field changes (`forget_carried_run_problems`);
+repainting from the timer's list alone erased the reason within 700 ms of the
+press, so a refused Run read as a button that did nothing
+(`tests/test_a_refused_run_keeps_its_reason.py`). Pressing Run with a problem open unfolds the first
 problem's section and scrolls it into view; clicking the line does the same.
 There is no dialog: `_validate_run_request` returns `None` and the problems are
 on screen, and `_last_run_problems` keeps what the last press reported. The

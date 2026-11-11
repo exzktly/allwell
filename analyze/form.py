@@ -163,7 +163,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._set_status(self._layout_lbl, "", quiet="")
 
 
-        self._input_edit.textChanged.connect(lambda _: self._refresh_output())
+        self._input_edit.textChanged.connect(lambda _: (self.forget_carried_run_problems(), self._refresh_output()))
 
     def _build_channels_section(self, parent: QWidget) -> None:
         """What the plate is, and its channels: one row each, with its role."""

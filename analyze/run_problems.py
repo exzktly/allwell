@@ -18,6 +18,12 @@ check, which reads nothing from disk — no packed-file scan, no look inside the
 input for a blank or control well — so it can run on a timer. Those disk checks
 are asked when Run is pressed.
 
+A refusal only Run can ask — a disk check, or one ``_validate_run_request``
+adds beside the roster — is carried by the continuous check
+(``_carried_run_problems``) until Run is pressed again or the input folder
+changes, because the continuous check cannot re-ask it and repainting from its
+own list would erase the reason the run was refused.
+
 ``_last_run_problems`` keeps what the last Run / + Queue press reported, as
 ``(title, message)`` pairs, for whatever wants to read it after the fact.
 """
@@ -158,6 +164,14 @@ class AnalyzeRunProblemsMixin:
         take the user to the first one."""
         self._run_attempted = bool(problems)
         self._last_run_problems = [(p.title, p.message) for p in problems]
+        # The refusals the continuous check cannot see — the disk checks it
+        # never asks (a packed file, a blank or control well missing from the
+        # input, a nanowell layout), and the ones `_validate_run_request` adds
+        # beside the roster. Without this, the live check repainted the line
+        # from its own lighter list 700 ms after Run was pressed and erased the
+        # reason: the run had been refused, and the button read as dead.
+        light = self._run_problems(live=True) if problems else []
+        self._carried_run_problems = [p for p in problems if p not in light]
         self._show_run_problems(problems, urgent=True)
         if problems:
             self._go_to_run_problem(problems[0])
@@ -177,6 +191,10 @@ class AnalyzeRunProblemsMixin:
         if container is not None and scroll is not None and container.isVisibleTo(scroll):
             QTimer.singleShot(0, lambda: scroll.ensureWidgetVisible(container, 0, 24))
 
+    def forget_carried_run_problems(self) -> None:
+        """The input folder changed: the disk checks' last answers were about another folder."""
+        self._carried_run_problems = []
+
     # ── the continuous check ────────────────────────────────────────────────
     def _start_live_run_checks(self) -> None:
         """Re-ask the disk-free checks on a timer while the pane is on screen,
@@ -194,6 +212,10 @@ class AnalyzeRunProblemsMixin:
         from core.safe import swallow
         with swallow("checking the Analyze form"):
             problems = self._run_problems(live=True)
+            # What only Run could ask stays until Run asks again or the input
+            # folder changes (`forget_carried_run_problems`): this check has no
+            # way to tell whether it still holds.
+            problems += [p for p in getattr(self, "_carried_run_problems", ()) if p not in problems]
             # Once Run has been pressed, the list stays in the error colour
             # until it is empty: the user is fixing it, not filling in a form.
             self._show_run_problems(problems, urgent=bool(problems) and self._run_attempted)

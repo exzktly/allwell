@@ -737,6 +737,20 @@ def _fill_combo(combo, names: list, listed: list) -> None:
     combo.addItem(CUSTOM_LABEL, sc.CUSTOM)
 
 
+class _PlaceOnResize(QObject):
+    """Calls *place* whenever a watched widget is shown, hidden or resized (:func:`share_page`)."""
+
+    def __init__(self, parent: QObject, place):
+        super().__init__(parent)
+        self._place = place
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.Show, QEvent.Hide, QEvent.Resize):
+            with swallow("Nanowells: share the page between the Subset editor and the figure"):
+                self._place()
+        return False
+
+
 def share_page(editor: SubsetEditor, figure: QWidget, redraw) -> None:
     """While *editor* is shown on a page too short for it and *figure* both — a phone held sideways, where the figure's
     own minimum and the footer under it already fill the page — the figure steps aside and the editor takes the page;
@@ -768,14 +782,7 @@ def share_page(editor: SubsetEditor, figure: QWidget, redraw) -> None:
             if not aside:
                 QTimer.singleShot(0, figure, redraw)     # with the figure as context: dropped if the page is deleted
 
-    class _Watch(QObject):
-        def eventFilter(self, obj, event) -> bool:  # Qt naming
-            if event.type() in (QEvent.Show, QEvent.Hide, QEvent.Resize):
-                with swallow("Nanowells: share the page between the Subset editor and the figure"):
-                    place()
-            return False
-
-    watch = _Watch(editor)
+    watch = _PlaceOnResize(editor, place)
     editor.installEventFilter(watch)
     page.installEventFilter(watch)
 

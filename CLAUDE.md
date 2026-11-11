@@ -84,10 +84,10 @@ the container**:
   command.
 - **Gated lanes** — three rosters in `tests/_lanes.py`, each its own lane, each
   run only when the change can reach it:
-  - **Nanowell end-to-end** (~320 tests, `--nanowell`): the files that render
+  - **Nanowell end-to-end** (~410 tests, `--nanowell`): the files that render
     synthetic tiles and run the real detection (`NANOWELL_E2E_FILES`, each with
-    its cost; ~1,075 s of work). Distributed by test (`--dist load`), because
-    one file is 475 s. A new test that renders tiles and detects joins it.
+    its cost; ~2,400 s of work). Distributed by test (`--dist load`), because
+    one file is ~460 s. A new test that renders tiles and detects joins it.
   - **Nanowell features** (~1,020 tests, `--nanowell-features`): every other
     nanowell test — form, page, playground search, Review's nanowell data. About
     530 s of work, a third of what the fast lane used to spend.
@@ -198,8 +198,10 @@ one that is wedged:
 
 | | Measured |
 |---|---|
-| Fast lane, local, quiet container, 4 CPUs | ~4 min in parallel (12,333 tests); ~2.3 min at 11,031 tests, before the nanowell work |
-| Nanowell lane, local, 4 CPUs | ~4.8 min (250 tests); 13 min 43 s at 398 tests in a container that had just run the other lanes |
+| Fast lane, local, quiet container, 4 CPUs | 4 min 13 s in parallel (13,411 tests, 874 s of worker time) |
+| Nanowell lane, local, 4 CPUs | 10 min 22 s (409 tests, ~2,400 s of work) |
+| Nanowell features lane, local, 4 CPUs | 4 min 02 s (1,966 tests) |
+| Remote lane, local, 4 CPUs | 2 min 09 s (1,785 tests) |
 | Nanowell lane, CI | 10 min 37 s to 14 min 04 s for the same ~400 tests, plus ~1 min of setup. Its job cap is 20 min (`ci.yml`), the other jobs' 15 |
 | Fast lane, 2 workers (what CI's runner gets) | ~4.1 min |
 | Fast lane, local, under contention from other work in the same container | roughly 2–3× that |

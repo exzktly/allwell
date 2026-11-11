@@ -18,13 +18,19 @@ from __future__ import annotations
 from dataclasses import replace
 from types import SimpleNamespace
 
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QToolButton, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
+from core.safe import swallow
+from review.core.phone_panel_sheet import close_controls_sheets
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell import subset_compute as ss
+from ui import theme
+from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 from widgets.owned_action import owned_action
 from widgets.spin_box import DoubleSpinBox
 
@@ -39,6 +45,15 @@ SAVED_PREFIX = "saved:"
 _LIMIT = 1e9
 _DECIMALS = 3
 _START_LIMIT = 999
+#: The characters a combo in the editor makes room for before eliding (its list still shows every entry in full). A
+#: combo sizes to its longest entry by default — a metric's whole name — which made one condition wider than a phone.
+_COMBO_CHARS = 12
+#: The most of its page's height the editor takes before it scrolls: the figure the subset is for keeps the rest.
+#: Twenty-four conditions, or two on a phone (where one condition wraps onto two or three lines of touch-sized
+#: controls), otherwise needed more than the page and were squeezed until every control was cut in half.
+_ROWS_SHARE = 0.45
+#: The fewest text lines of the editor shown when the page is short, before the figure gives up any more room.
+_ROWS_MIN_LINES = 3
 
 _SUBSET_TIP = ("Which nanowells every view draws and summarises. The presets keep the nanowells that held this "
                "many cells at the Baseline; Custom subset… and Edit… build any combination of conditions — starting "
@@ -79,6 +94,91 @@ _GATE_TIP = ("A gate drawn on the Scatter Plot over two nanowell metrics (Observ
              "is read from the scatter each time, so moving the gate there moves the subset.")
 
 
+def _flow(parent: QWidget, h_spacing: int = 8) -> FlowLayout:
+    """A row of the editor that wraps onto as many lines as its width needs, instead of cutting every control and
+    label to a few letters at phone width ("Use the nanowe", "Star", "betw")."""
+    flow = FlowLayout(parent, h_spacing=h_spacing)
+    sync_flow_height(parent)
+    return flow
+
+
+def _narrow(combo: QComboBox) -> QComboBox:
+    combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(_COMBO_CHARS)
+    return combo
+
+
+class _EditorScroll(QScrollArea):
+    """The editor, scrolling: as tall as it needs, up to :data:`_ROWS_SHARE` of the page it sits in.
+
+    That share is its minimum as well as its size, so the figure below — which stretches — cannot squeeze it to a
+    line; and a share rather than a height, so the figure keeps the rest on any screen. The rows wrap to the width,
+    never past it, so it scrolls only vertically. It asks for its content's height at its own width (the content's
+    flows reserve their wrapped height, ``sync_flow_height``), and asks again when the content or the page changes
+    size — a condition added, a phone turned."""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._page = None
+        #: The share of the page the editor may take: :data:`_ROWS_SHARE` beside the figure, all of it while the
+        #: figure has stepped aside for it (:func:`share_page`).
+        self.share = _ROWS_SHARE
+
+    def setWidget(self, widget: QWidget) -> None:  # Qt override
+        super().setWidget(widget)
+        widget.installEventFilter(self)
+
+    def _need(self) -> int:
+        """The content's height at the width it is shown at: its wrapped lines and status sentence, measured there
+        (a word-wrapped label's plain size hint is the height of a narrow paragraph, far taller than the line it is)."""
+        body = self.widget()
+        if body is None:
+            return 0
+        lay = body.layout()
+        width = self.viewport().width()
+        if lay is not None and lay.hasHeightForWidth() and width > 0:
+            return max(lay.totalHeightForWidth(width), body.minimumSizeHint().height())
+        return max(body.sizeHint().height(), body.minimumSizeHint().height())
+
+    def _floor(self) -> int:
+        return self.fontMetrics().height() * _ROWS_MIN_LINES
+
+    def height_at(self, share: float) -> int:
+        """The height the editor's content is given at *share* of its page."""
+        page = self._page.height() if self._page is not None else self.window().height()
+        return min(self._need(), max(self._floor(), int(page * share)))
+
+    def _height(self) -> int:
+        return self.height_at(self.share)
+
+    def sizeHint(self) -> QSize:  # Qt override
+        body = self.widget()
+        return QSize(body.sizeHint().width() if body is not None else 0, self._height())
+
+    def minimumSizeHint(self) -> QSize:  # Qt override
+        # Beside the figure its share is its minimum too; alone on the page it takes whatever the page has left.
+        return QSize(0, self._height() if self.share < 1 else min(self._need(), self._floor()))
+
+    def showEvent(self, event) -> None:  # Qt override
+        super().showEvent(event)
+        # The page is the editor's parent: the widget whose height is shared between the editor and the figure.
+        editor = self.parentWidget()
+        page = editor.parentWidget() if editor is not None else None
+        if page is not None and page is not self._page:
+            page.installEventFilter(self)
+            self._page = page
+        self.updateGeometry()
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.LayoutRequest, QEvent.Resize) and (obj is self.widget() or obj is self._page):
+            self.updateGeometry()
+        return False
+
+
 def _select(combo, value) -> None:
     for i in range(combo.count()):
         if combo.itemData(i) == value:
@@ -105,8 +205,12 @@ class _ConditionRow(QWidget):
     def __init__(self, editor, condition: ss.Condition):
         super().__init__()
         self._editor = editor
+        # The condition's controls wrap within the row, and × stays at its right edge whatever the width, so a
+        # condition that takes two lines on a phone still reads as one condition with one remove button.
         row = QHBoxLayout(self)
         row.setContentsMargins(0, 0, 0, 0)
+        controls = QWidget(self)
+        flow = _flow(controls)
         self.field_cb = QComboBox()
         self.field_cb.setToolTip(_FIELD_TIP)
         group = None
@@ -145,10 +249,16 @@ class _ConditionRow(QWidget):
         self.remove_btn.setText("×")
         self.remove_btn.setToolTip("Remove this condition")
         self.remove_btn.setProperty("variant", "secondary")
-        for w in (self.field_cb, self.at_cb, self.op_cb, self.gate_cb, self.window_label, self.a_spin, self.and_label,
-                  self.b_spin, self.tiles_btn, self.remove_btn):
-            row.addWidget(w)
-        row.addStretch(1)
+        for combo in (self.field_cb, self.at_cb, self.gate_cb):     # the comparisons are short: they keep their width
+            _narrow(combo)
+        self.window_label.setWordWrap(True)
+        # The bounds as one item, so "and" never wraps away from either of them.
+        self.bounds = flow_group(controls, self.a_spin, self.and_label, self.b_spin)
+        for w in (self.field_cb, self.at_cb, self.op_cb, self.gate_cb, self.window_label, self.bounds,
+                  self.tiles_btn):
+            flow.addWidget(w)
+        row.addWidget(controls, 1)
+        row.addWidget(self.remove_btn, 0, Qt.AlignTop)
         self._show(condition)
         self.field_cb.currentIndexChanged.connect(self._field_changed)
         self.at_cb.currentIndexChanged.connect(lambda _i: editor.changed())
@@ -249,6 +359,7 @@ class _ConditionRow(QWidget):
         self.a_spin.setVisible(not category and not ss.is_flag(name))
         self.and_label.setVisible(not category and ranged)
         self.b_spin.setVisible(not category and ranged)
+        self.bounds.setVisible(not self.a_spin.isHidden())  # the flow sees the group: an empty one takes no slot
         self.tiles_btn.setVisible(ss.is_category(name))
 
     # ── edits ───────────────────────────────────────────────────────────
@@ -306,8 +417,16 @@ class SubsetEditor(QFrame):
         #: row cannot always show exactly (a bound past the spin box's decimals or range), and which would then
         #: read as an edit nobody made, one Reset could never clear.
         self._built: ss.Subset | None = None
-        lay = QVBoxLayout(self)
-        head = QHBoxLayout()
+        # The whole editor scrolls, inside its share of the window: a phone held sideways leaves the page a few
+        # hundred pixels, less than the header and footer alone, and a fixed part there was drawn over the rest.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.scroll = _EditorScroll(self)
+        body = QWidget(self.scroll)
+        lay = QVBoxLayout(body)
+        # Each of the editor's lines is a flow, so at phone width it wraps rather than cutting its words and controls.
+        head_host = QWidget(body)
+        head = _flow(head_host)
         head.addWidget(QLabel("Use the nanowells that meet"))
         self.match_cb = QComboBox()
         self.match_cb.addItem("all", "all")
@@ -316,33 +435,35 @@ class SubsetEditor(QFrame):
         self.match_cb.currentIndexChanged.connect(lambda _i: self.changed())
         head.addWidget(self.match_cb)
         head.addWidget(QLabel("of these conditions:"))
-        head.addStretch(1)
         self.close_btn = QPushButton("Close")
         self.close_btn.setProperty("variant", "secondary")
-        head.addWidget(self.close_btn)
-        lay.addLayout(head)
-        names = QHBoxLayout()
-        names.addWidget(QLabel("Name"))
+        top = QHBoxLayout()
+        top.addWidget(head_host, 1)
+        top.addWidget(self.close_btn, 0, Qt.AlignTop)   # Close keeps the top-right corner however the words wrap
+        lay.addLayout(top)
+        names_host = QWidget(body)
+        names = _flow(names_host)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Name this subset to save it")
         self.name_edit.setMaxLength(ss.MAX_NAME)
         self.name_edit.setToolTip(_NAME_TIP)
         self.name_edit.textChanged.connect(lambda _t: self._enable_names())
         self.name_edit.returnPressed.connect(self.save_named)
-        names.addWidget(self.name_edit)
         self.save_btn = self._name_button("Save", _SAVE_TIP, self.save_named)
         self.rename_btn = self._name_button("Rename", _RENAME_TIP, self.rename_named)
         self.delete_btn = self._name_button("Delete", _DELETE_TIP, self.delete_named)
+        names.addWidget(flow_group(names_host, "Name", self.name_edit, spacing=8))
         for button in (self.save_btn, self.rename_btn, self.delete_btn):
             names.addWidget(button)
-        names.addStretch(1)
-        lay.addLayout(names)
+        lay.addWidget(names_host)
         #: The saved name the subset in use had when the name box was last filled: the box is refilled only when that
         #: changes, so a name being typed is never pulled from under the cursor.
         self._named: str | None = None
         self.rows_box = QVBoxLayout()
+        self.rows_box.setSpacing(theme.Spacing.md)         # a condition wrapped onto two lines stays apart from the next
         lay.addLayout(self.rows_box)
-        foot = QHBoxLayout()
+        foot_host = QWidget(body)
+        foot = _flow(foot_host)
         self.add_btn = QPushButton("+ Add condition")
         self.add_btn.setProperty("variant", "secondary")
         self.add_btn.clicked.connect(self.add)
@@ -363,12 +484,14 @@ class SubsetEditor(QFrame):
         self.apply_btn.clicked.connect(self.apply)
         foot.addWidget(self.reset_btn)
         foot.addWidget(self.apply_btn)          # beside Add condition and Clear: the row's four edits read together
-        foot.addStretch(1)
-        lay.addLayout(foot)
+        lay.addWidget(foot_host)
         self.status = QLabel("")
         self.status.setObjectName("InfoHint")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
+        lay.addStretch(1)
+        self.scroll.setWidget(body)
+        outer.addWidget(self.scroll)
 
     def _name_button(self, text: str, tip: str, slot) -> QPushButton:
         button = QPushButton(text)
@@ -530,6 +653,7 @@ class SubsetEditor(QFrame):
             self._say(f"A subset holds at most {ss.MAX_CONDITIONS} conditions.", warn=True)
             return
         self._add_row(ss.Condition(ss.START, "ge", 1))
+        self.scroll.ensureWidgetVisible(self.rows[-1])  # the new condition, where the rows scroll past their share
         self.changed()
 
     def remove(self, row) -> None:
@@ -614,6 +738,56 @@ def _fill_combo(combo, names: list, listed: list) -> None:
     combo.addItem(CUSTOM_LABEL, sc.CUSTOM)
 
 
+class _PlaceOnResize(QObject):
+    """Calls *place* whenever a watched widget is shown, hidden or resized (:func:`share_page`)."""
+
+    def __init__(self, parent: QObject, place):
+        super().__init__(parent)
+        self._place = place
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.Show, QEvent.Hide, QEvent.Resize):
+            with swallow("Nanowells: share the page between the Subset editor and the figure"):
+                self._place()
+        return False
+
+
+def share_page(editor: SubsetEditor, figure: QWidget, redraw) -> None:
+    """While *editor* is shown on a page too short for it and *figure* both — a phone held sideways, where the figure's
+    own minimum and the footer under it already fill the page — the figure steps aside and the editor takes the page;
+    Close brings the figure back, drawn again (*redraw*: a hidden figure is not drawn). Decided by the page's height,
+    not by phone layout, so a short window at a desk is treated the same; on a page with room for both, nothing moves.
+    """
+    page = editor.parentWidget()
+    lay = page.layout() if page is not None else None
+    if lay is None:
+        return
+    stepped_aside = [False]
+
+    def too_short() -> bool:
+        # Computed, not read from the editor's minimum size: its layout caches that, and it lags the share just set.
+        need = editor.scroll.height_at(_ROWS_SHARE) + 2 * editor.frameWidth() + figure.minimumSizeHint().height()
+        shown = [lay.itemAt(i).widget() for i in range(lay.count())]
+        others = [w for w in shown if w is not None and w not in (editor, figure) and not w.isHidden()]
+        need += sum(w.minimumSizeHint().height() for w in others)
+        need += lay.spacing() * (len(others) + 1)
+        return need > page.height()
+
+    def place() -> None:
+        aside = not editor.isHidden() and too_short()
+        editor.scroll.share = 1.0 if aside else _ROWS_SHARE
+        editor.scroll.updateGeometry()
+        if aside != stepped_aside[0]:
+            stepped_aside[0] = aside
+            figure.setVisible(not aside)
+            if not aside:
+                QTimer.singleShot(0, figure, redraw)     # with the figure as context: dropped if the page is deleted
+
+    watch = _PlaceOnResize(editor, place)
+    editor.installEventFilter(watch)
+    page.installEventFilter(watch)
+
+
 def build_subset_control(ctx, band, tp_text) -> SimpleNamespace:
     """*Subset*: the preset combo and **Edit…** in the band, and the editor (a panel the page places under the
     band). The combo is outlined in the accent while a subset is set, so one restored with the page's settings is
@@ -633,6 +807,10 @@ def build_subset_control(ctx, band, tp_text) -> SimpleNamespace:
     editor.hide()
 
     def show_editor(on: bool) -> None:
+        if on:
+            # On a phone Edit… is in the ⚙ Controls sheet, which is drawn over the page: the editor opened under it,
+            # all but its heading hidden. The sheet closes so the editor is seen. At a desk there is no such sheet.
+            close_controls_sheets(ctx.window)
         editor.setVisible(on)
         blocked = edit_btn.blockSignals(True)
         edit_btn.setChecked(on)

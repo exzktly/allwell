@@ -424,8 +424,11 @@ radio buttons whose labels are sentences — and seven of the nine were wider th
 a 432 px screen. Every `QScrollArea` under `PhoneHandles.fit_roots` (the Datasets
 pane) carries a `_FitOnShow` watcher that, in phone layout, fits it to its
 viewport whenever it is shown or its viewport changes width (a tool page is shown
-by the pane's own rail, which the shell does not hear), and gives it its desk form
-back when phone layout ends. The fitting is `ui/phone_fit.py`, Qt-only and
+by the pane's own rail, which the shell does not hear), fits it again when a panel
+shown inside it afterwards leaves it wider than the viewport (it watches the
+content for a layout request — a tool's run dashboard is hidden until a dataset
+folder is chosen or a run starts, which changes neither the page's visibility nor
+its width), and gives it its desk form back when phone layout ends. The fitting is `ui/phone_fit.py`, Qt-only and
 pane-free: a widget with a phone form of its own (`setStacked` — `PlateProgress`
 and the dashboards on it, `ControlBand`) takes it; any other horizontal box row
 wider than its room is turned top-to-bottom, outermost first, re-measuring after
@@ -602,7 +605,24 @@ cell and a section follow the show / hide of the widget the page shows and hides
 (`_Mirror`), so `show_slot` reshapes the form. The band's row margins are dropped
 while it is a form, since the sheet pads its content, and `heightForWidth`
 answers from the form. A page's own block of controls (declared `controls`, the
-Image Table's builder) keeps its `setStacked` form. The sheet's buttons, combos
+Image Table's builder) keeps its `setStacked` form. The sheet's scroll area is then
+fitted to its width like a Datasets page (`ui/phone_fit`, through the same
+`_FitOnShow` watcher): a form row keeps its label beside a group of controls on
+one line, and a group of several (Nanowells QC's four *Problem:* filters,
+Multivariate's mode segments, the Image Table's LUT rows) is wider than the
+sheet, so the row is stacked until it fits — refitted when a control shown later
+widens it, undone before the band goes back to its page. What is fitted is the
+form's host, never the `ControlBand` itself (fitting the band gave it a phone
+form of its own on top of the form and turned its row, which it did not survive
+going back), or a page's own block of controls as it stands. `ui/phone_fit`
+never wraps a layout's items for Python (`itemAt`): a `QLayoutItem` is no
+QObject, so a wrapper is never told when Qt frees the item, Qt reuses the freed
+address for the next item it makes, and the binding then hands back the stale
+wrapper — the band's own layout raised "Internal C++ object already deleted" on
+the sheet's second opening. Nested layouts are found as the layout's child
+objects and membership by `indexOf`; `tests/test_phone_fit.py` holds the rule,
+since whether an address is reused is the allocator's choice and no test
+reproduces it on demand. The sheet's buttons, combos
 and fields are 48 pt (`QWidget#Drawer[phoneSheet="true"]` in the touch block). The sheet's height is measured off the controls lent
 into it, and at `open` they still have their page's width, so the estimate is
 wrong (measured: 359 px against the 505 px they need once laid out, the
@@ -13434,7 +13454,11 @@ montage's crops share the Metrics setting but not that line: they have room for 
 each crop took more of the figure than the crops did, and three lines over a crop covered the lower third of the
 nanowell, where the cells are. **The layout is computed in inches** (`_extremes_layout`), the panels placed with
 `fig.add_axes`: the Largest and Smallest blocks side by side or one above the other, whichever gives the larger
-square crops, centred both ways. The view's **Metrics** box (`NanowellState.crop_metrics`, persisted, on by default; `controller.set_crop_metrics`) shows or hides all of that text, leaving the crops bare while the row labels keep the ranking. A crop under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) writes its fold change only,
+square crops, centred both ways between the title and the caption. Both are broken to the figure's width, and the
+montage leaves room for as many lines of each as that takes: the caption is written last, since it reports what the
+crops found, so when it needs more room than the montage first left (a phone's narrow figure breaks it into five or
+six lines, one more with a well excluded on the page) the montage is laid out again with that room under it
+(`render_site_rows(bottom=…)`). The view's **Metrics** box (`NanowellState.crop_metrics`, persisted, on by default; `controller.set_crop_metrics`) shows or hides all of that text, leaving the crops bare while the row labels keep the ranking. A crop under `_EXT_MIN_SIDE_WITH_METRICS` (0.6 in) writes its fold change only,
 and the caption says how to read the rest. It returns `{axes: site}`, kept on `st.extreme_axes`, and `on_click` selects the
 row's nanowell, which opens the site detail. The crops of the nanowells not yet in `st.crops` are
 read in one worker fetch (`_fetch(…, deliver=…)` merges the result into `st.crops`, the store the site detail
@@ -14203,7 +14227,15 @@ tooltip — is not on the page's own band. The control band holds, in this order
 combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — the subsets saved by name in this dataset, and *Custom subset…*, with an **Edit…** button,
 on every view, the combo outlined in the accent through the `filterActive` QSS property while a subset is set; the
 editor, `SubsetEditor`, is a panel the page places under the band — never a dialog — with one `_ConditionRow` per
-condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply*; an edit changes only the draft the rows
+condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply* (each line a `FlowLayout` that wraps rather
+than cutting its words and controls at a phone's width, each condition's × kept at its right edge, and its field,
+timepoint and gate combos making room for twelve characters rather than their longest entry; the whole panel sits in
+`_EditorScroll`, which takes as much of its page's height as it needs up to `_ROWS_SHARE` and scrolls past it, and
+`share_page` lets the editor take the figure's place while it is open on a page too short for both — a phone held
+sideways, where the figure and its footer alone fill the page — decided by the page's height, not by phone layout,
+with the figure redrawn when Close brings it back; opening it closes the ⚙ Controls sheet,
+`phone_panel_sheet.close_controls_sheets`, since on a phone Edit… is in that sheet, which is drawn over the page the
+editor opens in, and at a desk there is no such sheet); an edit changes only the draft the rows
 hold — `SubsetEditor.changed` says in the panel's `Warn` line that it is not applied yet (or why it is not a subset
 yet) — and *Apply* passes the draft through `controller.set_subset` once, so the page redraws once per Apply rather
 than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the rows have
@@ -22903,11 +22935,18 @@ you're in before you type the command.
   `pytest_collection_modifyitems` auto-marks these `slow`, precisely so the fast
   lane skips them.
 - **Every page, every screen, with data** (`tests/test_every_page_renders.py`, slow
-  lane, ~4 minutes). Qt's offscreen screen is an 800×800 square, which is no screen a
+  lane, ~6 minutes). Qt's offscreen screen is an 800×800 square, which is no screen a
   person has, so a full-app test run on it says nothing about how a page fits one.
   `tests/_screens.py::FakeScreen` makes every `QScreen` report a chosen
   rectangle — the desk 1640×980, a phone upright 432×936, a phone sideways 936×432 —
   and `place` puts the window there (maximizing would take the real 800×800).
+  **The patch is Python's only.** Qt's C++ still sees the 800×800 screen, so what Qt
+  places by itself — a `QMenu` it keeps on screen, a combo box's list — is placed
+  against that, and measured under `FakeScreen` every menu near the right edge
+  "runs off" a 432 px phone. To measure those, give Qt a real screen of the size:
+  `QT_QPA_PLATFORM="offscreen:configfile=<file>"` with
+  `{"screens": [{"name": "phone", "x": 0, "y": 0, "width": 432, "height": 936,
+  "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}]}`.
   The file runs three datasets (`tests/_page_datasets.py`: `mini`, `nanowell`,
   `images`) on those three screens, nine cases, each in a **subprocess of its own**
   (`python -m tests._page_render_case <dataset> <screen> <out.json>`, three at a
@@ -22918,14 +22957,25 @@ you're in before you type the command.
   generic "Sans Serif" — DejaVu Sans on the CI runner, where a page button and a
   scroll content wider than the ones a user sees were reported as defects.
   `tests/_page_tour.py` visits every Review section and page, the Datasets tools
-  and Analyze's views, and the phone's own chrome, after
+  and Analyze's views, and the phone's own chrome — and on a phone, every page
+  again with its ⚙ Controls sheet open over it (`"<page> ▸ Controls"`), since on a
+  phone the sheet holds most of a page's controls; when the tour opened it on one
+  Plotting page only, ten other pages' sheets scrolled sideways unseen — after
   `_page_datasets.prepare` has given each page the choices that make it draw data
   (a heat map's cells, the Statistics groups, Multivariate's features, a saved
   plot, an Image Table). `tests/_layout_checks.py` then measures each: text clipped
   by its widget, scroll content wider than its viewport with no bar, a widget off
   the window, figure text outside or over other figure text, neighbouring tick
-  labels, a scroll area left a sliver, a table wider than its viewport, and a page
-  menu whose label differs from the page or swallows an ampersand. The tests
+  labels, a scroll area left a sliver, a table wider than its viewport, a Controls
+  sheet whose content is wider than itself (`sideways_sheet`: a sheet does offer a
+  sideways bar, so the generic scroll check passed it), and a page
+  menu whose label differs from the page or swallows an ampersand. **What it cannot
+  see** is anything that appears only once a control is pressed — an in-page editor
+  (the Nanowells Subset editor), a run dashboard shown when a folder is chosen, a
+  popover, a menu, a dialog. Those were found by a crawl that pressed every control
+  of every page and sheet at phone size with the blocking calls stubbed; a new
+  panel of that kind gets a test of its own at phone size through its page's real
+  builder (`tests/test_nanowell_subset_fits_a_phone.py` is the shape). The tests
   assert that the tour reached every page the screen offers, that no page has a
   defect beyond `KNOWN` (each with a reason; an entry whose defect is gone fails),
   and that the pages left on an empty state are exactly `EMPTY` (each with the

@@ -38,6 +38,7 @@ def tour(win, qapp, *, kind: str, wells: set[str], phone: bool) -> Iterator[str]
         if bar is None:
             prepare(win, qapp, kind, key, wells)
             yield key
+            yield from _controls_sheet(shell, qapp, key, phone)
             continue
         for i in range(bar.count()):
             bar.setCurrentIndex(i)
@@ -45,6 +46,7 @@ def tour(win, qapp, *, kind: str, wells: set[str], phone: bool) -> Iterator[str]
             name = f"{key}/{bar.tabText(i)}"
             prepare(win, qapp, kind, name, wells)
             yield name
+            yield from _controls_sheet(shell, qapp, name, phone)
     if kind == "mini":
         win._on_titlebar_mode_seg(2)
         pump(qapp)
@@ -82,3 +84,20 @@ def tour(win, qapp, *, kind: str, wells: set[str], phone: bool) -> Iterator[str]
         yield "chrome/wells sheet"
         shell.close_wells(now=True)
         pump(qapp, 20, 200)
+
+
+#: The suffix of a page name the tour yields with that page's ⚙ Controls sheet open over it.
+SHEET_SUFFIX = " ▸ Controls"
+
+
+def _controls_sheet(shell, qapp, name: str, phone: bool) -> Iterator[str]:
+    """On a phone, every page's ⚙ Controls sheet, open over its page: the sheet holds most of a page's controls
+    there, laid out as a form, and the tour used to open it on one Plotting page only — while the sheets of ten other
+    pages scrolled sideways. At the desk, and on a page with no controls to lend, nothing."""
+    if not phone or shell._current_band() is None:
+        return
+    shell.open_controls()
+    pump(qapp, 20, 300)
+    yield name + SHEET_SUFFIX
+    shell.close_controls(now=True)
+    pump(qapp, 20, 200)

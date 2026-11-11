@@ -32,7 +32,12 @@ def is_phone(screen: str) -> bool:
 
 class FakeScreen:
     """``with FakeScreen(PHONE_UPRIGHT) as screen:`` — every ``QScreen`` reports that
-    rectangle until the block ends; ``screen.turn(rect)`` changes it (the phone turned)."""
+    rectangle until the block ends; ``screen.turn(rect)`` changes it (the phone turned).
+
+    Python's view only: Qt's C++ still sees the offscreen 800×800 screen, so what Qt places by
+    itself (a ``QMenu`` kept on screen, a combo box's list) is placed against that and cannot be
+    measured here. For those, start the process with a real screen of the size —
+    ``QT_QPA_PLATFORM="offscreen:configfile=<json>"``, ARCHITECTURE.md §10.4."""
 
     def __init__(self, rect: QRect) -> None:
         self.rect = QRect(rect)

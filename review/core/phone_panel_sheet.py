@@ -54,8 +54,11 @@ class _HideWatcher(QObject):
         return False
 
 
-def _close_controls_sheets(win: QWidget) -> None:
-    """Close the ⚙ Controls sheet (any Drawer marked ``phoneSheet``)."""
+def close_controls_sheets(win: QWidget) -> None:
+    """Close the ⚙ Controls sheet (any Drawer marked ``phoneSheet``). Nothing happens at the desk, where no such
+    sheet exists — so a page that opens a panel of its own from a control the phone lends to that sheet (the
+    Nanowells Subset editor) calls it without asking which layout is on, and the panel is not opened underneath
+    the sheet the user has just tapped in."""
     from widgets.drawer import Drawer
     for d in win.findChildren(Drawer):
         if d.property("phoneSheet") and d.isOpen():
@@ -158,7 +161,7 @@ def present(dock: QWidget | None) -> bool:
     win = dock.window()
     if win is None or win is dock:
         return False
-    _close_controls_sheets(win)
+    close_controls_sheets(win)
     sheet = _sheet_for(win)
     lent = sheet._aw_lent
     if lent is not None and lent[0] is not dock:

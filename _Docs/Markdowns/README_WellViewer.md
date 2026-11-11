@@ -6648,7 +6648,10 @@ the sentence names it.
 - **Subset** — which nanowells every view uses. The quick choices keep the nanowells that held a given number of
   cells at the Baseline: *All nanowells*, *Starting cells ≥1 (occupied)*, *1 (single cell)*, *1–2* and *≥2*.
   *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
-  conditions and choose whether a nanowell must meet *all* of them or *any*. Each condition tests one of:
+  conditions and choose whether a nanowell must meet *all* of them or *any*. On a narrow screen each condition wraps
+  onto as many lines as it needs, and the editor scrolls once it holds more than its share of the page; on a screen
+  too short for the editor and the figure both, such as a phone held sideways, the editor takes the figure's place
+  until you press **Close**. Each condition tests one of:
   - **Starting cells** — the count at the Baseline;
   - **a metric** — cell count, confluence, cell fluorescence and nanowell fluorescence (per channel), any fold change or the growth
     rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*

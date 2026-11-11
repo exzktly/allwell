@@ -88,6 +88,32 @@ def test_a_page_shown_later_is_fitted_when_it_shows(qtbot, phone):
     assert row.layout().direction() == QBoxLayout.TopToBottom
 
 
+def test_a_panel_shown_inside_a_fitted_page_is_fitted_too(qtbot, phone):
+    """A tool's run dashboard is hidden until a dataset folder is chosen or a run starts, and the page is fitted when
+    it shows, before that. The page's width does not change when the dashboard appears, so a watcher that refit only on
+    show and resize left it unfitted: Concatenate, Validate & Repair and Zip Loose Folder each became 413-431 px wider
+    than a 432 px phone, the plate, the description and the folder box running off its right edge."""
+    root, area, row = _wide_page(qtbot)
+    panel = QWidget()
+    h = QHBoxLayout(panel)
+    for _ in range(3):
+        e = QLineEdit()
+        e.setMinimumWidth(160)
+        h.addWidget(e)
+    panel.hide()                                        # the dashboard, until a folder is chosen
+    area.widget().layout().addWidget(panel)
+    shell = SimpleNamespace(_h=SimpleNamespace(fit_roots=lambda: [root]), _refresh_tool_label=lambda: None)
+    PhoneShell._fit_pages(shell)
+    QApplication.processEvents()
+    assert row.layout().direction() == QBoxLayout.TopToBottom
+    panel.show()
+    qtbot.wait(200)
+    assert panel.layout().direction() == QBoxLayout.TopToBottom, "the panel shown after the page was fitted stayed a row"
+    content = area.widget()
+    assert content.minimumSizeHint().width() <= area.viewport().width(), (
+        f"the page asks for {content.minimumSizeHint().width()} px in a {area.viewport().width()} px viewport")
+
+
 def _bind(shell, *names):
     for name in names:
         setattr(shell, name, getattr(PhoneShell, name).__get__(shell))

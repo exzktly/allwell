@@ -1747,3 +1747,51 @@ def test_follow_calls_back_while_the_owner_lives_and_leaves_when_it_is_gone(qapp
     phone_layout.set_on(True)
     phone_layout.set_on(False)
     assert seen == [True, False] and len(phone_layout._listeners) == before
+
+
+def _band_window(qapp):
+    """A window with a page whose control band holds one wide row — four buttons in one scope group, as the Nanowells
+    QC band's "Problem:" filters are — managed by a shell the way Review's pages are."""
+    from PySide6.QtWidgets import QPushButton, QVBoxLayout
+
+    from widgets.control_band import ControlBand
+    win = QWidget()
+    QVBoxLayout(win)
+    page = QWidget(win)
+    QVBoxLayout(page)
+    win.layout().addWidget(page)
+    band = ControlBand(page)
+    page.layout().addWidget(band)
+    buttons = [QPushButton(f"Problem filter number {i}") for i in range(4)]
+    band.add_scope("Show", *buttons)
+    shell = _shell(win, band_roots=lambda: [page])
+    win.resize(400, 700)
+    return win, shell, band, buttons
+
+
+def test_the_controls_sheet_fits_a_band_row_wider_than_the_phone_and_gives_it_back(qapp, app_sheet):
+    """Nanowells QC's band put four "Problem:" filters in one scope group, and in the ⚙ Controls sheet the form kept
+    the group on one line beside its label: 769 px of content in a 414 px sheet, which scrolled sideways (as did the
+    sheets of every Nanowells page, Multivariate, Spatial and the Image Browser's). The sheet is now fitted like a
+    Datasets page (``ui/phone_fit``): the row stacks until it fits. Closing the sheet gives the band its row back,
+    and the band opens again — the first version of this fit wrapped Qt's layout items for Python, and the band's own
+    layout then raised "Internal C++ object already deleted" on the second opening."""
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QScrollArea
+    win, shell, band, buttons = _band_window(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    for opening in range(2):
+        shell.open_controls()
+        QTest.qWait(300)
+        area = next(a for a in shell._sheet.findChildren(QScrollArea) if a.isVisible())
+        content = area.widget()
+        assert band.form() is not None
+        assert content.minimumSizeHint().width() <= area.viewport().width(), (
+            f"opening {opening + 1}: the sheet's content needs {content.minimumSizeHint().width()} px of "
+            f"{area.viewport().width()}")
+        shell.close_controls(now=True)
+        _pump(qapp)
+        assert band.form() is None
+        assert [band._scope.itemAt(i).widget() is not None for i in range(band._scope.count())], \
+            "the band's own row is empty after the sheet closed"

@@ -433,16 +433,14 @@ def test_a_draft_survives_another_control_redrawing_the_page(page):
 
 
 def test_reset_and_apply_sit_beside_add_condition_and_clear(page):  # noqa: F811
-    """The editor's four buttons read as one group at the left of their row: Add condition, Clear, Reset, Apply, then
-    the space — Reset and Apply were pushed to the far end, away from the edits they act on."""
+    """The editor's four buttons read as one group at the left of their row, in the order Add condition, Clear, Reset,
+    Apply — Reset and Apply were pushed to the far end, away from the edits they act on."""
     editor = _editor(page)
-    outer = editor.layout()
-    (row,) = [outer.itemAt(i).layout() for i in range(outer.count()) if outer.itemAt(i).layout() is not None
-              and outer.itemAt(i).layout().indexOf(editor.add_btn) >= 0]
-    items = [row.itemAt(j) for j in range(row.count())]
-    assert [item.widget() for item in items[:4]] == [editor.add_btn, editor.clear_btn, editor.reset_btn,
-                                                     editor.apply_btn]
-    assert items[4].spacerItem() is not None and len(items) == 5
+    row = editor.add_btn.parentWidget().layout()     # a flow, which packs its items from the left and wraps on a phone
+    assert [row.itemAt(j).widget() for j in range(row.count())] == [editor.add_btn, editor.clear_btn,
+                                                                     editor.reset_btn, editor.apply_btn]
+    xs = [b.x() for b in (editor.add_btn, editor.clear_btn, editor.reset_btn, editor.apply_btn)]
+    assert xs == sorted(xs) and xs[0] < editor.width() // 4, f"the buttons sit at x = {xs} of {editor.width()}"
 
 
 def test_restoring_a_saved_plot_leaves_the_saved_subset_library_as_it_is_now(page):

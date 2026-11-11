@@ -137,9 +137,10 @@ class AnalyzeSegParamsMixin:
         self._min_nucleus_area_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
         self._seg_param_stack.addPage("stardist_seeded_watershed_cell", ws)
 
-        # Cellpose (general): model, diameter, flow/cell-prob thresholds, optional
-        # second (nucleus) channel for cyto models. Segments the Segmentation
-        # channel above (fluorescent or brightfield).
+        # Cellpose (general): model and an optional second (nucleus) channel for
+        # cyto models. Segments the Segmentation channel above (fluorescent or
+        # brightfield). The diameter and the two thresholds are rows shared with
+        # the label-free preset, built below the stack.
         cp = _page()
         m_cell = self._row(cp, "Model")
         self._cellpose_model_cb = ValueCombo(CELLPOSE_MODEL_OPTIONS, cp)
@@ -149,19 +150,14 @@ class AnalyzeSegParamsMixin:
             "Cellpose 3's and run only where Cellpose 3 is installed; on Cellpose 4 a run refuses them by name.")
         m_cell.layout().addWidget(self._cellpose_model_cb)
         m_cell.layout().addStretch(1)
-        f_cell = self._row(cp, "Flow threshold")
-        self._cellpose_flow_thr_edit = self._entry(f_cell, "0.4", width=70)
-        f_cell.layout().addStretch(1)
-        c_cell = self._row(cp, "Cell-prob threshold")
-        self._cellpose_cellprob_thr_edit = self._entry(c_cell, "0.0", width=70)
-        c_cell.layout().addStretch(1)
         n_cell = self._row(cp, "Nucleus channel (optional)")
         self._cellpose_nuclei_channel_edit = self._entry(n_cell, "", width=80)
         n_cell.layout().addStretch(1)
         self._seg_param_stack.addPage("cellpose", cp)
 
-        # Label-free (Cellpose preset on the Phase channel). Its one exposed
-        # parameter, the diameter, is the shared row below the stack.
+        # Label-free (Cellpose preset on the Phase channel). Its parameters — the
+        # diameter and the flow / cell-prob thresholds — are the shared rows
+        # below the stack.
         lf = _page()
         lf_lbl = QLabel("Segments the channel marked 'Phase' above with Cellpose-SAM (cpsam), which reads "
                         "brightfield and phase contrast.", lf)
@@ -309,16 +305,44 @@ class AnalyzeSegParamsMixin:
         # _row() returns the right-hand cell; the label is in its parent, so the
         # parent row is what gets hidden.
         self._cellpose_diameter_row = d_cell.parentWidget()
+        self._build_cellpose_threshold_rows(sec)
         self._sync_cellpose_diameter_row()
 
+    def _build_cellpose_threshold_rows(self, sec: QWidget) -> None:
+        """Cellpose's flow and cell-probability thresholds, shared by both Cellpose methods like the diameter.
+
+        The label-free preset runs the same ``model.eval`` call, so it reads both thresholds as much as general
+        Cellpose does; while they sat on the general page only, a brightfield run had no way to lower the
+        cell-probability cut, which is what recovers large, faint cells (dendritic cells beside T cells) that the
+        model scores just under 0 and so leaves out entirely.
+        """
+        flow_tip = ("How far a mask's shape may disagree with the flows Cellpose predicted before the mask is "
+                    "thrown away. Higher keeps more, and more irregular, cells. Cellpose's default is 0.4.")
+        f_cell = self._row(sec, "Flow threshold", tooltip=flow_tip)
+        self._cellpose_flow_thr_edit = self._entry(f_cell, "0.4", width=70)
+        self._cellpose_flow_thr_edit.setToolTip(flow_tip)
+        f_cell.layout().addStretch(1)
+        prob_tip = ("The cell-probability floor for calling a pixel part of a cell. Lower (-1, -2) finds faint or "
+                    "low-contrast cells the default misses, at the risk of more background objects. Cellpose's "
+                    "default is 0.")
+        c_cell = self._row(sec, "Cell-prob threshold", tooltip=prob_tip)
+        self._cellpose_cellprob_thr_edit = self._entry(c_cell, "0.0", width=70)
+        self._cellpose_cellprob_thr_edit.setToolTip(prob_tip)
+        c_cell.layout().addStretch(1)
+        # As with the diameter, the label sits in the parent of the cell _row() returns.
+        self._cellpose_threshold_rows = (f_cell.parentWidget(), c_cell.parentWidget())
+
     def _sync_cellpose_diameter_row(self) -> None:
-        """Show the diameter only for the methods that run Cellpose — and not in nanowell mode, whose count takes
-        its cell size in micrometres from its own row (``nanowell_cell_diameter_um``) and never reads this one."""
-        row = getattr(self, "_cellpose_diameter_row", None)
-        if row is not None:
-            nanowell = getattr(self, "_nanowell_cb", None)
-            row.setVisible(self._seg_method() in _CELLPOSE_DIAMETER_METHODS
-                           and not (nanowell is not None and nanowell.isChecked()))
+        """Show the diameter and the two thresholds only for the methods that run Cellpose — and not in nanowell
+        mode, whose count takes its cell size in micrometres from its own row (``nanowell_cell_diameter_um``),
+        leaves the thresholds at Cellpose's defaults, and reads none of these rows."""
+        nanowell = getattr(self, "_nanowell_cb", None)
+        shown = (self._seg_method() in _CELLPOSE_DIAMETER_METHODS
+                 and not (nanowell is not None and nanowell.isChecked()))
+        rows = (getattr(self, "_cellpose_diameter_row", None), *getattr(self, "_cellpose_threshold_rows", ()))
+        for row in rows:
+            if row is not None:
+                row.setVisible(shown)
 
     def _build_stardist_threshold_rows(self, sec: QWidget) -> None:
         """The two StarDist detection thresholds, shared by both StarDist pages.

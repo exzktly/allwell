@@ -14,6 +14,7 @@ checks are the defects a manual sweep found, written as measurements:
 * ``ticks`` — neighbouring tick labels that run into each other ("10 11 12" drawn as "101112");
 * ``sliver`` — a scrollable area squeezed to a fraction of the window;
 * ``table`` — an item view that needs a sideways scroll to show its columns;
+* ``sheet`` — the phone's ⚙ Controls sheet with content wider than itself, scroll bar or not;
 * ``menu`` — the phone's page button naming a page that is not the one on screen, or showing a name whose
   ampersand Qt read as a keyboard mnemonic ("Validate & Repair" drawn as "Validate ̲Repair").
 
@@ -267,6 +268,28 @@ def stale_page_menu(window: QWidget, shell) -> list[Finding]:
         return []
 
 
+def sideways_sheet(window: QWidget, shell) -> list[Finding]:
+    """The phone's ⚙ Controls sheet open with content wider than itself. The generic ``scroll`` check passes it,
+    because the sheet does offer a sideways scroll bar — but a sheet of controls read down a phone is broken when it
+    has to be dragged sideways to reach the end of a row, and ten pages' sheets were (Nanowells Extremes held 841 px
+    of content in a 414 px sheet) while the tour opened the sheet on one page only."""
+    try:
+        sheet = getattr(shell, "_sheet", None)
+        if sheet is None or not sheet.isOpen() or not sheet.isVisible():
+            return []
+        found = []
+        for area in sheet.findChildren(QScrollArea):
+            inner = area.widget()
+            if area.isVisible() and inner is not None:
+                need, room = inner.minimumSizeHint().width(), area.viewport().width()
+                if need > room + SCROLL_SLACK_PX:
+                    found.append(Finding("sheet", _name(area), f"the Controls sheet's content needs {need}px of its "
+                                                               f"{room}px: it scrolls sideways"))
+        return found
+    except RuntimeError:
+        return []
+
+
 CHECKS = (clipped_text, clipped_scroll_content, off_window, figure_text_outside, figure_text_overlap,
           figure_tick_overlap, scroll_slivers, wide_tables)
 
@@ -276,4 +299,5 @@ def check_window(window: QWidget, shell=None) -> list[Finding]:
     found = [f for check in CHECKS for f in check(window)]
     if shell is not None:
         found += stale_page_menu(window, shell)
+        found += sideways_sheet(window, shell)
     return found

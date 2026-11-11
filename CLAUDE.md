@@ -147,10 +147,11 @@ the container**:
   touch the UI. A test that drives a control and asserts what reached a spec,
   argv, state or file is *behaviour* and must not join the roster, or CI stops
   running it.
-- **Every page, every screen, with data** (`tests/test_every_page_renders.py`, ~4
+- **Every page, every screen, with data** (`tests/test_every_page_renders.py`, ~6
   minutes, slow lane): three datasets × desk / phone upright / phone sideways, each
   case in a subprocess, on a patched screen of the real size (Qt's offscreen 800×800
-  is no screen a person has). Run it with `scripts/test.sh
+  is no screen a person has), every page's ⚙ Controls sheet opened on a phone. It
+  cannot see what appears only once a control is pressed — §7.10. Run it with `scripts/test.sh
   tests/test_every_page_renders.py -m ""` whenever a page's layout or a plot's
   fit changes; `ALLWELL_PAGE_SHOTS=<dir>` saves a PNG per page. ARCHITECTURE.md
   §10.4 has the mechanism.
@@ -689,6 +690,88 @@ does not need an hourly wake-up.
 Project settings only apply once the harness trusts them; a remote session that
 still prompts is loading none of the file. The fix there is the same allowlist in
 the user-level `~/.claude/settings.json`, which needs no trust step.
+
+**What a PR subscription tells you, and what it never will.** After opening a PR,
+`subscribe_pr_activity` delivers GitHub events into the session that subscribed.
+Some kinds of trouble arrive as events and some never do, and the ones that never
+arrive are exactly the ones that leave a PR broken while the session believes
+it is watching it.
+
+- **Usually arrive within seconds — but not reliably:** a check run finishing
+  (red or green), a review or review comment, and the PR being merged or closed.
+  CI here runs as GitHub Actions jobs, which are check runs. On PR #1302 the
+  first run's three failed jobs were delivered within ten seconds of failing;
+  the second run's three failed jobs, 25 minutes later, were **never
+  delivered**. Between the two, the session's worker had been restarted
+  (`get_session` showed `worker_epoch` 3), and events that fire while a worker
+  is being replaced can be lost outright: `ReadNotifications` afterwards
+  reported nothing queued. So treat a CI event as a fast path that usually
+  works, never as the only way you find out how a run ended.
+- **Never arrive as their own event: merge conflicts.** GitHub sends no webhook
+  when a PR *becomes* unmergeable because something else landed on `main`. It
+  works out mergeability lazily, only when someone asks, and the harness's
+  mergeability notices are best-effort. On this repository that is the common
+  case, not an edge one: several sessions merge PRs into `main` on the same day,
+  and the version-bump bot pushes to `main` after every merge, so a PR that was
+  clean when it opened can conflict an hour later with nothing announcing it.
+- **Also silent:** CI reported through the commit-status API rather than as
+  check runs, pushes to the branch by someone else, a lost delivery, and any PR
+  this session is not subscribed to. A PR's events go to **one session at a
+  time**: if another session already holds the subscription, this one is told
+  so and receives nothing, and a session that never subscribed gets nothing at
+  all. Subscribe in the same turn the PR is opened, and read the subscription
+  result rather than assuming it worked.
+
+So the subscription is a fast path for CI and reviews, and nothing more:
+**knowing how a run ended, and whether the PR still merges, is your own job,
+and the check-in is how you do it.**
+
+- **Every push to an open PR arms a check-in for when its CI should be done**:
+  about 20 minutes, which covers the fast lane's ~8 minutes and the nanowell
+  lane's ~15 (§2's table). Not 50 minutes — a 50-minute safety net is what let
+  the lost failures above sit unreported until the user saw them. At that
+  check-in read the check runs yourself (`pull_request_read`,
+  `method: "get_check_runs"`) whether or not an event arrived; if a run is still
+  going, re-arm for ten minutes rather than waiting for an event.
+- **When a session resumes or is compacted**, first call `ReadNotifications`,
+  then re-call `subscribe_pr_activity` for each open PR — it is idempotent, and
+  it reports when another session holds the PR — then read each PR's check runs
+  and merge state directly. Anything that fired during the restart may be gone.
+  `.claude/hooks/resume-check.sh` prints these steps into the session's context
+  on every `resume` and `compact` (ARCHITECTURE.md §10.6), as `[resume-check]`
+  lines; when they appear, do them before anything else.
+- **Otherwise keep a `send_later` check-in armed for as long as the PR is
+  open** — about 50 minutes after the last activity once CI has finished, then
+  about every four hours.
+
+At each check-in, and at the start of handling *any* PR event, read the PR's
+check runs and merge state before anything else:
+
+1. `pull_request_read` (`method: "get"`) and read `mergeable_state`. `dirty` is a
+   conflict. `unknown` (or a `mergeable` of `null`) means GitHub has not worked it
+   out yet — the read itself starts that, so read again a minute later rather
+   than treating it as clean. `unstable` means mergeable but some check is not
+   green, which is a CI question, not a conflict. `clean` is clean.
+2. Confirm it locally, because the API's answer can lag a push to `main`:
+   `git fetch origin main` and then `git merge-tree --write-tree HEAD origin/main`,
+   which prints conflicted paths and exits non-zero on a conflict without
+   touching the working tree.
+3. On a conflict, merge `origin/main` into the branch and resolve it per the
+   paragraph on conflict markers above, run what the resolution touched, and
+   push it as one round.
+
+A check-in that finds nothing new re-arms silently. Stop re-arming only when the
+PR is merged or closed, or the user says stop — not because the last few
+check-ins were quiet: a conflict is exactly the thing that arrives after a long
+quiet stretch. When CI fails on a runner problem rather than on the code (an
+outage before any test ran — Ubuntu's own mirrors being unreachable is the one
+seen here, and `scripts/install_qt_system_libs.sh` now routes around that one), note it once on the PR and re-run the failed
+jobs once; GitHub refuses a re-run while any job in the same run is still in
+progress, so re-run when the last job has finished. Before calling it a runner
+problem, check another open PR's checks from the same window: if it failed the
+same step the same way, the outage is not yours. When it persists past the one
+re-run, stop re-running, which only bills more runs that fail the same way, and
+tell the user what is blocked and on what.
 
 **Pull requests do not bump the version; `main` does, after each merge.**
 `.github/workflows/version-bump.yml` runs on every push to `main`, bumps
@@ -1494,3 +1577,63 @@ the answer is "none of the ones I ran", that is the work, not a formality.
 - Review can't see channels: check `pipeline_info.json` (`fluor_tokens`, `schema`,
   `available_timepoints`) — the viewer reads it in `domain/viewer_state.read_pipeline_info`.
 - More: ARCHITECTURE.md §12 (debugging recipes) and §17 (build/environment).
+
+## 7.10 A page that fits until you press something
+
+A report that a phone layout is "completely broken" was one panel; the sweep it
+prompted found six more defects of the same kind, in six features, and every one had
+passed the every-page render test. Not because the test was wrong — because it
+measures the page as it opens, and every one of them appeared later: an editor
+behind an **Edit…** toggle, a run dashboard shown once a folder is chosen, a caption
+that grows a line when a well is excluded, a Controls sheet the tour opened on one
+page of thirty.
+
+1. **Ask what the render test never shows.** A panel hidden until used, the
+   Controls sheet's form, a popover, a menu, a dialog: none is on screen when a page
+   is measured. A new one of these gets a test of its own at phone size through its
+   page's real builder (`tests/test_nanowell_subset_fits_a_phone.py`), and a new
+   kind of surface gets a stop in `tests/_page_tour.py` — which is how every page's
+   Controls sheet is measured now (`"<page> ▸ Controls"`).
+2. **A fit applied once is not a fit.** `phone_fit` ran when a Datasets page was
+   shown; the dashboard that appeared inside it afterwards changed neither the page's
+   visibility nor its width, so nothing fitted it. Anything that adapts a layout on
+   show must also adapt to content that changes after the show — watch the content's
+   layout request, not only the container's show and resize.
+3. **Fixed widths do not survive phone layout.** Touch scaling multiplies a fixed
+   width (90 → 153 px) and a fixed width cannot give way, so two fields beside a
+   label held Cell Gating 26 px wider than the phone — failing on `main`
+   in every phone case. Prefer a ceiling (`setMaximumWidth`) for a field's width at
+   the desk; it measures the same there and yields on a phone.
+4. **"Wider than its viewport, with a scroll bar" is still a defect on a phone.** The
+   generic scroll check only flags overflow with no bar, and a sheet of controls
+   that must be dragged sideways passed it on ten pages. Say what "broken" means for
+   the surface — a form read down a phone may never scroll sideways — and check that.
+5. **The fake screen is Python's only.** `FakeScreen` patches `QScreen` for Python;
+   Qt's C++ still places menus and combo lists on the offscreen 800 × 800 screen, so
+   every menu near the right edge "ran off" a 432 px phone — a whole class of
+   false findings, caught only because the numbers ended at exactly 800. Give Qt a
+   real screen (`QT_QPA_PLATFORM="offscreen:configfile=…"`, ARCHITECTURE.md §10.4)
+   before measuring anything Qt positions itself.
+6. **A crawl that presses every control is cheap and finds what review does not.**
+   Stub what blocks (`QDialog.exec` to `show()`, the static `QMessageBox` /
+   `QFileDialog` / `QInputDialog` calls, `widgets.menu_exec.exec_menu` to
+   `popup`), press every button and toggle, open every menu and trigger its actions,
+   open every combo, and measure each window and in-page change against the screen.
+   Two traps from running one: `findChildren(QWidget)` on a window wraps each
+   combo's popup container, a top-level the test reaper then deletes a second time
+   (collect by type instead); and a crawl's own bug — skipping every checkable
+   button, which is exactly how panels open — reads as "nothing found".
+7. **Never wrap a `QLayoutItem` you do not own.** `itemAt(i)` hands Python a wrapper
+   for an object that is no QObject, so the binding is never told Qt freed it; Qt
+   reuses the address for the next item and the stale wrapper comes back as
+   "Internal C++ object already deleted", far from the code that made it. Walk
+   nested layouts with `findChildren(QLayout)` and ask membership with `indexOf`
+   (`tests/test_phone_fit.py` holds it for `ui/phone_fit`). It is the allocator's
+   choice whether an address is reused, so no test reproduces it on demand — which is
+   why the rule is a guard.
+8. **A pre-existing failure is found by running the base, not by reading it.** The
+   Cell Gating failure looked like this branch's until the same test ran in a
+   worktree of `origin/main` and failed identically; and a desk-only label that failed
+   once in three runs here, in a form the branch never touched, is reported as
+   intermittent rather than fixed or blamed.
+

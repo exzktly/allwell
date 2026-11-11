@@ -105,3 +105,28 @@ def test_a_window_s_rows_write_a_cell_count_as_a_number_and_a_fold_change_with_i
     assert drawn("n") == ["#1  A01 q 1, r 0\n3", "2", "3"]
     assert drawn("count_fc") == ["#1  A01 q 1, r 0\n3×", "2×", "3×"]
     assert drawn("brightness_fc_GFP")[1] == "2×" and drawn("log2_count_fc")[1] == "+2"
+
+
+def test_on_a_phone_s_figure_the_caption_stays_clear_of_the_lowest_crops():
+    """The caption is written after the crops (it reports what they found) and wraps to the figure's width, while the
+    room under the montage was a fixed 0.45 in. On a phone's narrow figure the caption is five or six lines, and with
+    a well excluded on the page ("Excluded on this page: A01 (restore from Excluded on the band).") it ran over the
+    lowest crops and the metrics along their foot. The montage now leaves the room the caption needs."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    model, crops = _extremes_fixture()
+    fig = Figure(figsize=(4.1, 7.6))                      # the Extremes figure on a 432 x 936 phone, held upright
+    FigureCanvasAgg(fig)
+    note = ("Excluded on this page: A01 (restore from Excluded on the band). Focus unchecked: 15 under 10 rims in "
+            "the well.")
+    # Two timepoints, as the phone showed: the crops are then as tall as the height allows, not held small by width.
+    renderer.render_extremes(fig, model, crops, label="Count fold change", note=note, timepoints=TPS[1:])
+    fig.canvas.draw()
+    renderer_ = fig.canvas.get_renderer()
+    (caption,) = [t for t in fig.texts if t.get_gid() == "nw-extremes-caption"]
+    # The lines as drawn: matplotlib measures a ``wrap=True`` text unwrapped, so its extent cannot be read off it.
+    lines = (caption._get_wrapped_text() if caption.get_wrap() else caption.get_text()).count("\n") + 1
+    top = (caption.get_position()[1] * fig.bbox.height
+           + lines * caption.get_fontsize() * caption._linespacing * fig.dpi / 72)
+    lowest = min(ax.get_window_extent(renderer_).y0 for ax in fig.axes)
+    assert top <= lowest, f"the caption's top ({top:.0f} px) is over the lowest crops' foot ({lowest:.0f} px)"

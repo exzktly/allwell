@@ -1148,6 +1148,18 @@ Scrolling the mouse wheel over a dropdown or number box scrolls the page, not th
   cells are far from 30 px and check the masks: segmentation is most reliable
   when the diameter matches the cells, so a smaller value can be worth its time.
   A value that is not a number stops the run before it starts.
+- **Flow threshold** and **Cell-prob threshold** — Cellpose's two detection
+  thresholds, shown for both Cellpose methods, general and label-free (not in
+  nanowell mode, whose count keeps Cellpose's defaults).
+  - **Cell-prob threshold** (default `0`) is how confident Cellpose must be
+    that a pixel belongs to a cell. **Turn it down** (`-1`, then `-2`) when the
+    run misses real cells outright — faint or low-contrast ones, such as large
+    dendritic cells in brightfield beside well-detected T cells. Too low and
+    background starts to come back as objects, so compare counts on one well.
+  - **Flow threshold** (default `0.4`) is how far a cell's outline may disagree
+    with the flows Cellpose predicted before it is thrown away. **Turn it up**
+    (`0.8`–`1.0`) to keep irregular cells that are found and then rejected.
+  A value that is not a number stops the run before it starts.
 - **Nucleus probability** and **Overlap (NMS)** — the two StarDist detection
   thresholds, shown for both StarDist methods. A field left **blank** means the
   run uses the threshold built into the pretrained model.
@@ -6636,7 +6648,10 @@ the sentence names it.
 - **Subset** — which nanowells every view uses. The quick choices keep the nanowells that held a given number of
   cells at the Baseline: *All nanowells*, *Starting cells ≥1 (occupied)*, *1 (single cell)*, *1–2* and *≥2*.
   *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
-  conditions and choose whether a nanowell must meet *all* of them or *any*. Each condition tests one of:
+  conditions and choose whether a nanowell must meet *all* of them or *any*. On a narrow screen each condition wraps
+  onto as many lines as it needs, and the editor scrolls once it holds more than its share of the page; on a screen
+  too short for the editor and the figure both, such as a phone held sideways, the editor takes the figure's place
+  until you press **Close**. Each condition tests one of:
   - **Starting cells** — the count at the Baseline;
   - **a metric** — cell count, confluence, cell fluorescence and nanowell fluorescence (per channel), any fold change or the growth
     rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*

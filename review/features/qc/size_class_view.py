@@ -43,6 +43,9 @@ TOOLTIP = (
 #: The rows' title, by whether the dataset counts per nanowell (:func:`refresh`).
 TITLE_NANOWELL = "Size classes, counted per nanowell"
 TITLE_PLAIN = "Size classes, outlined in Segmentation"
+#: The widest a class's name field grows. The fields' widths are ceilings, not fixed: phone layout scales a fixed
+#: width for touch (the name to 153 px, each size to 89), and fixed they held the Cell Gating page 26 px wider than a
+#: 432 px phone with no way to scroll to the rest; as ceilings they give way to the page.
 _LABEL_W = 120
 
 
@@ -76,12 +79,12 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
         c = rule.classes[k]
         label = QLineEdit(c.label, grid)
         label.setPlaceholderText(f"class {k + 1}")
-        label.setFixedWidth(_LABEL_W)
+        label.setMaximumWidth(_LABEL_W)
         label.setToolTip(TOOLTIP)
         low = QLineEdit(_fmt(c.min_area), grid)
         high = QLineEdit(_fmt(c.max_area), grid)
         for edit in (low, high):
-            edit.setFixedWidth(theme.Metrics.num_field_w)
+            edit.setMaximumWidth(theme.Metrics.num_field_w)
             edit.setPlaceholderText("none")
             edit.setToolTip(TOOLTIP)
         diameter = QLabel("", grid)

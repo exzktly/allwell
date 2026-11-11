@@ -68,6 +68,8 @@ PREFILLED = {"nanowell_cell_diameter_um": "19.5"}
 #: Field defaults, shown as placeholders: a blank field sends no flag and the pipeline's own default applies.
 DEFAULTS = {
     "nanowell_cell_diameter_um": "15",
+    "nanowell_flow_threshold": "0.4",
+    "nanowell_cellprob_threshold": "0",
     "nanowell_margin_um": "",
     "nanowell_square_edge_deg": "0",
     "nanowell_occluded_below": "0.5",
@@ -88,6 +90,8 @@ PLACEHOLDERS = {"nanowell_empty_well": "none: no confluence"}
 #: Key -> (label, minimum, maximum, minimum is allowed). Mirrors ``pipeline.cli_args.nanowell_options_from_args``.
 _NUMERIC = {
     "nanowell_cell_diameter_um": ("Cell diameter", 0.0, None, False),
+    "nanowell_flow_threshold": ("Flow threshold", 0.0, None, True),
+    "nanowell_cellprob_threshold": ("Cell-prob threshold", -6.0, 6.0, True),
     "nanowell_margin_um": ("Margin", 0.0, None, True),
     "nanowell_square_edge_deg": ("Square edge angle", -45.0, 45.0, True),
     "nanowell_occluded_below": ("Occlusion threshold", 0.0, 1.0, False),

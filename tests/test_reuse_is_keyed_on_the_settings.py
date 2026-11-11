@@ -112,6 +112,8 @@ OTHER = {
     "nanowell_segment_scope": "tile",
     "nanowell_segment_scale": "tile",
     "nanowell_resize": "none",
+    "nanowell_flow_threshold": 0.8,
+    "nanowell_cellprob_threshold": -1.0,
     "nanowell_empty_well": "H12",
     "nanowell_fluor_background": "empty_well",
     "nanowell_grid": "3x7",

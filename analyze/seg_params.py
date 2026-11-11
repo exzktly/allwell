@@ -334,8 +334,9 @@ class AnalyzeSegParamsMixin:
 
     def _sync_cellpose_diameter_row(self) -> None:
         """Show the diameter and the two thresholds only for the methods that run Cellpose — and not in nanowell
-        mode, whose count takes its cell size in micrometres from its own row (``nanowell_cell_diameter_um``),
-        leaves the thresholds at Cellpose's defaults, and reads none of these rows."""
+        mode, whose count takes its cell size in micrometres and its two thresholds from its own rows
+        (``nanowell_cell_diameter_um``, ``nanowell_flow_threshold``, ``nanowell_cellprob_threshold``) and reads none
+        of these."""
         nanowell = getattr(self, "_nanowell_cb", None)
         shown = (self._seg_method() in _CELLPOSE_DIAMETER_METHODS
                  and not (nanowell is not None and nanowell.isChecked()))

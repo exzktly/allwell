@@ -11739,7 +11739,16 @@ keyed and digest-aliased as `segment_scope` is). Whether Cellpose resizes that i
 (`LEGACY_RESIZE`); `none` tells Cellpose no diameter (`NanowellSettings.segmenter_diameter_px` is 0), so the image is
 segmented as imaged, at a quarter of the network's pixels where a cell is half its 30. `--nanowell_resize` has no
 parser default and the form (`RESIZE_CHOICES`, the **Resize** combo) sends it only for `none`, so a run that does not
-resize differently hashes exactly as runs from before the flag existed. The whole-tile scope passes the range to the segmenter too
+resize differently hashes exactly as runs from before the flag existed. Cellpose's two thresholds for the count are
+`flow_threshold` and `cellprob_threshold` (`--nanowell_flow_threshold` / `--nanowell_cellprob_threshold`, the
+**Flow threshold** and **Cell-prob threshold** rows beside the count's other settings), at Cellpose's own
+`COUNT_FLOW_THRESHOLD` (0.4) and `COUNT_CELLPROB_THRESHOLD` (0) unless named. Neither flag has a parser default, and
+`cli_args._count_thresholds` drops a value equal to Cellpose's own from the arguments as well as the options, so a
+run at the defaults, typed or blank, keeps the settings digest, reuse key and kept masks of every earlier run. A
+threshold that differs joins the reuse key (`NanowellSettings._thresholds`) and reaches the segmenter only through
+`NanowellSettings.segmenter_options()`, which every call site that builds the count's segmenter passes
+(`tests/test_nanowell_count_takes_cellpose_thresholds.py` holds the call sites); since those options are part of the
+segmenter's cache identity, masks kept at other thresholds are never answered for this run. The whole-tile scope passes the range to the segmenter too
 (`segment_tile(lowhigh=…)`). `segmenter_view` (the `segmenter_floor` / `segmenter_contrast` columns) and the
 inspection sheet read the same range. `pipeline.cellpose._segment_cellpose(lowhigh=…)` scales the crop to that range itself and calls
 `eval(normalize=False)`: Cellpose pads a greyscale image with empty channels and applies a `normalize={"lowhigh": …}`
@@ -14927,7 +14936,8 @@ noted:
   preset — diameter, `flow_threshold` and `cellprob_threshold`
   (`seg_params._build_cellpose_diameter_row` / `_build_cellpose_threshold_rows`, shown by
   `_sync_cellpose_diameter_row` for both Cellpose methods and hidden in nanowell mode, whose count is its own
-  Cellpose call and reads none of them; `build_pipeline_args` sends the thresholds for both methods outside
+  Cellpose call with its own rows for both thresholds (`nanowell_flow_threshold`, `nanowell_cellprob_threshold`)
+  and reads none of these; `build_pipeline_args` sends the thresholds for both methods outside
   nanowell mode, and `analyze.domain.fields` validates them on the same terms) —
   and an optional second **nucleus channel** (`channels=[seg, nuc]` on Cellpose 3; on Cellpose 4 the two are
   stacked on the last axis with `channel_axis=-1`). Models are

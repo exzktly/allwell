@@ -101,8 +101,10 @@ def test_the_pipeline_applies_label_free_thresholds(tab, monkeypatch):
 
 
 def test_a_nanowell_run_is_sent_no_thresholds_and_not_blocked_by_them(tab):
-    """A nanowell count is its own Cellpose call that leaves both thresholds at Cellpose's defaults, so a value
-    left in the hidden rows must neither be sent (it would only change the run's settings key) nor block it."""
+    """A nanowell count is its own Cellpose call with thresholds of its own (``nanowell_flow_threshold`` /
+    ``nanowell_cellprob_threshold``, ``test_nanowell_count_takes_cellpose_thresholds.py``), so a value left in the
+    Segmentation section's hidden rows must neither be sent (it would only change the run's settings key) nor block
+    it."""
     from analyze.domain.fields import _numeric_option_errors
 
     _pick(tab, "cellpose_labelfree")

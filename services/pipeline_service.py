@@ -62,8 +62,9 @@ def _emit_nanowell_flags(args: list[str], opts: dict) -> None:
     if not plate_format:
         return
     args += ["--nanowell_format", plate_format]
-    for key in ("nanowell_cell_diameter_um", "nanowell_margin_um", "nanowell_square_edge_deg",
-                "nanowell_occluded_below", "nanowell_clipped_below"):
+    for key in ("nanowell_cell_diameter_um", "nanowell_flow_threshold", "nanowell_cellprob_threshold",
+                "nanowell_margin_um", "nanowell_square_edge_deg", "nanowell_occluded_below",
+                "nanowell_clipped_below"):
         _emit_num_flag(args, opts, key, f"--{key}", float)
     if str(opts.get("nanowell_geometry") or "").strip() == "infer":   # the default sends nothing (tracker X35)
         args += ["--nanowell_geometry", "infer"]
@@ -291,9 +292,10 @@ def build_pipeline_args(
     # The flow and cell-probability thresholds belong to both Cellpose methods
     # as well: the label-free preset runs the same model.eval call, and lowering
     # the cell-probability cut is how a brightfield run recovers faint cells.
-    # Not in nanowell mode, whose count is its own Cellpose call that leaves
-    # both at Cellpose's defaults — sending a value it never reads would only
-    # change the run's settings key.
+    # Not in nanowell mode, whose count is its own Cellpose call with its own
+    # thresholds (--nanowell_flow_threshold / --nanowell_cellprob_threshold,
+    # sent by _emit_nanowell_flags) — sending these, which it never reads,
+    # would only change the run's settings key.
     nanowell = bool(str(opts.get("nanowell_format") or "").strip())
     if segmentation_method in ("cellpose", "cellpose_labelfree") and not nanowell:
         for flag, key, default in (

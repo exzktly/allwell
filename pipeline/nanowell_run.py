@@ -108,6 +108,12 @@ LEGACY_RESIZE = "cell"
 FLUOR_BACKGROUND_FLOOR, FLUOR_BACKGROUND_EMPTY_WELL = "floor", "empty_well"
 FLUOR_BACKGROUNDS = (FLUOR_BACKGROUND_FLOOR, FLUOR_BACKGROUND_EMPTY_WELL)
 
+#: Cellpose's own flow and cell-probability thresholds, which the cell count segments at unless the run names others.
+#: Every run before the count took thresholds segmented at these, so a run at them keeps its reuse key, its settings
+#: and its kept masks: none of the three is told about a threshold left at its default.
+COUNT_FLOW_THRESHOLD = 0.4
+COUNT_CELLPROB_THRESHOLD = 0.0
+
 GEOMETRY_HEX_CIRCLE = "hex_circle"
 GEOMETRY_INFER = "infer"
 GEOMETRIES = (GEOMETRY_HEX_CIRCLE, GEOMETRY_INFER)
@@ -133,6 +139,10 @@ class NanowellSettings:
     empty_well: str | None = None
     #: What every fluorescence number is measured above (``FLUOR_BACKGROUNDS``); ``empty_well`` needs *empty_well*.
     fluor_background: str = FLUOR_BACKGROUND_FLOOR
+    #: Cellpose's thresholds for the cell count (``COUNT_FLOW_THRESHOLD`` / ``COUNT_CELLPROB_THRESHOLD`` unless the run
+    #: names others). A lower cell-probability threshold is what finds large, faint cells the default leaves out.
+    flow_threshold: float = COUNT_FLOW_THRESHOLD
+    cellprob_threshold: float = COUNT_CELLPROB_THRESHOLD
     #: The nanowell diameter measured on the plate, whatever the geometry (tracker F2): sites are fitted, owned and
     #: measured at it. Set from the well's one diameter by :func:`measure_timepoint` and by :func:`run_well` for its
     #: roster, and by Test detection; never part of the reuse key, which holds the setting (``key``), while the
@@ -203,7 +213,24 @@ class NanowellSettings:
             key["empty_well"] = self.empty_well
         if self.fluor_background != FLUOR_BACKGROUND_FLOOR:  # the floor is what every earlier run measured above
             key["fluor_background"] = self.fluor_background
+        key.update(self._thresholds())                     # Cellpose's own thresholds are every earlier run's
         return key
+
+    def _thresholds(self) -> dict:
+        """The cell count's Cellpose thresholds that differ from Cellpose's own: the only ones the reuse key and the
+        segmenter are told about, so a run at the defaults keeps the key and the kept masks it always had."""
+        out = {}
+        if self.flow_threshold != COUNT_FLOW_THRESHOLD:
+            out["flow_threshold"] = float(self.flow_threshold)
+        if self.cellprob_threshold != COUNT_CELLPROB_THRESHOLD:
+            out["cellprob_threshold"] = float(self.cellprob_threshold)
+        return out
+
+    def segmenter_options(self) -> dict:
+        """What ``nanowell_measure.cellpose_segmenter`` is given beside the diameter: the model and any threshold
+        that is not Cellpose's own. They are also the segmenter's cache identity (``nanowell_masks``), so masks
+        kept from a run at other thresholds are never answered for this one."""
+        return {"model_type": self.cellpose_model, **self._thresholds()}
 
     def segmenter_diameter_px(self, pixel_size_um: float) -> float:
         """The cell diameter Cellpose is told, in pixels: 0 (none, so no resize) when ``resize`` is ``none``."""
@@ -1579,7 +1606,7 @@ def _prepare_timepoint(located: Located, images: dict, settings: NanowellSetting
                         "_object": template}
         if template.source != nm.SOURCE_EARLIEST:                  # its own: what flag_template_drift compares
             out.template["floor_ratio"] = nm.floor_ratio(template)
-    segment = (segmenter or nm.cellpose_segmenter(settings.segmenter_diameter_px(px), model_type=settings.cellpose_model)
+    segment = (segmenter or nm.cellpose_segmenter(settings.segmenter_diameter_px(px), **settings.segmenter_options())
                ) if count_cells else None
     if segment is not None and mask_store is not None:
         segment = mask_store.wrap(segment, located.timepoint)

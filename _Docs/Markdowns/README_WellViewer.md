@@ -217,7 +217,7 @@ clipping thresholds below which a nanowell carries its state but no cell count. 
 With **Plate type: Nanowell array**, the Segmentation section's **Method** is **Nanowell cell count (Cellpose, on the
 Phase channel)**: a nanowell run does not use the segmentation methods the selector offers, so the selector is
 hidden, and the cell count's own settings are shown in place of their parameters: **Cellpose model**,
-**Segment on**, **Segment**, **Resize** and **Cell diameter (µm)**. Set the Role of the channel the tiles are imaged in to
+**Segment on**, **Segment**, **Resize**, **Cell diameter (µm)**, **Flow threshold** and **Cell-prob threshold**. Set the Role of the channel the tiles are imaged in to
 **Phase**. Set Plate type back to **Standard plate** and the selector comes back with the method you had chosen. The cell diameter sets the scale the model looks for cells at: with Resize
 *To the cell diameter*, Cellpose resizes each image so that a cell of that diameter becomes its own 30 px. It is not
 necessarily your cells' real size. It starts at 19.5 µm, which at 0.65 µm per pixel is exactly 30 px, so Cellpose
@@ -270,6 +270,21 @@ imaged)* segments each image as it is, which is that much faster, at whatever th
 — compare the counts on one well before a plate-wide run. With *None*, the cell diameter no longer sets the scale,
 so the field is greyed out.
 (On the command line: `--nanowell_resize none`.)
+
+**Flow threshold** and **Cell-prob threshold** are Cellpose's two detection thresholds for the cell count. Blank
+uses Cellpose's own values (flow `0.4`, cell-prob `0`), which every earlier run counted at; typing those same values
+changes nothing, and a plate counted at them is not re-counted.
+- **Cell-prob threshold** (`-6` to `6`) is how confident Cellpose must be that a pixel belongs to a cell. **Turn it
+  down** (`-1`, then `-2`) when the count misses real cells outright: faint or low-contrast ones, such as large
+  dendritic cells in brightfield beside T cells that are counted well. Too low and background starts to be counted
+  as cells, so compare the counts of one well before a plate-wide run.
+- **Flow threshold** (`0` or more) is how far a cell's outline may disagree with the flows Cellpose predicted before
+  the cell is thrown away. **Turn it up** (`0.8`–`1.0`) to keep irregular cells that are found and then rejected;
+  `0` keeps every outline.
+
+A run at other thresholds segments every nanowell again rather than reusing the cell outlines an earlier run kept,
+and its settings record the thresholds, so the wells counted before are re-run rather than treated as up to date.
+(On the command line: `--nanowell_flow_threshold`, `--nanowell_cellprob_threshold`.)
 
 Whichever you choose, the model is given the nanowells only: everything outside each nanowell's interior — its rim
 and the lattice between nanowells — is set to plain grey, and the brightness range is taken from the nanowells'
@@ -1153,8 +1168,10 @@ Scrolling the mouse wheel over a dropdown or number box scrolls the page, not th
   when the diameter matches the cells, so a smaller value can be worth its time.
   A value that is not a number stops the run before it starts.
 - **Flow threshold** and **Cell-prob threshold** — Cellpose's two detection
-  thresholds, shown for both Cellpose methods, general and label-free (not in
-  nanowell mode, whose count keeps Cellpose's defaults).
+  thresholds, shown for both Cellpose methods, general and label-free. In
+  nanowell mode these rows give way to the cell count's own **Flow threshold**
+  and **Cell-prob threshold**, which mean the same and are set the same way (see
+  *Nanowell arrays* above).
   - **Cell-prob threshold** (default `0`) is how confident Cellpose must be
     that a pixel belongs to a cell. **Turn it down** (`-1`, then `-2`) when the
     run misses real cells outright — faint or low-contrast ones, such as large

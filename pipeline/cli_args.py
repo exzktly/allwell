@@ -623,6 +623,18 @@ def build_parser() -> argparse.ArgumentParser:
                          "cell in pixels makes that an enlargement, which multiplies the pixels the network runs on. "
                          "none: each image is segmented as imaged, much faster for small cells, at whatever the "
                          "model makes of cells at that size."))
+    # No default values: a run that names neither threshold segments at Cellpose's own (flow 0.4, cell probability
+    # 0), as every run before the flags existed did, and an absent value leaves the settings digest those runs
+    # recorded unchanged (nanowell_options_from_args also drops a value equal to Cellpose's default).
+    p.add_argument("--nanowell_flow_threshold", type=float, default=None,
+                   help=("Cellpose's flow threshold for the cell count: how far a mask's shape may disagree with the "
+                         "flows Cellpose predicted before the mask is thrown away. Higher keeps more, and more "
+                         "irregular, cells; 0 keeps every mask. Default: Cellpose's 0.4."))
+    p.add_argument("--nanowell_cellprob_threshold", type=float, default=None,
+                   help=("Cellpose's cell-probability threshold for the cell count: the floor for calling a pixel "
+                         "part of a cell, from -6 to 6. Lower (-1, -2) finds faint or low-contrast cells the default "
+                         "misses, such as large dendritic cells in brightfield, at the risk of background objects. "
+                         "Default: Cellpose's 0."))
     p.add_argument("--nanowell_square_edge_deg", type=float, default=0.0,
                    help=("Angle of the central square nanowell's edges to a lattice row, degrees (assumed 0: the "
                          "square is cut parallel to a row). Used to refuse a lattice fitted a sixth of a turn off."))
@@ -634,6 +646,31 @@ def build_parser() -> argparse.ArgumentParser:
                          "tiles cuts it, is clipped and carries no cell count or confluence."))
 
     return p
+
+
+def _count_thresholds(args, error) -> dict:
+    """The cell count's Cellpose thresholds that differ from Cellpose's own defaults, as nanowell options.
+
+    A value equal to the default is dropped from the arguments as well as from the options, so a run that types
+    Cellpose's own 0.4 or 0 records the settings, reuse key and kept masks of a run that typed nothing: the counts
+    are the same, and nothing should be re-segmented for it."""
+    from pipeline.nanowell_run import COUNT_CELLPROB_THRESHOLD, COUNT_FLOW_THRESHOLD
+
+    out = {}
+    for attr, key, default, low, high in (
+            ("nanowell_flow_threshold", "flow_threshold", COUNT_FLOW_THRESHOLD, 0.0, None),
+            ("nanowell_cellprob_threshold", "cellprob_threshold", COUNT_CELLPROB_THRESHOLD, -6.0, 6.0)):
+        value = getattr(args, attr, None)
+        if value is None:
+            continue
+        if not math.isfinite(value) or value < low or (high is not None and value > high):
+            span = f"{low:g} to {high:g}" if high is not None else f"{low:g} or more"
+            error(f"--{attr} must be {span}.")
+        if float(value) == default:
+            setattr(args, attr, None)
+            continue
+        out[key] = float(value)
+    return out
 
 
 def nanowell_options_from_args(args, error) -> dict | None:
@@ -681,6 +718,7 @@ def nanowell_options_from_args(args, error) -> dict | None:
         options["segment_scale"] = args.nanowell_segment_scale
     if args.nanowell_resize not in (None, "cell"):            # and resized to the cell diameter
         options["resize"] = args.nanowell_resize
+    options.update(_count_thresholds(args, error))
     if args.nanowell_empty_well:
         from util.well_token import canonical_well_label
 

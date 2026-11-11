@@ -185,6 +185,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_confluence_reference.py": "confluence against the empty reference well, on a painted scene",
     "test_nanowell_segmenter_reference.py": "the rim-removed count input divided by the empty reference well's template",
     "test_nanowell_masks.py": "the kept cell masks: answered only for the same segmenter input",
+    "test_nanowell_count_takes_cellpose_thresholds.py": "the count's flow and cell-prob thresholds, form to Cellpose's call, keyed only when changed",
     "test_nanowell_parallel.py": "A nanowell worker's threads: results in order, one segmenter call at a time, budgets",
     "test_nanowell_tiles.py": "A nanowell well's tiles read from its archive once, or from a node-local copy",
     "test_nanowell_seams.py": "A fused nanowell's image: its holding tile, or a seam tile blended from the tiles covering it",

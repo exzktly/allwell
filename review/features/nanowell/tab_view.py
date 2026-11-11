@@ -49,7 +49,7 @@ from review.features.nanowell.display_range_view import (
     refresh_display_range_buttons,
 )
 from review.features.nanowell.series_compute import baseline_at, baseline_timepoint
-from review.features.nanowell.subset_view import build_subset_control
+from review.features.nanowell.subset_view import build_subset_control, share_page
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.moving_compute import MAX_WINDOW
 from review.features.nanowell.state import EXTREMES_MAX_N
@@ -560,7 +560,11 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     splitter.addWidget(detail)
     splitter.setStretchFactor(0, 3)
     splitter.setStretchFactor(1, 2)
-    layout.addWidget(wrap_with_empty_state(ctx.window, splitter, icon="hexagon", reason=nwc.nanowell_empty_reason), 1)
+    figures = wrap_with_empty_state(ctx.window, splitter, icon="hexagon", reason=nwc.nanowell_empty_reason)
+    layout.addWidget(figures, 1)
+    # A page too short for the Subset's conditions and the figures both (a phone held sideways) gives the editor
+    # the page while it is open.
+    share_page(start.editor, figures, redraw=lambda: nwc.redraw(ctx))
     layout.addWidget(build_details_panel(ctx, plot_area))  # the Distribution's footer, out of its figure
 
     show_detail = nw_phone.detail_placement(card, detail, detail_layout, strip_card,

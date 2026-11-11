@@ -680,11 +680,13 @@ and the check-in is how you do it.**
   check-in read the check runs yourself (`pull_request_read`,
   `method: "get_check_runs"`) whether or not an event arrived; if a run is still
   going, re-arm for ten minutes rather than waiting for an event.
-- **When a session resumes** (a `SessionStart:resume` hook line, or a
-  conversation that continues after a gap), first call `ReadNotifications`,
+- **When a session resumes or is compacted**, first call `ReadNotifications`,
   then re-call `subscribe_pr_activity` for each open PR — it is idempotent, and
   it reports when another session holds the PR — then read each PR's check runs
   and merge state directly. Anything that fired during the restart may be gone.
+  `.claude/hooks/resume-check.sh` prints these steps into the session's context
+  on every `resume` and `compact` (ARCHITECTURE.md §10.6), as `[resume-check]`
+  lines; when they appear, do them before anything else.
 - **Otherwise keep a `send_later` check-in armed for as long as the PR is
   open** — about 50 minutes after the last activity once CI has finished, then
   about every four hours.

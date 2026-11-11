@@ -23424,6 +23424,20 @@ segmentation tests need them, which is the same line `tests/requirements-dev.txt
 draws. A remote session that needs to run §10.5's StarDist or Cellpose tests
 installs that stack by hand.
 
+**A second `SessionStart` hook, `.claude/hooks/resume-check.sh`, runs only on
+`resume` and `compact`** (its `matcher` in `.claude/settings.json`). It installs
+nothing: it prints the steps a resumed or compacted session must take for each
+open PR it owns — read the queued notifications, re-subscribe, read the check
+runs and the merge state directly, and keep a check-in armed — naming the
+current branch. A `SessionStart` hook's standard output is added to the
+session's context, so the steps reach the session every time rather than
+depending on it remembering CLAUDE.md §6. It exists because PR events that fire
+while a session's worker is being replaced can be lost with nothing queued
+afterwards. It is a separate hook rather than a branch of `session-start.sh`
+so that a failing install step there cannot stop it printing, and it never
+exits non-zero. `tests/test_resume_hook_rereads_open_prs.py` holds its
+registration and the steps it prints.
+
 ---
 
 ### 10.7 The fake worker host (`tests/_fake_remote.py`)

@@ -104,6 +104,8 @@ _OPTS = {
     "nanowell_overlap_percent": "12",
     "nanowell_pixel_size_um": "0.8",
     "nanowell_cell_diameter_um": "22",
+    "nanowell_flow_threshold": "0.9",
+    "nanowell_cellprob_threshold": "-1.5",
     "nanowell_margin_um": "6",
     "nanowell_square_edge_deg": "5",
     "nanowell_occluded_below": "0.6",

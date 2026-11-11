@@ -4,7 +4,7 @@ On 2026-11-11 Ubuntu's own servers, the only apt sources the GitHub runner image
 is configured with, were unreachable for well over half an hour, and every pytest
 job on every open PR failed in its "Install Qt system libraries" step before a
 line of Python ran. ``scripts/install_qt_system_libs.sh`` fetches through
-independent Ubuntu mirrors first and Ubuntu's own archive last, verifying every
+three independent Ubuntu mirrors and none of Ubuntu's own servers, verifying every
 index against Ubuntu's signing key.
 
 The fix only holds while every install site uses it: one workflow left calling
@@ -66,14 +66,15 @@ def test_every_pytest_job_installs_the_qt_libraries_through_the_script():
     assert "scripts/install_qt_system_libs.sh" in SESSION_HOOK.read_text()
 
 
-def test_the_script_uses_its_own_mirror_list_with_ubuntu_last_and_verifies_signatures():
+def test_the_script_uses_its_own_mirror_list_without_ubuntu_and_verifies_signatures():
     text = SCRIPT.read_text()
     default = re.search(r'MIRRORS="\$\{ALLWELL_APT_MIRRORS:-([^}]*)\}"', text)
     assert default, "the default mirror list is gone"
     mirrors = default.group(1).split()
     assert len(mirrors) >= 3, mirrors
-    assert "ubuntu.com" in mirrors[-1], f"Ubuntu's own archive should be the last resort: {mirrors}"
-    assert not any("ubuntu.com" in m for m in mirrors[:-1]), f"only the last entry may be Ubuntu's own: {mirrors}"
+    # apt's mirror method spreads requests across every listed mirror rather than trying them in order, so a
+    # listed Ubuntu server still received requests during the outage and cost eight minutes on the runner.
+    assert not any("ubuntu.com" in m for m in mirrors), f"no Ubuntu-run server may be in the default list: {mirrors}"
     # The machine's own sources (Ubuntu's servers and third-party repos) are not consulted.
     assert "Dir::Etc::SourceList=$WORK/sources.list" in text
     assert "Dir::Etc::SourceParts=$WORK/parts" in text

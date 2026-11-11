@@ -23412,11 +23412,16 @@ jobs), `slow-lane.yml`, `coverage.yml`, `coverage-inventory.yml` — and
 `session-start.sh` install them through one script,
 `scripts/install_qt_system_libs.sh` (the slow lane passes its two font packages
 as arguments). The script does not use the machine's own apt sources. It writes
-a source list of its own whose packages come through a `mirror+file:` list,
-tried in order: three independent full Ubuntu mirrors (`mirrors.edge.kernel.org`,
-`mirrors.mit.edu`, `ftp.halifax.rwth-aachen.de`), then `archive.ubuntu.com`
-last. apt moves down the list when a mirror fails, so one mirror being down
-costs seconds rather than the job. The mirrors are transport only: every index
+a source list of its own whose packages come through a `mirror+file:` list of
+three independent full Ubuntu mirrors (`mirrors.edge.kernel.org`,
+`mirrors.mit.edu`, `ftp.halifax.rwth-aachen.de`) and none of Ubuntu's own
+servers. apt's mirror method spreads requests across every entry of equal
+priority rather than trying the list in order, and retries a failed file on
+another entry, so one mirror going down costs a few seconds of a 10-second
+timeout. It also means a dead entry costs time on every run: with
+`archive.ubuntu.com` listed during the outage, apt still sent it a share of the
+requests and the step took eight minutes on the runner, which is why Ubuntu's
+own archive is not in the list at all. The mirrors are transport only: every index
 is still verified against Ubuntu's archive signing key
 (`/usr/share/keyrings/ubuntu-archive-keyring.gpg`), so a mirror can make the
 install fail but cannot change what is installed. Two outages shaped this. Ubuntu's own

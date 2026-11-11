@@ -93,7 +93,10 @@ def test_a_segmenter_without_the_batch_or_range_attributes_gains_none():
     ({par.THREADS_ENV: "0"}, 1),                             # not positive: passed over, then nothing: serial
     ({}, 1),
 ])
-def test_the_thread_budget_is_what_the_run_gave_the_worker(environ, expected):
+def test_the_thread_budget_is_what_the_run_gave_the_worker(environ, expected, monkeypatch):
+    # Which setting wins is the question here, not the CPU cap: thread_budget never exceeds the CPUs the process
+    # may use, so on a two-CPU CI runner the override of 3 came back as 2. The cap has its own test below.
+    monkeypatch.setattr(par, "_usable_cpus", lambda: 64)
     assert par.thread_budget(environ) == expected
 
 

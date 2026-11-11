@@ -14874,8 +14874,12 @@ noted:
   detected. `n_tiles` is logged per FOV. The tile-size math is pure integer logic
   covered by `tests/test_stardist_tiling.py`.
 - `cellpose` — **general** Cellpose, not phase-locked. Exposes model
-  (cpsam, the default, or Cellpose 3's cyto3/cyto2/cyto/nuclei), diameter (the row shared with the label-free
-  preset), `flow_threshold`, `cellprob_threshold`,
+  (cpsam, the default, or Cellpose 3's cyto3/cyto2/cyto/nuclei), and three rows shared with the label-free
+  preset — diameter, `flow_threshold` and `cellprob_threshold`
+  (`seg_params._build_cellpose_diameter_row` / `_build_cellpose_threshold_rows`, shown by
+  `_sync_cellpose_diameter_row` for both Cellpose methods and hidden in nanowell mode, whose count is its own
+  Cellpose call and reads none of them; `build_pipeline_args` sends the thresholds for both methods outside
+  nanowell mode, and `analyze.domain.fields` validates them on the same terms) —
   and an optional second **nucleus channel** (`channels=[seg, nuc]` on Cellpose 3; on Cellpose 4 the two are
   stacked on the last axis with `channel_axis=-1`). Models are
   cached per name in `_CELLPOSE_MODELS`; `_worker_init` skips the StarDist/TF load.
@@ -23403,14 +23407,32 @@ Without it a fresh remote container has no test stack at all, and every test
 collection dies at `import PySide6` with `libEGL.so.1: cannot open shared object
 file` — Qt needs GL/EGL even under the offscreen QPA platform.
 
-Every workflow that installs those libraries — `ci.yml`, `slow-lane.yml`,
-`coverage.yml`, `coverage-inventory.yml` — lets `apt-get update` report errors
-without failing the step, and gates on the `apt-get install` beneath it instead.
-`update` exits non-zero when *any* configured repository's index fails to fetch,
-including the third-party ones the runner image ships and this project does not
-use, so a stale google-chrome index on `dl.google.com` failed a whole CI run
-before a line of Python was executed. The install is the honest gate: a library
-that genuinely cannot be fetched still fails it, by name.
+Every workflow that installs those libraries — `ci.yml` (all three pytest
+jobs), `slow-lane.yml`, `coverage.yml`, `coverage-inventory.yml` — and
+`session-start.sh` install them through one script,
+`scripts/install_qt_system_libs.sh` (the slow lane passes its two font packages
+as arguments). The script does not use the machine's own apt sources. It writes
+a source list of its own whose packages come through a `mirror+file:` list of
+three independent full Ubuntu mirrors (`mirrors.edge.kernel.org`,
+`mirrors.mit.edu`, `ftp.halifax.rwth-aachen.de`) and none of Ubuntu's own
+servers. apt's mirror method spreads requests across every entry of equal
+priority rather than trying the list in order, and retries a failed file on
+another entry, so one mirror going down costs a few seconds of a 10-second
+timeout. It also means a dead entry costs time on every run: with
+`archive.ubuntu.com` listed during the outage, apt still sent it a share of the
+requests and the step took eight minutes on the runner, which is why Ubuntu's
+own archive is not in the list at all. The mirrors are transport only: every index
+is still verified against Ubuntu's archive signing key
+(`/usr/share/keyrings/ubuntu-archive-keyring.gpg`), so a mirror can make the
+install fail but cannot change what is installed. Two outages shaped this. Ubuntu's own
+servers — the only ones the runner image is configured with — were unreachable
+for well over half an hour, and every pytest job on every open PR failed in this
+step after about five minutes of timeouts. And a stale third-party google-chrome
+index on `dl.google.com`, which the runner image ships and this project does not
+use, once failed a whole run's `apt-get update`; the script's own source list
+keeps every third-party repository out of the update. The install is the honest
+gate: a library that genuinely cannot be fetched from any mirror still fails the
+step, by name.
 
 The hook exits immediately when `CLAUDE_CODE_REMOTE` is not `true`: a developer
 machine has its own environment (`requirements.txt`) and the hook must
@@ -23419,6 +23441,20 @@ TensorFlow + StarDist and Torch + Cellpose are several GB and only the `slow`
 segmentation tests need them, which is the same line `tests/requirements-dev.txt`
 draws. A remote session that needs to run §10.5's StarDist or Cellpose tests
 installs that stack by hand.
+
+**A second `SessionStart` hook, `.claude/hooks/resume-check.sh`, runs only on
+`resume` and `compact`** (its `matcher` in `.claude/settings.json`). It installs
+nothing: it prints the steps a resumed or compacted session must take for each
+open PR it owns — read the queued notifications, re-subscribe, read the check
+runs and the merge state directly, and keep a check-in armed — naming the
+current branch. A `SessionStart` hook's standard output is added to the
+session's context, so the steps reach the session every time rather than
+depending on it remembering CLAUDE.md §6. It exists because PR events that fire
+while a session's worker is being replaced can be lost with nothing queued
+afterwards. It is a separate hook rather than a branch of `session-start.sh`
+so that a failing install step there cannot stop it printing, and it never
+exits non-zero. `tests/test_resume_hook_rereads_open_prs.py` holds its
+registration and the steps it prints.
 
 ---
 

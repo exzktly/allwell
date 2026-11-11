@@ -106,12 +106,20 @@ _CELLPOSE_FIELDS = frozenset(
     k for k in _FLOAT_FIELDS if k.startswith("cellpose_")
 )
 
-#: Which routines read each Cellpose parameter. The thresholds are general
-#: Cellpose's alone; the diameter is read by the label-free preset too, so a
-#: typo there must block that run rather than fall back to auto unannounced.
+#: Which routines read each Cellpose parameter. The diameter and both
+#: thresholds are read by the label-free preset too, so a typo in any of them
+#: must block that run rather than fall back to a default unannounced. Nanowell
+#: mode's count reads none of them (``_NANOWELL_UNREAD``).
 _CELLPOSE_FIELD_METHODS = {
     "cellpose_diameter": ("cellpose", "cellpose_labelfree"),
+    "cellpose_flow_threshold": ("cellpose", "cellpose_labelfree"),
+    "cellpose_cellprob_threshold": ("cellpose", "cellpose_labelfree"),
 }
+
+#: The Cellpose thresholds a nanowell run leaves at Cellpose's defaults: its
+#: count is its own Cellpose call (``pipeline.nanowell_run``), so a leftover
+#: value in the hidden rows must not block it.
+_NANOWELL_UNREAD = frozenset({"cellpose_flow_threshold", "cellpose_cellprob_threshold"})
 
 #: The two StarDist detection thresholds. Blank or ``auto`` means "use the
 #: threshold the pretrained model ships with"; anything else must read as a
@@ -216,6 +224,8 @@ def _float_field_errors(opts: dict) -> list[str]:
     for key, (label, low, high, gate) in _FLOAT_FIELDS.items():
         if (key in _CELLPOSE_FIELDS
                 and method not in _CELLPOSE_FIELD_METHODS.get(key, ("cellpose",))):
+            continue
+        if key in _NANOWELL_UNREAD and str(opts.get("nanowell_format") or "").strip():
             continue
         if gate is not None and not opts.get(gate):
             continue

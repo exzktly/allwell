@@ -67,9 +67,8 @@ def test_a_diameter_typed_for_label_free_reaches_the_pipeline(tab):
     argv = _argv(opts)
     assert "--cellpose_diameter" in argv, f"label-free sent no diameter: {argv}"
     assert argv[argv.index("--cellpose_diameter") + 1] == "25.0"
-    # Still the preset: model and thresholds stay general Cellpose's alone.
+    # Still the preset: the model stays general Cellpose's alone (label-free always runs cpsam).
     assert "--cellpose_model" not in argv
-    assert "--cellpose_flow_threshold" not in argv
 
 
 def test_label_free_left_at_zero_sends_no_diameter(tab):
@@ -88,11 +87,12 @@ def test_a_mistyped_label_free_diameter_blocks_the_run(tab):
     assert any("Cellpose diameter" in e for e in errs), errs
 
 
-def test_the_label_free_thresholds_are_still_not_checked(tab):
-    """Label-free does not read the flow / cell-probability thresholds, so a
-    leftover value there must not block it."""
+def test_a_mistyped_label_free_threshold_blocks_the_run(tab):
+    """Label-free now reads the flow / cell-probability thresholds, so a typo
+    there must block the run rather than fall back to Cellpose's default."""
     from analyze.domain.fields import _numeric_option_errors
 
     _pick(tab, "cellpose_labelfree")
     tab._cellpose_flow_thr_edit.setText("abc")
-    assert _numeric_option_errors(tab._collect_run_options()) == []
+    errs = _numeric_option_errors(tab._collect_run_options())
+    assert any("Cellpose flow threshold" in e for e in errs), errs

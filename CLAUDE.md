@@ -638,6 +638,88 @@ Project settings only apply once the harness trusts them; a remote session that
 still prompts is loading none of the file. The fix there is the same allowlist in
 the user-level `~/.claude/settings.json`, which needs no trust step.
 
+**What a PR subscription tells you, and what it never will.** After opening a PR,
+`subscribe_pr_activity` delivers GitHub events into the session that subscribed.
+Some kinds of trouble arrive as events and some never do, and the ones that never
+arrive are exactly the ones that leave a PR broken while the session believes
+it is watching it.
+
+- **Usually arrive within seconds — but not reliably:** a check run finishing
+  (red or green), a review or review comment, and the PR being merged or closed.
+  CI here runs as GitHub Actions jobs, which are check runs. On PR #1302 the
+  first run's three failed jobs were delivered within ten seconds of failing;
+  the second run's three failed jobs, 25 minutes later, were **never
+  delivered**. Between the two, the session's worker had been restarted
+  (`get_session` showed `worker_epoch` 3), and events that fire while a worker
+  is being replaced can be lost outright: `ReadNotifications` afterwards
+  reported nothing queued. So treat a CI event as a fast path that usually
+  works, never as the only way you find out how a run ended.
+- **Never arrive as their own event: merge conflicts.** GitHub sends no webhook
+  when a PR *becomes* unmergeable because something else landed on `main`. It
+  works out mergeability lazily, only when someone asks, and the harness's
+  mergeability notices are best-effort. On this repository that is the common
+  case, not an edge one: several sessions merge PRs into `main` on the same day,
+  and the version-bump bot pushes to `main` after every merge, so a PR that was
+  clean when it opened can conflict an hour later with nothing announcing it.
+- **Also silent:** CI reported through the commit-status API rather than as
+  check runs, pushes to the branch by someone else, a lost delivery, and any PR
+  this session is not subscribed to. A PR's events go to **one session at a
+  time**: if another session already holds the subscription, this one is told
+  so and receives nothing, and a session that never subscribed gets nothing at
+  all. Subscribe in the same turn the PR is opened, and read the subscription
+  result rather than assuming it worked.
+
+So the subscription is a fast path for CI and reviews, and nothing more:
+**knowing how a run ended, and whether the PR still merges, is your own job,
+and the check-in is how you do it.**
+
+- **Every push to an open PR arms a check-in for when its CI should be done**:
+  about 20 minutes, which covers the fast lane's ~8 minutes and the nanowell
+  lane's ~15 (§2's table). Not 50 minutes — a 50-minute safety net is what let
+  the lost failures above sit unreported until the user saw them. At that
+  check-in read the check runs yourself (`pull_request_read`,
+  `method: "get_check_runs"`) whether or not an event arrived; if a run is still
+  going, re-arm for ten minutes rather than waiting for an event.
+- **When a session resumes or is compacted**, first call `ReadNotifications`,
+  then re-call `subscribe_pr_activity` for each open PR — it is idempotent, and
+  it reports when another session holds the PR — then read each PR's check runs
+  and merge state directly. Anything that fired during the restart may be gone.
+  `.claude/hooks/resume-check.sh` prints these steps into the session's context
+  on every `resume` and `compact` (ARCHITECTURE.md §10.6), as `[resume-check]`
+  lines; when they appear, do them before anything else.
+- **Otherwise keep a `send_later` check-in armed for as long as the PR is
+  open** — about 50 minutes after the last activity once CI has finished, then
+  about every four hours.
+
+At each check-in, and at the start of handling *any* PR event, read the PR's
+check runs and merge state before anything else:
+
+1. `pull_request_read` (`method: "get"`) and read `mergeable_state`. `dirty` is a
+   conflict. `unknown` (or a `mergeable` of `null`) means GitHub has not worked it
+   out yet — the read itself starts that, so read again a minute later rather
+   than treating it as clean. `unstable` means mergeable but some check is not
+   green, which is a CI question, not a conflict. `clean` is clean.
+2. Confirm it locally, because the API's answer can lag a push to `main`:
+   `git fetch origin main` and then `git merge-tree --write-tree HEAD origin/main`,
+   which prints conflicted paths and exits non-zero on a conflict without
+   touching the working tree.
+3. On a conflict, merge `origin/main` into the branch and resolve it per the
+   paragraph on conflict markers above, run what the resolution touched, and
+   push it as one round.
+
+A check-in that finds nothing new re-arms silently. Stop re-arming only when the
+PR is merged or closed, or the user says stop — not because the last few
+check-ins were quiet: a conflict is exactly the thing that arrives after a long
+quiet stretch. When CI fails on a runner problem rather than on the code (an
+outage before any test ran — Ubuntu's own mirrors being unreachable is the one
+seen here, and `scripts/install_qt_system_libs.sh` now routes around that one), note it once on the PR and re-run the failed
+jobs once; GitHub refuses a re-run while any job in the same run is still in
+progress, so re-run when the last job has finished. Before calling it a runner
+problem, check another open PR's checks from the same window: if it failed the
+same step the same way, the outage is not yours. When it persists past the one
+re-run, stop re-running, which only bills more runs that fail the same way, and
+tell the user what is blocked and on what.
+
 **Pull requests do not bump the version; `main` does, after each merge.**
 `.github/workflows/version-bump.yml` runs on every push to `main`, bumps
 `version.py` by one increment (`scripts/bump_version.py`) and commits it back as

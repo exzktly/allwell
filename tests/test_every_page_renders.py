@@ -34,6 +34,7 @@ from pathlib import Path
 import pytest
 
 from tests._layout_checks import Finding
+from tests._page_tour import SHEET_SUFFIX
 from tests._page_datasets import DATASETS
 from tests._repo_scan import REPO_ROOT
 from tests._screens import SCREENS, is_phone
@@ -136,7 +137,8 @@ def test_the_known_findings_are_all_still_found(rendered):
 def test_the_pages_that_should_show_data_do(rendered):
     (kind, screen), result = rendered
     family = "phone" if is_phone(screen) else "desk"
-    empty = {page for page, (_f, showing_empty) in result.items() if showing_empty}
+    # A page's Controls sheet is measured over whatever its page shows, empty state included: EMPTY is about pages.
+    empty = {page for page, (_f, showing_empty) in result.items() if showing_empty and not page.endswith(SHEET_SUFFIX)}
     expected = set(EMPTY.get((kind, family), {}))
     assert empty == expected, (
         f"{kind} on {screen}: pages on an empty state that are not in EMPTY: {sorted(empty - expected)}; "

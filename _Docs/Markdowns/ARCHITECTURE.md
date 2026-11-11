@@ -22931,11 +22931,18 @@ you're in before you type the command.
   `pytest_collection_modifyitems` auto-marks these `slow`, precisely so the fast
   lane skips them.
 - **Every page, every screen, with data** (`tests/test_every_page_renders.py`, slow
-  lane, ~4 minutes). Qt's offscreen screen is an 800×800 square, which is no screen a
+  lane, ~6 minutes). Qt's offscreen screen is an 800×800 square, which is no screen a
   person has, so a full-app test run on it says nothing about how a page fits one.
   `tests/_screens.py::FakeScreen` makes every `QScreen` report a chosen
   rectangle — the desk 1640×980, a phone upright 432×936, a phone sideways 936×432 —
   and `place` puts the window there (maximizing would take the real 800×800).
+  **The patch is Python's only.** Qt's C++ still sees the 800×800 screen, so what Qt
+  places by itself — a `QMenu` it keeps on screen, a combo box's list — is placed
+  against that, and measured under `FakeScreen` every menu near the right edge
+  "runs off" a 432 px phone. To measure those, give Qt a real screen of the size:
+  `QT_QPA_PLATFORM="offscreen:configfile=<file>"` with
+  `{"screens": [{"name": "phone", "x": 0, "y": 0, "width": 432, "height": 936,
+  "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}]}`.
   The file runs three datasets (`tests/_page_datasets.py`: `mini`, `nanowell`,
   `images`) on those three screens, nine cases, each in a **subprocess of its own**
   (`python -m tests._page_render_case <dataset> <screen> <out.json>`, three at a
@@ -22946,14 +22953,25 @@ you're in before you type the command.
   generic "Sans Serif" — DejaVu Sans on the CI runner, where a page button and a
   scroll content wider than the ones a user sees were reported as defects.
   `tests/_page_tour.py` visits every Review section and page, the Datasets tools
-  and Analyze's views, and the phone's own chrome, after
+  and Analyze's views, and the phone's own chrome — and on a phone, every page
+  again with its ⚙ Controls sheet open over it (`"<page> ▸ Controls"`), since on a
+  phone the sheet holds most of a page's controls; when the tour opened it on one
+  Plotting page only, ten other pages' sheets scrolled sideways unseen — after
   `_page_datasets.prepare` has given each page the choices that make it draw data
   (a heat map's cells, the Statistics groups, Multivariate's features, a saved
   plot, an Image Table). `tests/_layout_checks.py` then measures each: text clipped
   by its widget, scroll content wider than its viewport with no bar, a widget off
   the window, figure text outside or over other figure text, neighbouring tick
-  labels, a scroll area left a sliver, a table wider than its viewport, and a page
-  menu whose label differs from the page or swallows an ampersand. The tests
+  labels, a scroll area left a sliver, a table wider than its viewport, a Controls
+  sheet whose content is wider than itself (`sideways_sheet`: a sheet does offer a
+  sideways bar, so the generic scroll check passed it), and a page
+  menu whose label differs from the page or swallows an ampersand. **What it cannot
+  see** is anything that appears only once a control is pressed — an in-page editor
+  (the Nanowells Subset editor), a run dashboard shown when a folder is chosen, a
+  popover, a menu, a dialog. Those were found by a crawl that pressed every control
+  of every page and sheet at phone size with the blocking calls stubbed; a new
+  panel of that kind gets a test of its own at phone size through its page's real
+  builder (`tests/test_nanowell_subset_fits_a_phone.py` is the shape). The tests
   assert that the tour reached every page the screen offers, that no page has a
   defect beyond `KNOWN` (each with a reason; an entry whose defect is gone fails),
   and that the pages left on an empty state are exactly `EMPTY` (each with the

@@ -147,10 +147,11 @@ the container**:
   touch the UI. A test that drives a control and asserts what reached a spec,
   argv, state or file is *behaviour* and must not join the roster, or CI stops
   running it.
-- **Every page, every screen, with data** (`tests/test_every_page_renders.py`, ~4
+- **Every page, every screen, with data** (`tests/test_every_page_renders.py`, ~6
   minutes, slow lane): three datasets × desk / phone upright / phone sideways, each
   case in a subprocess, on a patched screen of the real size (Qt's offscreen 800×800
-  is no screen a person has). Run it with `scripts/test.sh
+  is no screen a person has), every page's ⚙ Controls sheet opened on a phone. It
+  cannot see what appears only once a control is pressed — §7.10. Run it with `scripts/test.sh
   tests/test_every_page_renders.py -m ""` whenever a page's layout or a plot's
   fit changes; `ALLWELL_PAGE_SHOTS=<dir>` saves a PNG per page. ARCHITECTURE.md
   §10.4 has the mechanism.
@@ -1442,3 +1443,63 @@ the answer is "none of the ones I ran", that is the work, not a formality.
 - Review can't see channels: check `pipeline_info.json` (`fluor_tokens`, `schema`,
   `available_timepoints`) — the viewer reads it in `domain/viewer_state.read_pipeline_info`.
 - More: ARCHITECTURE.md §12 (debugging recipes) and §17 (build/environment).
+
+## 7.10 A page that fits until you press something
+
+A report that a phone layout is "completely broken" was one panel; the sweep it
+prompted found six more defects of the same kind, in six features, and every one had
+passed the every-page render test. Not because the test was wrong — because it
+measures the page as it opens, and every one of them appeared later: an editor
+behind an **Edit…** toggle, a run dashboard shown once a folder is chosen, a caption
+that grows a line when a well is excluded, a Controls sheet the tour opened on one
+page of thirty.
+
+1. **Ask what the render test never shows.** A panel hidden until used, the
+   Controls sheet's form, a popover, a menu, a dialog: none is on screen when a page
+   is measured. A new one of these gets a test of its own at phone size through its
+   page's real builder (`tests/test_nanowell_subset_fits_a_phone.py`), and a new
+   kind of surface gets a stop in `tests/_page_tour.py` — which is how every page's
+   Controls sheet is measured now (`"<page> ▸ Controls"`).
+2. **A fit applied once is not a fit.** `phone_fit` ran when a Datasets page was
+   shown; the dashboard that appeared inside it afterwards changed neither the page's
+   visibility nor its width, so nothing fitted it. Anything that adapts a layout on
+   show must also adapt to content that changes after the show — watch the content's
+   layout request, not only the container's show and resize.
+3. **Fixed widths do not survive phone layout.** Touch scaling multiplies a fixed
+   width (90 → 153 px) and a fixed width cannot give way, so two fields beside a
+   label held Cell Gating 26 px wider than the phone — failing on `main`
+   in every phone case. Prefer a ceiling (`setMaximumWidth`) for a field's width at
+   the desk; it measures the same there and yields on a phone.
+4. **"Wider than its viewport, with a scroll bar" is still a defect on a phone.** The
+   generic scroll check only flags overflow with no bar, and a sheet of controls
+   that must be dragged sideways passed it on ten pages. Say what "broken" means for
+   the surface — a form read down a phone may never scroll sideways — and check that.
+5. **The fake screen is Python's only.** `FakeScreen` patches `QScreen` for Python;
+   Qt's C++ still places menus and combo lists on the offscreen 800 × 800 screen, so
+   every menu near the right edge "ran off" a 432 px phone — a whole class of
+   false findings, caught only because the numbers ended at exactly 800. Give Qt a
+   real screen (`QT_QPA_PLATFORM="offscreen:configfile=…"`, ARCHITECTURE.md §10.4)
+   before measuring anything Qt positions itself.
+6. **A crawl that presses every control is cheap and finds what review does not.**
+   Stub what blocks (`QDialog.exec` to `show()`, the static `QMessageBox` /
+   `QFileDialog` / `QInputDialog` calls, `widgets.menu_exec.exec_menu` to
+   `popup`), press every button and toggle, open every menu and trigger its actions,
+   open every combo, and measure each window and in-page change against the screen.
+   Two traps from running one: `findChildren(QWidget)` on a window wraps each
+   combo's popup container, a top-level the test reaper then deletes a second time
+   (collect by type instead); and a crawl's own bug — skipping every checkable
+   button, which is exactly how panels open — reads as "nothing found".
+7. **Never wrap a `QLayoutItem` you do not own.** `itemAt(i)` hands Python a wrapper
+   for an object that is no QObject, so the binding is never told Qt freed it; Qt
+   reuses the address for the next item and the stale wrapper comes back as
+   "Internal C++ object already deleted", far from the code that made it. Walk
+   nested layouts with `findChildren(QLayout)` and ask membership with `indexOf`
+   (`tests/test_phone_fit.py` holds it for `ui/phone_fit`). It is the allocator's
+   choice whether an address is reused, so no test reproduces it on demand — which is
+   why the rule is a guard.
+8. **A pre-existing failure is found by running the base, not by reading it.** The
+   Cell Gating failure looked like this branch's until the same test ran in a
+   worktree of `origin/main` and failed identically; and a desk-only label that failed
+   once in three runs here, in a form the branch never touched, is reported as
+   intermittent rather than fixed or blamed.
+

@@ -51,6 +51,15 @@ _FIELDS = (
      "own 30 px. 30 × the pixel size (19.5 µm at 0.65 µm/px, the starting value) means no resize, the fastest; the "
      "cells' real diameter has them enlarged to that scale, which is slower. Resize: None skips the resize at any "
      "pixel size. Blank: 15 µm."),
+    ("nanowell_flow_threshold", "Flow threshold", "_nanowell_flow_thr_edit",
+     "How far a cell's outline may disagree with the flows Cellpose predicted before the cell count throws it "
+     "away. Turn it up (0.8 to 1.0) to keep irregular cells that are found and then rejected; 0 keeps every mask. "
+     "Blank: Cellpose's 0.4."),
+    ("nanowell_cellprob_threshold", "Cell-prob threshold", "_nanowell_cellprob_thr_edit",
+     "How confident Cellpose must be that a pixel belongs to a cell, from -6 to 6. Turn it down (-1, then -2) when "
+     "the count misses real cells outright: faint or low-contrast ones, such as large dendritic cells in brightfield "
+     "beside well-counted T cells. Too low and background comes back as cells, so compare counts on one well. "
+     "Blank: Cellpose's 0."),
     ("nanowell_margin_um", "Margin (µm)", "_nanowell_margin_edit",
      "How far inside a tile a nanowell must lie for that tile to own it, and so for its cells to be counted "
      "from that tile. Blank: a tenth of the nanowell diameter."),
@@ -72,7 +81,7 @@ _FIELDS = (
 
 #: The fields of :data:`_FIELDS` that set the cell count, built with the count's other settings in the Segmentation
 #: section (:meth:`AnalyzeNanowellSectionMixin._build_nanowell_count_rows`) rather than here.
-_COUNT_FIELDS = ("nanowell_cell_diameter_um",)
+_COUNT_FIELDS = ("nanowell_cell_diameter_um", "nanowell_flow_threshold", "nanowell_cellprob_threshold")
 
 
 #: A custom format's geometry (tracker A7), shown only while the format is Custom.
@@ -106,7 +115,7 @@ def _scan_label(value: str) -> str:
 
 def settings_from_opts(opts: dict):
     """The pipeline's ``NanowellSettings`` for the form's run options (blank numeric fields take the defaults)."""
-    from pipeline.nanowell_run import NanowellSettings
+    from pipeline.nanowell_run import COUNT_CELLPROB_THRESHOLD, COUNT_FLOW_THRESHOLD, NanowellSettings
 
     def number(key: str, default: float | None) -> float | None:
         text = str(opts.get(key) or "").strip()
@@ -125,7 +134,9 @@ def settings_from_opts(opts: dict):
         str(opts.get("nanowell_segment_scope") or SEGMENT_SCOPE_CHOICES[0][0]),
         # No control on the form: a run takes the command line's default, and Test detection the same.
         str(opts.get("nanowell_segment_scale") or "levelled"),
-        str(opts.get("nanowell_resize") or RESIZE_CHOICES[0][0]))
+        str(opts.get("nanowell_resize") or RESIZE_CHOICES[0][0]),
+        flow_threshold=number("nanowell_flow_threshold", COUNT_FLOW_THRESHOLD),
+        cellprob_threshold=number("nanowell_cellprob_threshold", COUNT_CELLPROB_THRESHOLD))
 
 
 class AnalyzeNanowellSectionMixin:

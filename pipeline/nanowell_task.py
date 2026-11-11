@@ -95,7 +95,9 @@ def settings_from_kwargs(kwargs: dict) -> nr.NanowellSettings:
                                spec.get("segment_scope") or nr.LEGACY_SEGMENT_SCOPE,
                                spec.get("segment_scale") or nr.LEGACY_SEGMENT_SCALE,
                                spec.get("resize") or nr.LEGACY_RESIZE, spec.get("empty_well") or None,
-                               fluor_background=spec.get("fluor_background") or nr.FLUOR_BACKGROUND_FLOOR)
+                               fluor_background=spec.get("fluor_background") or nr.FLUOR_BACKGROUND_FLOOR,
+                               flow_threshold=float(spec.get("flow_threshold", nr.COUNT_FLOW_THRESHOLD)),
+                               cellprob_threshold=float(spec.get("cellprob_threshold", nr.COUNT_CELLPROB_THRESHOLD)))
 
 
 def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:

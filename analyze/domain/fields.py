@@ -116,9 +116,11 @@ _CELLPOSE_FIELD_METHODS = {
     "cellpose_cellprob_threshold": ("cellpose", "cellpose_labelfree"),
 }
 
-#: The Cellpose thresholds a nanowell run leaves at Cellpose's defaults: its
-#: count is its own Cellpose call (``pipeline.nanowell_run``), so a leftover
-#: value in the hidden rows must not block it.
+#: The Segmentation section's Cellpose thresholds, which a nanowell run does
+#: not read: its count is its own Cellpose call (``pipeline.nanowell_run``)
+#: with thresholds of its own (``nanowell_flow_threshold`` /
+#: ``nanowell_cellprob_threshold``, checked by ``analyze.domain.nanowell_fields``),
+#: so a leftover value in these hidden rows must not block it.
 _NANOWELL_UNREAD = frozenset({"cellpose_flow_threshold", "cellpose_cellprob_threshold"})
 
 #: The two StarDist detection thresholds. Blank or ``auto`` means "use the

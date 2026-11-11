@@ -130,6 +130,8 @@ KEYED_ON: dict[str, str] = {
                                    "tile), so what contrast every cell had",
     "nanowell_resize":             "whether Cellpose resizes that input to the cell diameter first, so the scale "
                                    "every cell was seen at",
+    "nanowell_flow_threshold":     "Cellpose's flow threshold for the count, which drops masks, so every count",
+    "nanowell_cellprob_threshold": "Cellpose's cell-probability floor for the count, so which cells are found",
     "nanowell_empty_well":         "the empty well every confluence is calibrated against, so every "
                                    "confluence",
     "nanowell_fluor_background":   "what every fluorescence number is measured above (the well's own "

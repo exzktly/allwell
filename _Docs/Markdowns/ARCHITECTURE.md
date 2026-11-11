@@ -23278,15 +23278,18 @@ help while `qtbot` still holds the app).
    the widget reaper (rule 7) deleting the Analyze pane while the pre-run
    coverage scan's daemon thread (`aw-preflight-scan`) was emitting its answer
    to it; the faulthandler stack in the boot log showed both threads. So the
-   reaper first joins every thread the test started, for up to
-   `_THREAD_JOIN_SECONDS` (2 s) each, skipping Qt's own threads, which
+   reaper first joins every thread the test started, all of them against one
+   deadline `_THREAD_JOIN_SECONDS` (2 s) away — they run side by side, so each
+   still has the whole window, and an idle pool left behind
+   (`pipeline.nanowell_parallel`'s eight threads) costs the bound once rather
+   than eight times — skipping Qt's own threads, which
    `threading` sees as unjoinable dummies, and skipping any `threading.Timer`
    still counting down (`_is_a_pending_timer`) — the app's one Timer is
    `services.subprocess_kill`'s 5 s SIGKILL escalation, which fires on its own
    clock whether or not anything waits, so joining it only cost eight tests
    the full bound each. A long-lived worker such as the persistence writer or
    the Image Table's hover-MFI runner never ends, and the six tests that leave
-   one still pay the full wait — 12 s of worker time.
+   one still pay the 2 s once each.
 
 **The slow lane runs on demand, not on PRs and not on a schedule** —
 `.github/workflows/slow-lane.yml`, six sharded runners, dispatched by hand from

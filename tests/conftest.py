@@ -31,6 +31,9 @@ os.environ.setdefault("ALLWELL_MEMORY_FLOOR_MB", "0")
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 import threading
+# Bound at import: the reaper runs before a test's monkeypatches are undone, and a test that fakes
+# ``time.monotonic`` must not stretch or skip its wait.
+from time import monotonic as _monotonic
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -982,11 +985,17 @@ def _reap_widgets_the_test_created(request):
     # clock whether or not anything waits for it: joining it only made eight
     # tests in the lane pay the full bound each (16 s of worker time), and it
     # fired afterwards all the same.
+    #
+    # One deadline for all of them, not the bound per thread: they run side by
+    # side, so each still has the whole window to finish in, and a test that
+    # leaves an idle pool behind (`pipeline.nanowell_parallel`'s eight threads)
+    # pays the bound once rather than eight times over (16 s for one test).
+    deadline = _monotonic() + _THREAD_JOIN_SECONDS
     for thread in threading.enumerate():
         if (thread not in threads_before and thread is not threading.current_thread()
                 and not isinstance(thread, threading._DummyThread)
                 and not _is_a_pending_timer(thread)):
-            thread.join(timeout=_THREAD_JOIN_SECONDS)
+            thread.join(timeout=max(0.0, deadline - _monotonic()))
 
     # Re-read the instance: a test may have been the one to create it.
     app = QApplication.instance()

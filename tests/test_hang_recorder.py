@@ -54,8 +54,15 @@ def _run(tmp_path, *, stall: float, limit: str) -> str:
     return log.read_text(encoding="utf-8", errors="replace")
 
 
-def test_a_stalled_window_leaves_the_stuck_line_in_the_boot_log(tmp_path):
-    text = _run(tmp_path, stall=2.5, limit="1")
+@pytest.fixture(scope="module")
+def stalled_log(tmp_path_factory) -> str:
+    """The boot log of one window that stalled 2.5 s with a 1 s limit. Two tests read the same run: each run is a
+    fresh interpreter that has to sit through the stall, so a second identical one would only repeat its 4.6 s."""
+    return _run(tmp_path_factory.mktemp("stalled"), stall=2.5, limit="1")
+
+
+def test_a_stalled_window_leaves_the_stuck_line_in_the_boot_log(stalled_log):
+    text = stalled_log
     assert "Timeout (0:00:01)!" in text, text
     assert "_stuck_reading_a_well" in text, text      # the stack names the function it was stuck in
     assert "the window did not respond for 3 s" in text or "the window did not respond for 2 s" in text, text
@@ -71,11 +78,11 @@ def test_switched_off_it_writes_nothing(tmp_path):
     assert "Timeout" not in text, text
 
 
-def test_a_stall_it_recovered_from_is_not_kept_as_a_crash(tmp_path):
+def test_a_stall_it_recovered_from_is_not_kept_as_a_crash(stalled_log, tmp_path):
     """The dump's thread headers must not read as a crash marker, or the next launch keeps and reports the log."""
     from startup import boot_diag
 
-    text = _run(tmp_path, stall=2.5, limit="1")
+    text = stalled_log
     assert "Timeout" in text
     log = tmp_path / "copy.log"
     log.write_text(text)

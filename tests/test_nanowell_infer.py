@@ -380,10 +380,18 @@ def _paint_well(rendered, address):
     basis = np.column_stack((rendered.array.a1, rendered.array.a2))
     x, y = basis @ np.asarray(address, dtype=float) + np.asarray(rendered.array.origin)
     px = rendered.plan.pixel_size_um
+    reach = DIAMETER / 2
     for name, image in rendered.images.items():
         left, top = rendered.true_left_top_um[name]
-        yy, xx = np.mgrid[0:image.shape[0], 0:image.shape[1]]
-        image[np.hypot((xx + 0.5) * px + left - x, (yy + 0.5) * px + top - y) <= DIAMETER / 2] = 0.85
+        # Only the disk's bounding box (a pixel of margin each side) is tested, with the same per-pixel arithmetic.
+        x0 = max(int(np.floor((x - reach - left) / px - 0.5)) - 1, 0)
+        x1 = min(int(np.ceil((x + reach - left) / px - 0.5)) + 2, image.shape[1])
+        y0 = max(int(np.floor((y - reach - top) / px - 0.5)) - 1, 0)
+        y1 = min(int(np.ceil((y + reach - top) / px - 0.5)) + 2, image.shape[0])
+        if x0 >= x1 or y0 >= y1:
+            continue
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        image[y0:y1, x0:x1][np.hypot((xx + 0.5) * px + left - x, (yy + 0.5) * px + top - y) <= reach] = 0.85
 
 
 def test_an_incremental_timepoint_is_moved_onto_the_kept_roster():

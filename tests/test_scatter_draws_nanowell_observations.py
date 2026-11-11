@@ -154,13 +154,21 @@ def test_every_scatter_axis_picker_keeps_one_width_whatever_is_chosen(scatter_ct
     redraw_scatter_orchestrate(scatter_ctx)                 # fills the nanowell pickers from the dataset's metrics
     from review.features.scatter import _observations
     _observations.redraw(scatter_ctx, "aggregate")          # … and the Wells page's, on its own redraw
+    from PySide6.QtCore import QSignalBlocker
+
     for name in _AXIS_PICKERS:
         combo = scatter_ctx.widgets.get(name)
         assert combo.count() > 1, name
         widths = set()
-        for i in range(combo.count()):
-            combo.setCurrentIndex(i)
-            widths.add(combo.sizeHint().width())
+        # Signals blocked: the width is the box's own (``setFitsWidest`` / ``AdjustToContents``), and each choice
+        # otherwise redraws the scatter — 20 s for this sweep, against well under one with nothing redrawn.
+        blocker = QSignalBlocker(combo)
+        try:
+            for i in range(combo.count()):
+                combo.setCurrentIndex(i)
+                widths.add(combo.sizeHint().width())
+        finally:
+            blocker.unblock()
         assert len(widths) == 1, (name, sorted(widths))
 
 

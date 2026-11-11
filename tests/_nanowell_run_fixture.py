@@ -57,8 +57,18 @@ def threshold_segmenter(level=1.2, smooth=1.5, min_px=12):
 def paint_cell(rendered, site_um, *, dx_um=0.0, dy_um=0.0, radius_px=4.0, amount=0.35):
     """Add a bright blob to every tile that sees ``site_um + (dx, dy)`` (the same cell in an overlap)."""
     cx, cy = site_um[0] + dx_um, site_um[1] + dy_um
+    reach = radius_px * PX
     for name, image in rendered.images.items():
         left, top = rendered.true_left_top_um[name]
-        yy, xx = np.mgrid[0:image.shape[0], 0:image.shape[1]]
-        inside = np.hypot((xx + 0.5) * PX + left - cx, (yy + 0.5) * PX + top - cy) <= radius_px * PX
-        image[inside] += amount
+        # Only the pixels within the blob's bounding box (a pixel of margin each side) can be inside it. Testing the
+        # whole tile cost 27 ms a cell, and a rendered plate paints hundreds, which made painting most of the
+        # nanowell end-to-end lane's run time; the pixels tested and the arithmetic per pixel are unchanged.
+        x0 = max(int(np.floor((cx - reach - left) / PX - 0.5)) - 1, 0)
+        x1 = min(int(np.ceil((cx + reach - left) / PX - 0.5)) + 2, image.shape[1])
+        y0 = max(int(np.floor((cy - reach - top) / PX - 0.5)) - 1, 0)
+        y1 = min(int(np.ceil((cy + reach - top) / PX - 0.5)) + 2, image.shape[0])
+        if x0 >= x1 or y0 >= y1:
+            continue
+        yy, xx = np.ogrid[y0:y1, x0:x1]
+        inside = np.hypot((xx + 0.5) * PX + left - cx, (yy + 0.5) * PX + top - cy) <= reach
+        image[y0:y1, x0:x1][inside] += amount

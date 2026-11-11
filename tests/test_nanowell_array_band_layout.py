@@ -90,24 +90,27 @@ _ROWS_BY_VIEW = {
 }
 
 
-@pytest.mark.parametrize("width", [1600, 1500, 1200])
 @pytest.mark.parametrize("view", sorted(_ROWS_BY_VIEW))
-def test_every_view_keeps_the_same_three_rows(qc_page, themed, qtbot, width, view):
+def test_every_view_keeps_the_same_three_rows(qc_page, themed, qtbot, view):
     """Central selections · filters and normalisation · viewing, in that order on every view, at a wide and a narrower
-    window: a row that does not fit wraps within itself and never takes another row's controls onto it."""
+    window: a row that does not fit wraps within itself and never takes another row's controls onto it.
+
+    The three widths are one window resized, as a person resizes it, rather than a page built per width: the page
+    is ~2 s to build and a band whose rows depended on the widths it had been at before would be a defect too."""
     from review.features.nanowell import controller as nwc
 
     ctx = qc_page
     nwc.set_view(ctx, view)
-    _settle(qtbot, ctx, width)
-    rows = [{_row_of(ctx, name) for name in names} for names in _ROWS_BY_VIEW[view]]
-    # In order, and no two rows share a line: each row's last line is above the next row's first.
-    assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), (view, rows)
-    # Wide enough for one line each from 1600 px. At 1500 the filter row ended 2 px short of the edge, and the
-    # moving average's Trailing / Centred choice (agreed beside the window it shapes) wraps Distribution's
-    # *Responding above* onto a second line of that row there — within the row, which the check above holds.
-    if width == 1600:
-        assert rows == [{k} for k in range(len(rows))], (view, rows)
+    for width in (1600, 1500, 1200):
+        _settle(qtbot, ctx, width)
+        rows = [{_row_of(ctx, name) for name in names} for names in _ROWS_BY_VIEW[view]]
+        # In order, and no two rows share a line: each row's last line is above the next row's first.
+        assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), (view, width, rows)
+        # Wide enough for one line each from 1600 px. At 1500 the filter row ended 2 px short of the edge, and the
+        # moving average's Trailing / Centred choice (agreed beside the window it shapes) wraps Distribution's
+        # *Responding above* onto a second line of that row there — within the row, which the check above holds.
+        if width == 1600:
+            assert rows == [{k} for k in range(len(rows))], (view, width, rows)
 
 
 def test_the_excluded_chip_follows_exclude(qc_page, themed, qtbot):

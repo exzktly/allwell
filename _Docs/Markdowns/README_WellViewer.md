@@ -1148,6 +1148,18 @@ Scrolling the mouse wheel over a dropdown or number box scrolls the page, not th
   cells are far from 30 px and check the masks: segmentation is most reliable
   when the diameter matches the cells, so a smaller value can be worth its time.
   A value that is not a number stops the run before it starts.
+- **Flow threshold** and **Cell-prob threshold** — Cellpose's two detection
+  thresholds, shown for both Cellpose methods, general and label-free (not in
+  nanowell mode, whose count keeps Cellpose's defaults).
+  - **Cell-prob threshold** (default `0`) is how confident Cellpose must be
+    that a pixel belongs to a cell. **Turn it down** (`-1`, then `-2`) when the
+    run misses real cells outright — faint or low-contrast ones, such as large
+    dendritic cells in brightfield beside well-detected T cells. Too low and
+    background starts to come back as objects, so compare counts on one well.
+  - **Flow threshold** (default `0.4`) is how far a cell's outline may disagree
+    with the flows Cellpose predicted before it is thrown away. **Turn it up**
+    (`0.8`–`1.0`) to keep irregular cells that are found and then rejected.
+  A value that is not a number stops the run before it starts.
 - **Nucleus probability** and **Overlap (NMS)** — the two StarDist detection
   thresholds, shown for both StarDist methods. A field left **blank** means the
   run uses the threshold built into the pretrained model.

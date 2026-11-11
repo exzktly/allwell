@@ -14874,8 +14874,12 @@ noted:
   detected. `n_tiles` is logged per FOV. The tile-size math is pure integer logic
   covered by `tests/test_stardist_tiling.py`.
 - `cellpose` — **general** Cellpose, not phase-locked. Exposes model
-  (cpsam, the default, or Cellpose 3's cyto3/cyto2/cyto/nuclei), diameter (the row shared with the label-free
-  preset), `flow_threshold`, `cellprob_threshold`,
+  (cpsam, the default, or Cellpose 3's cyto3/cyto2/cyto/nuclei), and three rows shared with the label-free
+  preset — diameter, `flow_threshold` and `cellprob_threshold`
+  (`seg_params._build_cellpose_diameter_row` / `_build_cellpose_threshold_rows`, shown by
+  `_sync_cellpose_diameter_row` for both Cellpose methods and hidden in nanowell mode, whose count is its own
+  Cellpose call and reads none of them; `build_pipeline_args` sends the thresholds for both methods outside
+  nanowell mode, and `analyze.domain.fields` validates them on the same terms) —
   and an optional second **nucleus channel** (`channels=[seg, nuc]` on Cellpose 3; on Cellpose 4 the two are
   stacked on the last axis with `channel_axis=-1`). Models are
   cached per name in `_CELLPOSE_MODELS`; `_worker_init` skips the StarDist/TF load.

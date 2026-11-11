@@ -288,10 +288,14 @@ def build_pipeline_args(
             diameter = 0.0
         if diameter > 0:
             args += ["--cellpose_diameter", str(diameter)]
-    # General Cellpose also exposes model + thresholds + optional nucleus
-    # channel (works on a fluorescent or brightfield channel; no phase remap).
-    if segmentation_method == "cellpose":
-        args += ["--cellpose_model", str(opts.get("cellpose_model", "cpsam") or "cpsam")]
+    # The flow and cell-probability thresholds belong to both Cellpose methods
+    # as well: the label-free preset runs the same model.eval call, and lowering
+    # the cell-probability cut is how a brightfield run recovers faint cells.
+    # Not in nanowell mode, whose count is its own Cellpose call that leaves
+    # both at Cellpose's defaults — sending a value it never reads would only
+    # change the run's settings key.
+    nanowell = bool(str(opts.get("nanowell_format") or "").strip())
+    if segmentation_method in ("cellpose", "cellpose_labelfree") and not nanowell:
         for flag, key, default in (
             ("--cellpose_flow_threshold", "cellpose_flow_threshold", 0.4),
             ("--cellpose_cellprob_threshold", "cellpose_cellprob_threshold", 0.0),
@@ -301,6 +305,11 @@ def build_pipeline_args(
             except (TypeError, ValueError):
                 val = default
             args += [flag, str(val)]
+    # General Cellpose also exposes the model + an optional nucleus channel
+    # (works on a fluorescent or brightfield channel; no phase remap). The
+    # label-free preset always runs cpsam, so it is sent no model.
+    if segmentation_method == "cellpose":
+        args += ["--cellpose_model", str(opts.get("cellpose_model", "cpsam") or "cpsam")]
         nuc = (opts.get("cellpose_nuclei_channel") or "").strip()
         if nuc:
             args += ["--cellpose_nuclei_channel", nuc]

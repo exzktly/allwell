@@ -80,3 +80,12 @@ def test_the_script_uses_its_own_mirror_list_with_ubuntu_last_and_verifies_signa
     # A mirror is transport only: indexes are checked against Ubuntu's archive key.
     assert "signed-by=$KEYRING" in text and "ubuntu-archive-keyring.gpg" in text
     assert "mirror+file:" in text
+
+
+def test_the_cleanup_removes_what_sudo_apt_wrote_and_never_fails_the_install():
+    """On a CI runner the script runs as an unprivileged user and calls apt through sudo, so the lists apt writes
+    into the script's temp dir are root's. A plain ``rm -rf`` there failed the first CI run that used the script,
+    with every library already installed. The cleanup must use the same sudo and keep the install's exit status."""
+    trap = next(line for line in SCRIPT.read_text().splitlines() if line.startswith("trap "))
+    assert '$SUDO rm -rf "$WORK"' in trap, trap
+    assert "exit $status" in trap, trap

@@ -53,7 +53,10 @@ MIRRORS="${ALLWELL_APT_MIRRORS:-https://mirrors.edge.kernel.org/ubuntu https://m
 
 WORK="$(mktemp -d)"
 chmod 755 "$WORK"   # apt downloads as the unprivileged _apt user, which must reach the lists dir
-trap 'rm -rf "$WORK"' EXIT
+# apt runs under sudo on a CI runner, so the lists it writes here are root's:
+# the cleanup needs the same sudo, and a cleanup that cannot finish must never
+# turn a successful install into a failed step (exit status is kept as it was).
+trap 'status=$?; $SUDO rm -rf "$WORK" || echo "::warning::could not remove $WORK" >&2; exit $status' EXIT
 mkdir -p "$WORK/lists/partial" "$WORK/parts"
 tr ' ' '\n' <<<"$MIRRORS" | sed '/^$/d' > "$WORK/mirrors.txt"
 # Every pocket the packages can come from: the release, its updates and its

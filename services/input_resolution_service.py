@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import NamedTuple
 from util.dir_scan import files_in
 from util.well_token import canonical_well_label, is_well_archive
-from pipeline.input_layout import NonZipInput, ZIP_LOOSE_FOLDER_REMEDY, non_zip_input
+from pipeline.input_layout import PLANNER_MAX_FOLDERS, NonZipInput, ZIP_LOOSE_FOLDER_REMEDY, non_zip_input
 
 
 def build_bootstrap_cmd(bootstrap: Path, alias: str) -> list[str]:
@@ -76,6 +76,10 @@ GROUPED = "grouped"
 NEEDS_ZIPPING = "needs_zipping"
 #: An ``in/`` that holds something, none of which parses as a well.
 UNRECOGNISED = "unrecognised"
+#: The folder holds more folders than one plate's input could
+#: (``pipeline.input_layout.PLANNER_MAX_FOLDERS``), so the planner stopped
+#: walking it: a home folder or a whole volume, chosen or typed by mistake.
+TOO_LARGE = "too_large"
 #: An ``in/`` that exists and is empty.
 EMPTY_IN = "empty_in"
 #: The folder is there and is a directory, but listing it failed.
@@ -189,6 +193,15 @@ def _unreadable_plan(folder: Path, exc: OSError) -> InputPlan:
     )
 
 
+def _too_large_plan(where: str) -> InputPlan:
+    """The refusal for a folder whose walk ran past the planner's bound."""
+    return InputPlan(
+        TOO_LARGE, None, None, 0,
+        f"⚠ {where} holds more than {PLANNER_MAX_FOLDERS:,} folders — more than one plate's "
+        f"input. Choose the plate's own folder: the one holding in/, or the per-well zips.",
+    )
+
+
 def _needs_zipping_plan(found: NonZipInput, where: str) -> InputPlan:
     """The refusal for loose images / well folders, as one readout line."""
     parts = []
@@ -218,7 +231,9 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool) -> Input
         return _unreadable_plan(root, exc)
     well_zips = [(canonical_well_label(p.stem), p) for p in entries
                  if is_well_archive(p) and _is_well_named(p)]
-    found = non_zip_input(root, well_zips)
+    found = non_zip_input(root, well_zips, max_folders=PLANNER_MAX_FOLDERS)
+    if found.too_large:
+        return _too_large_plan(f"{root.name}/")
     if found.refused:
         return _needs_zipping_plan(found, f"{root.name}/")
     if well_zips:
@@ -266,9 +281,11 @@ def plan_input_layout(raw: Path) -> InputPlan:
         has_in = in_sub.is_dir()
         # Well folders at the selected root count only when there is no
         # ``in/``: beside one, the pipeline never looked at the root's folders.
-        found = non_zip_input(raw, [])
+        found = non_zip_input(raw, [], max_folders=PLANNER_MAX_FOLDERS)
     except OSError as exc:
         return _unreadable_plan(raw, exc)
+    if found.too_large:
+        return _too_large_plan(f"{raw.name}/" if raw.name else str(raw))
     # Likewise any other folder of images at the root: beside ``in/`` the root also holds ``out/``.
     if found.loose or ((found.stranded or found.nested) and not has_in):
         return _needs_zipping_plan(found if not has_in else found._replace(stranded=[], nested=[]),

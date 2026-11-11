@@ -8582,6 +8582,23 @@ and the folders below it down to `NESTED_DEPTH`, for the images inside them,
 and none of those listings stats an entry.
 The images inside the archives are never enumerated at all.
 
+**The planner's walk is bounded by a folder count as well as by depth.** The
+planner runs on the GUI thread every time the input field is set — Browse,
+restoring a queued job, opening a `pipeline_info.json` — and depth alone does
+not bound a walk below a mistaken root: four levels below every subfolder of
+`/` is 566,000 folders, about fifteen seconds of a frozen window. So both of the
+planner's `non_zip_input` calls pass `max_folders=PLANNER_MAX_FOLDERS` (10,000;
+a 384-well plate exported as a folder per well with ten timepoint folders in
+each is about 4,200). One `_FolderBudget` is shared by the whole walk, each
+folder listed spends one, and a walk that runs out stops and answers
+`too_large`, which the planner reports as its own action, `TOO_LARGE`, naming
+the folder and asking for the plate's own. A partial walk is refused rather
+than reported, because its lists would describe only the part it reached. The
+pipeline's `refuse_non_zip_input` and remote staging pass no budget and walk
+everything, since they decide what a run reads.
+`tests/test_input_planner_walk_is_bounded.py` holds both halves, and drives the
+refusal through the real `AnalyzeTab`.
+
 `dir_has_entries` keeps its own listing. It asks whether the folder holds an
 entry of *any* kind, which includes the ones a file/folder split drops because
 they are neither — a dangling symlink, a socket — and it tells an `in/` that

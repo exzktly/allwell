@@ -49,7 +49,7 @@ import re
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import (
-    QAbstractButton, QApplication, QBoxLayout, QComboBox, QLabel, QScrollArea, QWidget,
+    QAbstractButton, QApplication, QBoxLayout, QComboBox, QLabel, QLayout, QScrollArea, QWidget,
 )
 
 #: A widget's original form, for :func:`unfit`: the box layouts stacked, and
@@ -136,19 +136,14 @@ def _show_pending(content: QWidget) -> None:
 
 
 def _in_a_layout(w: QWidget) -> bool:
-    """Is *w* an item of its parent's layout, at any depth of nesting?"""
+    """Is *w* an item of its parent's layout, at any depth of nesting? Asked of
+    each layout by ``indexOf``, never by wrapping its items (:func:`_inner_layouts`
+    says why)."""
     parent = w.parentWidget()
     lay = parent.layout() if parent is not None else None
-    pending = [lay] if lay is not None else []
-    while pending:
-        lay = pending.pop()
-        for i in range(lay.count()):
-            item = lay.itemAt(i)
-            if item.widget() is w:
-                return True
-            if item.layout() is not None:
-                pending.append(item.layout())
-    return False
+    if lay is None:
+        return False
+    return any(inner.indexOf(w) >= 0 for inner in (lay, *_inner_layouts(lay)))
 
 
 def _activate(content: QWidget) -> None:
@@ -348,14 +343,18 @@ def fit_content(content: QWidget, width: int, *, max_passes: int = 40) -> bool:
 
 
 def _inner_layouts(lay) -> list:
-    """The layouts nested inside *lay* as items — not a child widget's own."""
-    out = []
-    for i in range(lay.count()):
-        inner = lay.itemAt(i).layout()
-        if inner is not None:
-            out.append(inner)
-            out.extend(_inner_layouts(inner))
-    return out
+    """The layouts nested inside *lay* as items — not a child widget's own.
+
+    Found as *lay*'s child objects (a nested layout is a child of the layout
+    it sits in; a child widget's own layout is that widget's), never through
+    ``itemAt(i).layout()``: that wraps each ``QLayoutItem`` for Python, and a
+    layout item is no QObject, so the binding never learns when Qt frees it.
+    When the widgets were then moved into another layout — the Controls sheet
+    handing a page's controls back — Qt allocated the new items at the freed
+    addresses, the binding returned the stale wrappers for them, and the
+    page's control band raised "Internal C++ object already deleted" the next
+    time the sheet opened."""
+    return list(lay.findChildren(QLayout))
 
 
 def _stack_inner_rows(content: QWidget, width: int) -> bool:

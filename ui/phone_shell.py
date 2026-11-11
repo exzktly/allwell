@@ -710,9 +710,15 @@ class _FitOnShow(QObject):
     width — a Datasets tool page is shown by the pane's own rail, which phone
     layout does not hear about, and turning the phone changes the width."""
 
-    def __init__(self, area: QWidget, on_show=None) -> None:
+    def __init__(self, area: QWidget, on_show=None, target=None) -> None:
         super().__init__(area)
         self._area = area
+        #: What is fitted: the area's whole content, or — for the Controls
+        #: sheet — the widget *target()* returns, the lent band's form. The band
+        #: around it is never fitted: given a phone form of its own and its row
+        #: turned, it did not survive going back to its page.
+        self._target = target
+        self._fitted: QWidget | None = None
         self._fitted_at: int | None = None
         # A page shown is a tool picked — from ☰ as well as the page button —
         # so the bar's label follows.
@@ -744,32 +750,70 @@ class _FitOnShow(QObject):
         """Fit what was shown since the last fit, if the page no longer fits:
         :func:`ui.phone_fit.fit` acts only on what overflows, so the rows already
         stacked stay as they are."""
-        from ui import phone_fit
         content = self._area.widget()
         if (self._fitted_at is None or content is None or not phone_layout.is_on()
                 or not self._area.isVisible()):
             return
         try:
             if content.minimumSizeHint().width() > self._area.viewport().width():
-                phone_fit.fit(self._area)
+                self._fit()
         except RuntimeError:
             swallowed()  # the page went before the fit ran
 
-    def refit(self) -> None:
+    def _fit(self) -> None:
         from ui import phone_fit
+        content = self._area.widget()
+        if self._target is None:
+            self._fitted = None
+            if content is not None:
+                phone_fit.fit(self._area)
+            return
+        target = self._target()
+        if target is None or content is None:
+            return                           # nothing of the target's to fit (a band that is not a form)
+        # The room the target has: the viewport less its offset on each side.
+        x = target.mapTo(content, target.rect().topLeft()).x() if target is not content else 0
+        self._fitted = target
+        phone_fit.fit_content(target, self._area.viewport().width() - 2 * max(0, x))
+
+    def _unfit(self) -> None:
+        from ui import phone_fit
+        fitted, self._fitted = self._fitted, None
+        if fitted is not None:
+            if shiboken6.isValid(fitted):
+                phone_fit.unfit_content(fitted)
+        elif self._target is None:
+            phone_fit.unfit(self._area)
+
+    def refit(self) -> None:
         if not phone_layout.is_on():
             if self._fitted_at is not None:
-                phone_fit.unfit(self._area)
+                self._unfit()
                 self._fitted_at = None
             return
         width = self._area.viewport().width()
         if not self._area.isVisible() or width <= 0 or width == self._fitted_at:
             return
         if self._fitted_at is not None:
-            phone_fit.unfit(self._area)      # wider than before: stack less
-        phone_fit.fit(self._area)
+            self._unfit()                    # wider than before: stack less
+        self._fit()
         self._fitted_at = width
         self._watch_content()
+
+    def refit_now(self) -> None:
+        """Fit the area to its viewport now, whatever width it was fitted at:
+        the Controls sheet calls it once the controls it was lent are in."""
+        if self._fitted_at is not None:
+            self.release()
+        self.refit()
+
+    def release(self) -> None:
+        """Give the content back its form from before the fit — the Controls
+        sheet calls it before the controls go back to their page."""
+        self._again.stop()
+        if self._fitted_at is not None:
+            self._unfit()
+            self._fitted_at = None
 
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
         if obj is not self._area:
@@ -1958,6 +2002,29 @@ class PhoneShell(QObject):
         sheet.setContentWidget(scroll)
         sheet._aw_land = land
         sheet._aw_holder = holder
+        # Fitted like a Datasets page (``ui/phone_fit``): a form row holds its
+        # label beside a group of controls kept on one line, and several were
+        # wider than the sheet — Nanowells QC's four "Problem:" buttons in one
+        # row held its sheet 769 px wide in a 414 px viewport — so the sheet
+        # scrolled sideways. The fit stacks what overflows; it is undone before
+        # the controls go back to their page (``_give_band_back``).
+        def _form_host() -> QWidget | None:
+            # A control band is fitted through its form, never itself (the
+            # fit would give the band a phone form of its own on top of the
+            # form, and turn its row); a page's own block of controls (the
+            # Image Table's shelf) is stacked by the sheet already, and is
+            # fitted as it stands.
+            band = self._sheet_band
+            if band is None:
+                return None
+            if hasattr(band, "form"):
+                form = band.form()
+                return form.host if form is not None else None
+            return band
+
+        fit = _FitOnShow(scroll, target=_form_host)
+        scroll.installEventFilter(fit)
+        sheet._aw_fit = fit
         if not land:
             # The height is measured off the controls the sheet holds, and they
             # are lent in still at their page width: measured at ``open`` the
@@ -2004,6 +2071,9 @@ class PhoneShell(QObject):
             scope.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
         self._sweep(force=False)    # the sheet's own scroll area, if new
         sheet.open()
+        fit = getattr(sheet, "_aw_fit", None)
+        if fit is not None:
+            fit.refit_now()
         self.controls_button.setText("Done ✕")
 
     def close_controls(self, *, now: bool = False) -> None:
@@ -2115,6 +2185,9 @@ class PhoneShell(QObject):
         if band is None:
             return
         try:
+            fit = getattr(self._sheet, "_aw_fit", None) if self._sheet is not None else None
+            if fit is not None:
+                fit.release()        # before the form is undone: the fit marked its rows
             if hasattr(band, "setForm"):
                 band.setForm(False)
             else:

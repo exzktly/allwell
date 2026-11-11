@@ -385,3 +385,19 @@ def test_a_row_that_is_a_layout_rather_than_a_widget_is_stacked_last_and_given_b
     assert pair.direction() == QHBoxLayout.LeftToRight, "a row that fits once its parent stacked was stacked too"
     unfit_content(content)
     assert row.direction() == QHBoxLayout.LeftToRight
+
+
+def test_the_fit_never_wraps_a_layout_item():
+    """``ui/phone_fit`` walks layouts it does not own, and the widgets in them are moved into other layouts afterwards
+    (the Controls sheet hands a page's controls back). A ``QLayoutItem`` is no QObject, so a Python wrapper made for
+    one by ``itemAt`` is never told when Qt frees it; Qt then allocated the new items at the freed addresses, the
+    binding handed back the stale wrappers, and the page's control band raised "Internal C++ object already deleted"
+    the next time the sheet opened. Whether an address is reused is up to the allocator, so no test reproduces it on
+    demand: the rule is held here instead. Nested layouts are found as child objects, membership by ``indexOf``."""
+    import ast
+
+    from tests._repo_scan import REPO_ROOT, parse_source
+
+    calls = [node.lineno for node in ast.walk(parse_source(REPO_ROOT / "ui" / "phone_fit.py"))
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "itemAt"]
+    assert not calls, f"ui/phone_fit.py wraps layout items with itemAt() at lines {calls}"

@@ -112,10 +112,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
             "Open a run's pipeline_info.json and fill the whole form from it, "
             "input folder included.")
         self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
-        # A flow, not a row: the two buttons side by side are the widest thing in the form, and in a fixed row
-        # their widths add up to its minimum. With the runner's wider fallback font that sum pushed the form
-        # past the sidebar (334 px against Metrics.rail_w's 329), so Presets wraps under the first button
-        # whenever the sidebar is too narrow for both.
+        # A flow, not a fixed row, whose minimum would be both buttons' widths: in a wider font that held the
+        # form past Metrics.rail_w. Presets wraps under the first button instead (test_labelfree_phase.py).
         pin_row = QWidget(sec)
         prl = FlowLayout(pin_row)
         prl.setContentsMargins(0, 0, 0, 4)

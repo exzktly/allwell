@@ -22,7 +22,7 @@ from services.remote_batch_resume import download_adopted
 from services.remote_batch_staging import prune_staged
 from services.remote_handoff import hand_off_and_wait
 from services.remote_suspend import _AnySet
-from services.remote_wire import TRANSIENT_PREFIX
+from services.remote_wire import TRANSIENT_PREFIX, WELL_XFER_PREFIX
 from util.well_token import canonical_well_label
 
 #: What an upload sent ahead logs in place of the ``[remote] ↑`` of an upload the run is waiting for. The Analyze
@@ -35,9 +35,15 @@ AHEAD_UP_MARK = "[remote] sent ahead ↑"
 
 def _ahead_log(log: Callable[[str], None]) -> Callable[[str], None]:
     """*log* for an upload sent ahead: ``↑`` lines marked :data:`AHEAD_UP_MARK`, rsync's live progress (for the status
-    line) dropped."""
+    line) dropped.
+
+    A well's own transfer fraction (:data:`~services.remote_wire.WELL_XFER_PREFIX`) is kept. It carries the transient
+    prefix too, but the progress view reads it as that one well's dial and nothing else — no stage, headline, label
+    or status line. Dropping it with the rest left every well sent ahead painted as uploaded from rsync's first byte
+    (the ``↑`` name line marks the stage) and its dial never filled, so a large well read as stuck, waiting with
+    nothing happening, for the whole of its upload."""
     def say(line: str) -> None:
-        if line.startswith(TRANSIENT_PREFIX):
+        if line.startswith(TRANSIENT_PREFIX) and not line.startswith(WELL_XFER_PREFIX):
             return
         log(line.replace("[remote] ↑", AHEAD_UP_MARK, 1))
     return say

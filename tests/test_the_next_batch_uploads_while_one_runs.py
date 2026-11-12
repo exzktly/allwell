@@ -258,6 +258,23 @@ def test_the_progress_view_does_not_read_an_upload_sent_ahead_as_the_run_uploadi
     assert ("stage", "upload") in plain, "the upload the run waits for still drives the headline"
 
 
+def test_a_well_sent_ahead_fills_its_dial_as_its_bytes_go_up():
+    """The reported case: on a re-run of a few anchored wells, the first well of batch 2 — uploaded while batch 1
+    computed — sat in the uploaded colour with an unmoving dial for its whole upload and read as stuck. rsync's per-well
+    fraction reached the log through ``_UploadWellProgress`` and ``_ahead_log`` dropped it with the rest of the
+    transient progress. It must reach the progress view, and move that well's dial and nothing else."""
+    from services.pipeline_runner import ProgressTracker
+    from services.remote_batch_step import _ahead_log
+    from services.remote_upload import _UploadWellProgress
+
+    said: list[str] = []
+    wells = _UploadWellProgress({"C05.zip": 1000}, _ahead_log(said.append))
+    wells.note_file("C05.zip")
+    wells.note_bytes(400)
+    events = [e for line in said for e in ProgressTracker().parse(line)]
+    assert events == [("well_xfer", ("C05", "up", 0.0)), ("well_xfer", ("C05", "up", 0.4))], said
+
+
 def test_a_stop_ends_an_upload_still_waiting_for_room(tmp_path, monkeypatch):
     """No well of batch 1 has left, so batch 2 has sent nothing and waits; Stop must end that wait too."""
     sent: list = []

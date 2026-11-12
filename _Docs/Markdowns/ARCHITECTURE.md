@@ -13776,7 +13776,7 @@ like the others; `_identity_controller.draw_identity` composes it from the sidec
 `identity_message`, `summary_lines`, `stage_line`, `worst_verdict`, `default_timepoint`), `_identity_render` draws it
 (every text a reader sees carries a `nw-identity-*` gid; the Diagnostics figure is `_identity_diagnostics_render`,
 placed by `_identity_diagnostics_layout`)
-and `identity_view` builds the *Compare* and *Colour* controls, the *Nanowell* box with **Origin**, and the Blink timer. Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
+and `identity_view` builds the *Compare* and *Colour* controls and the Blink timer (the *Nanowell* box with **Origin** is the whole page's, `goto_view`, below). Its verdict is the one every other figure reads (`pipeline.nanowell_identity.verdict_in`, stage override
 included). Four modes, `NanowellState.identity_mode` (persisted; an unknown one falls back to `distance`):
 *Distance map* — each compared address at its reference's measured position (well frame, µm), coloured by
 `NanowellState.identity_colour` (`IDENTITY_COLOURS`, persisted): `distance` fills it by its distance in pitches
@@ -13848,9 +13848,29 @@ two crops; the surface zooms alone. The zoom (`NanowellState.identity_zoom`, nev
 of the same well, timepoint and mode (montages arriving, a setting changed) and dropped when any of the three
 changes; a Blink frame flip leaves it alone.
 
-The band's *Nanowell* box (`identity_view._focus_box`, registered as `_nw_identity_focus_edit`) goes to one
-nanowell: Enter calls `controller.set_identity_focus`, which keeps the text on `NanowellState.identity_focus` (never
-persisted), forgets the kept zoom and redraws. `identity_focus_compute` reads the text — `q,r` as the addresses are
+**Going to one nanowell, on every view.** The band's *Nanowell* box and **Origin** (`goto_view.build_goto_controls`,
+registered as `_nw_goto_edit` and `_nw_goto_origin_btn`) lead the viewing row on every view, as one scope, and are
+greyed on Array QC (`_goto_controller.NO_GOTO_VIEWS`: it draws one row per well, not nanowells), saying why. Enter
+calls `_goto_controller.go_to_nanowell`. `goto_compute.resolve` reads the text — an address, optionally led by a well
+(`B04 2,-1`, `B04: 2,-1`, `b4/3.7`; a well matched against the page's drawn wells ignoring case and a column's leading
+zeros, so a well not selected on the plate is refused rather than read as an address in the page's well; without one,
+`page_well`), the address through `identity_focus_compute.parse_address` with that well's lattice kind at the page's
+timepoint. Then, whichever view is open: the page's well becomes the target's (`st.well`), the Identity focus becomes
+its `q,r` with the kept Identity zoom dropped, and — when the well's table holds the nanowell (`site_series`) — it is
+selected alone (`selected_sites`, `show_selected_in_popout`), so the site detail opens with its series and crops on
+every view. Each view frames it its own way: the Distribution rings it (`renderer._ring_selected`), Trajectories
+draws its own line over the thin ones in its selection colour (`renderer._draw_selected_trajectories`,
+`TRAJECTORY_SELECTED_GID`, from `render_trajectories(selected=)`), the Array view zooms onto it — the request is
+`NanowellState.array_goto`, which `controller._after_array_draw` spends once the view is drawn in that well
+(`_centre_array_goto`, the same `_centre_array_on` region a double-click sets) and draws again there — and Identity
+focuses it as below. A nanowell the table does not hold selects nothing; that, a well not drawn and text that is no
+address are each said on the status line, and on the Identity view an unreadable text is also handed to
+`set_identity_focus` so its figure says why. Clearing the box clears the Identity focus only.
+`tests/test_nanowell_goto_every_view.py` types into the real box on every view and reads the ring, the line, the
+region and the detail back.
+
+On the Identity view the focus (`controller.set_identity_focus`, which keeps the text on
+`NanowellState.identity_focus` (never persisted), forgets the kept zoom and redraws) marks the address: `identity_focus_compute` reads the text — `q,r` as the addresses are
 drawn, or a ring label through `util.nanowell_address.parse_label` — and `focus_marks` resolves it against the pair:
 the reference's site, the compared timepoint's site of the same name in its own frame and mapped into the reference's
 through the inverse registration, and the reference site's predicted place in the compared frame.
@@ -13861,9 +13881,9 @@ own site and cross the prediction; a sentence top right (`nw-identity-focus`) sa
 a timepoint does not hold it, or why the text is not an address. `_identity_zoom.restore` centres each panel on it
 (`focus_centres`, `focus_limits`: `FOCUS_HALF_PITCHES` spacings to the nearer edge, in the full view's proportions,
 widened on Side by side so the moved compared site stays in view) whenever the well, timepoint or mode changes, and
-keeps that as the zoom. Diagnostics draws crops about the square, so the box is greyed there (`FOCUS_MODES`) and
-`draw_focus` writes no sentence on its figure, whose places are all laid out from its size.
-**Origin** beside the box goes to `0,0`. **Go to nanowell** — in the site detail's crop header and in the pop-out
+keeps that as the zoom. Diagnostics draws crops about the square, so nothing is zoomed onto there (`FOCUS_MODES`; the
+box's tooltip says so, and it still selects) and `draw_focus` writes no sentence on its figure, whose places are all
+laid out from its size. **Go to nanowell** — in the site detail's crop header and in the pop-out
 window's header (`tab_view._go_to_button`) — calls `controller.go_to_site_in_blink`, which takes the crops' nanowell
 (`crops_site`) to the Identity view's Blink in its well, focused on its address.
 

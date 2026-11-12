@@ -6477,8 +6477,28 @@ control is found in the same place whichever view is open:
    **Subset**, **Exclude** (on the views with a Well; *Excluded (n)* follows it while a well is excluded), then
    **Baseline**, and where they apply **Baseline average**, **Moving average** and Distribution's **Responding
    above**.
-3. **Viewing** — how the open view shows it: *Along x*, *Image*, *Layers*, *Compare*, *Show*, … and its actions
-   (*Set anchor*, *Resolve*, *Re-run…*). Position and Trajectories have no row of their own.
+3. **Viewing** — how the open view shows it: first the **Nanowell** box and **Origin** (on every view; see *Going
+   to one nanowell* below), then *Along x*, *Image*, *Layers*, *Compare*, *Show*, … and the view's actions
+   (*Set anchor*, *Resolve*, *Re-run…*).
+
+#### Going to one nanowell
+
+The **Nanowell** box goes to one nanowell, the same way on every view. Type its address and press Enter — as the
+addresses are written on the images (`q,r`, for example `-2,3`) or as a ring label such as `3.7` — and lead it with
+a well to go to a nanowell in another well: `B04 2,-1` (also `B04: 2,-1`, `b4/3.7`). Without a well, the address is
+in the well the **Well** control shows. **Origin** goes to nanowell `0,0`. On every view the nanowell is then
+selected: its well becomes the page's well, the site detail opens beside the figure with its plots over time and its
+crops (and **Pop out** shows it large), and then each view shows where it is —
+
+- **Distribution** rings its dot in each timepoint's swarm;
+- **Trajectories** draws its own line over the others, in the ring's colour;
+- **Array** zooms onto it and rings it, as double-clicking it does;
+- **Identity** zooms onto it (see the Identity view below);
+- **Position**, **Statistics** and **Largest & smallest** summarise many nanowells, so it is shown in the site detail.
+
+A well that is not selected on the plate, an address the well's table does not hold, or text that is not an address
+is said on the status line, and nothing is selected. The box is greyed on **Array QC**, which draws one row per well
+rather than nanowells.
 
 In a narrow window a row wraps onto a second line of its own rather than mixing with the next row.
 
@@ -7404,14 +7424,14 @@ Every Compare mode zooms with the scroll wheel and pans by dragging. Side by sid
 Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them
 changes.
 
-To look at one nanowell, type its address in the **Nanowell** box and press Enter — as the addresses are written on
-the images (`q,r`, for example `-2,3`) or as a ring label such as `3.7`. The Distance map, Blink and Side by side zoom
-onto it and stay there as you change the timepoint, the well or the mode, and a sentence at the top right says how
-far its address landed from itself. A ring marks where the reference puts the nanowell; a cross marks where the later
-timepoint's nanowell of the same name lands. On a correct timepoint they sit together; when the addresses name other
-nanowells, the cross sits on a neighbour. Clear the box to go back to the whole view. The box is greyed on
-Diagnostics, which shows the central square rather than the array. **Origin** beside the box goes to nanowell
-`0,0`, the centre the addresses count from.
+An address typed in the **Nanowell** box (*Going to one nanowell*, above) is also where the Identity view looks: the
+Distance map, Blink and Side by side zoom onto it and stay there as you change the timepoint, the well or the mode,
+and a sentence at the top right says how far its address landed from itself. A ring marks where the reference puts
+the nanowell; a cross marks where the later timepoint's nanowell of the same name lands. On a correct timepoint they
+sit together; when the addresses name other nanowells, the cross sits on a neighbour. Text that is not an address is
+explained there too. Clear the box to go back to the whole view. Diagnostics shows the central square rather than the
+array, so there the nanowell is selected but not zoomed onto. **Origin** goes to nanowell `0,0`, the centre the
+addresses count from.
 
 Pointing at a nanowell names it beside the pointer — `T1 · nanowell 2,-1 · ring 2.9` — before its `x · y`. On Blink
 it names the address the frame on screen gives it, so a wrong address reads as its wrong name when the frame flips.

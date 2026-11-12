@@ -262,6 +262,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_measure_fast_paths.py": "The measuring's fast paths compute exactly what the code they replaced did",
     "test_nanowell_ownership.py": "Ownership checks calculate seam geometry without using the implementation",
     "test_nanowell_page.py": "The Nanowells page driven through its real builder, worker and canvas, in a minimal shell …",
+    "test_nanowell_goto_every_view.py": "The band's Nanowell box selects, details and frames one nanowell on every view",
     "test_nanowell_distribution_style.py": "The Distribution view's Show (Auto / Beeswarm / Violin) and violin Smoothing, …",
     "test_nanowell_selection_redraws_rings_only.py": "Selecting a nanowell or closing the site detail re-rings the Distribution figure, not rebuilds it",
     "test_nanowell_page_on_a_phone.py": "The Nanowells page's site detail, crop strip and footer in phone layout, in a minimal shell",

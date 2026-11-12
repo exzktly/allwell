@@ -791,11 +791,8 @@ def _redraw(ctx) -> None:
     if st.view == "statistics":
         pass                                             # its result is kept in ``st.stats_cache``; nothing to click
     elif isinstance(model, ArrayDrawn) or st.view == "array":
-        st.drawn = model
-        aq.ring_target(ctx, model, well, page_timepoint(ctx, well))     # the Resolve walk's hint, when walking
-        if model is not None and model.rendered is not None:
-            _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
-        _call(ctx, "_nw_refresh_zoom")
+        if not _after_array_draw(ctx, st, model, well):
+            return                                       # drawn again, at the region the Nanowell box asked for
     elif model is not None:
         st.model = model
         wnc.after_draw(ctx, st, model)
@@ -804,6 +801,21 @@ def _redraw(ctx) -> None:
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
     redraw_detail(ctx)
+
+
+def _after_array_draw(ctx, st, model, well: str) -> bool:
+    """Keep what the Array view drew and follow it up: the Resolve walk's hint, the tiles it wants read, the zoom
+    readout. ``False`` when it was drawn again instead, zoomed onto the nanowell the *Nanowell* box asked for
+    (:func:`_centre_array_goto`) — that draw has done all of this, and the caller stops."""
+    st.drawn = model
+    if st.array_goto is not None and _centre_array_goto(st, model):
+        _redraw(ctx)
+        return False
+    aq.ring_target(ctx, model, well, page_timepoint(ctx, well))     # the Resolve walk's hint, when walking
+    if model is not None and model.rendered is not None:
+        _want_tiles(ctx, {(tile, None) for tile in model.rendered.unread} | set(model.rendered.wants))
+    _call(ctx, "_nw_refresh_zoom")
+    return True
 
 
 def _draw_identity_page(ctx, st, fig, canvas, *, well: str, note: str = "") -> None:
@@ -1094,7 +1106,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
         if empty:
             render_message(fig, empty, gid="nw-moving-empty")
             return None, None
-        render_trajectories(fig, panels,
+        render_trajectories(fig, panels, selected=selected,
                             cohort=cohort, label=_label(metric, channel, data, sizes), time_source=data.time_source,
                             note=" ".join(filter(None, [mvc.describe(moving, column, baseline_moving,
                                                                      moving_centred), note])))
@@ -1605,13 +1617,33 @@ def focus_nanowell_at(ctx, event) -> None:
     if k is None:
         return
     sites = drawn.sites
-    x, y, half = float(sites.x[k]), float(sites.y[k]), float(sites.radius[k]) * FOCUS_MARGIN
-    st.region = (x - half, y - half, x + half, y + half)        # widened to the axes' shape when drawn
+    _centre_array_on(st, sites, k)
     site = sites.sites[k]
     if site[1] is not None and site[2] is not None:
         _select(ctx, site)                                       # redraws, at the new region
     else:
         redraw(ctx)                                              # an unaddressed nanowell cannot be selected
+
+
+def _centre_array_on(st, sites, k: int) -> None:
+    """Zoom the Array view onto nanowell *k* of *sites* (``ArraySites``): centred, filling the view."""
+    x, y, half = float(sites.x[k]), float(sites.y[k]), float(sites.radius[k]) * FOCUS_MARGIN
+    st.region = (x - half, y - half, x + half, y + half)        # widened to the axes' shape when drawn
+
+
+def _centre_array_goto(st, drawn) -> bool:
+    """Zoom onto the nanowell the *Nanowell* box asked for (``st.array_goto``) once *drawn* holds it; whether the
+    region moved, so the caller draws it again there. The request is spent either way: an address the well's scene
+    does not hold leaves the view as it is."""
+    target, st.array_goto = st.array_goto, None
+    sites = getattr(drawn, "sites", None)
+    if target is None or sites is None:
+        return False
+    for k, site in enumerate(sites.sites):
+        if tuple(site) == tuple(target):
+            _centre_array_on(st, sites, k)
+            return True
+    return False
 
 
 def on_canvas_resized(ctx) -> None:

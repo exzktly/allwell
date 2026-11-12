@@ -84,7 +84,7 @@ _ROWS_BY_VIEW = {
     "statistics": (_CENTRAL + ("_nw_tp_cb",), _FILTER + _AVERAGES, ("_nw_control_cb",)),
     "qc": (_CENTRAL, _FILTER, ("_nw_qc_wells_seg", "_nw_qc_walk_btn", "_nw_queue_btn", "_nw_qc_rerun_btn")),
     "extremes": (*_ONE_WELL, ("_nw_extremes_spin", "_nw_extremes_metrics_box")),
-    "identity": (*_ONE_WELL, ("_nw_identity_mode_seg", "_nw_identity_origin_btn")),
+    "identity": (*_ONE_WELL, ("_nw_identity_mode_seg", "_nw_goto_origin_btn")),
     "trajectories": (_CENTRAL, _FILTER + _AVERAGES),
     "position": (_CENTRAL + ("_nw_tp_cb",), _FILTER),
 }

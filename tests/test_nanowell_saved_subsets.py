@@ -123,6 +123,45 @@ def test_a_subset_saved_by_name_is_listed_and_choosing_it_draws_it(page):  # noq
     assert combo.currentData() == "custom" and st.saved_subsets["Ring at start"] == RING
 
 
+def test_the_editor_s_saved_dropdown_switches_between_the_saved_subsets(page):  # noqa: F811
+    """Asked for: "there is no way to toggle between saved subsets" in the editor. Its *Saved* dropdown lists every
+    saved subset; choosing one makes it the page's subset, rebuilds the rows from it, puts its name in the name box
+    and draws it — the two saved subsets keep different nanowells, so drawing the wrong one or none shows."""
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell.subset_view import UNSAVED_LABEL
+
+    st = page.state.feature_slice("nanowell")
+    nwc.set_subset(page, SINGLES)
+    singles = _dots(page)
+    nwc.set_subset(page, RING)
+    ring = _dots(page)
+    assert singles != ring
+    editor = _save(page, SINGLES, "Singles")
+    _save(page, RING, "Ring at start")
+    combo = editor.saved_cb
+    assert combo.isEnabled()
+    assert [combo.itemText(i) for i in range(combo.count())] == [UNSAVED_LABEL, "Singles", "Ring at start"]
+    assert combo.currentText() == "Ring at start"              # the subset in use, by its name
+    combo.setCurrentIndex(combo.findText("Singles"))
+    assert st.subset == SINGLES and _dots(page) == singles
+    assert editor.written().validated() == SINGLES and editor.name_edit.text() == "Singles"
+    assert page.widgets.get("_nw_subset_cb").currentText() == "Singles"   # the band's box follows
+    editor.rows[0].op_cb.setCurrentIndex(editor.rows[0].op_cb.findData("ge"))   # an edit not applied ...
+    combo.setCurrentIndex(combo.findText("Ring at start"))
+    assert st.subset == RING and _dots(page) == ring
+    assert editor.written().validated() == RING and not editor.pending()   # ... is discarded, as Reset does
+    editor.apply_btn.click()
+    nwc.set_subset(page, ss.Subset((C("n0", "ge", 3),)).validated())   # a subset saved under no name
+    assert combo.currentText() == UNSAVED_LABEL
+    combo.setCurrentIndex(combo.findText(UNSAVED_LABEL))       # names no subset: nothing changes
+    assert st.subset == ss.Subset((C("n0", "ge", 3),)).validated() and combo.currentText() == UNSAVED_LABEL
+
+
+def test_the_saved_dropdown_is_disabled_while_nothing_is_saved(page):  # noqa: F811
+    editor = _editor(page)
+    assert not editor.saved_cb.isEnabled() and editor.saved_cb.count() == 1
+
+
 def test_rename_and_delete_act_on_the_saved_subset_in_use(page):  # noqa: F811
     st = page.state.feature_slice("nanowell")
     editor = _save(page, SINGLES, "Singles")

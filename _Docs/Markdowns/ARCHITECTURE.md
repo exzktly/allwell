@@ -13327,7 +13327,11 @@ Nanowells mode passes `subset_label` from its run settings, and the Scatter Plot
 the `nanowell.subset_label` service (`_plot_links.subset_label`) and replaces its own copy on each redraw. The Subset
 combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when
 the names change, with data `saved:<name>`; choosing one calls `controller.apply_saved_subset`. The editor's name
-row — a name box, *Save* (`controller.save_subset`), *Rename* (`rename_saved_subset`, enabled for a saved subset in
+row starts with a *Saved* dropdown (`SubsetEditor.saved_cb`, filled by `_fill_saved` on every `_enable_names`, its
+entries rebuilt only when the saved names change): `subset_view.UNSAVED_LABEL` (data `""`) then each saved name; it
+shows the name in use or *(not saved)*, is disabled while nothing is saved, and choosing a name
+(`_saved_chosen`) clears `shown` and `_named` and calls `apply_saved_subset`, so the rows and the name box are
+rebuilt from that subset and any unapplied edits are discarded as Reset discards them. The rest of the row — a name box, *Save* (`controller.save_subset`), *Rename* (`rename_saved_subset`, enabled for a saved subset in
 use and a different name) and *Delete* (`delete_saved_subset`, which leaves the page's subset as it is) — says each
 result in the editor's status line and refills the name box only when the saved name in use changes and the box
 still holds the previous name or nothing — a new name typed for a draft survives Apply, which is how a draft is saved

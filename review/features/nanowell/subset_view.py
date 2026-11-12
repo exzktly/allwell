@@ -69,6 +69,10 @@ _NAME_TIP = ("A name for the subset as written, kept with this dataset: it is li
 _SAVE_TIP = "Keep the subset as written under the name typed beside it, in this dataset."
 _RENAME_TIP = "Give the saved subset in use the name typed beside it."
 _DELETE_TIP = "Forget the saved subset in use. The figure keeps using it until you choose another."
+_SAVED_TIP = ("Switch to another subset saved in this dataset: its conditions become the subset in use and every view "
+              "redraws with them. Edits not applied are discarded, as Reset does.")
+#: The saved-subsets dropdown's entry while the subset in use is saved under no name.
+UNSAVED_LABEL = "(not saved)"
 _MATCH_TIP = ("All: a nanowell is used only when it meets every condition.\n"
               "Any: a nanowell is used when it meets at least one.")
 _FIELD_TIP = ("What the condition tests: the cells at the start (the count at the Baseline), a metric, where the "
@@ -443,6 +447,14 @@ class SubsetEditor(QFrame):
         lay.addLayout(top)
         names_host = QWidget(body)
         names = _flow(names_host)
+        # Every subset saved in this dataset, one choice to switch to: the name row acts on the subset in use, and
+        # without this the editor offered no way to reach another saved one.
+        self.saved_cb = _narrow(QComboBox())
+        self.saved_cb.setToolTip(_SAVED_TIP)
+        #: The saved names the dropdown lists now: its entries are rebuilt only when they change (:meth:`_fill_saved`).
+        self._saved_listed: list | None = None
+        self.saved_cb.currentIndexChanged.connect(self._saved_chosen)
+        names.addWidget(flow_group(names_host, "Saved", self.saved_cb, spacing=8))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Name this subset to save it")
         self.name_edit.setMaxLength(ss.MAX_NAME)
@@ -533,6 +545,37 @@ class SubsetEditor(QFrame):
         self.refresh(self._state())
         self._say(f"\u201c{name}\u201d is no longer saved; the figure still uses its conditions.")
 
+    def _fill_saved(self) -> None:
+        """The saved-subsets dropdown lists the dataset's saved subsets, in the order saved, and shows the one in use
+        — or :data:`UNSAVED_LABEL` when the subset in use is saved under no name. Disabled while nothing is saved."""
+        st = self._state()
+        names = list(st.saved_subsets) if st is not None else []
+        combo = self.saved_cb
+        blocked = combo.blockSignals(True)
+        try:
+            if names != self._saved_listed:
+                self._saved_listed = names
+                combo.clear()
+                combo.addItem(UNSAVED_LABEL, "")
+                for name in names:
+                    combo.addItem(name, name)
+            combo.setCurrentIndex(max(0, combo.findData(self.current_name())))
+            combo.setEnabled(bool(names))
+        finally:
+            combo.blockSignals(blocked)
+
+    def _saved_chosen(self, index: int) -> None:
+        """Make the saved subset chosen in the dropdown the subset in use; the rows are rebuilt from it."""
+        name = self.saved_cb.itemData(index)
+        if not name:
+            self._fill_saved()                           # "(not saved)" names no subset: show the one in use again
+            return
+        self.shown = None                                # rebuild the rows even if it is already the subset in use
+        self._named = None                               # and put its name in the name box
+        if not nwc.apply_saved_subset(self._ctx, name):
+            self._say(f"\u201c{name}\u201d is no longer saved.", warn=True)
+        self.refresh(self._state())
+
     def _enable_names(self) -> None:
         """Save needs conditions and a name; Rename and Delete a saved subset in use, Rename a new name for it."""
         st = self._state()
@@ -544,6 +587,7 @@ class SubsetEditor(QFrame):
                                               if waiting else ""))
         self.rename_btn.setEnabled(bool(name) and bool(typed) and typed != name)
         self.delete_btn.setEnabled(bool(name))
+        self._fill_saved()
 
     def _fill_name(self) -> None:
         """The name box shows the saved name in use when that changes — unless the user has typed another name

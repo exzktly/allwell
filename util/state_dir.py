@@ -22,6 +22,7 @@ machine outside a dataset folder, in one fixed layout:
 ``job_queue.json``         the Datasets job queue (``services.job_queue``)
 ``run_index.json``         the run journal's index (``services.run_journal``)
 ``suspended_runs.json``    the suspended Analyze runs (``services.suspend_record``)
+``analyze_presets.json``   the named Analyze presets (``analyze.domain.presets``)
 =========================  ======================================================
 
 ``%LOCALAPPDATA%\\allwell`` on Windows — the folder Windows provides for exactly
@@ -31,7 +32,7 @@ written (Windows tries ``~/.allwell`` first). ``ALLWELL_STATE_DIR``, when set,
 replaces all of that — the test harness points it at a per-worker scratch
 folder so no test writes into the real one. The app's caches are cleared from
 the title bar's storage button (``core.local_storage``), which offers the
-scratch only behind a warning; the scan cache and the four records are never
+scratch only behind a warning; the scan cache and the records are never
 offered there.
 
 **A remote host keeps its own folders.** The scratch and the scan cache follow
@@ -118,6 +119,7 @@ REMOTES_NAME = "remotes.toml"
 JOB_QUEUE_NAME = "job_queue.json"
 RUN_INDEX_NAME = "run_index.json"
 SUSPENDED_RUNS_NAME = "suspended_runs.json"
+ANALYZE_PRESETS_NAME = "analyze_presets.json"
 BOOT_LOG_NAME = "allwell-boot.log"
 BOOTSTRAP_LOG_GLOB = "bootstrap-*.log"
 #: Where a source checkout kept its font cache before it moved into the app's

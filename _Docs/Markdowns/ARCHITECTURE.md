@@ -1164,6 +1164,8 @@ allwell/
 │   │   │                          (_refresh_output) the scan and a pending input feed
 │   │   ├── job_edit.py         ← the inverse of collect_spec, for the queue's edit flow
 │   │   ├── nanowell_fields.py  ← the Nanowells fields' meaning, bounds and errors, Qt-free
+│   │   ├── presets.py          ← named presets: which options one keeps, and the
+│   │   │                          analyze_presets.json store in the app's folder
 │   │   ├── run_log.py          ← RunLogFile: every line the log pane is given, also written to
 │   │   │                          <output>/logs/analyze-<stamp>.log, one file per run
 │   │   ├── well_list.py        ← the one parse of a typed well list, and the sentence a
@@ -1197,6 +1199,8 @@ allwell/
 │   ├── log_pane.py             ← the output pane — log view, raw-log toggle,
 │   │                              run-outcome surfacing, "Last run ·" card
 │   ├── pinfo.py                ← restore a prior run's pipeline_info into the form
+│   ├── presets.py              ← the Data section's Presets menu: save the form by
+│   │                              name, load or delete a saved preset
 │   ├── phone_view.py           ← phone layout: the form as the page, the run a strip
 │   │                              above it (Settings / Progress), Run in a bottom bar
 │   ├── preflight.py            ← what the output folder already holds, and offering
@@ -6587,8 +6591,9 @@ two copies sharing one would each rebuild the other's), `tmp/`, where
 `remotes.toml` (`services.remote_config.default_config_path`, unless
 `ALLWELL_REMOTES` points elsewhere), `job_queue.json`
 (`services.job_queue.queue_path`), `run_index.json`
-(`services.run_journal.index_path`) and `suspended_runs.json`
-(`services.suspend_record.record_path`). `services.remote_config.default_state_dir`
+(`services.run_journal.index_path`), `suspended_runs.json`
+(`services.suspend_record.record_path`) and `analyze_presets.json`
+(`analyze.domain.presets.presets_path`). `services.remote_config.default_state_dir`
 is the app's folder itself. Each record is resolved through
 `util.state_dir.adopt_legacy_file`, which moves a copy an earlier version left
 elsewhere — `%APPDATA%\allwell` or `~/.config/allwell` for the remotes, queue
@@ -8867,6 +8872,30 @@ numbers. Note also that `_refresh_remote_controls` *enables* dry-run only while
 auto-delete is checked, so "auto-delete off, dry-run on" is not a state the user
 can click their way to; hydrating one from a hand-edited `job_queue.json` leaves
 the value alone and simply shows the box disabled.
+
+**Named presets** go through the same inverse. `hydrate_job` is two halves —
+`hydrate_options(opts)` for the run options and `_hydrate_run_spec_fields` for
+what rides beside them — and the Data section's **Presets** menu
+(`analyze/presets.py`, `AnalyzePresetsMixin`, beside *Use settings from a
+previous run…*) calls the first half alone with `set_input_path=False`. A preset
+is `_collect_run_options()` minus `analyze.domain.presets.PER_RUN_KEYS` — the
+input folder, the scratch disk, the three well lists, the existing-output
+choice (`force` / `incremental`), `allow_low_disk` and the nanowell registration
+source — each a decision about one run of one dataset, with its reason written
+in the roster. The `RunSpec` fields (the remote, the cleanup flags, run-time
+detection) are not part of a preset either. Loading leaves every per-run field
+as it was; the one setter that writes an absent key —
+`_apply_nanowell_settings` sets the registration source from whatever the
+record says, blank included — is answered by putting the field's own text back
+after the load. Presets are stored in `analyze_presets.json` in the app's
+folder (`{"version": 1, "presets": {name: {"saved_at", "opts"}}}`), in the form's
+own spelling, through `util.json_write.write_json_atomic`; a file that exists
+and cannot be read raises `PresetFileError`, the menu says so, and Save is
+disabled, so a corrupt file is never replaced by a file holding one preset. The
+menu is rebuilt on every `aboutToShow`. `tests/test_analyze_presets.py` drives
+the menu on a real tab and loads into a second one, over the all-non-default
+fixture of `tests/test_analyze_job_edit.py`, and asserts every per-run field
+survives a load.
 
 **Run-time detection.** A queued job freezes the form's filename schema,
 separator and channel tokens when it is queued, but the input they describe may

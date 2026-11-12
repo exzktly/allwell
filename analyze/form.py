@@ -34,6 +34,7 @@ from analyze.domain.fields import (  # noqa: F401 — re-exported for analyze.ta
     _numeric_option_errors,
 )
 from analyze.pinfo import AnalyzePipelineInfoMixin
+from analyze.presets import AnalyzePresetsMixin
 from analyze.nanowell_hook import nanowell_section_mixin
 from analyze.qc_section import AnalyzeQCSectionMixin
 from analyze.run_footer import AnalyzeRunFooterMixin
@@ -59,7 +60,7 @@ AnalyzeNanowellSectionMixin = nanowell_section_mixin()
 
 class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
                           AnalyzeNanowellSectionMixin, AnalyzeSectionSummaryMixin,
-                          AnalyzePipelineInfoMixin, AnalyzeQCSectionMixin,
+                          AnalyzePipelineInfoMixin, AnalyzePresetsMixin, AnalyzeQCSectionMixin,
                           AnalyzeRunFooterMixin, AnalyzeRunScopeMixin,
                           AnalyzeSchemaSectionMixin,
                           AnalyzeSegParamsMixin):
@@ -114,6 +115,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         prl = QHBoxLayout(pin_row)
         prl.setContentsMargins(0, 0, 0, 4)
         prl.addWidget(self._open_pinfo_btn)
+        # Named presets: the user's own saved settings, offered on every dataset (analyze/presets.py).
+        prl.addWidget(self._build_presets_button(pin_row))
         prl.addStretch(1)
         sec.layout().addWidget(pin_row)
 

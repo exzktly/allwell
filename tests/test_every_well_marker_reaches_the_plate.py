@@ -180,6 +180,11 @@ ROSTER: dict[str, list[tuple]] = {
     # The kept cell masks are a cache: failing to write them costs the next run time, never a wrong number.
     "Well %s — its cell masks could not be kept in %s (%s: %s); a re-run segments them again.":
         [((W, "m.npz", "OSError", "full"), "W", "note", "")],
+    # The located timepoints a named Reuse registration folder gave, and the failure to keep this run's: either way the
+    # well's numbers are the ones its located timepoints give.
+    "Well %s — %d timepoint(s) taken as located in %s, not located again.": [((W, 3, "o"), "I", "note", "")],
+    "Well %s — its located timepoints could not be kept in %s (%s: %s); a run named on this folder will be refused "
+    "for this well.": [((W, "l.npz", "OSError", "full"), "W", "note", "")],
     # The kept cell outlines are display data for Review's crops: kept or not, the well's numbers are the same.
     "Well %s — %d cell outline(s) kept.": [((W, 120), "I", "note", "")],
     "Well %s — its cell outlines could not be kept in %s (%s: %s); Review draws its cells as dots.":

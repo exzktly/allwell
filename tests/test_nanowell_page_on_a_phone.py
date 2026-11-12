@@ -47,6 +47,41 @@ def test_at_a_desk_the_detail_opens_beside_the_figure(qtbot, page):
     assert page.widgets.get("_nw_detail_pane").isVisible() and page.widgets.get("_nw_card").isVisible()
 
 
+def _window_rect(widget):
+    from PySide6.QtCore import QRect
+
+    return QRect(widget.mapTo(widget.window(), widget.rect().topLeft()), widget.size())
+
+
+def test_at_a_desk_the_detail_is_a_right_column_from_the_top_of_the_page_to_the_bottom(qtbot, page):
+    """The site detail is the page's right column, as the Heat Map's Layout panel is: level with the top of the control
+    band and reaching the bottom of the page, with the band, the figure and its footer all to its left. Wrong
+    implementation: the detail beside the figure alone, under the band — its top then sits below the band's bottom.
+    Turned to phone layout and back, it returns to that column rather than staying where the phone put it."""
+    from widgets.control_band import ControlBand
+
+    _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    detail, card = page.widgets.get("_nw_detail_pane"), page.widgets.get("_nw_card")
+    band = next(b for b in detail.window().findChildren(ControlBand) if b.isVisible())
+
+    def check() -> None:
+        qtbot.waitUntil(lambda: detail.isVisible() and detail.width() > 0)
+        d, b, c = _window_rect(detail), _window_rect(band), _window_rect(card)
+        column = _window_rect(band.parentWidget())       # the page's column: band, figure and footer
+        assert d.top() <= b.top(), f"the detail starts at y={d.top()}, below the band's top at y={b.top()}"
+        assert d.bottom() >= column.bottom(), f"the detail ends at y={d.bottom()}, above the page's at {column.bottom()}"
+        assert b.right() < d.left() and c.right() < d.left(), "the band or the figure runs under the detail"
+
+    check()
+    phone_layout.set_on(True)
+    try:
+        assert detail.isVisible() and card.isHidden()
+    finally:
+        phone_layout.set_on(False)
+    check()
+
+
 def test_the_heading_names_one_nanowell(qtbot, page):
     titles = [w.text() for w in page.widgets.get("_nw_detail_pane").findChildren(QLabel)]
     assert "Selected nanowell" in titles and "Selected nanowells" not in titles

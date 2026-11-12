@@ -1024,6 +1024,22 @@ remote run is read against this computer: the input comes from where the file
 is, and the scratch disk and the completeness check are left as they are,
 because the recorded values describe the remote host.
 
+**Presets**, beside it, keeps settings you use again and again under a name of
+your own. **Save current settings as…** asks for a name and stores the whole
+form — filename schema, channels, segmentation and its parameters, image
+correction, measurements and filters, threshold controls, nanowell settings and
+the compute options — so a preset saved for one kind of plate can be applied to
+any other dataset. Choosing a preset's name from the menu fills the form from
+it; **Delete preset** removes one. Saving under a name that already exists asks
+before replacing it. A preset never changes the input folder, the scratch disk,
+the *Only / Skip / Force these wells* lists, what to do when a well already has
+output, the low-disk override, the nanowell registration source, or which
+computer the run goes to: those belong to one run, and stay as they are when a
+preset is loaded. Presets are kept on this computer, in `analyze_presets.json`
+in All-Well's own folder (`%LOCALAPPDATA%\allwell` on Windows, `~/.allwell` on
+macOS and Linux). If that file cannot be read, the menu says so and will not
+save over it.
+
 **Load these settings** fills the form with the settings that produced that
 output — from the run's own record where there is one, otherwise from the
 `pipeline_info.json` beside it, so it works on plates you ran long ago. Nothing

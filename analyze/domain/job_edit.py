@@ -108,9 +108,21 @@ class AnalyzeJobEditMixin:
         """
         opts = spec.get("opts") or {}
         if opts:
-            self._apply_pipeline_info({"execution_options": _opts_as_pinfo_keys(opts)})
-            self._hydrate_opts_without_sidecar_equivalents(opts)
+            self.hydrate_options(opts)
         return self._hydrate_run_spec_fields(spec)
+
+    def hydrate_options(self, opts: dict, *, set_input_path: bool = True) -> None:
+        """Populate the form from a run-options dict in ``_collect_run_options``' own spelling.
+
+        The ``opts`` half of :meth:`hydrate_job`, and what a named preset is
+        loaded through (``analyze/presets.py``). A key *opts* does not carry
+        leaves its field as it is. ``set_input_path=False`` keeps the input
+        folder on the form whatever *opts* says, as a preset — which carries no
+        folder — always asks.
+        """
+        self._apply_pipeline_info({"execution_options": _opts_as_pinfo_keys(opts)},
+                                  set_input_path=set_input_path)
+        self._hydrate_opts_without_sidecar_equivalents(opts)
 
     def _hydrate_opts_without_sidecar_equivalents(self, opts: dict) -> None:
         """The ``opts`` keys ``_apply_pipeline_info`` cannot restore correctly.

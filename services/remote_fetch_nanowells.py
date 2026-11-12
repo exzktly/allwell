@@ -47,6 +47,9 @@ MASKS_SUFFIX = "_masks.npz"
 #: ``pipeline.nanowell_outlines.OUTLINES_SUFFIX``, restated for the same reason (held equal by
 #: ``tests/test_nanowell_outlines.py``).
 OUTLINES_SUFFIX = "_outlines.npz"
+#: ``pipeline.nanowell_located.LOCATED_SUFFIX``, restated for the same reason (held equal by
+#: ``tests/test_a_remote_rerun_reuses_registration.py``).
+LOCATED_SUFFIX = "_located.npz"
 
 
 def fetch_nanowell_tables(fetcher, well: str) -> int | None:
@@ -88,9 +91,11 @@ def _fetch_masks(fetcher, well: str, dest: Path) -> None:
     instead of segmenting again. Best-effort: without it a later run segments again, which is slower and no less
     right, so a listing or pull that fails does not count against the well's tables. The cell outlines
     (``<well>_outlines.npz``, ``pipeline.nanowell_outlines``) come the same way: without them Review draws the cells
-    as dots and says so. Only the masks are ever sent back up to a host (``services.remote_registration``); the host
-    has no use for the outlines."""
-    for suffix in (MASKS_SUFFIX, OUTLINES_SUFFIX):
+    as dots and says so. The located timepoints (``<well>_located.npz``, ``pipeline.nanowell_located``) come the same
+    way, so a later run takes each timepoint's lattice, square and addresses rather than locating it again. The masks
+    and the located timepoints are sent back up to a host (``services.remote_registration``); the host has no use
+    for the outlines."""
+    for suffix in (MASKS_SUFFIX, OUTLINES_SUFFIX, LOCATED_SUFFIX):
         host, files, _bytes = fetcher._list_remote_glob(
             f"{fetcher.host.ssh_alias}:{fetcher.run.remote_output_dir}/{NANOWELL_DIR}/{well}{suffix}")
         if files:

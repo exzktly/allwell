@@ -175,6 +175,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/nanowell_parallel.py",
     # A well's kept cell masks, keyed on the segmenter's input: the nanowell task reads and writes them.
     "pipeline/nanowell_masks.py",
+    # Each timepoint's located result, written by every nanowell run and taken as it is from a named Reuse
+    # registration folder. Imported by pipeline/nanowell_task.py at module scope.
+    "pipeline/nanowell_located.py",
     # Each counted cell's outline, written beside the cell table for Review. Imported by
     # pipeline/nanowell_run.py and pipeline/nanowell_task.py at module scope.
     "pipeline/nanowell_outlines.py",

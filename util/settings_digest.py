@@ -170,9 +170,12 @@ NOT_KEYED_ON: dict[str, str] = {
     "only_wells_absent_ok":  "whether a named well absent from one batch's input "
                              "is skipped or refused; it computes nothing",
     "incremental_prior_dir": "where reuse looks, not what is computed",
-    "nanowell_registration_from": "where a nanowell run looks for tile registration to reuse; a stored one "
-                                  "is taken only when its own key matches this run's inputs exactly, so "
-                                  "what is computed is unchanged",
+    "nanowell_registration_from": "where a nanowell run takes its located timepoints from: an earlier run of "
+                                  "this plate, which the run refuses unless it fits every well, timepoint and "
+                                  "tile — the same positions and addresses this plate was located to, not a "
+                                  "setting of how cells are counted",
+    "nanowell_registration_carried": "marks that folder as one the app carried to a remote host rather than one "
+                                     "a person named; it changes only whether the folder is taken as it is",
     "nanowell_hold_dir":     "where a batch holds the wells left to the run's final re-anchoring pass; "
                              "that pass computes what the batch's own pass would have, from more wells",
     "nanowell_reanchor_only": "runs only the re-anchoring over wells already computed under these settings",

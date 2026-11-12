@@ -38,11 +38,11 @@ _FLUOR_BACKGROUND_TIP = (
     "A nanowell run applies no Image correction (flat-field or background subtraction); that section is hidden "
     "while Nanowell array is chosen.")
 _REGISTRATION_TIP = (
-    "An earlier nanowell run's output folder whose tile registration this run reuses, so a second analysis with "
-    "other segmentation or measurement settings skips registering the tiles. A timepoint's stored registration is "
-    "used only when it was made from exactly this run's inputs (the same images, acquisition record and plate "
-    "geometry); any other is registered afresh. Blank: only the output folder's own earlier registration is "
-    "reused, the same way. Runs on a remote host register every tile.")
+    "An earlier nanowell run's output folder whose result this run takes as it is: every timepoint's tile "
+    "positions, lattice, central square and nanowell addresses, so a second analysis with other segmentation or "
+    "measurement settings goes straight to counting cells. The run stops before any well starts unless the folder "
+    "has a result for every timepoint of every well, over the same tiles. Blank: the output folder's own earlier "
+    "registration is reused only where it was made from exactly this run's images and settings.")
 
 #: field key -> (row label, edit attribute, tooltip). The edits' placeholders are the pipeline's defaults.
 _FIELDS = (
@@ -627,8 +627,8 @@ class AnalyzeNanowellSectionMixin:
 
             problems.append(NANOWELL_REMOTE_INCREMENTAL_REFUSAL)
         if remote and str(opts.get(REGISTRATION_FROM_KEY) or "").strip():
-            self._nanowell_log_once("Reuse registration names a folder on this computer: its wells' grid records "
-                                    "are sent to the host, which reuses each placement whose images still match.")
+            self._nanowell_log_once("Reuse registration names a folder on this computer: its wells' located "
+                                    "timepoints are sent to the host, which takes them as they are.")
         if not problems and check_input:
             from analyze.nanowell_preflight import nanowell_input_report
 

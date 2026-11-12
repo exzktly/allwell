@@ -147,6 +147,7 @@ _DIGEST_SKIP_VALUE = frozenset({
 #: pre-flight / audit switches that compute nothing.
 _DIGEST_SKIP_FLAG = frozenset({
     "--force", "--incremental", "--allow_low_disk", "--no_run_check", "--no_auto_threshold",
+    "--nanowell_registration_carried",
 })
 #: Flags followed by any number of values (up to the next flag) that :func:`pipeline_argv_digest` leaves out: the
 #: wells a run is limited to or told to redo.

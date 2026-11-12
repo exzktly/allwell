@@ -70,8 +70,8 @@ def test_on_a_remote_host_the_run_goes_and_the_log_says_the_records_are_sent(  #
     tab._remote_cb.addItem("bench-box", userData="bench-box")
     tab._remote_cb.setCurrentIndex(tab._remote_cb.findData("bench-box"))
     assert tab._validate_run_request() is not None
-    assert ("Nanowells: Reuse registration names a folder on this computer: its wells' grid records are sent to the "
-            "host, which reuses each placement whose images still match.", "WARNING") in logged
+    assert ("Nanowells: Reuse registration names a folder on this computer: its wells' located timepoints are sent "
+            "to the host, which takes them as they are.", "WARNING") in logged
 
 
 def test_the_remote_argv_drops_the_folder_and_the_run_address_ignores_it():

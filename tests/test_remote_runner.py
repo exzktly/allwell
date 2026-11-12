@@ -1878,6 +1878,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/cellpose_masks.py",
         "pipeline/nanowell_parallel.py",
         "pipeline/nanowell_masks.py",
+        "pipeline/nanowell_located.py",
         "pipeline/nanowell_outlines.py",
         "pipeline/nanowell_seams.py",
         "pipeline/nanowell_tiles.py",

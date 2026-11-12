@@ -50,7 +50,10 @@ _BATCH_DIR = re.compile(r"b\d+")
 #: What a finished well leaves in a remote output directory, as globs on the well label. The nanowell tables live
 #: under ``nanowells/`` and are only present for a nanowell run.
 _OUTPUT_GLOBS = ("{w}_out.zip", "*_{w}.csv", "*_{w}.csv.gz")
-_NANOWELL_FILES = ("{w}.csv", "{w}_grid.json", "{w}_template.npz", "{w}_identity.json", "{w}_masks.npz")
+#: Its cell masks and located timepoints come too, so the Fetcher brings them home for the next run to reuse
+#: (``pipeline.nanowell_masks``, ``pipeline.nanowell_located``).
+_NANOWELL_FILES = ("{w}.csv", "{w}_grid.json", "{w}_template.npz", "{w}_identity.json", "{w}_masks.npz",
+                   "{w}_located.npz")
 
 
 @dataclass

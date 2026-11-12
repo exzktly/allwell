@@ -26,6 +26,8 @@ import numpy as np
 
 from pipeline import nanowell_measure as nm
 from pipeline import nanowell_reference as nref
+from pipeline.nanowell_located import (NotKept, encode_located, given_located, located_path,
+                                       refuse_unfitting_folder, write_located)
 from pipeline.nanowell_masks import MaskStore, masks_path
 from pipeline.nanowell_outlines import outlines_path, write_well_outlines
 from pipeline import nanowell_run as nr
@@ -111,13 +113,15 @@ def _prior_array(prior: dict | None) -> tuple[float | None, list | None]:
 
 def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                     template_path, staging_dir, settings_key, scratch_dir, expected_shape, stored_placements=None,
-                    manual_anchors=MappingProxyType({}), release=None, confluence_reference=None, mask_store=None):
+                    manual_anchors=MappingProxyType({}), release=None, confluence_reference=None, mask_store=None,
+                    given_located=None, keep_located=nr._keep_nothing):
     """``run_well`` over *todo* on what an earlier run kept (*prior*, or ``None``): ``(outcome, fixed radius,
     fixed roster, kept template)``. *expected_shape* is a described grid's shape: a well short of a whole row or
     column is incomplete, which a record's positions alone could not show. *confluence_reference* is what the well's
     confluence is read against (:func:`_confluence_reference_for` when not given): the one its kept timepoints were
     checked against, so the timepoints it measures are read against the same. *mask_store* is the well's kept cell
-    masks (``pipeline.nanowell_masks``)."""
+    masks (``pipeline.nanowell_masks``); *given_located* and *keep_located* are ``run_well``'s (the located results a
+    named folder gives, and where this run's go: ``pipeline.nanowell_located``)."""
     if confluence_reference is None:
         confluence_reference = _confluence_reference_for(well_label, settings, template_path)
     fixed, fixed_roster = _prior_array(prior)
@@ -133,7 +137,8 @@ def _run_with_prior(well_label, record, todo, prior, load_phase, settings, segme
                           manual_anchors=manual_anchors, progress=lambda done, total: _log_steps(well_label, done, total),
                           site_progress=lambda tp, done, total: _log_sites(well_label, tp, done, total),
                           note=lambda text: log.info("Well %s — %s", well_label, text), release=release,
-                          confluence_reference=confluence_reference, mask_store=mask_store)
+                          confluence_reference=confluence_reference, mask_store=mask_store,
+                          given_located=given_located, keep_located=keep_located)
     return outcome, fixed, fixed_roster, saved
 
 
@@ -771,6 +776,33 @@ def _save_masks(well_label: str, masks: MaskStore) -> None:
                     well_label, masks.target, type(exc).__name__, exc)
 
 
+class _KeptLocated(dict):
+    """``timepoint -> encode_located(...)`` of each timepoint as it is adopted (``run_well``'s *keep_located*):
+    encoded at once, because the well's later steps adjust the ``Located`` in place."""
+
+    def __setitem__(self, timepoint, located) -> None:
+        try:
+            super().__setitem__(timepoint, encode_located(located))
+        except NotKept as exc:
+            self.pop(timepoint, None)
+            log.warning("Timepoint %s's located result is not kept (it holds %s), so a run named on this folder "
+                        "will be refused for it.", timepoint, exc)
+
+
+def _save_located(output_dir: Path, well_label: str, kept: dict, given) -> None:
+    """Write the well's located results beside its grid record — after a failure too, since each is what locating
+    found — and say in the log how many were taken from a named folder."""
+    if given:
+        log.info("Well %s — %d timepoint(s) taken as located in %s, not located again.", well_label, len(given),
+                 next(iter(given.values()))["_reused_from"])
+    target = located_path(output_dir / NANOWELL_DIR, well_label)
+    try:
+        write_located(target, dict(kept))
+    except OSError as exc:
+        log.warning("Well %s — its located timepoints could not be kept in %s (%s: %s); a run named on this folder "
+                    "will be refused for this well.", well_label, target, type(exc).__name__, exc)
+
+
 def _write_outlines(output_dir: Path, well_label: str, outcome, prior: dict | None) -> None:
     """Keep the outlines of the cells the well's table now holds (``pipeline.nanowell_outlines``): this run's, and
     the kept timepoints' from the file they were kept from. Display data only, so a failure to write is logged and the
@@ -852,7 +884,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         return _run_with_prior(well_label, record, todo, prior, load_phase, settings, segmenter, channels, plate_rigid,
                                Path(prior_dir or output_dir) / NANOWELL_DIR / template_path.name, staging_dir,
                                settings_key, scratch_dir, tuple(pattern["grid"]) if described else None, placements,
-                               manual, tiles.release, reference, masks)
+                               manual, tiles.release, reference, masks, given, kept_located.__setitem__)
 
     def load_phase(tp, tile) -> np.ndarray | None:
         found = index.get((tp, tile))
@@ -878,6 +910,12 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
     # well re-run after a click segments only what the click changed (``pipeline.nanowell_masks``).
     masks = MaskStore(_masks_source(Path(prior_dir or output_dir), shared_kwargs_template["_nanowell"].get(
         "registration_from"), well_label), masks_path(output_dir / NANOWELL_DIR, well_label))
+    # A folder named as the registration to reuse gives every timepoint's located result, taken as it is (the run
+    # checked it fits before any well started: nanowell_located.refuse_unfitting_folder); this run's own are written
+    # beside its grid record for a later run to be given.
+    options = shared_kwargs_template["_nanowell"]
+    given = given_located(options["registration_from"], well_label) if _takes_located(options) else None
+    kept_located = _KeptLocated()
     try:
         return _finish_well(well_label, output_dir, fluor_tokens, csv_prefix, settings, record, timepoints,
                             digest, prior, todo, run, staging_dir, write_csv, template_path,
@@ -886,6 +924,7 @@ def process_well_zip(well_label, zip_path, output_dir, shared_kwargs_template, n
         log.info("Well %s — %s.", well_label, tiles.summary())
         tiles.close()
         _save_masks(well_label, masks)
+        _save_located(output_dir, well_label, kept_located, given)
 
 
 def _fluorescence_floor(block) -> dict:
@@ -1136,8 +1175,27 @@ def prepare_nanowell_run(options: dict, args, well_zips, refuse, input_dir, info
     (:func:`refuse_nanowell_without_zips`), record its blocks in the sidecar (:func:`record_nanowell_info`), and
     force the wells whose anchors changed since their last run (:func:`force_wells_with_new_anchors`)."""
     refuse_nanowell_without_zips(options, well_zips, refuse)
+    if options and _takes_located(options):
+        refuse_unfitting_folder(options["registration_from"], well_zips, _record_or_none, refuse)
     record_nanowell_info(info_path, options, input_dir)
     force_wells_with_new_anchors(options, args, input_dir, Path(info_path).parent)
+
+
+def _takes_located(options: dict) -> bool:
+    """Whether the run takes each timepoint's located result from a named folder (``--nanowell_registration_from``)
+    rather than locating it: a folder a person named, never one the app carried to a remote host on its own."""
+    return bool(options.get("registration_from")) and not options.get("registration_carried")
+
+
+def _record_or_none(zip_path) -> dict | None:
+    """The acquisition record beside *zip_path*, or ``None`` when there is none to read (the well fails on its own)."""
+    from util.acquisition_record import read_record_file
+
+    try:
+        return read_record_file(Path(zip_path).parent / "acquisition.json")
+    except Exception as exc:                      # the well itself reports it; this check has nothing to compare
+        log.debug("No acquisition record beside %s (%s: %s).", zip_path, type(exc).__name__, exc)
+        return None
 
 
 def force_wells_with_new_anchors(options: dict, args, input_dir, output_dir) -> None:
@@ -1174,7 +1232,7 @@ def record_nanowell_info(info_path, options: dict, input_dir) -> None:
     # Where registration may be reused from is not a setting of the results: positions are reused only when
     # registering again would give exactly them. A path here would also make two plates' settings differ for Merge
     # Plates, which compares these blocks.
-    settings = {k: v for k, v in options.items() if k != "registration_from"}
+    settings = {k: v for k, v in options.items() if k not in ("registration_from", "registration_carried")}
     block = {"nanowell": {"scheme_version": SCHEME_VERSION, "measure_version": nm.MEASURE_VERSION,
                           "settings": settings,
                           "conventions": {"origin": "top-left of the well frame, y down",

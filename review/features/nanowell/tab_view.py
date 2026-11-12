@@ -325,8 +325,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     st = ctx.state.feature_slice("nanowell")
     reg = ctx.widgets
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
+    plot_area, plot_layout, export_dock = make_plot_with_right_dock(parent)
     reg.register("_nanowell_export_dock", export_dock)
+    # The page is two columns: everything the page shows on the left — the band, the Subset's conditions, the guide,
+    # the figure and its footer — and the site detail on the right, from the top of the page to the bottom, the way
+    # the Heat Map's Layout panel sits beside its band and figure. The splitter lets the two share the width.
+    page_split = QSplitter(Qt.Horizontal, plot_area)
+    page_split.setChildrenCollapsible(False)
+    plot_layout.addWidget(page_split, 1)
+    main = QWidget(page_split)
+    layout = QVBoxLayout(main)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
     band = ControlBand(plot_area)
@@ -494,8 +502,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(build_window_strip(ctx, plot_area))
 
     # ── the figures ─────────────────────────────────────────────────────────
-    splitter = QSplitter(Qt.Horizontal, plot_area)
-    card = PlotCard(splitter, figsize=(_FIG_W, _FIG_H), constrained=False, header=False)
+    card = PlotCard(main, figsize=(_FIG_W, _FIG_H), constrained=False, header=False)
     card.setFigureTitle("")
     reg.register("_nw_card", card)
     reg.register("_nw_fig", card.figure)
@@ -536,7 +543,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     load_timer.timeout.connect(lambda: nwc.run_queued_load(ctx))
     reg.register("_nw_load_timer", load_timer)
 
-    detail = QWidget(splitter)
+    detail = QWidget(page_split)
     detail_layout = QVBoxLayout(detail)
     detail_layout.setContentsMargins(0, 0, 0, 0)
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
@@ -559,11 +566,18 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail_layout.addWidget(strip_card, 1)
     detail.hide()
     reg.register("_nw_detail_pane", detail)
-    splitter.addWidget(card)
-    splitter.addWidget(detail)
-    splitter.setStretchFactor(0, 3)
-    splitter.setStretchFactor(1, 2)
-    figures = wrap_with_empty_state(ctx.window, splitter, icon="hexagon", reason=nwc.nanowell_empty_reason)
+    page_split.addWidget(main)
+    page_split.addWidget(detail)
+    page_split.setStretchFactor(0, 3)
+    page_split.setStretchFactor(1, 2)
+    # The card goes into the empty-state stack inside a host of its own, as it went in inside the splitter before the
+    # detail moved out to the page's right column: a stack resizes its page directly while showing its placeholder, and
+    # the card as that page was laid out a few pixels across, so the first draw packed the swarms for no room at all.
+    figure_host = QWidget(main)
+    figure_layout = QVBoxLayout(figure_host)
+    figure_layout.setContentsMargins(0, 0, 0, 0)
+    figure_layout.addWidget(card)
+    figures = wrap_with_empty_state(ctx.window, figure_host, icon="hexagon", reason=nwc.nanowell_empty_reason)
     layout.addWidget(figures, 1)
     # A page too short for the Subset's conditions and the figures both (a phone held sideways) gives the editor
     # the page while it is open.
@@ -571,6 +585,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(build_details_panel(ctx, plot_area))  # the Distribution's footer, out of its figure
 
     show_detail = nw_phone.detail_placement(card, detail, detail_layout, strip_card,
+                                            desk=page_split, phone=(layout, figures),
                                             redraw_figure=lambda: nwc.redraw(ctx),
                                             refit_strip=lambda: nwc.refit_crop_strip(ctx),
                                             refit_ms=_REFIT_MS)

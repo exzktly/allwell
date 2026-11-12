@@ -34,13 +34,15 @@ def strip_columns_for(fig, crops) -> int:
     return strip_columns(len(crops), width * 0.94, height * 0.78)
 
 
-def detail_placement(card, detail, detail_layout, strip_card, *, redraw_figure: Callable[[], None],
+def detail_placement(card, detail, detail_layout, strip_card, *, desk, phone, redraw_figure: Callable[[], None],
                      refit_strip: Callable[[], None], refit_ms: int) -> Callable[[bool], None]:
-    """``show_detail(on)``: show the site detail beside the figure — or, in phone layout, instead of it.
+    """``show_detail(on)``: show the site detail as the page's right column — or, in phone layout, instead of the figure.
 
-    A phone is one column wide: beside the detail the figure was squeezed to a strip a few pixels wide, with no dot left
-    to tap. So there the detail takes the page while a nanowell is selected, and ✕ (which clears the selection) brings
-    the figure back. Switching phone layout with a nanowell selected re-places them at once, and the crop strip, which
+    At the desk the detail is the second pane of *desk*, the splitter whose first pane is the page's column (band,
+    figure, footer), so it runs from the top of the page to the bottom. A phone is one column wide: beside the detail
+    the figure was squeezed to a strip a few pixels wide, with no dot left to tap. So there the detail moves into the
+    page's column — *phone* is that column's layout and the figure's empty-state stack, whose place it takes — under
+    the band, while a nanowell is selected, and ✕ (which clears the selection) brings the figure back. Switching phone layout with a nanowell selected re-places them at once, and the crop strip, which
     wraps its crops to its own shape in phone layout (:func:`strip_columns_for`), is laid out again once a resize of it
     settles — the pane going full-screen, the phone turned.
 
@@ -49,11 +51,22 @@ def detail_placement(card, detail, detail_layout, strip_card, *, redraw_figure: 
     burst)."""
     from core.safe import swallow
 
+    column, figures = phone
+
+    def place(on_a_phone: bool) -> None:
+        # Reparenting hides a widget, so the caller sets the detail's visibility after this.
+        if on_a_phone and detail.parentWidget() is not column.parentWidget():
+            column.insertWidget(column.indexOf(figures) + 1, detail, 1)
+        elif not on_a_phone and detail.parentWidget() is not desk:
+            desk.addWidget(detail)
+
     def show_detail(on: bool) -> None:
-        detail.setVisible(on)
         phone = on_phone()
+        place(phone)
+        detail.setVisible(on)
         was_hidden = card.isHidden()
         card.setVisible(not (on and phone))
+        figures.setVisible(not (on and phone))
         if was_hidden and not card.isHidden():
             # Hidden, the figure was not drawn; it is drawn now that it is back. With the card as the timer's context,
             # Qt drops the call if the page is deleted before it runs.

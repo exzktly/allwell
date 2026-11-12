@@ -2359,7 +2359,8 @@ folder counts as in use when:
 
 - its app is still connected;
 - its Slurm job is still running, or `squeue` cannot be asked about it;
-- its process is still alive;
+- its process is still alive (a process that merely reuses its old process
+  number, started after the run, does not count);
 - it holds nanowell wells waiting for re-anchoring;
 - another run re-attached to it and is still going;
 - or something in it was written in the last 15 minutes.

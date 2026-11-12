@@ -58,7 +58,10 @@ at the moment of deletion.** A run folder is in use when its heartbeat is
 fresh; when ``squeue`` lists the job in its ``run.pid.slurm`` as alive, **or
 cannot say** (``squeue`` missing, failing for any reason other than "invalid
 job id", or the sidecar unreadable); when its ``run.pid`` is alive
-(``kill -0`` or ``ps -p``, so a process of another user still counts); when
+(``kill -0`` or ``ps -p``, so a process of another user still counts) and
+started no later than the file was written — a ``run.pid`` stays behind when
+its run ends, and a process that later reuses the number started after it, so
+it does not keep an old run (or the datasets it names) in use; when
 its ``keep/`` holds nanowell wells waiting for re-anchoring; when anything in
 it other than this module's own files was written in the last
 :data:`RECENT_WRITE_MIN` minutes; or when a run that re-attached to it
@@ -137,6 +140,13 @@ NOW_PROBE = ".aw_now"
 KEEP = "keep"
 #: A folder written to within this many minutes is treated as in use.
 RECENT_WRITE_MIN = 15
+
+#: How much later than its ``run.pid`` was written a live process with that PID
+#: may have started and still be taken for the run's own (seconds). The writer
+#: always starts first; the margin absorbs an NFS server whose clock stamps the
+#: file a little behind the probe ``$now`` is read from.
+PID_START_SLACK_S = 300
+
 #: The detailed listing runs ``du`` over every folder: minutes on a busy shared
 #: filesystem holding a few terabytes of plates.
 LISTING_TIMEOUT_S = 900.0
@@ -318,6 +328,13 @@ def _liveness_functions() -> str:
         f"_aw_fetched_current() {{ local o; [ -f \"$1/{RUN_FETCHED}\" ] && [ ! -L \"$1/{RUN_FETCHED}\" ] || return 1\n"
         f"  o=$(find \"$1\" -xdev -mindepth 1 -type f -newer \"$1/{RUN_FETCHED}\" ! -name '.aw_*' ! -name 'run.pid*' "
         f"! -path '*/{HEARTBEAT_DIR}/*' -print -quit 2>/dev/null) || return 1; [ -z \"$o\" ]; }}\n"
+        # A run.pid outlives its run, and the number in it is handed to the next process
+        # the node starts: a live process that started after the file was written is
+        # not the one that wrote it. Its age (ps etimes) is clock-free, and the file's
+        # mtime and $now are both the staging filesystem's clock. Unreadable: in use.
+        "_aw_pid_wrote() { local e t; e=$(ps -o etimes= -p \"$1\" 2>/dev/null | tr -cd '0-9')\n"
+        "  [ -n \"$e\" ] || return 0; t=$(_aw_mtime \"$2\"); [ -n \"$t\" ] || return 0\n"
+        f"  [ $((now - e)) -le $((t + {PID_START_SLACK_S})) ]; }}\n"
         "_aw_run_self_active() { local d=$1 h t z jid o r st p\n"
         f"  for h in \"$d/{HEARTBEAT_DIR}/alive\" \"$d/{LEGACY_UPLOAD_HEARTBEAT}\"; do\n"
         "    [ -e \"$h\" ] || continue; t=$(_aw_mtime \"$h\"); [ -n \"$t\" ] || return 0\n"
@@ -334,7 +351,8 @@ def _liveness_functions() -> str:
         "    else [ -n \"$aw_err\" ] && grep -qi 'invalid job id' \"$aw_err\" || return 0; fi\n"
         "  fi\n"
         "  if [ -s \"$d/run.pid\" ]; then p=$(head -c 32 \"$d/run.pid\" | tr -cd '0-9')\n"
-        "    if [ -n \"$p\" ]; then kill -0 \"$p\" 2>/dev/null && return 0; ps -p \"$p\" >/dev/null 2>&1 && return 0; fi\n"
+        "    if [ -n \"$p\" ] && { kill -0 \"$p\" 2>/dev/null || ps -p \"$p\" >/dev/null 2>&1; }; then\n"
+        "      _aw_pid_wrote \"$p\" \"$d/run.pid\" && return 0; fi\n"
         "  fi\n"
         "  _aw_recent \"$d\"; }\n"
         "_aw_run_active() { local b o; _aw_run_self_active \"$1\" && return 0\n"

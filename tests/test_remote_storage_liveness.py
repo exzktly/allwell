@@ -103,6 +103,21 @@ def _delete(cache, kind: str, name: str, **kw) -> str:
     return outcomes[(kind, name)]
 
 
+#: A ``ps`` that reports every process as 50 days old: the process named in a
+#: 40-day-old ``run.pid`` is then the one that wrote it, as a run's own is. The
+#: test process itself is minutes old, so without this it reads as a process
+#: that merely reuses the number (``_aw_pid_wrote``).
+_PS_AS_OLD_AS_THE_RUN = (
+    "ps() { if [ \"$1 $2\" = '-o etimes=' ]; then command ps \"$@\" >/dev/null 2>&1 && echo 4320000; "
+    "else command ps \"$@\"; fi; }\n")
+
+
+def _with_old_processes(cache):
+    real = cache._ssh_script
+    cache._ssh_script = lambda script, **kw: real(_PS_AS_OLD_AS_THE_RUN + script, **kw)
+    return cache
+
+
 def _shim(bin_dir: Path, name: str, body: str) -> None:
     bin_dir.mkdir(exist_ok=True)
     p = bin_dir / name
@@ -173,7 +188,7 @@ def test_a_run_s_live_pid_counts_even_when_it_has_a_scheduler_sidecar(staging, b
     (d / "run.pid").write_text(f"{os.getpid()}\n")
     _age(d / "run.pid")
     _shim(bin_dir, "squeue", "echo 'Invalid job id specified' >&2; exit 1\n")
-    assert _delete(_LocalCache(staging), "run", RUN) == "busy"
+    assert _delete(_with_old_processes(_LocalCache(staging)), "run", RUN) == "busy"
 
 
 # ── C2: a dataset a running run reads ───────────────────────────────────────
@@ -362,9 +377,65 @@ def test_a_live_pid_of_another_user_still_counts(staging):
     d = _run(staging, RUN)
     (d / "run.pid").write_text(f"{os.getpid()}\n")
     _age(d / "run.pid")
-    cache = _LocalCache(staging)
+    cache = _with_old_processes(_LocalCache(staging))
     real = cache._ssh_script
     cache._ssh_script = lambda script, **kw: real("kill() { return 1; }\n" + script, **kw)
+    assert _delete(cache, "run", RUN) == "busy"
+
+
+# ── a run.pid outlives its run, and its number is reused ────────────────────
+
+def _finished_run_whose_pid_was_reused(staging: Path, *, label: dict | None) -> Path:
+    """A run that ended 40 days ago and left its ``run.pid`` behind, naming a PID
+    some unrelated process now holds — here the test process, which started long
+    after the file was written. Slurm says the job is gone, as it does once a
+    finished job is purged."""
+    d = staging / "runs" / RUN
+    (d / "out").mkdir(parents=True)
+    (d / "out" / "A1_out.zip").write_bytes(b"x")
+    (d / rs.RUN_FETCHED).write_text("1")
+    if label is not None:
+        (d / rs.RUN_LABEL).write_text(json.dumps(label))
+    (d / "run.pid").write_text(f"{os.getpid()}\n")
+    (d / "run.pid.slurm").write_text("4242\n")
+    _age_tree(d)
+    return d
+
+
+def test_a_finished_run_whose_pid_was_reused_is_not_in_use(staging, bin_dir):
+    _finished_run_whose_pid_was_reused(staging, label={"run_id": RUN, "cache_key": KEY})
+    _shim(bin_dir, "squeue", "echo 'slurm_load_jobs error: Invalid job id specified' >&2; exit 1\n")
+    cache = _LocalCache(staging)
+    listed = {i.name: i for i in rs.list_storage(cache)[0].items}
+    assert listed[RUN].active is False
+    assert _delete(cache, "run", RUN) == "gone"
+
+
+@pytest.mark.parametrize("label", [
+    {"run_id": RUN, "cache_key": KEY},   # names the dataset
+    None,                                # names none, so it could be reading any
+], ids=["labelled", "unlabelled"])
+def test_a_dataset_is_not_held_by_a_finished_run_whose_pid_was_reused(staging, bin_dir, label):
+    """The report: an old dataset listed as *In use*, with old runs beside it."""
+    _dataset(staging, KEY)
+    _finished_run_whose_pid_was_reused(staging, label=label)
+    _shim(bin_dir, "squeue", "echo 'slurm_load_jobs error: Invalid job id specified' >&2; exit 1\n")
+    cache = _LocalCache(staging)
+    listed = {i.name: i for i in rs.list_storage(cache)[0].items}
+    assert (listed[RUN].active, listed[KEY].active) == (False, False)
+    assert _delete(cache, "dataset", KEY) == "gone"
+
+
+def test_a_live_pid_whose_age_cannot_be_read_still_counts(staging):
+    """A ``ps`` without ``etimes`` (BSD, busybox) cannot say when the process
+    started, so a live PID keeps the run in use, as it always did."""
+    _finished_run_whose_pid_was_reused(staging, label={"run_id": RUN, "cache_key": KEY})
+    (staging / "runs" / RUN / "run.pid.slurm").unlink()
+    cache = _LocalCache(staging)
+    real = cache._ssh_script
+    no_etimes = ("ps() { if [ \"$1 $2\" = '-o etimes=' ]; then echo 'ps: unknown -o field' >&2; return 1; "
+                 "else command ps \"$@\"; fi; }\n")
+    cache._ssh_script = lambda script, **kw: real(no_etimes + script, **kw)
     assert _delete(cache, "run", RUN) == "busy"
 
 

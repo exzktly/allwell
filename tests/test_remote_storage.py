@@ -165,7 +165,13 @@ def test_a_beating_run_is_in_use_and_survives_a_delete(tmp_path):
 
 
 def test_a_run_whose_pid_is_alive_is_in_use(tmp_path):
+    """Alive and as old as the run: ``ps`` reports every process 50 days old, so
+    the test process counts as the one that wrote the 40-day-old ``run.pid``."""
     cache = _LocalCache(tmp_path)
+    real = cache._ssh_script
+    cache._ssh_script = lambda script, **kw: real(
+        "ps() { if [ \"$1 $2\" = '-o etimes=' ]; then command ps \"$@\" >/dev/null 2>&1 && echo 4320000; "
+        "else command ps \"$@\"; fi; }\n" + script, **kw)
     for name, pid in ((RUN_ALIVE, os.getpid()), (RUN_GONE, 3_999_999)):
         run = _old_run(tmp_path, name)
         (run / "run.pid").write_text(f"{pid}\n")

@@ -2049,6 +2049,14 @@ while the upload is still going. If the node's job ends before it is ever grante
 the run asks for a node of its own instead and says so; a node that fails to boot
 is waited on while the request asks for another.
 
+**A long wait in the queue is not ended by the host going quiet.** While the
+node is queued, the app looks at it every 15 seconds, which on a busy cluster is
+hundreds of looks. When the login node does not answer one of them (*could not
+read the granted node's state … the remote did not answer within 60s*), the log
+says so once and the app looks again at the next poll; the job keeps its place
+in the queue, and the log says when the host answers again. Only **Release**,
+*Max queue wait* or the scheduler ending the job end the request.
+
 A run is told which node it is on in its log (*running on the granted node … — no
 queue wait*). A run that would outlast the node's time limit — its scheduler
 command's `--time`, scaled by its batches — gets a fresh node, with a fresh limit,

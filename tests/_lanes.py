@@ -345,6 +345,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_remote_commands_cannot_run_cut.py": "Every remote command line packed and every bash -s script grouped, so a cut or re-parsed one runs nothing; no rm outside the staging dir",
     "test_remote_hold_finds_slurm.py": "Requesting a granted node on a host whose Slurm tools are not on the control shell's PATH: the prelude that finds them, for every control script",
     "test_remote_hold_request.py": "Requesting a granted node: the sbatch sent, the queue wait, the boot retry, and giving the node back",
+    "test_a_long_queue_wait_survives_a_host_that_does_not_answer.py": "A granted-node request still queued keeps waiting through a look the host did not answer, instead of cancelling the job",
     "test_remote_hold_script.py": "The granted node's hold script, run under sh: release, idle, app-gone and time-limit endings, and what must not end it",
     "test_a_remote_run_says_how_it_ended.py": "A remote run says what ended it, and calls its job closed only once the host confirms it",
     "test_a_silent_remote_stream_is_noticed.py": "A remote run quiet for twenty minutes outside a queue wait is said and checked with the host",

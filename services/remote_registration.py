@@ -20,6 +20,12 @@ when its own output folder has none (``nanowell_task._masks_source``), so a re-r
 input changed. The Fetcher brings them back with each well's tables (``remote_fetch_nanowells._fetch_masks``), so a
 remote run's masks are here for the next one.
 
+When a person named the Reuse registration folder, each well's located timepoints (``<well>_located.npz``,
+``pipeline.nanowell_located``) are sent from it too, and the host takes them as they are, exactly as a local run
+does. When nobody did, the folder is only this computer's output folder carried along, and the host is told so
+(``--nanowell_registration_carried``, appended by ``RemoteRunner._build_remote_argv``): it then reuses each
+placement and mask only where it fits, and locates every timepoint.
+
 Nothing is trusted for having been sent: the host takes a stored placement only when its key matches what it would
 compute from the images it has, so a record from other images, another plate or an older algorithm is ignored there
 exactly as it would be here. A failed upload costs only the reuse, never the run.
@@ -30,19 +36,21 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from pathlib import Path
 
-from services.remote_fetch_nanowells import MASKS_SUFFIX, NANOWELL_DIR
+from services.remote_fetch_nanowells import LOCATED_SUFFIX, MASKS_SUFFIX, NANOWELL_DIR
 from services.remote_run_id import _parse_argv_flags
 from util.aw_safe import swallow
 
 REG_DIR = "reg"
-#: What is sent of each well, by suffix: its grid record (the registration) and its cell masks.
-SENT_SUFFIXES = ("_grid.json", MASKS_SUFFIX)
+#: What is sent of each well, by suffix: its grid record (the registration) and its cell masks, each from the first
+#: folder that has it, and — from a folder a person named only — its located timepoints.
+SENT_SUFFIXES = ("_grid.json", MASKS_SUFFIX, LOCATED_SUFFIX)
 
 
 def local_grids(pipeline_argv, wells: Iterable[str]) -> list[Path]:
     """Each of *wells*' grid record and cell masks on this computer, each from the first folder that has it: the Reuse
-    registration folder (``--nanowell_registration_from``), then the run's output folder. Empty for a run that is not
-    a nanowell run."""
+    registration folder (``--nanowell_registration_from``), then the run's output folder; and its located timepoints
+    (``pipeline.nanowell_located``) from the Reuse registration folder alone, because the host takes those as they
+    are, which only a folder a person named may be. Empty for a run that is not a nanowell run."""
     if "--nanowell_format" not in [str(a) for a in pipeline_argv]:
         return []
     flags = _parse_argv_flags(pipeline_argv, multi=set(),
@@ -50,9 +58,10 @@ def local_grids(pipeline_argv, wells: Iterable[str]) -> list[Path]:
     folders = [Path(f).expanduser() for f in (flags.get("--nanowell_registration_from"), flags.get("--output_dir"))
                if f]
     found = []
+    named = folders[:1] if flags.get("--nanowell_registration_from") else []
     for well in sorted(set(wells)):
         for suffix in SENT_SUFFIXES:
-            for folder in folders:
+            for folder in (named if suffix == LOCATED_SUFFIX else folders):
                 path = folder / NANOWELL_DIR / f"{well}{suffix}"
                 if path.is_file():
                     found.append(path)
@@ -75,8 +84,9 @@ def send_registration(cache, run_dir: str, pipeline_argv, wells: Iterable[str],
         if rc == 0:
             wells_sent = len({p.name[: -len(sfx)] for p in grids for sfx in SENT_SUFFIXES if p.name.endswith(sfx)})
             masks = sum(1 for p in grids if p.name.endswith(MASKS_SUFFIX))
-            log(f"[remote] stored registration sent for {wells_sent} well(s), cell masks for {masks}; the host reuses "
-                f"each placement and mask whose images and settings still match\n")
+            located = sum(1 for p in grids if p.name.endswith(LOCATED_SUFFIX))
+            log(f"[remote] stored registration sent for {wells_sent} well(s), cell masks for {masks}, located "
+                f"timepoints for {located}\n")
             return reg
         log(f"[remote] warn: the wells' stored registration could not be sent (rsync rc={rc}); the host registers "
             f"their tiles again\n")

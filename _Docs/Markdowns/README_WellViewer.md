@@ -388,20 +388,21 @@ condition *On a tile seam*). A nanowell near the scan's outer edge, inside one t
 counted on that tile and flagged the same way.
 
 **Reuse registration** (a folder and a **Browse…** button) is for analysing a plate a second time with other
-segmentation or measurement settings — another cell diameter, margin, or occlusion or clipping threshold — without
-registering every tile again. Name the earlier run's output folder. For each well and timepoint, the run takes the
-tile positions that run stored in `nanowells/<well>_grid.json` only when they were made from exactly the same
-inputs: the same images, the same acquisition record, the same plate format, geometry and measured lattice pitch,
-and the same version of the registration step. Anything else is registered again, so the positions are always the
-ones registering would give, and reusing them changes nothing but the time a run takes. Left blank, the output
-folder's own earlier registration is reused the same way, so re-running a plate into the folder it was analysed
-into keeps its registration too. Registration is only stored this way by runs from this version on: a folder
-analysed by an earlier version has nothing to reuse, and its first re-run registers every tile. The run log says
-`registration reused from <folder>` for each well that took it, and each timepoint's grid record names the folder
-(`registration.reused_from`). Run refuses to start when the folder is not a nanowell run's output folder. On a
-**remote host** the same reuse happens: before the run starts, each well's grid record on this computer — from this
-folder, else from the output folder — is sent to the host (`stored registration sent for N well(s)` in the log), and
-the host takes each placement under the same rule, so re-running a well remotely does not register it again.
+segmentation or measurement settings — another cell diameter, margin, Cellpose model, or occlusion or clipping
+threshold — without locating it again. Name the earlier run's output folder, and the run takes that run's result for
+every timepoint as it is: the tile positions, the lattice, the central square and every nanowell's address
+(`nanowells/<well>_located.npz`, which every run writes). Nothing is located; the run goes straight to counting
+cells. Nothing about the images or settings is compared either, so name only a folder from this plate. What the run
+does check, before any well starts, is that the folder fits the plate: a result for every timepoint of every well
+being analysed, covering the same tiles the acquisition record lists. When it does not, the run stops and names each
+well and timepoint that does not fit. A folder analysed before located results were kept has none, so it is refused
+the same way — re-analyse that plate once without the field to give it one. The log says, per well, how many
+timepoints were taken and from where, and each taken timepoint's grid record names the folder (`located_from`,
+`registration.reused_from`). Left blank, a plate re-run into the folder it was analysed into reuses that folder's own
+tile registration only where it was made from exactly the same images and settings, and locates the rest. Run
+refuses to start when the folder is not a nanowell run's output folder. On a **remote host** the same happens:
+before the run starts, each well's located timepoints from this folder (and its grid record and cell masks) are sent
+to the host (`stored registration sent for N well(s)` in the log), which takes them as they are.
 
 **Test detection…** runs registration and detection on one well at one timepoint, in the background, and opens a
 window with the montage: every nanowell outlined (green empty, blue holding cells, amber occluded, red
@@ -444,8 +445,8 @@ angle of the central square's edges to a lattice row (default 0). `--nanowell_ge
 its contrast and infers the lattice kind (hexagonal or square), pitch, orientation and outline, as *Infer from
 the image* does on the form; without it (`hex_circle`) the array is a hexagonal lattice in a circle.
 `--nanowell_cellpose_model` chooses the counting model (`cpsam`, the default; `cyto3` or `livecell_cp3` on a
-Cellpose 3 install), as **Cellpose model** does on the form. `--nanowell_registration_from <folder>` reuses an earlier run's tile registration, as **Reuse
-registration** does on the form. Wells must be zips.
+Cellpose 3 install), as **Cellpose model** does on the form. `--nanowell_registration_from <folder>` takes an earlier run's tile positions and addresses as they
+are, as **Reuse registration** does on the form. Wells must be zips.
 
 The output folder holds the same files a standard run writes, `pipeline_info.json` and, per well,
 `<prefix>_<well>.csv.gz` and `<well>_out.zip`, with a `nanowells/` folder beside them for what only a nanowell run
@@ -473,6 +474,9 @@ In `nanowells/`, per well:
 - `<well>_outlines.npz`: the outline of every cell the run counted, which the Nanowells crops draw when **Cells** is
   on. Only Review reads it; deleting it turns the outlines back into dots. A remote run fetches it back with the
   well's tables.
+- `<well>_located.npz`: what locating each timepoint found (its tile positions, lattice, central square, origin and
+  every nanowell's address). A later run with this folder named as **Reuse registration** takes it as it is instead
+  of locating the plate again. A remote run fetches it back with the well's tables.
 - `<well>_masks.npz`: the cell masks Cellpose returned, kept so a re-run of the well — after an anchor is set, or
   with settings that do not change what Cellpose is shown — segments only what it has not seen. Each is taken back
   only for the exact pixels, scaling and model it was made from; anything else is segmented again. Deleting the file

@@ -12092,35 +12092,63 @@ own pixels still wins over the agreement, with a registration warning. The reloc
 name (`<well>_<tp>_agreed`), since the first is still mapped. A kept timepoint is never registered again here: an
 incremental run takes it as it was, and only a full re-run puts it right.
 
-**Registration reuse** (`nanowell_run.registration_key`, `stored_placement`, `Placement`). A plate analysed a
-second time with other segmentation or measurement settings does not register its tiles again. Every grid block
-that carries `tiles` also carries a `registration` block: the key the placement was solved under, the
-registration's own warnings, how many tiles' lattice fits constrained it, `reused_from` (the folder it was
-taken from, or `null` when this run solved it) and `steps` (each lattice pair's whole-vector choice: where it came
-from and how far it moved from the stage's own pick). The key digests everything registration reads:
-`REGISTRATION_SCHEME` (raise it whenever `tile_register` or the per-tile fits could move a tile), the timepoint's
-`record_digest`, every tile's pixels, the geometry, nominal pitch and diameter, the working pitch and lattice
-kind measured on the timepoint, and the agreed tile offsets when the timepoint is registered again with them — and
-nothing that acts after registration (cell diameter, margin, square edge,
-occlusion and clipping thresholds, the segmenter). `locate_timepoint` computes the key once the working pitch is
-measured and takes the first stored placement under it for exactly the plan's tiles, skipping the per-tile fits
-and `register_tiles`; otherwise it registers. So reuse is a cache whose hits are the positions registering would
-give, which is why the source folder is outside `util.settings_digest.KEYED_ON` (listed in `NOT_KEYED_ON`), the
-remote run digest (`services.remote_run_id._DIGEST_SKIP_VALUE`) and the sidecar's `nanowell.settings` (Merge
-Plates compares those blocks). `nanowell_task.stored_placements` gathers the candidates per timepoint from the
-folder named by `--nanowell_registration_from` (the form's *Reuse registration*, key
-`nanowell_registration_from`, refused unless it holds `nanowells/`) and then the output folder itself, read
-before the run rewrites its grid record; `_log_reused_registration` logs one line per well that took any. A
-remote run cannot read either folder (its output folder on the host is a fresh one), so
-`services.remote_registration.send_registration`, called once the run's address is fixed (`RemoteRunner`'s single-shot
-preparation and `_BatchedRemoteProcess.__init__`), uploads each sent well's grid record from the first local folder
-holding one — the Reuse registration folder, then the local output folder — and its cell masks (`<well>_masks.npz`,
-chosen the same way) into `<run_dir>/reg/nanowells/` and
-records `_RemoteRun.registration_dir`; `RemoteRunner._build_remote_argv` drops the local folder's flag and appends
-`--nanowell_registration_from <run_dir>/reg` instead. Nothing is trusted for having been sent: the host applies the
-same key, and a failed upload costs only the reuse. Grid records written before the key existed carry no `registration` block and are never reused.
-`tests/test_reuse_is_keyed_completely.py` mutates each key input alone; `tests/test_nanowell_registration_reuse.py`
-drives the reuse through `process_microscopy.main`.
+**A named folder is taken as it is** (`pipeline/nanowell_located.py`, `nanowell_run._given_or_located`,
+`_rebuilt`). Every run writes what locating each timepoint found — the `Located` it adopted, registration, lattice
+fit, detected sites, outline, square, origin and addresses — to `nanowells/<well>_located.npz`
+(`nanowell_task._KeptLocated`, `_save_located`; after a failure too). It is captured as each timepoint is adopted
+(`run_well`'s `keep_located`), so a timepoint located again with the well's agreed tile layout, or by the end-of-run
+pass from the plate's motion, keeps that last locate, and before the well's later steps (shared roster, diameter,
+a lattice-step frame shift) adjust it in place, because a run that takes it applies them again as the first run did;
+a re-registered timepoint's `tile_layout` note is put on its grid block and kept with it. A timepoint the run did not
+locate (an incremental run's kept ones) keeps its earlier entry. Entries are JSON with every type tagged and the
+arrays beside it, decoded only into the classes `_CLASSES` names (no pickle); a dict or list met twice decodes to one
+object again (the `Located`'s `fiducial` is its grid block's). The montage is not kept but rebuilt from the kept
+positions and the images, nor the tile plan, rebuilt from the record (`_tile_plan`).
+
+A run given `--nanowell_registration_from <folder>` (the form's *Reuse registration*, key
+`nanowell_registration_from`, refused unless it holds `nanowells/`) takes each timepoint from that folder's file
+(`nanowell_located.given_located`, *given_located*) and does not locate it; nothing about the images or settings is
+compared, because naming the folder says these are this plate's positions and addresses. The end-of-run pass
+(*plate_rigid*) and a relocate with the agreed layout (*preferred*) still locate, since they decide what the earlier
+result did not. What is checked is that the folder fits: `nanowell_task.prepare_nanowell_run` calls
+`refuse_unfitting_folder` before any well starts, and the run exits naming every well whose file is missing or
+unreadable and every timepoint that has no entry or whose kept tiles are not the tiles the acquisition record lists,
+rather than locating some timepoints and taking others. A hit's grid block names the folder (`located_from`, and
+`registration.reused_from`), and the log says per well how many timepoints were taken. The folder is outside
+`util.settings_digest.KEYED_ON` (`NOT_KEYED_ON` says why), the remote run digest
+(`services.remote_run_id._DIGEST_SKIP_VALUE`) and the sidecar's `nanowell.settings` (Merge Plates compares those).
+
+**Registration reuse without a named folder** (`nanowell_run.registration_key`, `stored_placement`, `Placement`).
+Re-run in place, a well reuses its output folder's own earlier tile registration, under a key. Every grid block that
+carries `tiles` also carries a `registration` block: the key the placement was solved under, the registration's own
+warnings, how many tiles' lattice fits constrained it, `reused_from` (the folder it was taken from, or `null` when
+this run solved it) and `steps` (each lattice pair's whole-vector choice: where it came from and how far it moved
+from the stage's own pick). The key digests everything registration reads: `REGISTRATION_SCHEME` (raise it whenever
+`tile_register` or the per-tile fits could move a tile), the timepoint's `record_digest`, every tile's pixels, the
+geometry, nominal pitch and diameter, the working pitch and lattice kind measured on the timepoint, and the agreed
+tile offsets when the timepoint is registered again with them — and nothing that acts after registration (cell
+diameter, margin, square edge, occlusion and clipping thresholds, the segmenter). `locate_timepoint` computes the key
+once the working pitch is measured and takes the first stored placement under it for exactly the plan's tiles,
+skipping the per-tile fits and `register_tiles`; otherwise it registers. `nanowell_task.stored_placements` gathers
+the candidates per timepoint from the folder `--nanowell_registration_from` names and then the output folder itself,
+read before the run rewrites its grid record; `_log_reused_registration` logs one line per well that took any. Grid
+records written before the key existed carry no `registration` block and are never reused.
+
+**On a remote host** neither folder is readable (the host's output folder is a fresh one), so
+`services.remote_registration.send_registration`, called once the run's address is fixed (`RemoteRunner`'s
+single-shot preparation and `_BatchedRemoteProcess.__init__`), uploads each sent well's grid record and cell masks
+(`<well>_masks.npz`) from the first local folder holding them — the Reuse registration folder, then the local output
+folder — and its located timepoints (`<well>_located.npz`) from the Reuse registration folder alone, into
+`<run_dir>/reg/nanowells/`, and records `_RemoteRun.registration_dir`. `RemoteRunner._build_remote_argv` drops the
+local folder's flag and appends `--nanowell_registration_from <run_dir>/reg` instead; when nobody named a folder it
+also appends `--nanowell_registration_carried` (`nanowell_task._takes_located`), so the host treats the carried
+output folder as the in-place case — placements and masks reused under their keys, every timepoint located — and
+never takes it as it is. A failed upload costs only the reuse. The Fetcher brings `<well>_located.npz` back with the
+masks (`remote_fetch_nanowells._fetch_masks`), and an adopted batch well brings it (`remote_batch_resume._NANOWELL_FILES`).
+`tests/test_nanowell_located_reuse.py` runs a well both ways through `process_microscopy.main` and compares the grid
+record and table, refuses an unfitting folder, and takes a well whose timepoints disagreed; `tests/test_reuse_is_keyed_completely.py`
+mutates each registration key input alone; `tests/test_nanowell_registration_reuse.py` drives the keyed reuse through
+`process_microscopy.main`.
 
 **Outputs** (`pipeline/nanowell_task.py`). The per-cell CSV keeps the existing columns (`fov` is the owner
 tile) and adds `nw_q`, `nw_r`, `nw_ring`, `nw_label`, `well_x_um`, `well_y_um`. `timepoint_hours` sits beside the
@@ -12564,7 +12592,8 @@ pipeline's 15 µm) and puts a dataset that was no nanowell run back on the prefi
 (`tests/test_nanowell_count_settings_sit_with_segmentation.py`). *Reuse registration* (a path
 and a Browse button, key `nanowell_registration_from`) sends `--nanowell_registration_from` when filled; a folder
 without `nanowells/` is refused (`registration_from_error`), and with a remote host chosen the run goes on and the log
-says once that its wells' grid records are sent to the host (`_nanowell_log_once`, `services.remote_registration`). Its option keys are
+says once that its wells' located timepoints are sent to the host, which takes them as they are (`_nanowell_log_once`,
+`services.remote_registration`). Its option keys are
 the pipeline's destinations (`nanowell_format` and so on), so a job's `opts`, the argv, and a sidecar's
 `execution_options` all name the same things and the edit-a-queued-job round trip and the sidecar restore
 need no translation; a sidecar that states `nanowell_format: null` switches the mode off, and one that

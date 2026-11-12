@@ -810,9 +810,11 @@ def test_an_adopted_nanowell_well_brings_its_cell_masks(tmp_path, monkeypatch):
     _finished_on(old / "out", "A02")
     (old / "out" / "nanowells").mkdir(parents=True, exist_ok=True)
     (old / "out" / "nanowells" / "A01_masks.npz").write_bytes(b"masks")
+    (old / "out" / "nanowells" / "A01_located.npz").write_bytes(b"located")
 
     _run(p, monkeypatch)
 
     assert p._returncode == 0, p._logged
     assert (run_dir / "out" / "nanowells" / "A01_masks.npz").read_bytes() == b"masks"
+    assert (run_dir / "out" / "nanowells" / "A01_located.npz").read_bytes() == b"located"
     assert not (run_dir / "out" / "nanowells" / "A02_masks.npz").exists()

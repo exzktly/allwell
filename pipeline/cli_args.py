@@ -552,13 +552,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--nanowell_pixel_size_um", type=float, default=None,
                    help="With --nanowell_grid: the image pixel size in micrometres.")
     p.add_argument("--nanowell_registration_from", default=None,
-                   help=("An earlier nanowell run's output folder whose tile registration this run reuses, so a "
-                         "second analysis with other segmentation or measurement settings does not register the "
-                         "tiles again. A timepoint's stored registration is used only when it was made from exactly "
-                         "this run's inputs (the same images, acquisition record, plate geometry and registration "
-                         "algorithm); any other is registered afresh, so the positions are always the ones "
-                         "registering would give. The output folder's own earlier registration is reused the same "
-                         "way without this flag."))
+                   help=("An earlier nanowell run's output folder whose located timepoints this run takes as they "
+                         "are — every tile position, the lattice, the central square and every nanowell's address "
+                         "(nanowells/<well>_located.npz) — so a second analysis with other segmentation or "
+                         "measurement settings locates nothing again. The run stops before any well starts unless "
+                         "the folder holds a located result for every timepoint of every well it analyses, over the "
+                         "tiles the acquisition record lists. Without this flag the output folder's own earlier "
+                         "registration is reused when it was made from exactly this run's inputs."))
+    p.add_argument("--nanowell_registration_carried", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--nanowell_hold_dir", default=None,
                    help=("One batch of a batched run: leave the end-of-run re-anchoring to the run's final pass "
                          "(--nanowell_reanchor_only) and link into this folder the archive of every well it could "
@@ -740,6 +741,10 @@ def nanowell_options_from_args(args, error) -> dict | None:
             error(f"--nanowell_registration_from {source} is not a nanowell run's output folder: it has no "
                   "nanowells/ folder of grid records to reuse.")
         options["registration_from"] = str(source)
+        # A folder the app carried to a remote host from this computer's output folder, which nobody named: its
+        # records are reused only where they fit (``services.remote_registration``), never taken as they are.
+        if args.nanowell_registration_carried:
+            options["registration_carried"] = True
     return options
 
 

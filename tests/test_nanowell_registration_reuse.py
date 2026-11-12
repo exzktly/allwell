@@ -151,16 +151,23 @@ def test_re_running_a_plate_in_place_with_other_segmentation_keeps_its_registrat
     assert _block(out)["tiles"] == tiles
 
 
-def test_a_corrected_image_is_registered_again_even_with_the_same_record(tmp_path, monkeypatch, rendered_well):
+def test_a_corrected_image_is_registered_again_when_no_folder_is_named(tmp_path, monkeypatch, rendered_well):
+    """Re-run in place, the output folder's own registration is reused only under its key: one tile's pixels changed,
+    the record the same, and the tiles are registered again. (A folder *named* is taken as it is:
+    ``test_nanowell_located_reuse``.)"""
     rendered, record = rendered_well
-    first = _run(monkeypatch, _write_plate(tmp_path / "a", rendered, record), "out")
+    plate = _write_plate(tmp_path / "a", rendered, record)
+    first = _run(monkeypatch, plate, "out")
+    before = _block(first)["registration"]["key"]
+    corrected = _write_plate(tmp_path / "b", rendered, record, nudge_tile=sorted(rendered.images)[0])
+    import shutil
+
+    shutil.copytree(first, corrected / "out")
     counter = _CountingRegister(monkeypatch)
-    # The same record, one tile's pixels changed: the stored registration was made from other images.
-    plate = _write_plate(tmp_path / "b", rendered, record, nudge_tile=sorted(rendered.images)[0])
-    second = _run(monkeypatch, plate, "out", "--nanowell_registration_from", str(first))
+    second = _run(monkeypatch, corrected, "out", "--nanowell_cell_diameter_um", "11")
     assert counter.calls == 1
     assert _block(second)["registration"]["reused_from"] is None
-    assert _block(second)["registration"]["key"] != _block(first)["registration"]["key"]
+    assert _block(second)["registration"]["key"] != before
 
 
 def test_a_folder_that_is_not_a_nanowell_run_is_refused_by_name(tmp_path, monkeypatch, rendered_well):
@@ -203,7 +210,8 @@ def test_a_host_given_only_the_sent_grid_record_reuses_the_registration(tmp_path
     argv = ["py", "pm.py", "--output_dir", str(first), "--nanowell_format", "100um"]
     reg = send_registration(cache, str(host), argv, [WELL], lambda _m: None)
     assert sorted(p.name for p in Path(reg).rglob("*") if p.is_file()) == [f"{WELL}_grid.json", f"{WELL}_masks.npz"]
-    second = _run(monkeypatch, plate, "fresh_out", "--nanowell_registration_from", reg)
+    # What RemoteRunner._build_remote_argv sends with a folder nobody named: reused where it fits, never taken.
+    second = _run(monkeypatch, plate, "fresh_out", "--nanowell_registration_from", reg, "--nanowell_registration_carried")
     assert counter.calls == 1, "the host registered the tiles again"
     assert len(calls) == segmented, "the host segmented crops whose masks it was sent"
     assert _block(second)["registration"]["reused_from"] == reg

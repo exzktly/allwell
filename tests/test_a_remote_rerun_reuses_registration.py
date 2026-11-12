@@ -48,6 +48,19 @@ def test_each_sent_well_takes_the_first_local_folder_that_has_its_record(tmp_pat
     assert local_grids(_argv(out, nanowell=False), ["A01"]) == []
 
 
+def test_located_timepoints_are_sent_only_from_a_folder_a_person_named(tmp_path):
+    """The host takes located timepoints as they are, so they come only from the Reuse registration folder — never
+    from the output folder, which the run carries along whether or not anyone asked."""
+    out, reg = tmp_path / "out", tmp_path / "earlier"
+    grid = _grid(out, "A01")
+    (out / "nanowells" / "A01_located.npz").write_bytes(b"npz")
+    assert local_grids(_argv(out), ["A01"]) == [grid]
+    (reg / "nanowells").mkdir(parents=True)
+    named = reg / "nanowells" / "A01_located.npz"
+    named.write_bytes(b"npz")
+    assert local_grids(_argv(out, reg), ["A01"]) == [grid, named]
+
+
 class _Cache:
     def __init__(self, rc=0):
         self.rc, self.ssh, self.sent = rc, [], []
@@ -69,7 +82,7 @@ def test_the_records_go_to_the_run_s_own_folder_and_a_failed_upload_names_none(t
     assert cache.ssh == [["mkdir", "-p", "~/.st/runs/run-x/reg/nanowells"]]
     assert cache.sent[0][:2] == ([grid], "~/.st/runs/run-x/reg/nanowells")
     assert "log_fn" not in cache.sent[0][2], "a grid record logged as an upload reads as a well to the progress view"
-    assert "stored registration sent for 1 well(s), cell masks for 0" in "".join(logged)
+    assert "stored registration sent for 1 well(s), cell masks for 0, located timepoints for 0" in "".join(logged)
     failed = _Cache(rc=23)
     assert send_registration(failed, "/r", _argv(out), ["A01"], logged.append) == ""
     assert "could not be sent (rsync rc=23)" in logged[-1]
@@ -88,6 +101,12 @@ def test_the_host_s_argv_names_the_sent_folder_and_never_the_local_one():
     remote = runner._build_remote_argv(local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP)
     assert "/local/earlier" not in remote
     assert remote[remote.index("--nanowell_registration_from") + 1] == "~/.st/runs/run-x/reg"
+    assert "--nanowell_registration_carried" not in remote, "a folder a person named was sent as one nobody named"
+    carried = runner._build_remote_argv(_argv(Path("/local/out")), "/r/in", "/r/out", OutputFilter.FULL,
+                                        LocalInputMode.ZIP)
+    assert carried[carried.index("--nanowell_registration_from") + 1] == "~/.st/runs/run-x/reg"
+    assert "--nanowell_registration_carried" in carried, (
+        "this computer's output folder, carried with nobody naming it, would be taken as it is on the host")
     runner._run = types.SimpleNamespace(registration_dir="")
     remote = runner._build_remote_argv(local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP)
     assert "--nanowell_registration_from" not in remote
@@ -134,11 +153,12 @@ def test_both_remote_run_paths_send_the_records():
 
 
 def test_the_restated_names_match_the_pipeline_s():
+    from pipeline.nanowell_located import LOCATED_SUFFIX
     from pipeline.nanowell_masks import MASKS_SUFFIX
     from pipeline.nanowell_task import NANOWELL_DIR
     from services import remote_fetch_nanowells as rfn
 
-    assert (rfn.MASKS_SUFFIX, rfn.NANOWELL_DIR) == (MASKS_SUFFIX, NANOWELL_DIR)
+    assert (rfn.MASKS_SUFFIX, rfn.LOCATED_SUFFIX, rfn.NANOWELL_DIR) == (MASKS_SUFFIX, LOCATED_SUFFIX, NANOWELL_DIR)
 
 
 def test_a_fetched_well_brings_its_masks_back_without_counting_them_against_its_tables(tmp_path):

@@ -26,10 +26,14 @@ import math
 import time
 from pathlib import Path
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from pipeline.nanowell_outlines import OUTLINE_COLUMN, encode_outlines, extend_aligned
+
+if TYPE_CHECKING:
+    from pipeline.tile_grid import GridPlan
 
 #: The plate formats the pipeline knows: (lattice pitch, nanowell diameter), micrometres. The pitch is nominal: it
 #: seeds :func:`working_pitch`, a lattice search on the tiles from half to twice it, and the pitch measured there
@@ -549,15 +553,14 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     from pipeline.nanowell_detect import detect_sites, estimate_lattice_fft
     from pipeline.nanowell_lattice import index_points, resolve_origin
     from pipeline.nanowell_sites import check_format
-    from pipeline.tile_grid import OK as GRID_OK, place_from_record, tiles_from_record
+    from pipeline.tile_grid import OK as GRID_OK, tiles_from_record
     from pipeline.tile_register import TileObservation, build_montage, register_tiles
 
     found = tiles_from_record(record, well, timepoint)
     if found is None:
         return Located(timepoint, NO_RECORD, f"The acquisition record has no tiles for {well} at {timepoint}")
     tiles, tile_size, pixel_size, overlap = found
-    plan = place_from_record(tiles, tile_size_px=tile_size, pixel_size_um=pixel_size,
-                             declared_overlap_percent=overlap, expected_shape=expected_shape)
+    plan = _tile_plan(record, well, timepoint, expected_shape)
     if plan.status != GRID_OK:
         status = INCOMPLETE_GRID if plan.status == "incomplete_grid" else BAD_GRID
         return Located(timepoint, status, plan.reason, _grid_block(plan, None, {"status": status}), plan)
@@ -671,6 +674,38 @@ def locate_timepoint(timepoint: str, record: dict, well: str, images: dict, sett
     located.indexed = index_points(detection.points_um, detection.fit, resolved.origin_xy)
     located.grid = _grid_block(plan, registration, {**seed, **_lattice_block(located, OK, resolved.reason)},
                                warnings)
+    return located
+
+
+def _tile_plan(record: dict, well: str, timepoint: str, expected_shape=None) -> GridPlan | None:
+    """The tile plan the record gives the (well, timepoint) (``tile_grid.place_from_record``), or ``None`` when the
+    record has no tiles for it."""
+    from pipeline.tile_grid import place_from_record, tiles_from_record
+
+    found = tiles_from_record(record, well, timepoint)
+    if found is None:
+        return None
+    tiles, tile_size, pixel_size, overlap = found
+    return place_from_record(tiles, tile_size_px=tile_size, pixel_size_um=pixel_size,
+                             declared_overlap_percent=overlap, expected_shape=expected_shape)
+
+
+def _rebuilt(given: dict, record: dict, well: str, timepoint: str, images: dict, expected_shape=None) -> Located:
+    """A ``Located`` from an earlier run's located result (``pipeline.nanowell_located``), taken as it is: its tile
+    plan rebuilt from the record and its montage from the kept positions and *images*. Its grid block names the folder
+    it was taken from (``located_from``), and its registration the same folder."""
+    from pipeline.tile_register import build_montage
+
+    given = dict(given)
+    folder = given.pop("_reused_from")
+    located = Located(**given)
+    located.plan = _tile_plan(record, well, timepoint, expected_shape)
+    if located.positions:
+        located.montage = build_montage(images, located.positions, located.pixel_size_um)
+    if located.grid:
+        located.grid["located_from"] = folder
+        if isinstance(located.grid.get("registration"), dict):
+            located.grid["registration"]["reused_from"] = folder
     return located
 
 
@@ -2746,6 +2781,32 @@ def _agree_tile_layouts(outcome: WellOutcome, timepoints, kept_layouts, locate, 
             "compared_with": sorted(name for name in layouts if name != tp)}
 
 
+def _keep_nothing(_timepoint, _located) -> None:
+    """``run_well``'s *keep_located* when the caller keeps nothing."""
+
+
+def _keep_tile_layouts(outcome: WellOutcome, timepoints, keep_located) -> None:
+    """Put each re-registered timepoint's ``tile_layout`` (``_agree_tile_layouts``) on its ``Located``'s grid block and
+    keep it again, so a run given this located result records why its tiles were registered again, as this run does."""
+    for tp in timepoints:
+        layout = (outcome.timepoints.get(tp) or {}).get("tile_layout")
+        if layout is None or outcome.located[tp].grid is None:
+            continue
+        outcome.located[tp].grid["tile_layout"] = layout
+        keep_located(tp, outcome.located[tp])
+
+
+def _given_or_located(given_located, tp, rigid, preferred, record, well, images, settings, expected_shape, stored,
+                      manual_anchor_um) -> Located:
+    """*tp*'s earlier located result from *given_located*, taken as it is, or *tp* located here: the end-of-run pass
+    (*rigid*) and a locate with the well's agreed tile layout (*preferred*) decide something the earlier result did
+    not, so they always locate."""
+    if rigid is None and preferred is None and tp in (given_located or {}):
+        return _rebuilt(given_located[tp], record, well, tp, images, expected_shape)
+    return locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape, plate_rigid=rigid,
+                            stored=stored, manual_anchor_um=manual_anchor_um, preferred=preferred)
+
+
 def run_well(well: str, record: dict, timepoints, load_phase, settings: NanowellSettings, *,
              segmenter=None, channels: dict | None = None, plate_rigid: dict | None = None,
              expected_shape=None, fixed_radius_um: float | None = None, checkpoint=None,
@@ -2753,7 +2814,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
              kept_evidence: dict | None = None, stored_placements: dict | None = None,
              manual_anchors: Mapping = MappingProxyType({}), progress=None, site_progress=None,
              note=None, kept_layouts: dict | None = None, release=None, confluence_reference=None,
-             mask_store=None) -> WellOutcome:
+             mask_store=None, given_located: Mapping | None = None, keep_located=_keep_nothing) -> WellOutcome:
     """Locate every timepoint, agree on one array radius, then measure each against it.
 
     *load_phase* is ``f(timepoint, tile_id) -> image | None``; *channels* maps a fluorescence name to
@@ -2788,7 +2849,11 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     the count is Cellpose's, *segmenter* ``None``). *release*, when given, is ``f(timepoint)``, called once nothing
     will read that timepoint's tiles again (``pipeline.nanowell_tiles.WellTiles.release``). *mask_store*, when
     given, is the well's ``pipeline.nanowell_masks.MaskStore``: a crop segmented before, from exactly these pixels by
-    exactly this segmenter, is answered from it rather than segmented again.
+    exactly this segmenter, is answered from it rather than segmented again. *given_located* maps a timepoint to an
+    earlier run's located result (``pipeline.nanowell_located.given_located``): such a timepoint is taken as it is
+    rather than located, except by the end-of-run pass, which locates a timepoint again from the plate's motion.
+    *keep_located* is ``f(timepoint, located)``, called as each timepoint is adopted (the last call for a
+    timepoint is the one it keeps), before the well's later steps adjust it.
     """
     from pipeline.nanowell_parallel import ahead as nanowell_ahead
     from pipeline.nanowell_parallel import gpu_in_use, ordered_results, thread_budget
@@ -2800,14 +2865,15 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
 
     def located_for(tp, preferred=None, stem=""):
         images = _images_for(record, well, tp, load_phase)
-        located = locate_timepoint(tp, record, well, images, settings, expected_shape=expected_shape,
-                                   plate_rigid=(plate_rigid or {}).get(tp), stored=(stored_placements or {}).get(tp),
-                                   manual_anchor_um=manual_anchors.get(tp), preferred=preferred)
+        rigid = (plate_rigid or {}).get(tp)
+        located = _given_or_located(given_located, tp, rigid, preferred, record, well, images, settings,
+                                    expected_shape, (stored_placements or {}).get(tp), manual_anchors.get(tp))
         if spill_dir is not None and located.montage is not None:
             located.montage = _spill_montage(located.montage, Path(spill_dir), f"{well}_{tp}{stem}")
         return located
 
     def adopt(tp, located):
+        keep_located(tp, located)
         outcome.located[tp] = located
         outcome.timepoints[tp] = dict(located.grid) or {"status": located.status, "reason": located.reason}
         outcome.timepoints[tp]["record_digest"] = record_digest(record, well, tp)
@@ -2834,6 +2900,7 @@ def run_well(well: str, record: dict, timepoints, load_phase, settings: Nanowell
     finally:
         located_in_order.close()            # on a raise here, nothing goes on locating behind it
     _agree_tile_layouts(outcome, timepoints, kept_layouts, locate, note)
+    _keep_tile_layouts(outcome, timepoints, keep_located)
     anchored = [tp for tp in timepoints if outcome.located[tp].status == OK]
     unaddressed = [tp for tp in timepoints if outcome.located[tp].status == UNADDRESSED]
     # An inferred array has a shared set of addresses instead of a shared radius, whatever its outline (X35).

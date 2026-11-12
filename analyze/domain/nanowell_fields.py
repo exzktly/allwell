@@ -162,7 +162,8 @@ def pattern_from_opts(opts: dict) -> dict | None:
             "overlap_percent": overlap, "pixel_size_um": pixel}
 
 
-#: An earlier nanowell run's output folder whose tile registration the run may reuse (``--nanowell_registration_from``).
+#: An earlier nanowell run's output folder whose located timepoints the run takes as they are
+#: (``--nanowell_registration_from``, ``pipeline.nanowell_located``).
 REGISTRATION_FROM_KEY = "nanowell_registration_from"
 
 

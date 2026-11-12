@@ -835,9 +835,12 @@ class GrantedNode:
             self.transcript.add(f"{sent}  →  job {self.job_id}")
             self._log(f"[remote] granted node: asked the scheduler for a node (job {self.job_id}, "
                       f"time limit {_duration(limit_s)}).\n")
-            boot_failed = self._wait(began, queue_wait)
-            if boot_failed is None:
-                return self.state()
+            outcome = self._wait(began, queue_wait)
+            if isinstance(outcome, HoldState):
+                # The state the wait saw granted, not a fresh read: a read that failed here raised out of the request,
+                # which then cancelled a node that had just been granted.
+                return outcome
+            boot_failed = outcome
             if boot_failed != "?":                         # a failure that named no node cannot be excluded
                 failed_nodes.append(boot_failed)
             self._log(f"[remote] granted node: node {boot_failed} failed to boot; asking for another.\n")
@@ -848,17 +851,42 @@ class GrantedNode:
             raise HoldError("the request was cancelled.")
         self._sleep(seconds)
 
-    def _wait(self, began: float, queue_wait: int) -> str | None:
-        """Poll until the hold is granted (``None``), its node failed to boot (that node's name), or it cannot be."""
+    def _wait(self, began: float, queue_wait: int) -> HoldState | str:
+        """Poll until the hold is granted (the granted state), its node failed to boot (that node's name), or it cannot
+        be.
+
+        A look the host did not answer is not one of those: it says nothing about the job, which is still where the
+        scheduler put it, and a request that waits hours in the queue makes hundreds of looks, so ending on the first
+        failure threw the queued job away more surely the longer it had waited. It is said in the log, once for each
+        run of failures, and the next poll looks again; Release and the Max queue wait still end the wait, and the
+        node's own script still ends the node if this app's heartbeat stops."""
+        unanswered = 0
         while True:
             if self._cancelled.is_set():
                 raise HoldError("the request was cancelled.")
-            state = self.state()
+            try:
+                state = self.state()
+            except HoldError as exc:
+                unanswered += 1
+                if unanswered == 1:
+                    self._log(f"[remote] granted node: WARN {exc} — job {self.job_id} is still waiting in the queue "
+                              f"as far as this app knows; looking again every {HOLD_POLL_S} s.\n")
+                if queue_wait and self._clock() - began > queue_wait:
+                    self.release("it waited out this host's Max queue wait")
+                    raise HoldQueueWaitSpent(
+                        f"no node was granted within {queue_wait // 60} min, this host's Max queue wait — "
+                        f"cancelled job {self.job_id}.") from None
+                self._nap(HOLD_POLL_S)
+                continue
+            if unanswered:
+                self._log(f"[remote] granted node: the host is answering again after {unanswered} unanswered "
+                          f"look(s); job {state.job_id} is {state.phase}.\n")
+                unanswered = 0
             self.on_state(state)
             if state.phase in ("granted", "busy"):
                 self._log(f"[remote] granted node: {state.node} (job {state.job_id}) is granted"
                           f"{' — ' + state.gpus if state.gpus else ''}.\n")
-                return None
+                return state
             if state.slurm_state in _BOOT_FAILED_STATES and not state.granted_at:
                 return state.node or "?"
             if state.phase == "ended":

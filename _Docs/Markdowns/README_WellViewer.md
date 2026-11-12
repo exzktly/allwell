@@ -6790,7 +6790,11 @@ the sentence names it.
   **Saving a subset by name.** The editor's **Name** box names the subset as written: type a name and press
   **Save** (or Enter) to keep it in this dataset. Save keeps the subset in use, so it waits while edits are not
   applied: press **Apply** first. Saved subsets are listed by name in the Subset box, between the
-  quick choices and *Custom subset…*; choosing one makes it the subset again. The box shows a saved subset's name
+  quick choices and *Custom subset…*; choosing one makes it the subset again. Inside the editor, the **Saved**
+  dropdown beside the Name box lists them too, so you can switch between saved subsets while editing: choosing one
+  makes it the subset in use, fills the conditions and the Name box from it, and discards any edits not yet
+  applied (as **Reset** does). It reads *(not saved)* while the subset in use has no name, and is greyed out until
+  something is saved. The box shows a saved subset's name
   only while its conditions are exactly the saved ones — change one and it reads *Custom subset…*, with the saved
   one left as it was (save under the same name to replace it). **Rename** gives the saved subset in use the name
   typed; **Delete** forgets it, and the figure keeps using its conditions until you choose another. Each dataset

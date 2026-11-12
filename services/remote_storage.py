@@ -141,6 +141,12 @@ KEEP = "keep"
 #: A folder written to within this many minutes is treated as in use.
 RECENT_WRITE_MIN = 15
 
+#: How far past the staging filesystem's "now" a file's mtime may be and still
+#: count as a recent write. Further than that, the file was dated by another
+#: machine's clock (copied with its times preserved) and says nothing about when
+#: anything last wrote it, so a folder holding one is not in use on its account.
+FUTURE_WRITE_SLACK_S = RECENT_WRITE_MIN * 60
+
 #: How much later than its ``run.pid`` was written a live process with that PID
 #: may have started and still be taken for the run's own (seconds). The writer
 #: always starts first; the margin absorbs an NFS server whose clock stamps the
@@ -259,7 +265,15 @@ def _preamble(staging_dir: str, *, missing_ok: bool = False) -> str:
         f"if aw_p=$(mktemp ./{NOW_PROBE}.XXXXXX 2>/dev/null); then t=$(_aw_mtime \"$aw_p\"); rm -f -- \"$aw_p\"; "
         "[ -n \"$t\" ] && now=$t; fi\n"
         # Where squeue's complaints go, read apart from its answer (see _aw_run_self_active).
-        "aw_err=$(mktemp 2>/dev/null) || aw_err=''; [ -z \"$aw_err\" ] || trap 'rm -f -- \"$aw_err\"' EXIT\n"
+        "aw_err=$(mktemp 2>/dev/null) || aw_err=''\n"
+        # A file dated FUTURE_WRITE_SLACK_S past $now, on the same clock: a file newer than
+        # it is dated in the future (copied with its times from a machine whose clock is
+        # ahead), which "written in the last minutes" must not read as a recent write.
+        # Absent when it cannot be made exactly (no touch -d @N): every such file counts.
+        f"aw_cap=''; if aw_c=$(mktemp ./{NOW_PROBE}.XXXXXX 2>/dev/null); then c=$((now + {FUTURE_WRITE_SLACK_S}))\n"
+        "  touch -d \"@$c\" -- \"$aw_c\" 2>/dev/null; if [ \"$(_aw_mtime \"$aw_c\")\" = \"$c\" ]; then aw_cap=$aw_c; "
+        "else rm -f -- \"$aw_c\"; fi; fi\n"
+        "trap 'rm -f -- ${aw_err:+\"$aw_err\"} ${aw_cap:+\"$aw_cap\"}' EXIT\n"
         + _guard_functions() + _liveness_functions()
     )
 
@@ -314,14 +328,21 @@ def _guard_functions() -> str:
 def _liveness_functions() -> str:
     """``_aw_run_active D`` and ``_aw_dataset_active D STAMP NAME``: the one
     definition of "in use", shared by the listing and every deletion. Each
-    answers *yes* whenever it cannot tell."""
+    answers *yes* whenever it cannot tell, and on *yes* leaves in ``aw_why`` the
+    rule that answered, in words (no tab or newline), so the browser can say why
+    a folder is kept rather than only that it is."""
     not_own = " ".join(f"! -name {f}" for f in _OWN_FILES)
     return (
+        "aw_why=''; aw_ws=$'\\t\\r\\n'\n"
         "_aw_newest() { local m=0 p t; for p in \"$@\"; do [ -e \"$p\" ] || continue\n"
         "  t=$(_aw_mtime \"$p\") && [ -n \"$t\" ] && [ \"$t\" -gt \"$m\" ] && m=$t; done; echo \"$m\"; }\n"
         # A find that fails (no -quit or -mmin, an unreadable folder) answers *in use*.
-        f"_aw_recent() {{ local o; o=$(find \"$1\" -xdev -mindepth 1 -type f -mmin -{RECENT_WRITE_MIN} {not_own} "
-        "-print -quit 2>/dev/null) || return 0; [ -n \"$o\" ]; }\n"
+        # A file dated past $aw_cap was dated by another machine's clock: not a write.
+        "_aw_recent() { local o x=(); [ -n \"$aw_cap\" ] && x=(! -newer \"$aw_cap\")\n"
+        f"  o=$(find \"$1\" -xdev -mindepth 1 -type f -mmin -{RECENT_WRITE_MIN} {not_own} "
+        "${x[@]+\"${x[@]}\"} -print -quit 2>/dev/null) || { aw_why=\"its files could not be searched for recent writes\"; return 0; }\n"
+        "  [ -n \"$o\" ] || return 1\n"
+        f"  aw_why=\"${{o#\"$1\"/}} was written in the last {RECENT_WRITE_MIN} minutes\"; }}\n"
         # Downloaded, and nothing but bookkeeping written since: a run that re-used the
         # folder without clearing the marker (an older build, a failed label call)
         # leaves newer files, so the marker no longer vouches for them.
@@ -333,22 +354,29 @@ def _liveness_functions() -> str:
         # not the one that wrote it. Its age (ps etimes) is clock-free, and the file's
         # mtime and $now are both the staging filesystem's clock. Unreadable: in use.
         "_aw_pid_wrote() { local e t; e=$(ps -o etimes= -p \"$1\" 2>/dev/null | tr -cd '0-9')\n"
-        "  [ -n \"$e\" ] || return 0; t=$(_aw_mtime \"$2\"); [ -n \"$t\" ] || return 0\n"
-        f"  [ $((now - e)) -le $((t + {PID_START_SLACK_S})) ]; }}\n"
+        "  [ -n \"$e\" ] || { aw_why=\"process $1 named in run.pid is running and its age cannot be read\"; return 0; }\n"
+        "  t=$(_aw_mtime \"$2\"); [ -n \"$t\" ] || { aw_why=\"process $1 named in run.pid is running and run.pid's time cannot be read\"; return 0; }\n"
+        f"  [ $((now - e)) -le $((t + {PID_START_SLACK_S})) ] || return 1\n"
+        "  aw_why=\"process $1 named in run.pid is still running\"; }\n"
         "_aw_run_self_active() { local d=$1 h t z jid o r st p\n"
         f"  for h in \"$d/{HEARTBEAT_DIR}/alive\" \"$d/{LEGACY_UPLOAD_HEARTBEAT}\"; do\n"
-        "    [ -e \"$h\" ] || continue; t=$(_aw_mtime \"$h\"); [ -n \"$t\" ] || return 0\n"
-        f"    [ $((now - t)) -lt {MID_BATCH_HEARTBEAT_STALE_S} ] && return 0; done\n"
-        f"  for z in \"$d/{HOLD_DIR}\"/*.zip; do [ -e \"$z\" ] && return 0; done\n"
+        "    [ -e \"$h\" ] || continue; t=$(_aw_mtime \"$h\"); [ -n \"$t\" ] || { aw_why=\"its heartbeat's time cannot be read\"; return 0; }\n"
+        f"    [ $((now - t)) -lt {MID_BATCH_HEARTBEAT_STALE_S} ] && {{ aw_why=\"its heartbeat was touched $((now - t)) s ago\"; return 0; }}; done\n"
+        f"  for z in \"$d/{HOLD_DIR}\"/*.zip; do [ -e \"$z\" ] && "
+        f"{{ aw_why=\"{HOLD_DIR}/ holds nanowell wells waiting for the end-of-run re-anchoring\"; return 0; }}; done\n"
         "  if [ -e \"$d/run.pid.slurm\" ]; then\n"
-        "    jid=$(head -c 64 \"$d/run.pid.slurm\" 2>/dev/null | tr -cd '0-9.'); [ -n \"$jid\" ] || return 0\n"
-        "    command -v squeue >/dev/null 2>&1 || return 0\n"
+        "    jid=$(head -c 64 \"$d/run.pid.slurm\" 2>/dev/null | tr -cd '0-9.')\n"
+        "    [ -n \"$jid\" ] || { aw_why=\"run.pid.slurm names no Slurm job\"; return 0; }\n"
+        "    command -v squeue >/dev/null 2>&1 || { aw_why=\"squeue is not on PATH, so whether Slurm job $jid ended cannot be checked\"; return 0; }\n"
         # The answer from stdout only, so a warning squeue prints on every call cannot
         # read as a job state; its complaints are read only to recognise a finished job.
         "    o=$(" + squeue_listing("jid") + " 2>\"${aw_err:-/dev/null}\"); r=$?\n"
         "    if [ $r -eq 0 ]; then st=$(printf '%s\\n' \"$o\" | head -n 1)\n"
-        f"      case \"$st\" in ''|{_ENDED_STATES}) ;; *) return 0;; esac\n"
-        "    else [ -n \"$aw_err\" ] && grep -qi 'invalid job id' \"$aw_err\" || return 0; fi\n"
+        f"      case \"$st\" in ''|{_ENDED_STATES}) ;; *) case \"$jid\" in *.*) aw_why=\"Slurm step $jid is still running\";; "
+        "*) aw_why=\"Slurm job $jid is $(printf '%s' \"$st\" | head -c 40)\";; esac; return 0;; esac\n"
+        "    elif ! { [ -n \"$aw_err\" ] && grep -qi 'invalid job id' \"$aw_err\"; }; then\n"
+        "      aw_why=\"squeue could not say whether Slurm job $jid ended (exit $r: $({ [ -n \"$aw_err\" ] && head -n 1 \"$aw_err\"; } 2>/dev/null | head -c 160))\"\n"
+        "      return 0; fi\n"
         "  fi\n"
         "  if [ -s \"$d/run.pid\" ]; then p=$(head -c 32 \"$d/run.pid\" | tr -cd '0-9')\n"
         "    if [ -n \"$p\" ] && { kill -0 \"$p\" 2>/dev/null || ps -p \"$p\" >/dev/null 2>&1; }; then\n"
@@ -359,23 +387,35 @@ def _liveness_functions() -> str:
         f"  b=\"$1/{RUN_BORROWED_BY}\"; [ -f \"$b\" ] && [ ! -L \"$b\" ] || return 1\n"
         "  while IFS= read -r o || [ -n \"$o\" ]; do\n"
         f"    [[ $o =~ {_RUN_NAME_RE} ]] && [ -d \"runs/$o\" ] && [ ! -L \"runs/$o\" ] && "
-        "_aw_run_self_active \"runs/$o\" && return 0\n"
+        "_aw_run_self_active \"runs/$o\" && { aw_why=\"run $o, which re-attached to it, is in use: $aw_why\"; return 0; }\n"
         "  done < \"$b\"; return 1; }\n"
-        # Which datasets runs in use are reading, worked out once per script.
-        "aw_scanned=0; aw_active_keys=''; aw_active_unknown=0\n"
-        "_aw_scan_runs() { [ $aw_scanned = 1 ] && return; aw_scanned=1; local r l k\n"
-        "  for r in runs/*; do [ -d \"$r\" ] && [ ! -L \"$r\" ] || continue; _aw_run_active \"$r\" || continue\n"
+        # Which datasets runs in use are reading, worked out once per script: one line
+        # per run in use, ``<match>\t<run>\t<why>``. The match is ``k:<key>`` from its
+        # label; ``p:<prefix>`` for an unlabelled run whose name carries the first 16
+        # hex digits of its dataset's key (``remote_run_id._run_id_body``); ``*`` for
+        # one that says nothing about its dataset, which keeps every dataset.
+        "aw_scanned=0; aw_users=''\n"
+        "_aw_scan_runs() { [ $aw_scanned = 1 ] && return; aw_scanned=1; local r l k m\n"
+        "  for r in runs/*; do [ -d \"$r\" ] && [ ! -L \"$r\" ] || continue; aw_why=''; _aw_run_active \"$r\" || continue\n"
         f"    l=\"$r/{RUN_LABEL}\"; k=''\n"
         "    if [ -f \"$l\" ] && [ ! -L \"$l\" ]; then k=$(grep -oE '\"cache_key\"[[:space:]]*:[[:space:]]*\"[0-9a-f]+\"' "
         "\"$l\" | grep -oE '[0-9a-f]{16,}' | head -n 1); fi\n"
-        "    if [ -n \"$k\" ]; then aw_active_keys=\"$aw_active_keys $k \"; else aw_active_unknown=1; fi\n"
+        "    if [ -n \"$k\" ]; then m=\"k:$k\"\n"
+        "    elif [[ ${r#runs/} =~ ^run-([0-9a-f]{16})-[0-9a-f]{8,64}$ ]]; then m=\"p:${BASH_REMATCH[1]}\"\n"
+        "    else m='*'; fi\n"
+        "    aw_users+=\"$m\"$'\\t'\"${r#runs/}\"$'\\t'\"${aw_why//[$aw_ws]/ }\"$'\\n'\n"
         "  done; }\n"
-        "_aw_dataset_active() { local d=$1 s=$2 n=$3 t\n"
-        "  if [ -e \"$s\" ]; then t=$(_aw_mtime \"$s\"); [ -n \"$t\" ] || return 0\n"
-        f"    [ $((now - t)) -lt {RECENT_WRITE_MIN * 60} ] && return 0; fi\n"
+        "_aw_dataset_active() { local d=$1 s=$2 n=$3 t m r w\n"
+        "  if [ -e \"$s\" ]; then t=$(_aw_mtime \"$s\"); [ -n \"$t\" ] || { aw_why=\"its in-use stamp's time cannot be read\"; return 0; }\n"
+        f"    [ $((now - t)) -lt {RECENT_WRITE_MIN * 60} ] && {{ aw_why=\"a run stamped it in use $(((now - t) / 60)) min ago\"; return 0; }}; fi\n"
         "  _aw_recent \"$d\" && return 0\n"
-        "  _aw_scan_runs; [ $aw_active_unknown = 1 ] && return 0\n"
-        "  case \"$aw_active_keys\" in *\" $n \"*) return 0;; esac; return 1; }\n"
+        "  _aw_scan_runs\n"
+        "  while IFS=$'\\t' read -r m r w; do\n"
+        "    case \"$m\" in \"k:$n\") aw_why=\"run $r is in use and reads it: $w\";;\n"
+        "      p:*) [[ $n == \"${m#p:}\"* ]] || continue; aw_why=\"run $r is in use and its name points at it: $w\";;\n"
+        "      '*') aw_why=\"run $r is in use and has no label saying which dataset it reads: $w\";;\n"
+        "      *) continue;; esac; return 0\n"
+        "  done <<< \"$aw_users\"; return 1; }\n"
         # When a folder was last used; 0 when that cannot be read.
         "_aw_last_used() { if [ \"$1\" = runs ]; then\n"
         f"    _aw_newest \"runs/$2/out\" \"runs/$2/in\" \"runs/$2/{HEARTBEAT_DIR}/alive\" "
@@ -481,6 +521,8 @@ class StorageItem:
     marked: bool = False       # the server found it All-Well's
     mine: bool = True          # owned by the user the app logs in as
     fetched: bool = False      # a run folder whose results were downloaded and verified
+    #: Which in-use rule kept it, in the server's words ("Slurm job 4001 is RUNNING"); "" when not in use or not checked.
+    in_use_why: str = field(default="", compare=False)
 
     @property
     def project(self) -> str:
@@ -543,8 +585,10 @@ def listing_script(staging_dir: str, *, detail: bool) -> str:
             '[ -n "$sz" ] || sz=-'
             if detail else "sz=-")
     fetched = ('f=0; _aw_fetched_current "$d" && f=1' if detail else f'f=0; [ -f "$d/{RUN_FETCHED}" ] && f=1')
-    run_act = ('if _aw_run_active "$d"; then a=1; else a=0; fi' if detail else "a=-")
-    ds_act = ('if _aw_dataset_active "$d" "$stamp" "$n"; then a=1; else a=0; fi' if detail else "a=-")
+    # In use: ``1:<why>``, the rule that answered, with any tab or newline blanked.
+    in_use = 'then a="1:${aw_why//[$aw_ws]/ }"; else a=0; fi'
+    run_act = (f'aw_why=""; if _aw_run_active "$d"; {in_use}' if detail else "a=-")
+    ds_act = (f'aw_why=""; if _aw_dataset_active "$d" "$stamp" "$n"; {in_use}' if detail else "a=-")
     emit = ("if _aw_ours \"$top\" \"$n\"; then o=1; else o=0; fi; if _aw_mine \"$top\" \"$n\"; then m=1; else m=0; fi\n"
             "  mt=$(_aw_mtime \"$d\"); [ -n \"$mt\" ] || mt=-; used=$(_aw_last_used \"$top\" \"$n\")\n"
             "  printf 'item\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "
@@ -613,7 +657,8 @@ def parse_listing(text: str) -> Listing | None:
             items.append(StorageItem(
                 kind=parts[1], name=parts[2], size=_int_or_none(parts[3]),
                 modified=_int_or_none(parts[4]) or 0, last_used=_int_or_none(parts[5]) or 0,
-                active={"1": True, "0": False}.get(parts[6]),
+                active={"1": True, "0": False}.get(parts[6].partition(":")[0]),
+                in_use_why=parts[6].partition(":")[2].strip() if parts[6].startswith("1") else "",
                 expiry=parts[7] if parts[7] == KEEP or _int_or_none(parts[7]) is not None else "",
                 marked=parts[8] == "1", mine=parts[9] == "1", fetched=parts[10] == "1",
                 label=label if isinstance(label, dict) else {},
@@ -803,7 +848,7 @@ def delete_script(staging_dir: str, items: Iterable[StorageItem], *, automatic: 
             f"elif ! _aw_mine {top} {nq}; then printf 'refused:not-yours\\t{tag}\\n'; "
             f"elif _aw_mount under {d}; then printf 'refused:holds-a-mount\\t{tag}\\n'; "
             f"{auto}"
-            f"elif {busy}; then printf 'busy\\t{tag}\\n'; "
+            f"elif aw_why=''; {busy}; then printf 'busy:%s\\t{tag}\\n' \"${{aw_why//[$aw_ws]/ }}\"; "
             f"elif [ $aw_onefs = 0 ]; then printf 'refused:rm-cannot-stay-on-one-filesystem\\t{tag}\\n'; "
             f"else {remove}; aw_r=$?; if [ $aw_r = 0 ]; then {extra}printf 'gone\\t{tag}\\n'; "
             f"elif [ $aw_r = 2 ]; then printf 'fail:partly-removed\\t{tag}\\n'; "
@@ -892,7 +937,8 @@ def remove_expired(cache, listing: Listing, *, log: Callable[[str], None], host_
             idle = max(0, listing.now - item.last_used) // _DAY
             log(f"[remote] storage: removed expired {describe(item)}, untouched {idle} day(s)\n")
         elif status == "busy":
-            log(f"[remote] storage: kept expired {describe(item)}: it is in use\n")
+            why = outcome.partition(":")[2].strip()
+            log(f"[remote] storage: kept expired {describe(item)}: it is in use{' (' + why + ')' if why else ''}\n")
         elif status == "refused":
             why = outcome.partition(":")[2] or error
             log(f"[remote] storage: kept {describe(item)}: the server declined ({why})\n")

@@ -233,3 +233,16 @@ def test_a_failed_refresh_leaves_nothing_to_act_on(qtbot, staged):
     assert dlg._listing is None and dlg._tree.topLevelItemCount() == 0
     assert not dlg._sweep_btn.isEnabled()
     assert "Nothing shown is current" in dlg._status.text()
+
+
+def test_a_folder_in_use_says_why_in_its_tooltip(qtbot, staged):
+    """The Expires column only says *In use*; which rule kept the folder is what
+    tells a finished run held by a stale signal from one that is really running."""
+    host, staging = staged
+    (staging / "runs" / RUN_A / ".aw_beat").mkdir()
+    (staging / "runs" / RUN_A / ".aw_beat" / "alive").touch()
+    dlg = _open(qtbot, host)
+    busy, idle = _row(dlg, RUN_A), _row(dlg, RUN_B)
+    assert busy.text(6) == "In use"
+    assert "\nIn use: its heartbeat was touched " in busy.toolTip(6)
+    assert "In use" not in idle.toolTip(6)

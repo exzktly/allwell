@@ -2391,11 +2391,19 @@ folder counts as in use when:
   number, started after the run, does not count);
 - it holds nanowell wells waiting for re-anchoring;
 - another run re-attached to it and is still going;
-- or something in it was written in the last 15 minutes.
+- or something in it was written in the last 15 minutes (a file dated in the
+  future — copied from a computer whose clock is ahead — does not count).
 
 A dataset counts as in use while a run is reading it, or if it was used in the
-last 15 minutes. While a job is only waiting in the Slurm queue, what keeps its
-folder in use is the app staying connected.
+last 15 minutes. A run in use with no label is taken to read the dataset its
+folder name points at; only a run from an older build, whose name says nothing
+about its dataset, keeps every dataset in use. While a job is only waiting in the
+Slurm queue, what keeps its folder in use is the app staying connected.
+
+**Hover over a folder to see why it is in use**: the tooltip's *In use:* line
+names the rule that kept it — the Slurm job and its state, the process number,
+the held nanowell wells, the run that is reading a dataset, or the file written
+recently. The log line for a folder the automatic clean-up kept says the same.
 
 - **Delete…** removes the selected folders after asking you. The confirmation
   says how many of the run folders hold results All-Well never confirmed as

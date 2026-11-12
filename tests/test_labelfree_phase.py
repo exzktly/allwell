@@ -50,6 +50,35 @@ def test_analyze_form_fits_narrow_sidebar(qapp):
         cb.setChecked(False); assert not cb.isChecked()
 
 
+def test_analyze_form_fits_narrow_sidebar_with_a_wider_font(qapp):
+    """The form still fits the sidebar when the font is wider than this machine's.
+
+    The sidebar check above failed on GitHub's runners and passed everywhere else: 334 px against
+    ``Metrics.rail_w`` + 2 on the runner, 313 px on a machine whose default sans-serif is Inter. The fast lane's
+    runner has no Inter and falls back to a wider face, and the row holding "Use settings from a previous run…"
+    and "Presets" side by side in a fixed row added both buttons' widths into the form's minimum. A font 15% wider
+    than the default stands in for that fallback: under it the fixed row needed 345 px; the row now wraps, and
+    the form needs 268.
+    """
+    from PySide6.QtWidgets import QScrollArea
+    from analyze.tab import AnalyzeTab
+    from ui import theme
+
+    original = qapp.font()
+    wider = qapp.font()
+    wider.setPointSizeF(original.pointSizeF() * 1.15)
+    qapp.setFont(wider)
+    try:
+        tab = AnalyzeTab()
+        form = next(sa.widget() for sa in tab.findChildren(QScrollArea))
+        need = form.minimumSizeHint().width()
+        assert need <= theme.Metrics.rail_w + 2, (
+            f"with a font 15% wider the Analyze form needs {need} px, wider than the {theme.Metrics.rail_w} px "
+            "sidebar: some row adds its widgets' widths instead of wrapping")
+    finally:
+        qapp.setFont(original)
+
+
 def test_qc_debris_toggle_hides_its_labels(qapp):
     """Regression: 'Remove debris' off must hide the size/solidity LABELS too,
     not just their input cells. ``_row()`` returns the right-hand cell (the label

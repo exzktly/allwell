@@ -8877,7 +8877,10 @@ the value alone and simply shows the box disabled.
 `hydrate_options(opts)` for the run options and `_hydrate_run_spec_fields` for
 what rides beside them — and the Data section's **Presets** menu
 (`analyze/presets.py`, `AnalyzePresetsMixin`, beside *Use settings from a
-previous run…*) calls the first half alone with `set_input_path=False`. A preset
+previous run…* in a `FlowLayout` that puts it on the next line when the sidebar
+is too narrow for both; in a fixed row the two buttons' widths added up to the
+form's minimum and, in a wider fallback font, held it past `Metrics.rail_w`,
+which `tests/test_labelfree_phase.py` checks at a font 15% wider) calls the first half alone with `set_input_path=False`. A preset
 is `_collect_run_options()` minus `analyze.domain.presets.PER_RUN_KEYS` — the
 input folder, the scratch disk, the three well lists, the existing-output
 choice (`force` / `incremental`), `allow_low_disk` and the nanowell registration

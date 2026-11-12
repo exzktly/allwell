@@ -2215,9 +2215,15 @@ def _named(item) -> str:
     return item.name or item.well
 
 
+#: The gid of the line drawn over a selected nanowell's own trajectory.
+TRAJECTORY_SELECTED_GID = "nw-selected-trajectory"
+
+
 def render_trajectories(fig, panels, *, label: str, time_source: str | None = None, note: str = "",
-                        cohort: bool = False) -> None:
-    """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline.
+                        cohort: bool = False, selected=()) -> None:
+    """One panel per well: a thin line per nanowell, a thick median per occupancy class at baseline, and each
+    *selected* nanowell's own line drawn over them in its selection colour (``selection_colours``, the colour its
+    ring has on the Distribution and Array views), so a nanowell gone to is found among the thousands.
 
     The panels share one y scale, labelled on the left column, and one time axis: recorded hours as numbers, the
     axis labelled once per column under the bottom row — the timepoint names at their true hours ran into each
@@ -2277,6 +2283,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
                 ax.add_collection(thick)
                 theme_paired_colours(thick, screen=("none", screen[1]), publication=("none", publication[1]))
         _unjoined_points(ax, panel, oks)
+        _draw_selected_trajectories(ax, panel, selected)
         span = float(np.ptp(panel.times)) if len(panel.times) > 1 else 1.0
         marked_kinds.update(panel.marks.values())
         mark_timepoints(ax, panel.times, panel.marks, _mark_colours(muted), width=0.04 * span or 0.3,
@@ -2367,6 +2374,18 @@ def _share_limits(axes, x_groups=None) -> None:
 
 
 # ── position effects (V6) ────────────────────────────────────────────────────
+def _draw_selected_trajectories(ax, panel, selected) -> None:
+    """Each selected nanowell of *panel*'s well over its thin line: a line through every value it has (a gap where it
+    has none), with a marker at each, in the nanowell's selection colour, above the class medians."""
+    colours = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}
+    for site, _occ, y in panel.lines:
+        colour = colours.get(tuple(site))
+        if colour is None:
+            continue
+        ax.plot(panel.times, y, color=colour, linewidth=2.0, marker="o", markersize=3.5, zorder=6,
+                gid=TRAJECTORY_SELECTED_GID)
+
+
 def render_position(fig, series, *, label: str, timepoint: str, note: str = "") -> None:
     """Metric against ring, per well (median and interquartile band), with each ring's excluded share below.
 

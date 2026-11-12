@@ -40,6 +40,7 @@ from review.features.nanowell.rim_focus_view import build_rim_focus_controls
 from review.features.nanowell.details_view import build_details_panel
 from review.features.nanowell.variables_view import build_variable_controls
 from review.features.nanowell.window_view import build_popout_chrome, build_popout_window_controls, build_window_strip
+from review.features.nanowell.goto_view import build_goto_controls, refresh_goto_controls
 from review.features.nanowell.identity_view import build_identity_controls, refresh_identity_controls
 from review.features.nanowell.popout_view import build_popout_view_controls
 from review.features.nanowell.qc_view import build_qc_controls, refresh_qc_controls
@@ -431,6 +432,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     grp_responding = band.add_scope("Responding above", responding_edit)
     filter_row_end = band.add_break()
 
+    # The Nanowell box leads the viewing row on every view, so going to one nanowell is found in one place.
+    goto = build_goto_controls(ctx, band)
     array_controls = _build_array_controls(ctx, band, positions_seg, grp_positions)
     identity = build_identity_controls(ctx, band)
     statistics = build_statistics_controls(ctx, band)
@@ -584,7 +587,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
 
     controls = (view_bar, metric_cb, channel_cb, axis_seg, baseline_cb, tp_cb, control_cb, well_cb, cohort_box, moving_spin,
                 moving_kind_cb, baseline_moving_spin,
-                responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *start.signalling,
+                responding_edit, extremes_spin, extremes_cells, extremes_numbers, *identity.signalling, *goto.signalling, *start.signalling,
                 *array_controls.signalling, *statistics.signalling, *rim_focus.signalling,
                 *qc_controls.signalling, *dist_style.signalling)
 
@@ -643,6 +646,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             start.refresh(st)
             _refresh_array_controls(ctx, st, array, array_controls)
             refresh_identity_controls(st, identity, view == "identity")
+            refresh_goto_controls(st, goto, view)
             refresh_qc_controls(ctx, st, view == "qc", qc_controls)
             walk_view = aq.current_view(ctx)
             refresh_queue_controls(ctx, view == walk_view, queue)

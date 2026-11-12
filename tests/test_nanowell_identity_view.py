@@ -1048,7 +1048,7 @@ def test_the_page_s_nanowell_box_goes_to_the_address_keeps_it_across_timepoints_
     ctx = page
     st = _loaded(qtbot, ctx)
     _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
-    edit = ctx.widgets.get("_nw_identity_focus_edit")
+    edit = ctx.widgets.get("_nw_goto_edit")
     assert edit.isVisibleTo(ctx.window) and edit.isEnabled()
     edit.setText("1,0")
     assert st.identity_focus == ""                                          # typing alone goes nowhere
@@ -1063,11 +1063,11 @@ def test_the_page_s_nanowell_box_goes_to_the_address_keeps_it_across_timepoints_
     assert st.identity_drawn is None
     nwc.set_timepoint(ctx, "T1")
     assert _centre(st.identity_drawn.axes["map"]) == pytest.approx(ref_site)
-    # Diagnostics has no array to go to: the box is greyed and says why.
+    # Diagnostics has no array to zoom onto: the box still selects there, and says it does not zoom.
     _choose(ctx, "_nw_identity_mode_seg", "diagnostics", [k for k, _l in MODES])
-    assert not edit.isEnabled() and "not the array" in edit.toolTip()
+    assert edit.isEnabled() and "not zoomed onto there" in edit.toolTip()
     _choose(ctx, "_nw_identity_mode_seg", "distance", [k for k, _l in MODES])
-    assert edit.isEnabled()
+    assert edit.isEnabled() and "not zoomed onto there" not in edit.toolTip()
     # Clearing the box goes back to the whole view.
     edit.clear()
     drawn = st.identity_drawn
@@ -1128,8 +1128,8 @@ def test_origin_goes_to_nanowell_0_0(page, qtbot):
     ctx = page
     st = _loaded(qtbot, ctx)
     _choose(ctx, "_nw_view_bar", "identity", [k for k, _l in VIEWS])
-    ctx.widgets.get("_nw_identity_origin_btn").click()
-    assert st.identity_focus == "0,0" and ctx.widgets.get("_nw_identity_focus_edit").text() == "0,0"
+    ctx.widgets.get("_nw_goto_origin_btn").click()
+    assert st.identity_focus == "0,0" and ctx.widgets.get("_nw_goto_edit").text() == "0,0"
     drawn = st.identity_drawn
     assert _centre(drawn.axes["map"]) == pytest.approx(drawn.pair.ref.sites[(0, 0)])
 

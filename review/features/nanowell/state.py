@@ -229,8 +229,9 @@ class NanowellState:
     identity_mode: str = "distance"
     #: What the Distance map colours by (:data:`IDENTITY_COLOURS`).
     identity_colour: str = "auto"
-    #: The nanowell the Identity view goes to, as typed in its *Nanowell* box (``identity_focus_compute``); ``""``:
-    #: none. Not kept with the page's settings: an address belongs to the dataset being looked at.
+    #: The nanowell the Identity view goes to, as the band's *Nanowell* box last named it (``q,r``, or the text as
+    #: typed when it names no nanowell, so the view can say why: ``identity_focus_compute``); ``""``: none. Not kept
+    #: with the page's settings: an address belongs to the dataset being looked at.
     identity_focus: str = ""
     #: The wells left out of every figure on the page by hand (the band's *Exclude*), sorted; the rest of Review is
     #: untouched. Kept with the page's settings.
@@ -307,6 +308,9 @@ class NanowellState:
     region: object = None
     region_for: object = None
     press: object = None
+    #: ``(well, q, r)`` the *Nanowell* box asked the Array view to centre on, once it is drawn in that well
+    #: (``controller.go_to_nanowell``); ``None`` once centred.
+    array_goto: object = None
     anchor_mode: bool = False
     #: ``(well, timepoint)`` another page asked to set an anchor on (``controller.open_for_anchor``): *Set anchor* is
     #: turned on there once the well's tables are loaded, since it can only be turned on with the grid status read.
@@ -387,7 +391,7 @@ class NanowellState:
         self.crops, self.montages, self.fetching, self.fetch_bridges = CropCache(), {}, set(), []
         self.window_crops = TimepointCropCache()
         self.popout_crops = {}
-        self.region = self.region_for = self.press = self.drawn = None
+        self.region = self.region_for = self.press = self.drawn = self.array_goto = None
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}
         self.window_page, self.window_press, self.window_model, self.popout_hits = 0, None, None, {}

@@ -642,8 +642,8 @@ it ends — after the last one, or when you stop it — it goes back to the QC v
 anchored and skipped, or how many it looked at) and what to do next — **Re-run anchored wells…** when anything was
 anchored, otherwise the next class on the plate to resolve — rings the cells it anchored (now *anchor waiting*), and
 puts your plate selection back as it was.
-Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, and
-run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
+Then press **Re-run anchored wells…**, which opens Analyze on the dataset limited to the anchored wells, with the
+settings the dataset's run recorded (channel names in the case the files use), and run it. One click per well is enough when the rest of the plate is anchored: the well's other timepoints are
 addressed from it at the end of the run, through the plate's other wells. A timepoint that still cannot be
 addressed says so, and takes a click of its own. The re-run does not segment the well's cells again: a click
 changes which nanowell is which, not the pixels Cellpose is shown, so each nanowell takes back the cell masks the

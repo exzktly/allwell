@@ -8,6 +8,7 @@ folder Review loads.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -32,12 +33,41 @@ def open_in_analyze(ctx, *, force_wells, only_wells, incremental: bool = True) -
         return False
     handoff(
         Path(root),
-        dict(getattr(ctx.state.dataset, "pipeline_info", None) or {}),
+        recorded_settings(ctx),
         incremental=incremental,
         force_wells=list(force_wells),
         only_wells=list(only_wells),
     )
     return True
+
+
+def recorded_settings(ctx) -> dict:
+    """The loaded dataset's ``pipeline_info.json`` exactly as the run wrote it, for Analyze to restore.
+
+    Read from disk rather than taken from ``ctx.state.dataset.pipeline_info``, because that dict is Review's own
+    reading of the file (``review.domain.viewer_state.read_pipeline_info``) and is the wrong thing to configure a
+    run with in two ways. It lower-cases every channel token, which is right for Review — the CSV columns are
+    lower-case — and wrong for Analyze, whose pipeline matches a token against the filenames exactly, so a
+    re-run handed ``dapi`` for files named ``…_DAPI.tif`` found no image in any well and still exited cleanly.
+    And it keeps none of ``execution_options``, the run's whole ``vars(args)`` snapshot, so Analyze's applier fell
+    back to the few top-level keys: the CSV prefix, the segmentation thresholds and every nanowell setting were
+    lost, and the segmentation channel arrived as an extra fluorescent row besides. Analyze's other restores —
+    *Open pipeline_info.json*, *Load these settings*, Validate & Repair — all read the file; this makes the
+    Review side do the same.
+
+    An unreadable or absent file hands over nothing, which leaves Analyze's form as it was rather than
+    configuring it from a copy known to be lossy.
+    """
+    from review.domain.viewer_state import resolve_pipeline_info_path
+
+    data_dir = getattr(getattr(ctx.state, "dataset", None), "data_dir", None)
+    if not data_dir:
+        return {}
+    try:
+        info = json.loads(resolve_pipeline_info_path(Path(data_dir)).read_text())
+    except (OSError, ValueError):
+        return {}
+    return info if isinstance(info, dict) else {}
 
 
 def dataset_root(ctx) -> str:

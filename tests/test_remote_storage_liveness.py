@@ -98,9 +98,15 @@ def _item(kind: str, name: str, **kw) -> rs.StorageItem:
     return rs.StorageItem(kind, name, modified=1, last_used=1, label=label, fetched=kind == "run", **kw)
 
 
-def _delete(cache, kind: str, name: str, **kw) -> str:
+def _delete_outcome(cache, kind: str, name: str, **kw) -> str:
     outcomes, _ = rs.delete_items(cache, [_item(kind, name)], **kw)
     return outcomes[(kind, name)]
+
+
+def _delete(cache, kind: str, name: str, **kw) -> str:
+    """The outcome, with a ``busy`` one's reason (``busy:<why>``) left off."""
+    outcome = _delete_outcome(cache, kind, name, **kw)
+    return "busy" if rs.status_of(outcome) == "busy" else outcome
 
 
 #: A ``ps`` that reports every process as 50 days old: the process named in a
@@ -193,14 +199,23 @@ def test_a_run_s_live_pid_counts_even_when_it_has_a_scheduler_sidecar(staging, b
 
 # ── C2: a dataset a running run reads ───────────────────────────────────────
 
-@pytest.mark.parametrize("label, expected", [
-    ({"run_id": OWN, "cache_key": KEY}, "busy"),          # the running run reads this dataset
-    ({"run_id": OWN, "cache_key": OTHER_KEY}, "gone"),    # it reads another one
-    (None, "busy"),                                        # no label: it could be reading any
+#: A dataset key whose first 16 hex digits are the ones in :data:`OWN`'s name, as
+#: ``remote_run_id._run_id_body`` names a run after the dataset it reads.
+OWN_KEY = "0000000000000cc3" + "0" * 16
+#: A run folder of an older build: a name with no dataset key in it.
+OLD_SHAPE = "run-00000000000c0de5"
+
+
+@pytest.mark.parametrize("label, running_name, key, expected", [
+    ({"run_id": OWN, "cache_key": KEY}, OWN, KEY, "busy"),          # the running run reads this dataset
+    ({"run_id": OWN, "cache_key": OTHER_KEY}, OWN, KEY, "gone"),    # it reads another one
+    (None, OWN, OWN_KEY, "busy"),       # no label, and its name carries this dataset's key
+    (None, OWN, KEY, "gone"),           # no label, and its name carries another dataset's key
+    (None, OLD_SHAPE, KEY, "busy"),     # no label and no key in its name: it could be reading any
 ])
-def test_a_dataset_a_running_run_reads_is_in_use(staging, label, expected):
-    _dataset(staging, KEY)
-    running = staging / "runs" / OWN
+def test_a_dataset_a_running_run_reads_is_in_use(staging, label, running_name, key, expected):
+    _dataset(staging, key)
+    running = staging / "runs" / running_name
     (running / "out").mkdir(parents=True)
     if label is not None:
         (running / rs.RUN_LABEL).write_text(json.dumps(label))
@@ -208,8 +223,8 @@ def test_a_dataset_a_running_run_reads_is_in_use(staging, label, expected):
     _beat(running)
     cache = _LocalCache(staging)
     listed = {i.name: i for i in rs.list_storage(cache)[0].items}
-    assert listed[KEY].active is (expected == "busy")
-    assert _delete(cache, "dataset", KEY) == expected
+    assert listed[key].active is (expected == "busy")
+    assert _delete(cache, "dataset", key) == expected
 
 
 # ── C3: a folder another run re-attached to ─────────────────────────────────
@@ -813,3 +828,103 @@ def test_sizes_and_free_space_are_read_where_du_and_df_lack_the_gnu_flags(stagin
     assert item.size is not None and item.size % 1024 == 0 and item.size > 0
     assert listing.free_bytes is not None and listing.free_bytes % 1024 == 0
 
+
+
+# ── one finished run does not keep every dataset; each kept folder says why ──
+
+def _listed(cache) -> dict[str, rs.StorageItem]:
+    return {i.name: i for i in rs.list_storage(cache)[0].items}
+
+
+def test_one_unlabelled_finished_run_keeps_only_the_dataset_its_name_points_at(staging):
+    """The report: every dataset on a host listed In use. One run folder an older
+    build left unlabelled, stopped with a well still held for re-anchoring, is in use
+    for as long as ``keep/`` holds it — and an in-use run with no label used to keep
+    *every* dataset, since nothing said which one it reads. Its name does: a run is
+    ``run-<first 16 hex of its dataset's key>-<settings digest>``."""
+    own, other, third = OWN_KEY, KEY, OTHER_KEY
+    for key in (own, other, third):
+        _dataset(staging, key)
+    held = staging / "runs" / OWN
+    (held / "keep").mkdir(parents=True)
+    (held / "keep" / "A01.zip").write_bytes(b"w")
+    _age_tree(held)
+    listed = _listed(_LocalCache(staging))
+    assert listed[OWN].active is True
+    assert listed[OWN].in_use_why == "keep/ holds nanowell wells waiting for the end-of-run re-anchoring"
+    assert (listed[own].active, listed[other].active, listed[third].active) == (True, False, False)
+    assert listed[own].in_use_why == (f"run {OWN} is in use and its name points at it: "
+                                      "keep/ holds nanowell wells waiting for the end-of-run re-anchoring")
+    assert _delete(_LocalCache(staging), "dataset", other) == "gone"
+
+
+def test_an_in_use_run_with_no_key_in_its_name_or_label_still_keeps_every_dataset(staging):
+    _dataset(staging, KEY)
+    _dataset(staging, OTHER_KEY)
+    old = staging / "runs" / OLD_SHAPE
+    (old / "out").mkdir(parents=True)
+    _age_tree(old)
+    _beat(old)
+    listed = _listed(_LocalCache(staging))
+    assert (listed[KEY].active, listed[OTHER_KEY].active) == (True, True)
+    assert listed[KEY].in_use_why.startswith(
+        f"run {OLD_SHAPE} is in use and has no label saying which dataset it reads: its heartbeat was touched ")
+
+
+@pytest.mark.parametrize("ahead_s, in_use", [(3 * DAY, False), (rs.FUTURE_WRITE_SLACK_S // 3, True)])
+def test_a_file_dated_in_the_future_is_not_a_recent_write(staging, ahead_s, in_use):
+    """``find -mmin -15`` matches every file dated after now, so an archive copied
+    with its times from a machine whose clock is ahead kept its dataset (and the
+    run holding it) in use until that date came round. Within the slack it still
+    counts: that is clock noise around a real write."""
+    d = _dataset(staging, KEY)
+    r = _run(staging, RUN)
+    t = int(time.time()) + ahead_s
+    for f in (d / "B1.zip", r / "out" / "B1_out.zip"):
+        f.write_bytes(b"f")
+        os.utime(f, (t, t))
+    listed = _listed(_LocalCache(staging))
+    assert (listed[KEY].active, listed[RUN].active) == (in_use, in_use)
+    if in_use:
+        assert listed[KEY].in_use_why == f"B1.zip was written in the last {rs.RECENT_WRITE_MIN} minutes"
+    assert _delete(_LocalCache(staging), "dataset", KEY) == ("busy" if in_use else "gone")
+    assert not list(staging.glob(f"{rs.NOW_PROBE}*"))           # the clock files are cleaned up
+
+
+@pytest.mark.parametrize("squeue, why", [
+    ("echo RUNNING; exit 0", "Slurm job 4242 is RUNNING"),
+    ("echo 'slurm_load_jobs error: Socket timed out on send/recv operation' >&2; exit 1",
+     "squeue could not say whether Slurm job 4242 ended (exit 1: slurm_load_jobs error: Socket timed out on "
+     "send/recv operation)"),
+])
+def test_a_run_kept_by_its_scheduler_job_says_so(staging, bin_dir, squeue, why):
+    _with_sidecar(staging)
+    _shim(bin_dir, "squeue", squeue + "\n")
+    assert _listed(_LocalCache(staging))[RUN].in_use_why == why
+    assert _delete_outcome(_LocalCache(staging), "run", RUN) == f"busy:{why}"
+
+
+def test_a_run_kept_by_its_live_pid_says_so(staging):
+    d = _run(staging)
+    (d / "run.pid").write_text(f"{os.getpid()}\n")
+    _age(d / "run.pid")
+    why = f"process {os.getpid()} named in run.pid is still running"
+    assert _listed(_with_old_processes(_LocalCache(staging)))[RUN].in_use_why == why
+
+
+def test_a_folder_not_in_use_carries_no_reason(staging):
+    _run(staging)
+    _dataset(staging, KEY)
+    listed = _listed(_LocalCache(staging))
+    assert [(i.active, i.in_use_why) for i in listed.values()] == [(False, ""), (False, "")]
+
+
+def test_the_listing_s_in_use_field_parses_with_and_without_a_reason():
+    def item(active: str) -> rs.StorageItem:
+        line = "\t".join(["item", "run", RUN, "-", "1", "1", active, "", "1", "1", "1", ""])
+        return rs.parse_listing(f"now\t5\n{line}\n").items[0]
+    assert (item("1:Slurm job 7 is RUNNING").active, item("1:Slurm job 7 is RUNNING").in_use_why) == (
+        True, "Slurm job 7 is RUNNING")
+    assert (item("1").active, item("1").in_use_why) == (True, "")
+    assert (item("0").active, item("0").in_use_why) == (False, "")
+    assert (item("-").active, item("-").in_use_why) == (None, "")

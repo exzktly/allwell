@@ -159,7 +159,8 @@ def test_a_beating_run_is_in_use_and_survives_a_delete(tmp_path):
 
     outcomes, error = rs.delete_items(cache, list(items.values()))
     assert error == ""
-    assert outcomes == {("run", RUN_LIVE): "busy", ("run", RUN_DEAD): "gone"}
+    assert {k: rs.status_of(o) for k, o in outcomes.items()} == {("run", RUN_LIVE): "busy", ("run", RUN_DEAD): "gone"}
+    assert outcomes[("run", RUN_LIVE)].startswith("busy:its heartbeat was touched ")
     assert run.is_dir()
     assert not (tmp_path / "runs" / RUN_DEAD).exists()
 

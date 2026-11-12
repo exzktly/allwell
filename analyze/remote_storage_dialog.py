@@ -103,6 +103,8 @@ def row_texts(item: rs.StorageItem, now: int, host_days: int) -> list[str]:
 
 def _tooltip(item: rs.StorageItem, staging_dir: str) -> str:
     lines = [f"On the server: {item.path(staging_dir)}"]
+    if item.active:
+        lines.append(f"In use: {item.in_use_why or 'the server did not say why'}")
     if not item.label:
         lines.append("No label: made before All-Well labelled its remote folders.")
     for key, title in (("input_dir", "Input"), ("output_dir", "Output"), ("client", "Run from")):

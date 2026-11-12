@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QMessageBox, QPush
 
 from analyze.domain import presets as store
 from core.safe import swallowed
+from widgets.owned_action import owned_action
 
 SAVE_ACTION = "Save current settings as…"
 DELETE_MENU = "Delete preset"
@@ -45,7 +46,10 @@ class AnalyzePresetsMixin:
     def _rebuild_presets_menu(self) -> None:
         """List the saved presets to load, then Save and the Delete submenu."""
         menu = self._presets_menu
-        menu.clear()
+        menu.clear()                      # deletes the actions it owns (owned_action parents each to it)
+        old = getattr(self, "_presets_delete_menu", None)
+        if old is not None:               # a child widget, which clear() leaves: one per opening otherwise
+            old.deleteLater()
         try:
             saved = store.load_presets()
             problem = ""
@@ -59,16 +63,16 @@ class AnalyzePresetsMixin:
         elif not names:
             menu.addAction(NO_PRESETS).setEnabled(False)
         for name in names:
-            action = menu.addAction(name)
+            action = owned_action(menu, name)
             action.setToolTip(f"Fill the form with the settings saved as “{name}”.")
             action.triggered.connect(lambda _checked=False, n=name: self._load_preset(n))
         menu.addSeparator()
-        save = menu.addAction(SAVE_ACTION)
+        save = owned_action(menu, SAVE_ACTION)
         save.setEnabled(not problem)     # never write over a file whose presets could not be read
         save.triggered.connect(self._save_preset_as)
-        delete = QMenu(DELETE_MENU, menu)
+        delete = self._presets_delete_menu = QMenu(DELETE_MENU, menu)
         for name in names:
-            delete.addAction(name).triggered.connect(
+            owned_action(delete, name).triggered.connect(
                 lambda _checked=False, n=name: self._delete_preset(n))
         delete.setEnabled(bool(names))
         menu.addMenu(delete)

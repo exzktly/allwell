@@ -13325,7 +13325,12 @@ drawn under a Subset writes `Subset: “name”` at its top left, gid `nw-subset
 by `saved_name_of` against the page's unbound `st.subset`, else the conditions (`Subset.label`). It is written on the
 figure rather than only in the page's Details field because a saved, exported or pasted figure leaves Details behind.
 `controller.draw_view` takes it as `subset_label` and stamps after `_compose_view` (the view composition, which clears
-the figure first), for every view but Identity; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
+the figure first), for every view but Identity, joined with ` · ` to `controller.moving_tag` — the moving average's
+short phrase (`moving_compute.figure_tag`: `Moving average over 3 timepoints (trailing)`, `; baseline over N` for a
+fold change's own baseline window) on `MOVING_VIEWS` (Distribution, Trajectories, Statistics) for a metric with values
+over time, `""` otherwise — so a figure of averaged values says so on the same line with or without a subset (the
+footer keeps `moving_compute.describe`'s full sentence; Statistics writes no footer sentence of it, which is why the
+tag is on the figure). The Distribution window's rows pop-out puts the same tag in its title; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
 Nanowells mode passes `subset_label` from its run settings, and the Scatter Plot's nanowell scatter reads it through
 the `nanowell.subset_label` service (`_plot_links.subset_label`) and replaces its own copy on each redraw. The Subset
 combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when

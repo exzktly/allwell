@@ -1041,12 +1041,28 @@ def draw_view(fig, view: str, metrics, data, *, subset_label: str = "", **kwargs
 
     *subset_label* (``subset_compute.figure_label``) is written at the figure's top left after the view is drawn
     (``renderer.stamp_subset``), its size classes named by the user's labels as the footer's are (:func:`_named`), naming the saved subset the figure is of — every view but Identity, which uses no
-    Subset. The rest of the keywords are :func:`_compose_view`'s.
+    Subset. On the same line, a figure drawn from moving averages says so (:func:`moving_tag`), with or without a
+    subset. The rest of the keywords are :func:`_compose_view`'s.
     """
     drawn = _compose_view(fig, view, metrics, data, **kwargs)
     if view != "identity":
-        stamp_subset(fig, _named(subset_label, _sizes_of(kwargs.get("gate"), kwargs.get("sizes"))))
+        stamp_subset(fig, " · ".join(filter(None, [_named(subset_label, _sizes_of(kwargs.get("gate"), kwargs.get("sizes"))),
+                                                   moving_tag(view, **kwargs)])))
     return drawn
+
+
+#: The views whose values are moving averages while the moving average is on (``_compose_view``).
+MOVING_VIEWS = ("distribution", "trajectories", "statistics")
+
+
+def moving_tag(view: str, *, metric: str = "", channel=None, moving: int = 0, baseline_moving: int = 0,
+               moving_centred: bool = False, baseline: str = "", **_rest) -> str:
+    """What *view*'s figure says on its subset line when it is drawn from moving averages
+    (``moving_compute.figure_tag``); ``""`` for a view or metric (one value per nanowell) the window does not apply to."""
+    if view not in MOVING_VIEWS or metric in PER_NANOWELL:
+        return ""
+    return mvc.figure_tag(moving, metric_column(metric, channel) if metric in METRICS else "", baseline,
+                          baseline_moving, moving_centred)
 
 
 def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, channel: str | None, axis: str,

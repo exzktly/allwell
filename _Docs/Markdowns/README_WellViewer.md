@@ -6846,7 +6846,11 @@ the sentence names it.
   its window, so the first timepoints (before a full window), and any window with a gap or a timepoint whose
   nanowell identity is not confirmed, have no value; they are counted among the exclusions with that reason
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
-  measured values and then averaged. The footer states the window.
+  measured values and then averaged. The footer states the window, and the figure's top-left line — where the
+  Subset's name goes — says *Moving average over 3 timepoints (trailing)* (or *centred*, and *; baseline over 2*
+  when the baseline has its own window), beside the subset's name or on its own, so a saved or copied figure still
+  says its values are averaged. The Distribution window's pop-out says the same in its title. Views the moving
+  average does not reach (Array, Position, Extremes) and metrics with one value per nanowell say nothing of it.
 
   The menu in place of the label chooses the kind of window. **Moving average** (the default) is the one above:
   it ends at the timepoint, so no later timepoint — one that may already show a treatment — reaches it, but every

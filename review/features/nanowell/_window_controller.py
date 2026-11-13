@@ -585,7 +585,11 @@ def draw_window_popout(ctx, st, fig) -> None:
     st.popout_hits = render_site_rows(
         fig, model, [(f"Rows {first + 1}–{first + len(shown)} of {len(rows):,}", shown)],
         _page_crops(st, sites, columns),
-        label=label, empty=strip_text(st), title=f"Distribution window · {label}", head=strip_text(st),
+        label=label, empty=strip_text(st), head=strip_text(st),
+        # The window ranks the Distribution's values, which are moving averages while that is on: the title says so.
+        title=" · ".join(filter(None, [f"Distribution window · {label}", nwc.moving_tag(
+            "distribution", metric=metric, channel=channel, moving=st.moving, baseline_moving=st.baseline_moving,
+            moving_centred=st.moving_centred, baseline=st.baseline)])),
         cells=st.crop_cells, numbers=st.crop_metrics, image_channel=image_channel,
         display_range=nwc.display_range(ctx),
         timepoints=columns,

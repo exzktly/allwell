@@ -299,6 +299,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_page_variables.py": "The Nanowells page honours the plate's sample variables: Group by, Colour by, Split by and Then by",
     "test_nanowell_statistics.py": "The Nanowells page's Statistics view: wells or groups compared by t-test, Mann-Whitney, KS or Dunnett",
     "test_nanowell_subset.py": "The Nanowells page's *Subset*: any number of conditions — starting cells, a metric at a …",
+    "test_nanowell_moving_average_is_said.py": "A figure of moving averages says so on its subset line, through the page's controls",
     "test_nanowell_subset_scatter_gates.py": "The Nanowells page's *Subset* can name a gate drawn on the Scatter Plot's …",
     "test_nanowell_subset_row_flags.py": "The Subset's per-timepoint nanowell properties (found, identity, focus, …), read through site_metrics",
     "test_nanowell_synth.py": "Ground-truth geometry is checked independently of the fitting code",

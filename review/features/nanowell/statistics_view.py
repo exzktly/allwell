@@ -27,12 +27,14 @@ _TEST_TIP = ("The test each comparison is made with.\n"
              "(the figure draws their cumulative curves); Dunnett compares each sample with the control chosen\n"
              "under vs, corrected for that family. With three or more samples an omnibus (ANOVA, or Kruskal-Wallis\n"
              "for the rank tests) is stated first. Other tests' p-values are Benjamini-Hochberg adjusted (p_BH).\n"
-             "Rare responders: each group against the control group under vs, wells as the units, for a handful of\n"
-             "nanowells per well growing faster than control nanowells do — the exceedance count, Higher Criticism\n"
-             "and an upper-tail Anderson-Darling, each calibrated on the control wells, on the count fold change.")
-_FLAGGED_TIP = ("Show the nanowells the Rare responders test flagged — above the threshold, or at or below their well's "
-                "HC threshold — in the pop-out, as rows of crops over time, to rule out segmentation errors, doublets "
-                "and debris.")
+             "Rare responders: each group against the control group under vs, wells as the units: does it hold a\n"
+             "handful of nanowells that grew past anything the control wells reach? The exceedance test decides;\n"
+             "Higher Criticism and an upper-tail shape test are reported beside it. The value is the count fold change.")
+_FLAGGED_TIP = ("Show the nanowells that grew past the control cutoff — the ones the verdict is counted from — in the "
+                "pop-out, as rows of crops over time, to rule out segmentation errors, doublets and debris.")
+#: Why **Review flagged crops** is greyed out, said on the button itself.
+FLAGGED_NONE_TIP = "No nanowell grew past the control cutoff, so there is nothing to review."
+FLAGGED_NOT_RUN_TIP = "Choose the control group under vs: the nanowells the test flags can then be reviewed here."
 STATS_CONTROL_TIP = ("Compare each sample with this one only — fewer comparisons than every pair, and the family a "
                      "plate design usually means. Dunnett needs one. None: every pair is compared.")
 
@@ -75,9 +77,15 @@ def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool)
     """Shown on the Statistics view only, on the state's choices. The caller blocks the signals."""
     controls.group.setVisible(on_view)
     rare = sc.test_spec(st.stats_test)["kind"] == "rare"
-    controls.unit.setEnabled(not rare)                  # the rare-responder tests always take wells as the units
+    # Hidden, not greyed: the rare-responder tests always take wells as the units, so the choice never applies to
+    # them, and a greyed control the user cannot use reads as one they must first unlock.
+    controls.unit.setVisible(not rare)
     if controls.flagged is not None:
         controls.flagged.setVisible(rare)
+        ready = bool(st.rare_flagged)
+        controls.flagged.setEnabled(ready)
+        controls.flagged.setToolTip(_FLAGGED_TIP if ready else FLAGGED_NONE_TIP if st.rare_footer is not None
+                                    else FLAGGED_NOT_RUN_TIP)
     for combo, value in ((controls.unit, st.stats_unit), (controls.test, st.stats_test)):
         index = combo.findData(value)
         if index >= 0:

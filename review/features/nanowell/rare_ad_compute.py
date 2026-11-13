@@ -38,7 +38,10 @@ SCHOLZ_LABEL = "k-sample Anderson–Darling (Scholz–Stephens), two-sided — u
 
 
 def a2r_stratum(x: np.ndarray, ref: np.ndarray) -> float:
-    """``A²_R`` of the values *x* against the sorted control values *ref*; NaN when either is empty."""
+    """``A²_R`` of the values *x* against the sorted control values *ref*; NaN when either is empty, and NaN when
+    the control pool has no value above its median and below its top — the integral then has nothing to run over,
+    so the statistic measures nothing (whole-number fold changes such as 2, 3, 4 do this), which is not a measured
+    zero."""
     x = np.sort(np.asarray(x, dtype=float))
     ref = np.asarray(ref, dtype=float)
     n, N = len(x), len(ref)
@@ -49,24 +52,26 @@ def a2r_stratum(x: np.ndarray, ref: np.ndarray) -> float:
     Fn = np.searchsorted(x, u, side="right") / n
     keep = (u > np.median(ref)) & (F0 < 1.0)
     if not keep.any():
-        return 0.0
+        return math.nan
     excess = np.maximum(F0[keep] - Fn[keep], 0.0)
     return float(n * np.sum((c[keep] / N) * excess ** 2 / (1.0 - F0[keep])))
 
 
 def a2r(well: Well, pooled: dict) -> tuple[float, dict]:
-    """The well's strata-weighted ``A²_R`` and each stratum's own value."""
+    """The well's strata-weighted ``A²_R`` and each stratum's own value. A stratum whose value is undefined
+    (:func:`a2r_stratum`) is reported and left out of the weighting; NaN when no stratum has a value."""
     per, weights = {}, {}
     for s, x in well.values.items():
         ref = pooled.get(s)
         if ref is None or len(ref) == 0:
             continue
         per[s] = a2r_stratum(x, ref)
-        weights[s] = len(x)
+        if np.isfinite(per[s]):
+            weights[s] = len(x)
     total = sum(weights.values())
     if not total:
         return math.nan, per
-    return float(sum(weights[s] / total * per[s] for s in per)), per
+    return float(sum(weights[s] / total * per[s] for s in weights)), per
 
 
 def statistic(well: Well, pooled: dict) -> float:

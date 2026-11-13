@@ -218,7 +218,7 @@ def test_hc_detects_sparse_responders_that_a_mean_shift_test_would_not():
     unit = res.units[0]
     assert unit.hc_perm.p == pytest.approx(unit.hc_perm.min_p) and unit.hc_perm.exhaustive
     assert unit.hc_perm.n_labelings == math.comb(9, 3)
-    assert rr.SUPPORTS in unit.interpretation
+    assert unit.interpretation == rr.DETECTED           # decided by the exceedance test; HC reported beside it
 
 
 # ── permutations ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -283,12 +283,18 @@ def test_bh_runs_across_treatments_for_each_test():
     assert q.min() == pytest.approx(min(2 * lo, hi)) and q.max() == pytest.approx(hi)
 
 
-def test_ad_alone_is_a_shape_difference_not_enrichment():
+def test_the_exceedance_test_alone_decides_the_verdict():
+    """User decision: Test A decides; Higher Criticism and the upper-tail shape test never change the verdict. Each
+    case puts the supporting tests on the other side of the line from the exceedance test, so a rule that let either
+    decide would give a different answer."""
     unit = rr.Unit("all", "drug", [], [], True, True)
-    unit.q = {"exceedance": 0.4, "hc": 0.3, "ad": 0.01}
-    assert rr.interpret(unit, 0.05) == rr.SHAPE_ONLY
-    unit.q = {"exceedance": 0.01, "hc": 0.3, "ad": 0.01}
-    assert rr.interpret(unit, 0.05) == f"{rr.SUPPORTS} (exceedance)"
+    unit.q = {"exceedance": 0.4, "hc": 0.01, "ad": 0.01}
+    assert rr.interpret(unit, 0.05) == rr.NOT_DETECTED
+    unit.q = {"exceedance": 0.01, "hc": 0.9, "ad": 0.9}
+    assert rr.interpret(unit, 0.05) == rr.DETECTED
+    unit.q = {"exceedance": float("nan"), "hc": 0.01, "ad": 0.01}
+    assert rr.interpret(unit, 0.05) == rr.NOT_DETECTED
+    assert rr.interpret(rr.Unit("all", "drug", [], [], False, False), 0.05) == rr.INSUFFICIENT
 
 
 def test_responders_name_the_spiked_nanowells_with_their_crops():
@@ -422,7 +428,8 @@ def test_the_page_figure_keeps_its_panels_legible_however_long_the_text():
         panels = [ax for ax in fig.axes if ax.get_visible() and ax.axison]
         assert panels, size
         heights = [ax.get_position().height * size[1] for ax in panels]
-        assert min(heights) >= rd.ROW_MIN_IN - 1.1, (size, heights)
+        # A row's axes keep at least what ROW_MIN_IN leaves after its title, ticks and labels (1.3 in).
+        assert min(heights) >= rd.ROW_MIN_IN - rd._ROW_PAD_IN - 1e-6 and min(heights) >= 1.25, (size, heights)
         lowest = min(ax.get_position().y0 for ax in panels)
         texts = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
         assert texts and max(t.get_position()[1] for t in texts) < lowest, size
@@ -524,6 +531,154 @@ def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
         renderer = FigureCanvasAgg(fig).get_renderer()
         exceed = panels[1]
         box = exceed.get_window_extent(renderer)
-        labels = [t for t in exceed.texts if t.get_text().startswith("p=")]
+        labels = [t for t in exceed.texts if t.get_gid() == "rare-exceed-count"]
         assert labels, size
         assert all(t.get_window_extent(renderer).y1 <= box.y1 for t in labels), size   # inside, under the title
+
+
+# ── what the result says, and what the figure draws (tracker RARE_RESPONDERS_UX_TRACKER.md) ──────────────────────
+def _small_plate(*, spiked: bool, n_ctrl: int = 3, n_treat: int = 2, seed: int = 3) -> pd.DataFrame:
+    """Whole-number fold changes (2×, 3×, 4× of 1–3 starting cells), as a real count plate has, on wells named as
+    the plate names them; with *spiked*, nanowells 5, 17, 33 and 48 of each drug well grow 30-fold."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for well in [f"A{i + 1:02d}" for i in range(n_ctrl)] + [f"B{i + 1:02d}" for i in range(n_treat)]:
+        n0 = rng.integers(1, 4, 60)
+        nt = n0 * rng.integers(2, 5, 60)
+        if spiked and well.startswith("B"):
+            for q in (5, 17, 33, 48):
+                nt[q] = n0[q] * 30
+        rows += [{"plate_id": "P", "well_id": well, "condition": "ctrl" if well.startswith("A") else "drug",
+                  "nanowell_id": str(i), "n0": int(n0[i]), "nt": int(nt[i]), "t0_h": 0.0, "t_h": 5.0,
+                  "crop_path": ""} for i in range(60)]
+    return pd.DataFrame(rows)
+
+
+def test_a_plate_with_no_responders_flags_nothing_and_says_the_test_could_not_run():
+    """The reported defect: the null plate listed 15 "flagged" nanowells — Higher Criticism's candidates, which every
+    well has — beside a verdict of none. Only nanowells past the cutoff are flagged (user decision), and with none
+    past it in any well the deciding test says it was not run rather than printing dashes."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_small_plate(spiked=False), rr.RareParams(control="ctrl"))
+    unit = res.units[0]
+    assert len(res.responders) == 0 and unit.interpretation == rr.NOT_DETECTED
+    assert any(len(unit.hc[w.key].candidates) for w in unit.treated)      # the candidates exist; they are not flagged
+    text = rx.unit_text(res, unit)
+    assert text["headline"] == ("drug: rare responders not detected. 0 of 120 drug nanowells (0.0%) grew past the "
+                                "control cutoff (its top 1%), against 0 of 180 control nanowells (0.0%) · 2 drug vs "
+                                "3 control wells.")
+    assert text["lines"][0] == "Deciding: exceedance test not tested — no nanowell in any well grew past the cutoff."
+
+
+def test_the_spiked_plate_leads_with_counts_and_names_every_limit_of_the_design():
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    unit = res.units[0]
+    assert sorted(res.responders["nanowell_id"].astype(int)) == sorted([5, 17, 33, 48] * 2)
+    text = rx.unit_text(res, unit)
+    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past "
+                                       "the control cutoff (its top 1%), against 0 of 180 control nanowells (0.0%)")
+    assert text["lines"] == [
+        "Deciding: exceedance test p = 0.00072.",
+        "Supporting, not deciding: Higher Criticism p = 0.1 (the lowest possible with these wells) · shape test "
+        "not computable (too few distinct fold changes above the control median)."]
+    assert text["caveats"] == [
+        "With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1, so they can "
+        "neither confirm nor rule out anything here.",
+        "No control nanowell grew past the cutoff, so the spread between wells could not be estimated: the "
+        "exceedance test's p treats nanowells as independent and overstates the evidence (on wells alone, p ≥ 0.1).",
+        "Higher Criticism cannot see the 2 most extreme drug nanowell(s) (it leaves out p ≤ 1/n), so it says nothing "
+        "about them."]
+
+
+def test_higher_criticism_s_blind_spot_is_named_where_it_hides_the_responders():
+    """User decision: keep HC+, and warn. With 6 control wells the pool is larger than a well, every spiked nanowell
+    falls at p ≤ 1/n, HC+ leaves them all out (p 0.93) — and the figure says so."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_small_plate(spiked=True, n_ctrl=6, n_treat=3), rr.RareParams(control="ctrl"))
+    unit = res.units[0]
+    assert unit.interpretation == rr.DETECTED and unit.hc_perm.p > 0.5
+    assert ("Higher Criticism cannot see the 12 most extreme drug nanowell(s) (it leaves out p ≤ 1/n), so it says "
+            "nothing about them.") in rx.caveats(unit, res.prepared.params)
+
+
+def test_the_upper_tail_shape_statistic_is_undefined_not_zero_when_it_has_nothing_to_measure():
+    """With whole-number fold changes the control pool has no value above its median and below its top, so the
+    statistic's integral runs over nothing: that is not a measured zero (CLAUDE.md §7), and it was reported as
+    A²_R = 0 with p = 1."""
+    from review.features.nanowell import rare_ad_compute as ad
+
+    assert math.isnan(ad.a2r_stratum(np.array([2.0, 4.0, 60.0]), np.array([2.0, 3.0, 4.0, 4.0])))
+    assert ad.a2r_stratum(np.array([9.0, 9.0]), np.array([1.0, 2.0, 3.0, 4.0, 5.0])) > 0   # a real tail still counts
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    assert math.isnan(res.units[0].a2_perm.p)
+    assert math.isnan(res.table["a2r_mean"].iloc[0])
+
+
+def test_a_relabeling_whose_statistic_is_undefined_does_not_make_p_smaller():
+    """Four wells, two treated (C, D): six labelings. The statistic is 2 for C, 0 for D and undefined for A and B, so
+    the observed mean is 1; {A,C} and {B,C} score 2, {A,D} and {B,D} score 0, and {A,B} is undefined. Counting the
+    undefined labeling as smaller gave p = 3/6; it cannot be ruled out as at least as extreme, so p = 4/6."""
+    import review.features.nanowell.rare_null_compute as rn
+
+    wells = [_well(k, [1.0]) for k in "ABCD"]
+    values = {"A": math.nan, "B": math.nan, "C": 2.0, "D": 0.0}
+    perm = rn.permutation_test(wells, {"C", "D"}, lambda well, _pooled: values[well.key], 100, 0)
+    assert perm.n_labelings == 6 and perm.observed == 1.0
+    assert perm.p == pytest.approx(4 / 6)
+
+
+def test_the_figure_draws_counts_and_fold_changes_not_p_values_and_logarithms():
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    fig = Figure(figsize=(14.5, 7.0))
+    rd.render_rare_page(fig, res)
+    fig.canvas.draw()
+    ecdf, exceed, hc_ax = [ax for ax in fig.axes if ax.axison][:3]
+    assert ecdf.get_title().startswith("How far nanowells grew, by starting cells")
+    ticks = [t.get_text() for t in ecdf.get_xticklabels() if t.get_text()]
+    assert {"2×", "4×", "8×"} <= set(ticks) and all(t.endswith("×") for t in ticks)      # fold changes, not log₂
+    counts = sorted(t.get_text() for t in exceed.texts if t.get_gid() == "rare-exceed-count")
+    assert counts == ["0/60", "0/60", "0/60", "4/60", "4/60"]
+    assert not any(t.get_text().startswith("p=") for t in exceed.texts)
+    assert exceed.get_ylim()[0] == 0
+    assert hc_ax.get_title().startswith("Higher Criticism: p = 0.1 (lowest possible)")
+    heads = [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-rare-unit"]
+    assert heads and heads[0].startswith("drug: rare responders detected. 8 of 120")
+    lines = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
+    assert lines[0].get_text() == "Deciding: exceedance test p = 0.00072."
+    assert lines[0].get_position()[1] < min(ax.get_position().y0 for ax in (ecdf, exceed, hc_ax))
+    assert min(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-unit") > max(
+        ax.get_position().y1 for ax in (ecdf, exceed, hc_ax))        # the answer above the panels
+
+
+def test_a_short_figure_cuts_its_text_between_sentences_and_keeps_the_caveats_first():
+    """However short the figure, the deciding test is drawn; then the caveats, before the supporting tests; and what is
+    cut is cut between sentences, with one pointer to Details."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    for size in ((4.06, 7.32), (4.06, 9.0), (4.06, 12.0)):
+        fig = Figure(figsize=size)
+        rd.render_rare_page(fig, res, note="pointer")
+        lines = [t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-line"]
+        assert lines[0] == "Deciding: exceedance test p = 0.00072.", size
+        joined = " ".join(line.strip() for line in lines)
+        if "Supporting" in joined:
+            assert "⚠" in joined and joined.index("⚠") < joined.index("Supporting"), size
+        if lines[-1].startswith("… "):
+            assert lines[-1].endswith("more, and the full report: Details ▸ under the figure."), size
+            drawn = " ".join(line.strip() for line in lines[:-1])
+        else:
+            assert lines[-1] == "pointer", size
+            drawn = " ".join(line.strip() for line in lines[:-1])
+        for sentence in drawn.split("⚠ ")[1:]:                      # every caveat drawn is drawn whole
+            assert sentence.split("Supporting")[0].rstrip().endswith("."), (size, sentence)

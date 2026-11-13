@@ -25,6 +25,8 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
+
 from review.features.nanowell.rare_exceedance_compute import FISHER_LABEL
 from review.features.nanowell.rare_ad_compute import SCHOLZ_LABEL
 from util.json_write import write_json_atomic
@@ -42,27 +44,75 @@ def _num(value, spec: str = ".3g") -> str:
     return format(value, spec)
 
 
+def _or_text(r) -> str:
+    if not math.isfinite(r["exceedance_or"]) and not math.isinf(r["exceedance_or"]):
+        return "not estimable"
+    if math.isinf(r["exceedance_or"]):
+        return (f"unbounded — no control nanowell grew past the cutoff (95% interval {_num(r['exceedance_or_ci_low'])} "
+                "to ∞)")
+    return (f"{_num(r['exceedance_or'])} (95% interval {_num(r['exceedance_or_ci_low'])} to "
+            f"{_num(r['exceedance_or_ci_high'])})")
+
+
+def _perm_text(p, q, n, exhaustive, floor, undefined: str) -> str:
+    if not math.isfinite(p):
+        return undefined
+    at_floor = " — the lowest possible" if math.isfinite(floor) and p <= floor * (1 + 1e-9) else ""
+    return (f"p {_num(p)}{at_floor}, q {_num(q)} ({n} relabelings of the wells, "
+            f"{'every one' if exhaustive else 'a random sample'}; lowest possible p {_num(floor)})")
+
+
+def _unit_lines(result, unit, r) -> list[str]:
+    kt, nt, kc, nc = counts_of(unit)
+    plates = "all plates" if r["plate"] == "all" else f"plate {r['plate']}"
+    lines = [f"{r['treatment']} ({plates}): {r['n_treatment_wells']} {r['treatment']} vs {r['n_control_wells']} "
+             f"control wells — {r['interpretation']}"]
+    if not r["group_inference"]:
+        lines.append(f"  not tested as a group: {r['refusal']}")
+    if kt + kc == 0:
+        lines.append(f"  {NAME_A}: not tested — no nanowell in any well grew past the cutoff "
+                     f"(the control's {r['percentile']:g}th percentile per starting cell count).")
+    else:
+        method = "beta-binomial regression" if r["exceedance_method"].startswith("beta-binomial") else r["exceedance_method"]
+        lines.append(f"  {NAME_A} at the control's {r['percentile']:g}th percentile ({method}): {kt} of {nt} "
+                     f"{r['treatment']} vs {kc} of {nc} control nanowells past the cutoff; odds of growing past it "
+                     f"{_or_text(r)}; spread between wells ρ {_num(r['rho'])}; p {_num(r['exceedance_p'])}, "
+                     f"q {_num(r['exceedance_q'])}")
+        lines.append(f"    for comparison, {FISHER_LABEL}: p {_num(r['fisher_p_anticonservative'])}")
+    lines.append(f"  {NAME_B}: mean score {_num(r['hc_mean'])} over the {r['treatment']} wells; "
+                 + _perm_text(r["hc_p"], r["hc_q"], r["hc_permutations"], r["hc_exhaustive"], r["hc_min_p"],
+                              "not computable"))
+    lines.append(f"  {NAME_C}: " + (f"mean {_num(r['a2r_mean'])}; " if math.isfinite(r["a2r_mean"]) else "")
+                 + _perm_text(r["a2r_p"], r["a2r_q"], r["a2r_permutations"], r["hc_exhaustive"], r["a2r_min_p"],
+                              C_UNDEFINED))
+    stat, sp, note = unit.scholz
+    capped = note.startswith("p capped")
+    p_text = (f"p ≥ {_num(sp)} (scipy caps it)" if capped and math.isfinite(sp) and sp >= 0.25 else
+              f"p ≤ {_num(sp)} (scipy caps it)" if capped and math.isfinite(sp) else f"p {_num(sp)}")
+    lines.append(f"    for comparison, {SCHOLZ_LABEL}: standardised statistic {_num(stat)}, {p_text}"
+                 + (f" ({note})" if note and not capped else ""))
+    floor = 1.0 / (len(unit.controls) + 1) if unit.controls else math.nan
+    for c in (c for c in unit.primary.counts if c.treated):
+        well = c.key.split(":", 1)[-1]
+        at = " — the lowest possible" if math.isfinite(c.empirical_p) and c.empirical_p <= floor * (1 + 1e-9) else ""
+        lines.append(f"  {well}: {c.k} of {c.n} nanowells past the cutoff ({_pct(c.k, c.n)}); against the "
+                     f"{len(unit.controls)} control wells, p {_num(c.empirical_p)}{at}")
+    if r["notes"]:
+        lines.append(f"  notes: {r['notes']}")
+    return lines
+
+
 def report_lines(result) -> list[str]:
-    lines = [f"Rare-responder analysis — value: {result.prepared.value_label}; "
-             f"{result.log['nanowells_kept']} nanowells kept, {result.log['nanowells_excluded']} excluded"]
-    for _i, r in result.table.iterrows():
-        lines.append(f"{r['treatment']} ({r['plate']}): {r['n_treatment_wells']} treatment vs "
-                     f"{r['n_control_wells']} control wells — {r['interpretation']}")
-        if not r["group_inference"]:
-            lines.append(f"  group-level inference refused: {r['refusal']}")
-        lines.append(f"  A exceedance @ {r['percentile']:g}th [{r['exceedance_method']}]: OR {_num(r['exceedance_or'])} "
-                     f"(95% CI {_num(r['exceedance_or_ci_low'])}–{_num(r['exceedance_or_ci_high'])}), "
-                     f"ρ {_num(r['rho'])}, p {_num(r['exceedance_p'])}, q {_num(r['exceedance_q'])}")
-        lines.append(f"    {FISHER_LABEL}: p {_num(r['fisher_p_anticonservative'])}")
-        lines.append(f"  B HC+ mean {_num(r['hc_mean'])}: permutation p {_num(r['hc_p'])}, q {_num(r['hc_q'])} "
-                     f"({r['hc_permutations']} distinct labelings, {'exhaustive' if r['hc_exhaustive'] else 'sampled'};"
-                     f" smallest attainable p {_num(r['hc_min_p'])})")
-        lines.append(f"  C A²_R mean {_num(r['a2r_mean'])}: permutation p {_num(r['a2r_p'])}, q {_num(r['a2r_q'])} "
-                     f"(smallest attainable p {_num(r['a2r_min_p'])})")
-        lines.append(f"    {SCHOLZ_LABEL}: A² {_num(r['scholz_stephens_stat_uncalibrated'])}, "
-                     f"p {_num(r['scholz_stephens_p_uncalibrated'])}")
-        if r["notes"]:
-            lines.append(f"  notes: {r['notes']}")
+    """The full report, in plain words, as the page's Details shows it and ``rare_report.txt`` holds it: what each test
+    asks, then per group its verdict, every test's statistic, p and q, the comparison tests, each well's count, and
+    every warning; the self-check when it ran."""
+    lines = [f"Rare-responder analysis of {result.prepared.value_label}: {result.log['nanowells_kept']} nanowells kept, "
+             f"{result.log['nanowells_excluded']} left out.",
+             *[f"{name} asks: {what}." for name, what in ASKS.items()],
+             f"q is each p corrected across the {len(result.units)} group(s) tested (Benjamini–Hochberg), separately "
+             f"for each test; only the {NAME_A.lower()} decides the verdict."]
+    for unit, (_i, r) in zip(result.units, result.table.iterrows()):
+        lines += _unit_lines(result, unit, r)
     lines += [f"WARNING: {w}" for w in result.warnings]
     if result.validation is not None:
         lines.append("Self-check, control vs control (share of p < 0.05 should be ≤ ~5%):")
@@ -100,20 +150,141 @@ def write(result, folder) -> list[Path]:
     return written + [log, report]
 
 
+#: One name per test, everywhere the result is read — the figure, Details and the export.
+NAME_A = "Exceedance test"
+NAME_B = "Higher Criticism"
+NAME_C = "Upper-tail shape test"
+#: What each test asks, said once where the tests are introduced (Details).
+ASKS = {NAME_A: "more nanowells past the control cutoff than in control (decides the verdict)",
+        NAME_B: "a few extreme nanowells, with no fixed cutoff",
+        NAME_C: "any difference in the top of the distribution (Anderson–Darling)"}
+#: The reason an Upper-tail shape statistic is undefined, said in place of a p.
+C_UNDEFINED = "not computable (too few distinct fold changes above the control median)"
+
+
+def _pct(k: int, n: int) -> str:
+    return f"{k / n:.1%}" if n else "—"
+
+
+def counts_of(unit) -> tuple[int, int, int, int]:
+    """``(treated past the cutoff, treated, control past the cutoff, control)`` nanowells for *unit*'s cutoff."""
+    counts = unit.primary.counts
+    return (sum(c.k for c in counts if c.treated), sum(c.n for c in counts if c.treated),
+            sum(c.k for c in counts if not c.treated), sum(c.n for c in counts if not c.treated))
+
+
+def cutoff_name(params) -> str:
+    """How the cutoff is named: the control percentile it was set at, or the fixed value the user gave."""
+    if params.fixed_threshold is not None:
+        return f"the fixed cutoff ({params.fixed_threshold:g})"
+    return f"the control cutoff (its top {100 - params.percentile:g}%)"
+
+
+def headline(unit, params) -> str:
+    """The answer for *unit*, first and in counts: the verdict, then how many nanowells of each condition grew past
+    the cutoff, and the wells behind them. Every number is a count a reader can check against the panels."""
+    kt, nt, kc, nc = counts_of(unit)
+    wells = f"{len(unit.treated)} {unit.treatment} vs {len(unit.controls)} control wells"
+    return (f"{unit.label}: {unit.interpretation}. {kt} of {nt} {unit.treatment} nanowells ({_pct(kt, nt)}) grew past "
+            f"{cutoff_name(params)}, against {kc} of {nc} control nanowells ({_pct(kc, nc)}) · {wells}.")
+
+
+def _floor_note(perm) -> str:
+    if perm is None or not math.isfinite(perm.p) or not math.isfinite(perm.min_p) or perm.p > perm.min_p * (1 + 1e-9):
+        return ""
+    return " (the lowest possible with these wells)"
+
+
+def deciding_line(unit, n_units: int, params) -> str:
+    """The exceedance test's result: its p (and q when several groups were tested), or why it has none."""
+    kt, _nt, kc, _nc = counts_of(unit)
+    a = unit.primary
+    if not unit.group_allowed:
+        return f"Deciding: {NAME_A.lower()} not run — {unit.refusal}."
+    if kt + kc == 0:
+        return f"Deciding: {NAME_A.lower()} not tested — no nanowell in any well grew past the cutoff."
+    if not math.isfinite(a.p):
+        return f"Deciding: {NAME_A.lower()} has no group p — {'; '.join(a.notes) or 'too few wells for the regression'}."
+    q = unit.q.get("exceedance", math.nan)
+    corrected = f" (q = {_num(q)} across the {n_units} groups tested)" if n_units > 1 else ""
+    return f"Deciding: {NAME_A.lower()} p = {_num(a.p)}{corrected}."
+
+
+def _support_part(name: str, perm, undefined: str) -> str:
+    if perm is None:
+        return f"{name} not run"
+    if not math.isfinite(perm.p):
+        return f"{name} {undefined if perm.reason == 'the statistic is undefined for every treatment well' else 'not computable: ' + (perm.reason or 'undefined')}"
+    return f"{name} p = {_num(perm.p)}{_floor_note(perm)}"
+
+
+def supporting_line(unit, params) -> str:
+    """Higher Criticism and the upper-tail shape test, which never change the verdict, and — when either finds what
+    the exceedance test did not — what that disagreement usually means."""
+    from review.features.nanowell.rare_report_compute import significant
+
+    if not unit.group_allowed:
+        return ""
+    line = (f"Supporting, not deciding: {_support_part(NAME_B, unit.hc_perm, 'not computable')} · "
+            f"{_support_part('shape test', unit.a2_perm, C_UNDEFINED)}.")
+    a_sig = significant(unit, "exceedance", params.fdr)
+    if not a_sig and significant(unit, "hc", params.fdr):
+        line += (f" {NAME_B} finds an excess the cutoff did not: look at the nanowells just under the cutoff.")
+    elif not a_sig and significant(unit, "ad", params.fdr):
+        line += " The top of the distribution differs in shape, which by itself is not rare responders."
+    return line
+
+
+def caveats(unit, params) -> list[str]:
+    """What undermines the verdict, each in one sentence — said beside it, never left in Details: a permutation floor
+    that keeps the supporting tests from ever reaching significance, an exceedance regression that could not estimate
+    the spread between wells, and nanowells Higher Criticism cannot see."""
+    from review.features.nanowell import rare_hc_compute as hc
+    from review.features.nanowell.rare_exceedance_compute import BB_LABEL
+    from review.features.nanowell.rare_null_compute import pool
+
+    out = []
+    if not unit.group_allowed:
+        return out
+    kt, _nt, kc, _nc = counts_of(unit)
+    perm = unit.hc_perm
+    if perm is not None and math.isfinite(perm.min_p) and perm.min_p >= params.fdr:
+        out.append(f"With {len(unit.controls)} control and {len(unit.treated)} {unit.treatment} wells, {NAME_B} and the "
+                   f"shape test cannot go below p = {_num(perm.min_p)}, so they can neither confirm nor rule out "
+                   "anything here.")
+    a = unit.primary
+    if a.method == BB_LABEL and math.isfinite(a.p) and kc == 0 and kt > 0:
+        exact = (f" (on wells alone, p ≥ {_num(perm.min_p)})" if perm is not None and perm.exhaustive
+                 and math.isfinite(perm.min_p) else "")
+        out.append("No control nanowell grew past the cutoff, so the spread between wells could not be estimated: "
+                   f"the {NAME_A.lower()}'s p treats nanowells as independent and overstates the evidence" + exact + ".")
+    full = pool(unit.controls)
+    unseen = 0
+    for w in unit.treated:
+        ps = hc.p_values(w, full)[0]
+        unseen += int(np.sum(ps <= 1.0 / len(ps))) if len(ps) else 0
+    if unseen:
+        out.append(f"{NAME_B} cannot see the {unseen} most extreme {unit.treatment} nanowell(s) (it leaves out "
+                   "p ≤ 1/n), so it says nothing about them.")
+    return out
+
+
+def unit_text(result, unit) -> dict:
+    """Everything the figure says about *unit*: ``headline``, ``lines`` (the deciding test, then the supporting
+    ones) and ``caveats``."""
+    params = result.prepared.params
+    return {"headline": headline(unit, params),
+            "lines": [line for line in (deciding_line(unit, len(result.units), params), supporting_line(unit, params))
+                      if line],
+            "caveats": caveats(unit, params)}
+
+
 def verdict_lines(result, units=None) -> list[str]:
-    """Two lines per treatment for the figure: the verdict, then each test's p and q — the rest is in
-    :func:`report_lines`, which the page shows under the figure (Details)."""
-    rows = result.table if units is None else result.table.head(units)
+    """The figure's text for each treatment as flat lines: its headline, the tests, then each caveat marked ⚠. The
+    full report is :func:`report_lines`, which the page shows under the figure (Details)."""
+    chosen = result.units if units is None else result.units[:units]
     lines = []
-    for _i, r in rows.iterrows():
-        lines.append(f"{r['treatment']}{'' if r['plate'] == 'all' else ' @ ' + str(r['plate'])}: "
-                     f"{r['n_treatment_wells']} vs {r['n_control_wells']} control wells — {r['interpretation']}")
-        if not r["group_inference"]:
-            lines.append(f"    {r['refusal']}")
-            continue
-        lines.append(f"    A exceedance: OR {_num(r['exceedance_or'])} (95% CI {_num(r['exceedance_or_ci_low'])}–"
-                     f"{_num(r['exceedance_or_ci_high'])}), p {_num(r['exceedance_p'])}, q {_num(r['exceedance_q'])}"
-                     f"   ·   B HC: p {_num(r['hc_p'])}, q {_num(r['hc_q'])}"
-                     f"   ·   C A²R: p {_num(r['a2r_p'])}, q {_num(r['a2r_q'])}"
-                     f"   ·   smallest attainable p {_num(r['hc_min_p'])}")
+    for unit in chosen:
+        text = unit_text(result, unit)
+        lines += [text["headline"], *text["lines"], *[f"⚠ {c}" for c in text["caveats"]]]
     return lines

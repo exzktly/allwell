@@ -154,7 +154,9 @@ def permutation_test(units: list[Well], treated: set, statistic, max_labelings: 
         return Permutation(observed, math.nan, n, exhaustive, math.nan, "the statistic is undefined for every "
                            "treatment well")
     others = np.asarray(stats[1:], dtype=float)
-    ge = int(np.sum(np.nan_to_num(others, nan=-np.inf) >= observed))
+    # A relabeling whose statistic is undefined cannot be ruled out as at least as extreme, so it counts as one:
+    # counting it as smaller (as -inf did) made p smaller than the labelings support.
+    ge = int(np.sum(np.nan_to_num(others, nan=np.inf) >= observed))
     # Exhaustive: the observed labeling is one of n, so p = (1 + ge) / n. Sampled: the same formula with B + 1 = n.
     p = (1 + ge) / n
     return Permutation(observed, float(p), n, exhaustive, 1.0 / n, null=stats[1:])

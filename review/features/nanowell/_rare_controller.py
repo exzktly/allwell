@@ -32,7 +32,7 @@ from review.features.nanowell import controller as _controller
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._rare_render import render_rare_page
 from review.features.nanowell.rare_data_compute import RareParams, from_site_metrics
-from review.features.nanowell.rare_export_compute import report_lines, verdict_lines
+from review.features.nanowell.rare_export_compute import report_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
 from review.features.nanowell.renderer import Footer, render_message, render_site_rows
 from review.features.nanowell.summary_compute import timepoint_phrase
@@ -41,7 +41,7 @@ from review.features.nanowell.summary_compute import timepoint_phrase
 FLAGGED_PAGE = 24
 #: Results kept at most: the one drawn and a few the user may step back to.
 RESULTS_KEPT = 4
-COMPUTING = "Running the rare-responder tests on a worker…"
+COMPUTING = "Testing"                                   # the start of every computing message (computing_text)
 NO_CONTROL = ("Rare responders test each group of wells against a control group: choose the control group under "
               "vs.")
 NOT_APPLIED = "The moving average and the Fixed cohort do not apply to the rare-responder tests."
@@ -125,7 +125,7 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     if held is None:
         if request is not None:
             request(key, lambda: analyse(table, params))
-        render_message(fig, COMPUTING, gid="nw-rare-computing")
+        render_message(fig, computing_text(groups, control), gid="nw-rare-computing")
         return None
     if isinstance(held, str):
         render_message(fig, held, gid="nw-rare-why")
@@ -133,7 +133,7 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     notes = [f"{VALUE_NOTE} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.", *([NOT_APPLIED] if moving_on or cohort else []),
              *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
-    render_rare_page(fig, held, verdict_lines(held), note=DETAILS_POINTER)
+    render_rare_page(fig, held, note=DETAILS_POINTER)
     return held
 
 
@@ -143,6 +143,12 @@ def timepoint_hours(metrics: pd.DataFrame, timepoint: str) -> float:
         return float("nan")
     hours = pd.to_numeric(metrics.loc[metrics["timepoint"] == timepoint, "time_h"], errors="coerce").dropna()
     return float(hours.iloc[0]) if len(hours) else float("nan")
+
+
+def computing_text(groups: dict, control: str) -> str:
+    """What the figure says while the tests run: what is being tested against what, not where it runs."""
+    others = [name for name in groups if name != control]
+    return f"{COMPUTING} {', '.join(others)} against {control} for rare responders…"
 
 
 #: What the figure says under its verdicts: the full report is in the field under it, not in the figure.
@@ -187,6 +193,8 @@ def after_draw(ctx, st, model) -> None:
     results beyond :data:`RESULTS_KEPT`, and refresh the pop-out when it shows them."""
     st.rare_flagged = flagged_rows(model) if isinstance(model, RareResult) else []
     st.rare_footer = footer_of(model) if isinstance(model, RareResult) else None
+    nwc_ = _nwc()
+    nwc_._call(ctx, "_nw_refresh_controls")             # Review flagged crops follows what this result flagged
     while len(st.rare_results) > RESULTS_KEPT:
         st.rare_results.pop(next(iter(st.rare_results)))
     nwc = _nwc()
@@ -194,6 +202,12 @@ def after_draw(ctx, st, model) -> None:
     nwc._call(ctx, "_nw_popout_window_refresh")
     if st.popout_source == "responders":
         nwc.draw_popout(ctx)
+
+
+#: The pop-out with nothing flagged: after a result with none, and before any result.
+FLAGGED_NONE = "No nanowell grew past the control cutoff, so the Rare responders test flagged nothing to review."
+FLAGGED_NOT_RUN = ("Run the Rare responders test on the Statistics view: the nanowells that grow past the control "
+                   "cutoff are shown here for review by eye.")
 
 
 def page_count(st) -> int:
@@ -236,8 +250,8 @@ def draw_flagged_popout(ctx, st, fig) -> None:
     st.popout_hits, st.popout_tiles = {}, []
     flagged = st.rare_flagged
     if not flagged:
-        render_message(fig, "Run the Rare responders test on the Statistics view: the nanowells it flags are shown "
-                            "here for review by eye.", gid="nw-popout-flagged-empty")
+        render_message(fig, FLAGGED_NONE if st.rare_footer is not None else FLAGGED_NOT_RUN,
+                       gid="nw-popout-flagged-empty")
         return
     nwc = _nwc()
     if st.popout_tps_none:
@@ -253,8 +267,8 @@ def draw_flagged_popout(ctx, st, fig) -> None:
             for i, row in enumerate(shown)]
     columns = nwc.extremes_columns(timepoints, st.timepoint, st.popout_tps)
     wnc._want_crops(ctx, st, sites, sorted(columns, key=lambda tp: tp != st.timepoint))
-    head = (f"{len(flagged):,} nanowell(s) flagged by the rare-responder tests (above the threshold, or at or below "
-            "their well's HC threshold): check each for segmentation errors, doublets and debris.")
+    head = (f"{len(flagged):,} nanowell(s) grew past the control cutoff — the ones the verdict is counted from. Check "
+            "each for segmentation errors, doublets and debris")       # the caption adds its own full stop
     st.popout_hits = render_site_rows(
         fig, wc.WindowRows(st.timepoint, "count_fc", timepoints),
         [(f"Flagged {first + 1}–{first + len(shown)} of {len(flagged):,}", rows)],

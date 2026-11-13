@@ -67,29 +67,37 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     _choose(page, "_nw_stats_test_cb", "rare")
     assert st.stats_test == "rare"
     assert _texts(page, "nw-rare-why") == [rc.NO_CONTROL]
-    assert not page.widgets.get("_nw_stats_unit_cb").isEnabled()
+    assert not page.widgets.get("_nw_stats_unit_cb").isVisibleTo(page.window)     # never applies: hidden, not greyed
+    assert not page.widgets.get("_nw_stats_flagged_btn").isEnabled()                # nothing to review before a result
     assert page.widgets.get("_nw_stats_flagged_btn").isVisibleTo(page.window)
     # vs lists the groups, not the wells, even on the Wells unit: the test compares groups.
     control = page.widgets.get("_nw_control_cb")
     assert [control.itemData(i) for i in range(control.count())] == ["", "ctrl", "drug"]
     _choose(page, "_nw_control_cb", "ctrl")
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
-    # The figure carries the verdict and each test's p; the full report is in Details, under the figure.
+    # The figure leads with the answer in counts; under the panels the deciding test, the supporting ones and the
+    # caveats; the full report is in Details, under the figure.
+    assert [t.replace("\n", " ") for t in _texts(page, "nw-rare-unit")] == [
+        "drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its top 1%), "
+        "against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells."]
     figure = " ".join(_texts(page, "nw-rare-line"))
-    assert "drug: 2 vs 3 control wells — supports rare-responder enrichment" in figure
+    assert "Deciding: exceedance test p = 0.00072." in figure
+    assert "Higher Criticism p = 0.1 (the lowest possible with these wells)" in figure
+    assert "⚠ With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1" in figure
     assert rc.DETAILS_POINTER in figure and "anti-conservative" not in figure
-    assert _texts(page, "nw-rare-unit") == ["drug"]
+    assert page.widgets.get("_nw_stats_flagged_btn").isEnabled()
     assert page.widgets.get("_nw_details_btn").isVisibleTo(page.window)
     assert page.widgets.get("_nw_details_summary").text().startswith("Rare responders: 1 treatment(s)")
     page.widgets.get("_nw_details_btn").setChecked(True)
     details = page.widgets.get("_nw_details_body").text()
-    assert "drug (all): 2 treatment vs 3 control wells" in details
+    assert "drug (all plates): 2 drug vs 3 control wells — rare responders detected" in details
     assert "anti-conservative" in details and "uncalibrated" in details
-    assert f"{rc.VALUE_NOTE} Timepoint: t_a · 5 h." in details      # its hours, as the Timepoint control names it and rc.UNIT_IGNORED in details
-    # The flagged nanowells are exactly the spiked ones of the treatment wells, highest fold change first.
+    assert f"{rc.VALUE_NOTE} Timepoint: t_a · 5 h." in details      # its hours, as the Timepoint control names it
+    assert rc.UNIT_IGNORED in details
+    # The flagged nanowells are exactly the spiked ones of the treatment wells — the ones past the cutoff, nothing
+    # else — highest fold change first.
     flagged = {row["site"] for row in st.rare_flagged}
-    assert {(w, q, 0) for w in ("B01", "B02") for q in RESPONDERS} <= flagged
-    assert all(site[0] in ("B01", "B02") for site in flagged)
+    assert flagged == {(w, q, 0) for w in ("B01", "B02") for q in RESPONDERS}
     assert st.rare_flagged[0]["fc"] == max(row["fc"] for row in st.rare_flagged)
 
 
@@ -174,7 +182,7 @@ def test_a_control_hidden_on_the_plate_is_named_with_how_to_show_it_again(groupe
     assert nwc.nanowell_empty_reason(page) is None
     assert st.control == "ctrl"                          # the choice under vs survives the group being hidden
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
-    assert "drug: 2 vs 3 control wells" in " ".join(_texts(page, "nw-rare-line"))
+    assert _texts(page, "nw-rare-unit")[0].startswith("drug: rare responders detected.")
 
 
 def test_only_the_control_drawn_names_the_hidden_treatment(grouped_page, qtbot):
@@ -200,3 +208,46 @@ def test_a_sample_test_whose_vs_well_is_hidden_says_it_compared_every_pair(group
     note = " ".join(_texts(page, sc.GID_NOTE))
     assert ("vs A01 is not drawn: its group ctrl is hidden on the plate, so every pair is compared instead. Hidden on "
             "the plate: ctrl (A01, A02, A03).") in note
+
+
+def test_with_nothing_flagged_review_flagged_crops_is_greyed_out_and_says_why(qtbot, tmp_path, monkeypatch):
+    """The null plate: nothing grew past the cutoff, so the button that opens the flagged nanowells is greyed out with
+    the reason on it, and the pop-out — opened from its own source menu — says there is nothing to review rather than
+    telling the user to run a test that has already run."""
+    from review.domain import plot_members
+    from review.domain.batch_models import ReplicateSet
+    from review.features.nanowell import statistics_view as sv
+
+    rng = np.random.default_rng(3)
+    plate = {}
+    for well in ("A01", "A02", "A03", "B01", "B02"):
+        n0 = rng.integers(1, 4, N_SITES)
+        plate[well] = {"t_c": [int(v) for v in n0], "t_a": [int(v) for v in n0 * rng.integers(2, 5, N_SITES)]}
+    monkeypatch.setattr(plot_members, "plot_replicate_sets",
+                        lambda ctx: [ReplicateSet("ctrl", ["A01", "A02", "A03"]),
+                                     ReplicateSet("drug", ["B01", "B02"])])
+    page = _page(qtbot, _write_nanowell_dataset(tmp_path, counts=plate))
+    page.state.selection.selected_wells = set(plate)
+    st = _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    button = page.widgets.get("_nw_stats_flagged_btn")
+    assert not button.isEnabled() and button.toolTip() == sv.FLAGGED_NOT_RUN_TIP
+    _choose(page, "_nw_control_cb", "ctrl")
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
+    assert st.rare_flagged == []
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders not detected. 0 of 120")
+    assert not button.isEnabled() and button.toolTip() == sv.FLAGGED_NONE_TIP
+    rc.open_flagged_popout(page)                  # what the button runs; the pop-out's source menu reaches it too
+    assert st.popout_source == "responders"
+    assert _popout_texts(page, "nw-popout-flagged-empty") == [rc.FLAGGED_NONE]
+
+
+def _popout_texts(ctx, gid):
+    fig = ctx.widgets.get("_nw_popout_fig")
+    return [t.get_text() for t in list(fig.texts) + [t for ax in fig.axes for t in ax.texts] if t.get_gid() == gid]
+
+
+def test_the_computing_message_says_what_is_being_tested():
+    """It said "Running the rare-responder tests on a worker…" — where it runs, not what it is doing."""
+    assert rc.computing_text({"ctrl": ["A01"], "drug": ["B01"], "dmso": ["C01"]}, "ctrl") == (
+        "Testing drug, dmso against ctrl for rare responders…")

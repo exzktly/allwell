@@ -301,6 +301,7 @@ class NanowellState:
     #: sentence a failed run left), and the flagged nanowells of the one drawn last, as the pop-out pages them.
     rare_results: dict = field(default_factory=dict)
     rare_flagged: list = field(default_factory=list)
+    rare_footer: object = None              # the drawn rare result's Details (``_rare_controller.footer_of``)
     window_press: object = None             # (axes, x px, y px) of a press on the Distribution figure
     window_model: object = None             # the DistributionModel last drawn, which windows are read against
     popout_hits: dict = field(default_factory=dict)   # the pop-out's crop axes -> (well, q, r), for a click
@@ -396,7 +397,7 @@ class NanowellState:
         self.crops, self.montages, self.fetching, self.fetch_bridges = CropCache(), {}, set(), []
         self.window_crops = TimepointCropCache()
         self.popout_crops = {}
-        self.rare_results, self.rare_flagged = {}, []
+        self.rare_results, self.rare_flagged, self.rare_footer = {}, [], None
         self.region = self.region_for = self.press = self.drawn = self.array_goto = None
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}

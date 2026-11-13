@@ -74,11 +74,18 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     assert [control.itemData(i) for i in range(control.count())] == ["", "ctrl", "drug"]
     _choose(page, "_nw_control_cb", "ctrl")
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
-    report = "\n".join(_texts(page, "nw-rare-line"))
-    assert "drug (all): 2 treatment vs 3 control wells" in report
-    assert "anti-conservative" in report and "uncalibrated" in report
-    assert f"{rc.VALUE_NOTE} Timepoint: t_a." in report.replace("\n", " ") and rc.UNIT_IGNORED in report.replace("\n", " ")
+    # The figure carries the verdict and each test's p; the full report is in Details, under the figure.
+    figure = " ".join(_texts(page, "nw-rare-line"))
+    assert "drug: 2 vs 3 control wells — supports rare-responder enrichment" in figure
+    assert rc.DETAILS_POINTER in figure and "anti-conservative" not in figure
     assert _texts(page, "nw-rare-unit") == ["drug"]
+    assert page.widgets.get("_nw_details_btn").isVisibleTo(page.window)
+    assert page.widgets.get("_nw_details_summary").text().startswith("Rare responders: 1 treatment(s)")
+    page.widgets.get("_nw_details_btn").setChecked(True)
+    details = page.widgets.get("_nw_details_body").text()
+    assert "drug (all): 2 treatment vs 3 control wells" in details
+    assert "anti-conservative" in details and "uncalibrated" in details
+    assert f"{rc.VALUE_NOTE} Timepoint: t_a." in details and rc.UNIT_IGNORED in details
     # The flagged nanowells are exactly the spiked ones of the treatment wells, highest fold change first.
     flagged = {row["site"] for row in st.rare_flagged}
     assert {(w, q, 0) for w in ("B01", "B02") for q in RESPONDERS} <= flagged
@@ -111,4 +118,5 @@ def test_switching_back_to_a_sample_test_draws_the_samples_again(page, qtbot):
     _choose(page, "_nw_stats_test_cb", "welch")
     assert page.widgets.get("_nw_stats_unit_cb").isEnabled()
     assert not _texts(page, "nw-rare-line") and _texts(page, sc.GID_HEADER)
-    assert st.rare_flagged == []
+    assert st.rare_flagged == [] and st.rare_footer is None
+    assert not page.widgets.get("_nw_details_btn").isVisibleTo(page.window)

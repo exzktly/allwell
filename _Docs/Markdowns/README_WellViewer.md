@@ -7142,7 +7142,10 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
 
   The tests run in the background (the figure says so meanwhile). The figure draws, per treatment group, the
   cumulative distributions with each threshold, every well's exceedance rate over the band of the control wells,
-  and the Higher Criticism curves, with the full report beneath. **Review flagged crops** opens the pop-out on the
+  and the Higher Criticism curves, with two lines under them per group: the verdict, and each test's p and q. The
+  full report, its warnings and notes are in **Details ▸** under the figure, so the panels keep their room
+  however much the report says; a window too short for every group's row draws the first ones and names the rest.
+  **Review flagged crops** opens the pop-out on the
   nanowells the tests flagged — above the threshold, or at or below their well's Higher Criticism threshold —
   as rows of crops over time, highest fold change first, so segmentation errors, doublets and debris can be
   ruled out by eye; the pop-out's **Show** switches between them, the selected nanowell and the Distribution
@@ -11108,10 +11111,11 @@ a few fast nanowells from a whole tail that moved, so it never supports the rare
 
 On the **Statistics** view, choose **Test: Rare responders (vs control, wells as units)**, then the control
 group under **vs**. The tests run in the background; the figure says so until they finish. Each treatment group
-then gets one row of three panels (up to three groups; the report covers all of them):
+then gets one row of three panels (up to three groups, and as many as the window's height fits; the report covers
+all of them), and under the panels two lines per group: the verdict, then each test's p and q:
 
-1. **ECDF by N0** — one colour per loading stratum, control dotted, treatment solid, the stratum's threshold T
-   dashed, on a log fold-change axis. Rare responders show as the treatment curve peeling away *below* the
+1. **ECDF by N0** — one colour per loading stratum (named in its key), control dotted, treatment solid, the
+   stratum's threshold T dashed, on a log₂ fold-change axis. Rare responders show as the treatment curve peeling away *below* the
    control curve only at its top right; a general shift shows as the whole curve displaced.
 2. **Exceedance per well over the control null** — every well's share of nanowells above T. Control wells (each
    scored leave-one-out) are grey dots; the shaded band spans them and the dotted line is their mean. Treatment
@@ -11121,7 +11125,7 @@ then gets one row of three panels (up to three groups; the report covers all of 
    with a dot at **i\***. A treatment curve that rises well above the grey bundle near the left edge is a sparse
    excess.
 
-The **report** beneath reads, per group: the verdict; Test A's odds ratio, 95 % interval, ρ, p and q, with the
+The full **report** is in **Details ▸** under the figure, so the panels keep their room. It reads, per group: the verdict; Test A's odds ratio, 95 % interval, ρ, p and q, with the
 anti-conservative Fisher line under it; HC's mean, permutation p and q, the number of shufflings and the
 smallest attainable p; the same for A²R, with the uncalibrated Scholz–Stephens line; and any warnings (a stratum
 with too few control nanowells to resolve the percentile, a pool too small for HC, a plate effect that could not

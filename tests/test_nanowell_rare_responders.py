@@ -394,3 +394,39 @@ def test_the_figures_draw_threshold_null_curves_and_named_crop_placeholders():
     gids = {a.get_gid() for ax in fig.axes for a in ax.get_children()}
     assert f"rare-crop:{first['well_key']}:{first['nanowell_id']}" in gids
     assert sum(1 for g in gids if g and g.startswith("rare-crop-missing:")) == 2
+
+
+def test_no_control_exceedance_reports_an_unbounded_odds_ratio_not_a_number():
+    ctrl = [_well(k, np.r_[np.ones(99), 1.0]) for k in ("A", "B", "C")]
+    treat = [_well(k, np.r_[np.ones(95), [50.0] * 5], "drug") for k in ("T", "U")]
+    a = ex.exceedance_test(ctrl, treat, 99.0, None, bb_allowed=True, group_allowed=True)
+    assert a.odds_ratio == math.inf and a.p < 0.05
+    assert any("no control well has a nanowell above the threshold" in n for n in a.notes)
+
+
+def test_the_page_figure_keeps_its_panels_legible_however_long_the_text():
+    """The reported defect: the report drawn into the figure crushed the panels. Whatever the lines and the figure's
+    size, every panel keeps a readable height and no line of text sits on a panel."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    t = pd.concat([plate(n=120, responders=4, seed=s, treatment=f"drug{s}") if s == 0 else
+                   plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(4)])
+    res = rr.analyse(t)
+    lines = [f"line {i} " + "x" * 150 for i in range(12)]
+    for size in ((14.5, 7.0), (10.0, 5.5), (7.0, 4.0)):
+        fig = Figure(figsize=size)
+        rd.render_rare_page(fig, res, lines, note="a note")
+        renderer = fig.canvas.get_renderer() if hasattr(fig.canvas, "get_renderer") else None
+        panels = [ax for ax in fig.axes if ax.get_visible() and ax.axison]
+        assert panels, size
+        heights = [ax.get_position().height * size[1] for ax in panels]
+        assert min(heights) >= rd.ROW_MIN_IN - 1.1, (size, heights)
+        lowest = min(ax.get_position().y0 for ax in panels)
+        texts = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
+        assert texts and max(t.get_position()[1] for t in texts) < lowest, size
+        drawn = {t.get_text() for ax in panels for t in ax.texts if t.get_gid() == "nw-rare-unit"}
+        if len(drawn) < len(res.units):
+            assert any("not drawn" in t.get_text() for t in texts), size
+        del renderer

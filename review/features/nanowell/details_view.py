@@ -6,8 +6,9 @@ eight lines and left the panels a sliver. ``renderer.render_distribution(footer_
 
 Collapsed (the default), its header is the counts line and how many alerts and notes it holds, so what the figure
 leaves out is never out of sight altogether; an alert makes the header say so in the theme's warning ink. Opened, it lists
-the alerts and then the notes, one each. It is shown on the Distribution view only, and remembers being opened for the
-session.
+the alerts and then the notes, one each. It is shown on the Distribution view, and on the Statistics view while it
+draws the Rare responders test, whose full report it holds (``_rare_controller.footer_of``) so the figure keeps its
+room for the panels; it remembers being opened for the session.
 """
 
 from __future__ import annotations
@@ -32,6 +33,18 @@ def summary(footer) -> str:
 def body(footer) -> str:
     """The open field: what the drawing left out, the alerts, then the notes, a line each."""
     return "\n".join([f"⚠ {a}" for a in [*footer.warnings, *footer.alerts]] + [f"• {n}" for n in footer.notes])
+
+
+def _footer(st) -> object | None:
+    """The footer the field shows: the Distribution view's, or the Statistics view's Rare responders report
+    (``_rare_controller.footer_of``); ``None`` on any other view."""
+    if st is None:
+        return None
+    if st.view == "distribution":
+        return getattr(getattr(st, "hits", None), "footer", None)
+    if st.view == "statistics":
+        return getattr(st, "rare_footer", None)
+    return None
 
 
 def build_details_panel(ctx, parent) -> QWidget:
@@ -63,8 +76,8 @@ def build_details_panel(ctx, parent) -> QWidget:
 
     def refresh() -> None:
         st = ctx.state.feature_slice("nanowell")
-        footer = getattr(getattr(st, "hits", None), "footer", None) if st is not None else None
-        shown = st is not None and st.view == "distribution" and footer is not None
+        footer = _footer(st)
+        shown = footer is not None
         panel.setVisible(shown)
         if not shown:
             return

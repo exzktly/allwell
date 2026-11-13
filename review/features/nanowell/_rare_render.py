@@ -55,11 +55,26 @@ def _strata(unit) -> list:
 
 
 def _pooled(group, stratum, log_axis: bool) -> tuple[np.ndarray, np.ndarray] | None:
+    """The pooled ECDF of *group* in *stratum*; with *log_axis*, its x as log₂ of the value (a value of 0 left out).
+
+    The log is taken here, on a linear axis, rather than by ``set_xscale("log")``: the page's style pass sets each
+    axis's scale from the Properties panel after the draw, which put a "(log)" label over a linear axis."""
     parts = [w.values[stratum] for w in group if stratum in w.values]
     if not parts:
         return None
     x, y = _ecdf(np.concatenate(parts))
-    return (x[x > 0], y[x > 0]) if log_axis else (x, y)
+    if not log_axis:
+        return x, y
+    keep = x > 0
+    return np.log2(x[keep]), y[keep]
+
+
+def _x(value: float, log_axis: bool) -> float:
+    return math.log2(value) if log_axis and value > 0 else value
+
+
+def _x_label(value_label: str, log_axis: bool) -> str:
+    return f"log₂ {value_label} (FC = 0 not shown)" if log_axis else value_label
 
 
 def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) -> None:
@@ -71,12 +86,10 @@ def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) 
         if xy is not None:
             ax.step(*xy, where="post", color=colour, label=label, linewidth=1.2)[0].set_gid(f"{gid}:{stratum}")
     if stratum in unit.thresholds:
-        ax.axvline(unit.thresholds[stratum], color=ink, linestyle="--", linewidth=1).set_gid(
+        ax.axvline(_x(unit.thresholds[stratum], log_axis), color=ink, linestyle="--", linewidth=1).set_gid(
             f"rare-threshold:{stratum}")
-    if log_axis:
-        ax.set_xscale("log")
     _title(ax, f"N0 = {stratum}")
-    ax.set_xlabel(value_label + (" (log; FC = 0 not shown)" if log_axis else ""))
+    ax.set_xlabel(_x_label(value_label, log_axis))
     ax.set_ylim(0, 1.01)
 
 
@@ -88,17 +101,19 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
                                   (unit.treated, "-", "rare-ecdf-treatment")):
             xy = _pooled(group, stratum, log_axis)
             if xy is not None:
-                ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1)[0].set_gid(
-                    f"{gid}:{stratum}")
+                ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1,
+                        label=f"N0 {stratum}" if style == "-" else None)[0].set_gid(f"{gid}:{stratum}")
         if stratum in unit.thresholds:
-            ax.axvline(unit.thresholds[stratum], color=colour, linestyle="--", linewidth=0.8).set_gid(
+            ax.axvline(_x(unit.thresholds[stratum], log_axis), color=colour, linestyle="--", linewidth=0.8).set_gid(
                 f"rare-threshold:{stratum}")
-    if log_axis:
-        ax.set_xscale("log")
-    ax.set_xlabel(value_label + (" (log)" if log_axis else ""))
+    ax.set_xlabel(_x_label(value_label, log_axis))
     ax.set_ylabel("cumulative fraction")
     ax.set_ylim(0, 1.01)
-    _title(ax, "ECDF by N0: " + ", ".join(strata) + " (control dotted)")
+    _ground, ink, _muted = _inks(ax)
+    legend = ax.legend(fontsize=_TITLE_PT * 0.75, frameon=False, loc="lower right", handlelength=1.2)
+    for text in legend.get_texts():
+        _ink(text).set_color(ink)
+    _title(ax, "ECDF by N0 (treatment solid, control dotted, T dashed)")
 
 
 def draw_exceedance(ax, unit) -> None:
@@ -162,42 +177,63 @@ def render_hc(fig, unit) -> None:
     draw_hc(_new_axes(fig, 1)[0], unit)
 
 
-def _wrapped(fig, lines) -> list[str]:
-    width = max(40, int(fig.get_figwidth() * 72 / (_REPORT_PT * 0.6)))
-    return [part for line in lines for part in (textwrap.wrap(line, width, subsequent_indent="    ") or [""])]
+def _wrapped(fig, lines, width_frac: float) -> list[str]:
+    """*lines* wrapped to what fits *width_frac* of the figure's width at the report's monospace size."""
+    chars = max(40, int(fig.get_figwidth() * width_frac * 72 / (_REPORT_PT * 0.62)))
+    return [part for line in lines for part in (textwrap.wrap(line, chars, subsequent_indent="      ") or [""])]
+
+
+#: The height one row of panels needs to be read, in inches: titles, ticks and labels take about 1.1 of it.
+ROW_MIN_IN = 2.4
+#: Inches: the figure's top margin, and the space a row's x labels and title take beyond its axes.
+_TOP_IN, _ROW_PAD_IN, _TEXT_PAD_IN = 0.15, 1.05, 0.12
 
 
 def render_rare_page(fig, result, lines, *, note: str = "") -> None:
-    """The Statistics view's figure for the rare-responder tests: a row of ECDF / exceedance / HC per treatment (at
-    most :data:`MAX_UNIT_ROWS`), then *lines* (``rare_export_compute.report_lines``) and *note*, each line a text
-    artist with gid ``nw-rare-line``."""
+    """The Statistics view's figure for the rare-responder tests: a row of ECDF / exceedance / HC per treatment, then
+    *lines* — the short verdict per treatment (``rare_export_compute.verdict_lines``), each a text artist with gid
+    ``nw-rare-line`` — and *note*. The full report is not drawn here: the page shows it under the figure (Details).
+
+    **The panels are laid out first, in inches.** Each row gets at least :data:`ROW_MIN_IN`; the text takes only what
+    its lines need, and as many treatments are drawn as their rows fit — the rest named in a line — so a long report
+    or a short window never squeezes the panels below legibility."""
     fig.clear()
-    units = result.units[:MAX_UNIT_ROWS]
+    width, height = max(fig.get_figwidth(), 1.0), max(fig.get_figheight(), 1.0)
+    step_in = _REPORT_PT * _LEADING / 72
+    room = max(1, int((height - _TOP_IN - (len(lines) + 2) * step_in) // ROW_MIN_IN))
+    units = result.units[:min(MAX_UNIT_ROWS, room)]
     extra = len(result.units) - len(units)
-    text = _wrapped(fig, [*lines, *([f"{extra} more treatment(s) are in the report only."] if extra else []),
-                          *([note] if note else [])])
-    height = max(fig.get_figheight(), 1.0)
-    step = _REPORT_PT * _LEADING / 72 / height
-    text_frac = min(0.6, len(text) * step + 0.04) if units else 0.96
-    band = (1.0 - text_frac) / max(1, len(units))
+    text = _wrapped(fig, [*lines, *([f"{extra} more treatment(s) are not drawn: each is in Details, below the "
+                                     "figure."] if extra else []), *([note] if note else [])], 0.96)
+    # The text takes what the panels leave, never more: lines past it are counted, and Details holds them all.
+    fits = max(1, int((height - _TOP_IN - len(units) * ROW_MIN_IN - 2 * _TEXT_PAD_IN) // step_in))
+    if len(text) > fits:
+        text = text[:fits - 1] + [f"… {len(text) - fits + 1} more line(s) not drawn: Details ▸ under the figure."]
+    text_in = len(text) * step_in + 2 * _TEXT_PAD_IN
+    band_in = max(ROW_MIN_IN, (height - _TOP_IN - text_in) / max(1, len(units)))
     log_axis = not result.prepared.params.normalize
+    left, gap = 0.75 / width, 0.85 / width
+    panel_w = (1.0 - left - 0.25 / width - 2 * gap) / 3
     for r, unit in enumerate(units):
-        bottom = 1.0 - (r + 1) * band
+        top = height - _TOP_IN - r * band_in
+        bottom = top - band_in + 0.62                    # the x labels sit below the axes
+        axes_h = band_in - _ROW_PAD_IN
         panels = (lambda ax, u=unit: draw_ecdf_strata(ax, u, result.prepared.value_label, log_axis),
                   lambda ax, u=unit: draw_exceedance(ax, u), lambda ax, u=unit: draw_hc(ax, u))
         for c, draw in enumerate(panels):
-            ax = fig.add_axes([0.07 + c * 0.32, bottom + band * 0.3, 0.25, band * 0.55])
+            ax = fig.add_axes([left + c * (panel_w + gap), bottom / height, panel_w, axes_h / height])
             _prepare_axes(ax, GRID_TYPE_SCALE)
             draw(ax)
             if c == 0:
-                _ink(ax.text(0.0, 1.22, unit.label, transform=ax.transAxes, fontsize=_TITLE_PT, fontweight="bold",
-                             color=_inks(ax)[1], gid="nw-rare-unit"))
+                _ink(ax.text(0.0, 1.0 + 0.36 / axes_h, unit.label, transform=ax.transAxes, fontsize=_TITLE_PT,
+                             fontweight="bold", color=_inks(ax)[1], gid="nw-rare-unit"))
     probe = fig.axes[0] if fig.axes else fig.add_axes([0, 0, 0.001, 0.001], frameon=False)
-    ink = _inks(probe)[1]
     if not units:
         probe.axis("off")
+    ink = _inks(probe)[1]
+    y0 = (text_in - _TEXT_PAD_IN) / height
     for i, line in enumerate(text):
-        _ink(fig.text(0.02, text_frac - 0.01 - i * step, line, fontsize=_REPORT_PT, family="monospace", va="top",
+        _ink(fig.text(0.02, y0 - i * step_in / height, line, fontsize=_REPORT_PT, family="monospace", va="top",
                       color=ink, gid="nw-rare-line"))
 
 

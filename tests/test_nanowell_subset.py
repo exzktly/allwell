@@ -351,6 +351,15 @@ def test_a_rim_fitted_condition_is_offered_as_yes_or_no(page):
     row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
     editor.apply_btn.click()
     assert page.state.feature_slice("nanowell").subset == ss.Subset((C("rim_fitted", "yes", at="every"),))
+    # The nanowell's own rim, which the crops' "rim not fitted" speaks of, is offered beside it and built the same way.
+    editor.add_btn.click()
+    row = editor.rows[1]
+    row.field_cb.setCurrentIndex(row.field_cb.findData("nw_rim_fitted"))
+    assert row.field_cb.currentText() == "Nanowell rim fitted"
+    row.at_cb.setCurrentIndex(row.at_cb.findData("every"))
+    editor.apply_btn.click()
+    assert page.state.feature_slice("nanowell").subset == ss.Subset(
+        (C("rim_fitted", "yes", at="every"), C("nw_rim_fitted", "yes", at="every")))
 
 
 def test_a_seam_condition_is_built_in_the_editor(page):

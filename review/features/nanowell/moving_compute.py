@@ -159,6 +159,22 @@ def describe(window: int, column: str = "", baseline_window: int = 0, centred: b
     return text
 
 
+def figure_tag(window: int, column: str = "", baseline: str = "", baseline_window: int = 0,
+               centred: bool = False) -> str:
+    """The short phrase a figure drawn from moving averages carries on its top-left line beside the subset's name
+    (``renderer.stamp_subset``), so a figure read away from the page — saved, exported, on a slide, or with its
+    footer folded into the page's Details — never passes averaged values off as measured ones:
+    ``Moving average over 3 timepoints (trailing)``, ``… (centred)``, and for a fold change whose baseline has a window
+    of its own (*baseline_window*, as :func:`baseline_window_for` allows it under *baseline*)
+    ``…; baseline over 2``. ``""`` with the moving average off. :func:`describe` is the footer's full sentence."""
+    window = clamp_window(window, centred)
+    if not window:
+        return ""
+    text = f"Moving average over {window} timepoints ({'centred' if centred else 'trailing'})"
+    base = clamp_window(baseline_window_for(window, baseline_window, baseline)) if base_value(column) else 0
+    return text + (f"; baseline over {base}" if base else "")
+
+
 def _at_base_row(frame: pd.DataFrame, value: str, series: pd.Series) -> pd.Series:
     """*series* at each nanowell's baseline row for the measurement *value* (``series_compute``'s
     ``_base_tp_<value>``), broadcast to every row of the nanowell; NaN where it has no baseline row."""

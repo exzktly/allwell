@@ -26,8 +26,10 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
 * the nanowell's per-timepoint properties (:data:`ROW_FLAGS`), each a yes/no read from its own column so that no
   one of them stands in for another: whether the run *found* the nanowell, whether the well's timepoint was not
   addressed at all, whether the nanowell was occluded or clipped, whether the identity check contradicted its
-  address, whether a circular rim was fitted to the well's array at that timepoint (``series_compute``'s
-  ``rim_fitted``), whether the rim-focus rule flagged its rim, whether its field is left out (Cell Gating, QC
+  address, whether a circle was fitted to the outline of the well's whole array at that timepoint
+  (``series_compute``'s ``rim_fitted``, one answer for every nanowell of the well), whether the nanowell's own rim was
+  fitted there (a rim focus measured, ``focus`` > 0 — what a crop's caption calls *rim not fitted* when it was not),
+  whether the rim-focus rule flagged its rim, whether its field is left out (Cell Gating, QC
   triage, the chosen FOVs), and whether the run measured it without a count. *Found by the run at every timepoint: yes* keeps
   only the nanowells tracked through the whole dataset; *at any timepoint: no* on a defect keeps those it never
   touched;
@@ -115,7 +117,8 @@ ROW_FLAGS = {
     "tp_unaddressed": "Timepoint not addressed",
     "occluded": "Occluded or clipped",
     "identity_out": "Identity contradicted",
-    "rim_fitted": "Array rim fitted",
+    "rim_fitted": "Array outline fitted",
+    "nw_rim_fitted": "Nanowell rim fitted",
     "rim_out_of_focus": "Rim out of focus",
     "field_left_out": "In a field left out",
     "no_count": "Measured without a count",
@@ -762,6 +765,16 @@ def _row_flag(metrics: pd.DataFrame, name: str) -> np.ndarray:
     if name == "rim_fitted":
         fitted = column("rim_fitted")
         return np.full(len(metrics), np.nan) if fitted is None else fitted.map(_flag_value).to_numpy(dtype=float)
+    if name == "nw_rim_fitted":
+        # The nanowell's own rim, as its crop's caption judges it (``series_compute.rim_focus_text``): fitted where a
+        # rim focus was measured; not fitted where the run measured the nanowell and found none (predicted geometry,
+        # a rim off the image); no value where the run did not measure it, which nothing here may guess.
+        focus, state = column("focus"), column("run_state")
+        if focus is None or state is None:
+            return np.full(len(metrics), np.nan)
+        measured = pd.to_numeric(focus, errors="coerce").to_numpy(dtype=float)
+        fitted = np.isfinite(measured) & (measured > 0)
+        return np.where(fitted, 1.0, np.where(state.isin((MEASURED, EMPTY)).to_numpy(), 0.0, np.nan))
     ok = column({"identity_out": "identity_ok", "rim_out_of_focus": "rim_focus_ok"}[name])
     if ok is None:
         return np.full(len(metrics), np.nan)

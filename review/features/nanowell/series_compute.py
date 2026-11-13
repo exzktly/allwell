@@ -341,11 +341,13 @@ def site_series(metrics: pd.DataFrame, well: str, q: int, r: int) -> pd.DataFram
     return rows.sort_values("tp_order", kind="stable").reset_index(drop=True)
 
 
-def crop_metric_lines(row, channel: str | None = None) -> list[str]:
+def crop_metric_lines(row, channel: str | None = None, sizes=None) -> list[str]:
     """What a crop of one nanowell at one timepoint is captioned with, one short item each: its computed
-    measurements there — the cell count, the confluence as a percentage, and the shared channel's nanowell fluorescence and
-    brightness when the run measured them — in that order of importance, since a crop with room for one line writes
-    as many as fit and the pop-out writes them all. A
+    measurements there — the cell count, then, with size classes set on Cell Gating (*sizes*, the
+    ``SizeClassRule`` the counts were made with), the count in each class and in neither
+    (``size_class_compute.breakdown_items``), the confluence as a percentage, and the shared channel's nanowell
+    fluorescence and brightness when the run measured them — in that order of importance, since a crop with room for
+    one line writes as many as fit and the pop-out writes them all. A
     timepoint whose state carries no number says its state instead, and a measurement that is missing is left out
     rather than written as zero.
 
@@ -362,6 +364,7 @@ def crop_metric_lines(row, channel: str | None = None) -> list[str]:
     items = []
     if n is not None:
         items.append(f"{n:g} cell" + ("" if n == 1 else "s"))
+        items += size_class_compute.breakdown_items(row, sizes)
     if c is not None:
         items.append(f"{100 * c:.0f}% conf.")
     if channel:

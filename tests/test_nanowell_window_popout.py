@@ -81,6 +81,17 @@ def test_open_in_pop_out_draws_the_window_s_members_as_rows(page, qtbot, spied):
     assert all(kw["with_well"] is True for _b, _c, kw in spied)
 
 
+def test_the_rows_title_says_the_window_ranks_moving_averages_while_that_is_on(page, qtbot, spied):  # noqa: F811
+    """The window's values are the Distribution's, so averaged while the moving average is on: the title says so
+    (``controller.moving_tag``), and says nothing of it while it is off."""
+    st = _drawn(page, qtbot)
+    qtbot.mouseClick(page.widgets.get("_nw_window_popout_btn"), Qt.LeftButton)
+    assert spied[-1][2]["title"] == "Distribution window · Cell count"
+    st.moving = 2
+    nwc.draw_popout(page)
+    assert spied[-1][2]["title"] == "Distribution window · Cell count · Moving average over 2 timepoints (trailing)"
+
+
 def test_rows_page_by_twenty_four(page, qtbot, spied, monkeypatch):  # noqa: F811
     st = _loaded(qtbot, page)
     window = DistributionWindow("n", "time", ("t_c", "t_a"), 0, 9)

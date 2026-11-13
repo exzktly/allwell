@@ -136,3 +136,19 @@ def test_a_well_the_dataset_no_longer_has_is_dropped_from_both():
     ctx = _ctx(wells=["A01"], rsets=[_Rset("g", ["A01", "GONE"])])
     assert _wells_of(ctx) == ["A01"]
     assert [n for n, _w, _r in plot_group_well_lists(ctx)] == ["g"]
+
+
+def test_every_group_hidden_draws_nothing_not_the_old_selection():
+    """With replicate sets defined, group visibility is the only source of the plotted wells — ``selected_wells`` is
+    ignored. Hiding every set returned no visible set, which read as "no sets defined", so the plots fell back to
+    ``selected_wells`` (left there by a Saved selection load, or from before the sets existed) and drew those wells one
+    by one while the plate showed every group off. Hiding every group draws nothing; a solo well toggled on still
+    draws, and with no sets at all the selection rule is unchanged."""
+    rsets = [_Rset("ctrl", ["A01", "A02"], hidden=True), _Rset("drug", ["B01"], hidden=True)]
+    ctx = _ctx(wells=["A01", "A02", "B01"], selected=["A01", "B01"], rsets=rsets)
+    assert _lists_wells(ctx) == [] == _wells_of(ctx)
+    assert _lists_wells(ctx, fallback_to_all=False) == []
+    with_solo = _ctx(wells=["A01", "A02", "B01", "C01"], selected=["A01"], rsets=rsets, solo=["C01"])
+    assert _lists_wells(with_solo) == ["C01"]
+    no_sets = _ctx(wells=["A01", "A02", "B01"], selected=["A01", "B01"])
+    assert _lists_wells(no_sets) == ["A01", "B01"]

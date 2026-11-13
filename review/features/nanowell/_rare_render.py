@@ -5,8 +5,11 @@ Pure matplotlib onto a figure it is handed; every number comes from ``rare_repor
 :func:`render_rare_page` is what the Nanowells page's Statistics view draws for the *Rare responders* test: one row
 of the three panels per treatment (at most :data:`MAX_UNIT_ROWS`), the report's lines beneath. The single-panel
 functions draw one of them onto a whole figure. Each artist that carries a result has a gid (``rare-…``), so a test
-reads the figure back rather than the result. Control wells are drawn in the secondary ink, treatment wells in the
-plate's well colours, every text in the plot tokens' inks with the theme tag, so it repaints on a theme flip.
+reads the figure back rather than the result. Control wells are drawn in the secondary ink, each treatment well in
+its own colour on the plate (``selections_model.color_for_well``), every text in the plot tokens' inks with the theme
+tag, so it repaints on a theme flip. The loading strata are a magnitude, not an identity, so they are drawn in the
+page's occupancy ramp (the colours the Distribution view gives a nanowell's cell count) rather than in well colours a
+reader would take for wells: its screen / publication pair, marked so a capture repaints it.
 """
 
 from __future__ import annotations
@@ -16,7 +19,7 @@ import textwrap
 
 import numpy as np
 
-from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _prepare_axes
+from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
 
 #: Crops drawn at most per figure; the rest are counted in its title.
 MAX_CROPS = 48
@@ -27,10 +30,35 @@ _REPORT_PT = 6.5
 _LEADING = 1.45
 
 
-def _colours(n: int) -> list:
-    from ui.theme import WELL_COLORS_TUPLE
+def _well_colour(key: str) -> str:
+    """A treatment well's colour: the one the plate draws it in. *key* is ``plate:well``."""
+    from review.domain.selections_model import color_for_well
 
-    return [WELL_COLORS_TUPLE[i % len(WELL_COLORS_TUPLE)] for i in range(n)]
+    return color_for_well(str(key).split(":", 1)[-1])
+
+
+def _ramp_index(i: int, n: int, size: int) -> int:
+    """Shade *i* of *n* ordered strata on a ramp of *size* shades: the top *n* shades when they fit, so with the
+    default strata above one cell the shades match the occupancy classes 1, 2 and 3+; spread over the ramp when
+    there are more strata than shades."""
+    if n <= size:
+        return size - n + i
+    return min(size - 1, i * size // n)
+
+
+def _stratum_shades(n: int) -> list[tuple[str, str]]:
+    """``(screen, publication)`` per stratum, lowest first, from the occupancy ramp."""
+    from ui.theme import Colors, CPub
+
+    size = len(Colors.occupancy_ramp)
+    return [(Colors.occupancy_ramp[_ramp_index(i, n, size)], CPub.occupancy_ramp[_ramp_index(i, n, size)])
+            for i in range(n)]
+
+
+def _paired(line, pair: tuple[str, str]):
+    from widgets.plot_card import theme_paired_colours
+
+    return theme_paired_colours(line, screen=pair[0], publication=pair[1])
 
 
 def _ecdf(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -80,8 +108,9 @@ def _x_label(value_label: str, log_axis: bool) -> str:
 def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) -> None:
     """One stratum's pooled control ECDF against its pooled treatment ECDF, the threshold marked."""
     _ground, ink, muted = _inks(ax)
+    treated_colour = _well_colour(unit.treated[0].key) if unit.treated else ink
     for group, colour, gid, label in ((unit.controls, muted, "rare-ecdf-control", "control"),
-                                      (unit.treated, _colours(1)[0], "rare-ecdf-treatment", unit.treatment)):
+                                      (unit.treated, treated_colour, "rare-ecdf-treatment", unit.treatment)):
         xy = _pooled(group, stratum, log_axis)
         if xy is not None:
             ax.step(*xy, where="post", color=colour, label=label, linewidth=1.2)[0].set_gid(f"{gid}:{stratum}")
@@ -96,16 +125,22 @@ def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) 
 def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     """Every stratum on one axes: control dotted, treatment solid, one colour per stratum, each threshold dashed."""
     strata = _strata(unit)
-    for stratum, colour in zip(strata, _colours(len(strata))):
+    publication = _is_publication(ax)
+    legend_pairs = []
+    for stratum, pair in zip(strata, _stratum_shades(len(strata))):
+        colour = pair[1] if publication else pair[0]
         for group, style, gid in ((unit.controls, ":", "rare-ecdf-control"),
                                   (unit.treated, "-", "rare-ecdf-treatment")):
             xy = _pooled(group, stratum, log_axis)
             if xy is not None:
-                ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1,
-                        label=f"N0 {stratum}" if style == "-" else None)[0].set_gid(f"{gid}:{stratum}")
+                line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1,
+                               label=f"N0 {stratum}" if style == "-" else None)[0]
+                _paired(line, pair).set_gid(f"{gid}:{stratum}")
+                if style == "-":
+                    legend_pairs.append(pair)
         if stratum in unit.thresholds:
-            ax.axvline(_x(unit.thresholds[stratum], log_axis), color=colour, linestyle="--", linewidth=0.8).set_gid(
-                f"rare-threshold:{stratum}")
+            _paired(ax.axvline(_x(unit.thresholds[stratum], log_axis), color=colour, linestyle="--", linewidth=0.8),
+                    pair).set_gid(f"rare-threshold:{stratum}")
     ax.set_xlabel(_x_label(value_label, log_axis))
     ax.set_ylabel("cumulative fraction")
     ax.set_ylim(0, 1.01)
@@ -113,6 +148,8 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     legend = ax.legend(fontsize=_TITLE_PT * 0.75, frameon=False, loc="lower right", handlelength=1.2)
     for text in legend.get_texts():
         _ink(text).set_color(ink)
+    for line, pair in zip(legend.get_lines(), legend_pairs):    # the legend's handles are copies: pair them too
+        _paired(line, pair)
     _title(ax, "ECDF by N0 (treatment solid, control dotted, T dashed)")
 
 
@@ -128,8 +165,8 @@ def draw_exceedance(ax, unit) -> None:
         ax.axhline(np.nanmean(ctrl_rates), color=muted, linestyle=":", linewidth=1).set_gid("rare-null-mean")
     xs = np.arange(len(counts))
     ax.scatter(xs[:len(controls)], ctrl_rates, color=muted, zorder=3, gid="rare-exceed-control")
-    for i, (c, colour) in enumerate(zip(treated, _colours(len(treated)))):
-        x = len(controls) + i
+    for i, c in enumerate(treated):
+        x, colour = len(controls) + i, _well_colour(c.key)
         ax.scatter([x], [c.rate * 100], color=colour, zorder=4, gid=f"rare-exceed-treated:{c.key}")
         if np.isfinite(c.empirical_p):
             _ink(ax.annotate(f"p={c.empirical_p:.2g}", (x, c.rate * 100), textcoords="offset points",
@@ -147,8 +184,8 @@ def draw_hc(ax, unit) -> None:
         h = unit.hc[w.key]
         if len(h.curve_x):
             ax.plot(h.curve_x, h.curve_y, color=muted, linewidth=0.8, gid=f"rare-hc-control:{w.key}")
-    for w, colour in zip(unit.treated, _colours(len(unit.treated))):
-        h = unit.hc[w.key]
+    for w in unit.treated:
+        h, colour = unit.hc[w.key], _well_colour(w.key)
         if len(h.curve_x):
             ax.plot(h.curve_x, h.curve_y, color=colour, linewidth=1.3, gid=f"rare-hc-treated:{w.key}")
             ax.scatter([h.i_star / h.n], [h.value], color=colour, zorder=4, gid=f"rare-hc-istar:{w.key}")

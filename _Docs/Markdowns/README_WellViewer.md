@@ -7036,6 +7036,11 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   - **contradicted** (`xx`, `X`), **inconclusive** (`//`, `?`), **partial** (`\\`, with how many nanowells it leaves
     out) and **not checked** (`..`) — what the identity check said (see *Is each nanowell the same
     nanowell at every timepoint?* below), with the same hatches the line plots use;
+  - **minor partial** (`\\` in green) — a partial timepoint leaving out at most 5% of the nanowells it compared,
+    and **addresses agree** (`//` in green) — an inconclusive one whose every address lands on itself, doubted only
+    by the array's fitted outline. Neither needs a look: the first's few left-out nanowells already stay out of every
+    comparison, and no anchor changes the second. They are not counted in the title, which says how many there are
+    in a note beneath it;
   - **reference** (`R`) and **confirmed** — nothing to do.
 
   A timepoint that was not addressed is shown as such even when the identity check calls it inconclusive: the

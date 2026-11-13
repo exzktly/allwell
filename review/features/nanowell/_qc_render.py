@@ -19,12 +19,13 @@ from review.features.nanowell.renderer import _ink, _inks, _mark_colours, _theme
 HATCH = {qc.NOT_ADDRESSED: "", qc.ANCHOR_WAITING: "----", qc.NOT_LOCATED: "||||",
          qc.CONTRADICTED: _LINE_HATCH[qc.CONTRADICTED], qc.INCONCLUSIVE: _LINE_HATCH[qc.INCONCLUSIVE],
          qc.PARTIAL: _LINE_HATCH[qc.PARTIAL], qc.NOT_CHECKED: _LINE_HATCH[qc.NOT_CHECKED],
+         qc.MINOR_PARTIAL: _LINE_HATCH[qc.PARTIAL], qc.ADDRESSES_AGREE: _LINE_HATCH[qc.INCONCLUSIVE],
          qc.REFERENCE: "", qc.CONFIRMED: ""}
 #: Each state's glyph, written in cells tall enough to hold it; a partial cell writes its left-out count instead.
 GLYPH = {qc.NOT_ADDRESSED: "!", qc.ANCHOR_WAITING: "A", qc.NOT_LOCATED: "–", qc.CONTRADICTED: "X",
          qc.INCONCLUSIVE: "?", qc.REFERENCE: "R"}
 #: Each state's tint behind its hatch; *not addressed*, the one an anchor fixes, is filled solid.
-_ALPHA = {qc.NOT_ADDRESSED: 1.0, qc.CONFIRMED: 0.10}
+_ALPHA = {qc.NOT_ADDRESSED: 1.0, qc.CONFIRMED: 0.10, qc.MINOR_PARTIAL: 0.10, qc.ADDRESSES_AGREE: 0.10}
 _TINT = 0.18
 #: The tallest a cell is drawn, and the shortest that holds a glyph, in pixels.
 MAX_CELL_PX, GLYPH_PX = 28.0, 14.0
@@ -41,7 +42,9 @@ def colours(muted: str) -> dict:
 
     out = dict(_mark_colours(muted))
     out.update({qc.NOT_ADDRESSED: Colors.warn, qc.ANCHOR_WAITING: Colors.accent, qc.NOT_LOCATED: muted,
-                qc.REFERENCE: Colors.success, qc.CONFIRMED: Colors.success})
+                qc.REFERENCE: Colors.success, qc.CONFIRMED: Colors.success,
+                # Good enough to need no look, in the confirmed ink, keeping the check's own verdict's texture.
+                qc.MINOR_PARTIAL: Colors.success, qc.ADDRESSES_AGREE: Colors.success})
     return out
 
 

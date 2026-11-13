@@ -13513,7 +13513,18 @@ anchor set and not yet used is *anchor waiting*, `unaddressed` otherwise *not ad
 last run tried the anchor set there), any other status but `ok` *not located* (an anchor cannot change it), and only
 an `ok` timepoint takes the identity verdict — an unaddressed timepoint has no addresses for the check to confirm,
 and reading it as *inconclusive* would hide the remedy. Which timepoints are *not addressed* and *anchor waiting* is
-`anchor_queue_compute.waiting_items`'s answer, the function the queue walks, so the two cannot disagree.
+`anchor_queue_compute.waiting_items`'s answer, the function the queue walks, so the two cannot disagree. Two
+readings of the identity verdict need no look and have states of their own, so the matrix still says the check did
+not answer *confirmed*: **minor partial** (`MINOR_PARTIAL`), a *partial* timepoint leaving out at most
+`MINOR_PARTIAL_SHARE` (5 %) of the nanowells it compared — the count is read from the sidecar's `compared`
+(`read_plate` → `PlateRecords.compared`, `_compared` reading without re-hashing once `verdicts` has decided the
+sidecar is current), and a timepoint with no count stays *partial* — and **addresses agree** (`ADDRESSES_AGREE`), an
+*inconclusive* one whose reason is the array's fitted centre alone with every address landing on itself
+(`_addresses_agree`, on `nanowell_identity.compare`'s wording). Both are out of `NEEDS_A_LOOK` (spelled out, not a
+slice of `QC_STATES`) and of every walk, are drawn in the confirmed ink with the check's own verdict's hatch, and
+are counted in a note under the title. On a real plate they were 239 and 65 of the 336 timepoints needing a look,
+the partial ones leaving out a median of one nanowell and the centre ones spread from 0.75 to 1.42 pitches; only
+the QC view reads them so, and the identity verdicts every other view reads are unchanged.
 `_qc_render.draw_qc` fills each state with its own ink and texture — solid for *not addressed*, the line plots'
 hatches for the identity verdicts (`_identity_marks.HATCH`), horizontal and vertical lines for *anchor waiting* and
 *not located* — so it reads without colour; cells tall enough carry a glyph too (a partial cell its left-out count),

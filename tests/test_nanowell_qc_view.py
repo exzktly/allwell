@@ -431,3 +431,61 @@ def test_the_count_compared_is_read_from_the_well_s_sidecar(tmp_path):
         "t0": {"verdict": "reference"}, "t1": {"verdict": "partial", "compared": 140}, "t2": {"compared": "x"}}}))
     assert qc._compared(tmp_path, "A01") == {"t1": 140}
     assert qc._compared(tmp_path, "B01") == {}
+
+
+def test_the_plate_s_files_are_never_checked_on_the_gui_thread(qc_page, qtbot, monkeypatch):
+    """Reported: the window stopped responding for 30 to 100 s at a time, and every faulthandler dump of the GUI
+    thread was inside ``pathlib.stat`` under ``qc_compute.signature``, called from the QC view's control refresh and
+    draw. The signature is about three ``stat`` calls a well; on a slow or synced disk that is the freeze. Every
+    check must run on a worker, and the page's refreshes and draws must still pick up a file that changed."""
+    import threading
+
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import qc_compute
+
+    ctx, st, out = qc_page
+    real, threads = qc_compute.signature, []
+
+    def spy(*args, **kwargs):
+        threads.append(threading.current_thread() is threading.main_thread())
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(qc_compute, "signature", spy)
+    for _ in range(3):
+        nwc._call(ctx, "_nw_refresh_controls")
+        nwc.redraw(ctx)
+    qtbot.waitUntil(lambda: st.qc_reading is None, timeout=20000)
+    assert threads and not any(threads), threads
+    # A file written while the page is open is found by the next refresh, without one on the GUI thread.
+    _write_sidecar(out, "A01", {"t_c": "inconclusive", "t_a": "reference"})
+    nwc.redraw(ctx)
+    qtbot.waitUntil(lambda: st.qc_reading is None and st.qc_matrix is not None
+                    and st.qc_matrix.counts.get("inconclusive"), timeout=20000)
+    assert not any(threads)
+
+
+def test_a_check_asked_for_while_one_runs_runs_when_it_lands(qc_page, qtbot, monkeypatch):
+    """One check at a time: a refresh during a check is remembered, so a file changed after the check began is not
+    missed until some later, unrelated refresh."""
+    import time
+
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import qc_compute
+
+    ctx, st, out = qc_page
+    qtbot.waitUntil(lambda: st.qc_reading is None and st.qc_records is not None, timeout=20000)
+    real = qc_compute.signature
+
+    def slow(*args, **kwargs):
+        sig = real(*args, **kwargs)
+        time.sleep(0.4)                                   # the files change while this check is in flight
+        return sig
+
+    monkeypatch.setattr(qc_compute, "signature", slow)
+    nwc.redraw(ctx)                                       # starts a check
+    assert st.qc_reading is not None
+    _write_sidecar(out, "A01", {"t_c": "inconclusive", "t_a": "reference"})
+    nwc.redraw(ctx)                                       # asked for during it: remembered, not dropped
+    assert st.qc_recheck
+    qtbot.waitUntil(lambda: st.qc_reading is None and not st.qc_recheck and st.qc_matrix is not None
+                    and st.qc_matrix.counts.get("inconclusive"), timeout=20000)

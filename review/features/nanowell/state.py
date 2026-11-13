@@ -373,6 +373,7 @@ class NanowellState:
     qc_records: object = None
     qc_signature: object = None
     qc_reading: object = None
+    qc_recheck: bool = False                # a check was asked for while one was on a worker: run it when that lands
     qc_bridge: object = None
     qc_matrix: object = None
     qc_matrix_for: object = None

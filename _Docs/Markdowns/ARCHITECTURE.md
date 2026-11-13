@@ -13524,7 +13524,13 @@ acquisition record or the labels — the page's time order whether or not any ta
 identity result from a stale one hashes each well's sites table, so the read runs on a worker
 (`_qc_controller.ensure_read`); the result is held on `state.qc_records` against `qc_compute.signature` — the name,
 time and size of every file it read — and read again only when one changes (a run, the identity check, an anchor
-set or cleared). `qc_compute.plate_qc` decides each cell's state with the grid status first: `unaddressed` with an
+set or cleared). The signature itself is taken on the worker too, never on the GUI thread: it is about three `stat`
+calls a well, asked for on every refresh of the page's controls and every QC draw, and on a slow or synced disk it
+held the window unresponsive for 30 to 100 s at a time. One check runs at a time; a request while one is in flight
+sets `state.qc_recheck` and runs when it lands, so a file changed mid-check is still found. A failed read is held
+against the signature it failed for, so it is not retried until the files change. A dataset switch is noticed from
+the signature's folder, with no file access. `tests/test_nanowell_qc_view.py::test_the_plate_s_files_are_never_checked_on_the_gui_thread`
+spies on the thread every check runs on. `qc_compute.plate_qc` decides each cell's state with the grid status first: `unaddressed` with an
 anchor set and not yet used is *anchor waiting*, `unaddressed` otherwise *not addressed* (with `refused` when the
 last run tried the anchor set there), any other status but `ok` *not located* (an anchor cannot change it), and only
 an `ok` timepoint takes the identity verdict — an unaddressed timepoint has no addresses for the check to confirm,

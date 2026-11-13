@@ -146,8 +146,9 @@ def _stat(path: Path) -> tuple:
 
 def signature(data_dir, anchors_path) -> tuple:
     """Every file :func:`read_plate` depends on, by name, time and size: a different signature means read again.
-    Only ``stat`` calls, cheap enough for the GUI thread. A run, a re-run, the identity check and a new anchor each
-    change it."""
+    A run, a re-run, the identity check and a new anchor each change it. Only ``stat`` calls, but about three a well,
+    which on a slow or synced disk took the GUI thread 30 to 100 s: it is taken on a worker
+    (``_qc_controller.ensure_read``), never on the GUI thread."""
     from review.data.nanowell_focus_gate import nanowell_dir
 
     folder = nanowell_dir(data_dir)

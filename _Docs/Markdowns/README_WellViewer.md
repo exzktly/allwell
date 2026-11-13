@@ -7501,6 +7501,23 @@ well that has not been checked gives the exact line for the copy of All-Well you
 made by Subset, Concatenate, Merge Plates or a Validate relabel always starts out not checked, since its tables are new;
 run the check on its output folder.
 
+#### Calibrating the central square's thresholds
+
+When the QC view asks for an anchor at a timepoint and the ring it draws — the run's own guess at the central square,
+which it did not trust — keeps turning out to be right, the run is refusing squares it found correctly. It accepts a
+square only when the square's score leads the next most square outline by more than 0.15 and is at least 3 times
+it; both numbers were set on synthetic images, not on a real plate. To see what your plate supports, run
+`python -m pipeline.nanowell_square_calibration <output folder>` (in the packaged app,
+`<where the app is>/AllWell-<version>.app/Contents/MacOS/AllWell --run-square-calibration <output folder>`). It reads
+the anchors you have set (from the `in/` folder beside the output folder, or `--input_dir <folder>`): a guess within
+half a nanowell spacing of your click counts as right, any other as wrong. Squares the run accepted itself count as
+right when the identity check confirmed the timepoint, and as wrong when it found the run took something else for
+the square. It then prints how many right and wrong guesses today's thresholds accept, the lead and ratio of each,
+and the strictest thresholds that accept the most right guesses and no wrong one, with how many of today's refused
+timepoints they would accept. With few wrong guesses to test against it says so: check a sample of the newly
+accepted timepoints before relying on the suggestion. It changes nothing in the dataset. Add `--csv` for one row per
+timepoint (scores and labels only, no images or paths) to share.
+
 ### Image Browser
 
 The **Image Browser** rail entry (under **Inspect**, beside Review CSV) hosts four image-review

@@ -1136,7 +1136,8 @@ allwell/
 ├── allwell_report.py            ← `python allwell_report.py` — draw a dataset's saved plots without a
 │                                  window (Saved Plots → *The headless report*)
 ├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
-│                                  / --run-bootstrap / --run-report / --run-nanowell-preview / --run-identity dispatch. A helper the *app* spawns is not an entry
+│                                  / --run-bootstrap / --run-report / --run-nanowell-preview / --run-identity
+│                                  / --run-square-calibration dispatch. A helper the *app* spawns is not an entry
 │                                  point in this sense and does not belong here — it lives in the package
 │                                  whose work it does (see pipeline/well_plate_zipper.py below)
 │
@@ -11315,7 +11316,18 @@ accepts it when it leads the runner-up by more than `FIDUCIAL_MARGIN` (0.15) and
 least circular of a set of circles. A fixed floor of 0.4 decided it before: rendered squares with
 rounded corners, a halo or a few micrometres of defocus read 0.34 to 0.50 against circles at 0.01 to
 0.15, and were refused while standing six times above every circle. All three numbers are assumed
-until real squares calibrate them (tracker F6). **A refused square says which test it failed.** `describe_fiducial` turns the
+until real squares calibrate them (tracker F6). **A plate calibrates them from its own answers**:
+`pipeline/nanowell_square_calibration.py` (Qt-free; `python -m pipeline.nanowell_square_calibration <output_dir>
+[--input_dir <in>] [--csv]`, in the packaged app the executable with `--run-square-calibration`) reads every grid
+record's `fiducial` block and labels each square guess from what the disk already knows: an anchor set by hand at
+the same well and timepoint (right when the guess lies within half a pitch of the click, wrong otherwise — the
+search never sees the anchor, so the guess is independent of it), else, for a square the run accepted itself, the
+identity check (`confirmed` is right; `contradicted` with `square_agreement_pitches` above
+`SQUARE_AGREEMENT_PITCHES` is wrong; any other verdict says nothing about the square). It reports what the current
+pair accepts and searches margins 0.00–0.50 and ratios 1.00–5.00 for the pair accepting the most right guesses and
+no wrong one (the strictest among ties), judged by `fiducial_accepted`'s own rule, and how many of today's refused
+guesses that pair would accept. It changes nothing; it says so when the current pair already does as well, and
+warns when fewer than five wrong guesses back the suggestion. **A refused square says which test it failed.** `describe_fiducial` turns the
 search into a block — sites scored, the best and runner-up squareness, the floor, where the
 square was, and a sentence naming the failure when there is no candidate (no site could be
 scored; only one could; the most square outline read under the floor) — and `resolve_origin`

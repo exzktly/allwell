@@ -21,7 +21,9 @@ wrong analysis rather than a crash, and it has its own guard below.
 from __future__ import annotations
 
 import csv
+import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -169,7 +171,7 @@ def test_a_changed_parser_invalidates_every_cache():
     ])
     digest = hashlib.sha256(material.encode()).hexdigest()[:16]
 
-    assert (pc.PARSER_VERSION, digest) == (2, "774ec118cf096871"), (
+    assert (pc.PARSER_VERSION, digest) == (2, "9d8bdea5f7560249"), (
         "load_well_csv or a constant it reads has changed. Every cached frame "
         "on every user's disk was produced by the old one, and the fingerprint "
         "does not know that. Bump PARSER_VERSION so they all invalidate, then "
@@ -420,3 +422,56 @@ def test_an_abandoned_staging_file_is_swept(plate, tmp_path):
 
 def test_pruning_a_directory_with_no_cache_is_not_an_error(tmp_path):
     assert pc.prune(tmp_path / "never opened") == 0
+
+
+_THREAD_PROBE = r"""
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import numpy as np, pandas as pd
+from pathlib import Path
+import review.data.parquet_cache as pc
+pc.ARROW_THREADS = sys.argv[3] == "1"
+from review.data.data_loading import read_well_frame
+csv = Path(sys.argv[2]) / "B03.csv"
+pd.DataFrame({**{f"m{i}": np.random.default_rng(i).normal(size=50_000) for i in range(20)}, "well": "B03"}).to_csv(
+    csv, index=False)
+read_well_frame(csv)                        # a miss: parses the CSV and writes the cache
+before = len(os.listdir("/proc/self/task"))
+frame = read_well_frame(csv)                # a hit: decodes the cache
+print(before, len(os.listdir("/proc/self/task")), len(frame))
+"""
+
+
+@pytest.mark.skipif(not Path("/proc/self/task").is_dir(), reason="counts threads through /proc")
+@pytest.mark.parametrize("threads, starts_none", [("0", True), ("1", False)])
+def test_a_cache_hit_decodes_on_the_calling_thread(tmp_path, threads, starts_none):
+    """Reported: a load from a network drive ended in ``Fatal Python error: Aborted`` inside ``read_table``, with no
+    Python thread labelled as the one that aborted — a native Arrow pool thread. A cache hit now decodes on the
+    worker's own thread: it starts no thread. The ``ARROW_THREADS = True`` case is the control, and must start some,
+    or this count measures nothing."""
+    import subprocess
+
+    repo = Path(__file__).resolve().parents[1]
+    out = subprocess.run([sys.executable, "-c", _THREAD_PROBE, str(repo), str(tmp_path), threads],
+                         capture_output=True, text=True, timeout=120)
+    assert out.returncode == 0, out.stderr
+    before, after, rows = (int(v) for v in out.stdout.split())
+    assert rows == 50_000
+    assert (after == before) is starts_none, (before, after)
+
+
+def test_the_single_threaded_read_is_the_table_read_table_returns(tmp_path):
+    """``_read_table`` decodes one column at a time on the calling thread; what it returns must be ``read_table``'s
+    table exactly — values, types, column order and the schema's pandas metadata — whole and for a column subset."""
+    import pyarrow.parquet as pq
+
+    from tests.test_a_read_costs_about_one_frame import _messy_well
+
+    path = _messy_well(tmp_path / "A01.csv.gz", late_numbers=True, rows=20_000)
+    read_well_frame(path)
+    cache = pc.cache_path(path)
+    whole = pq.read_table(cache, pre_buffer=False)
+    assert pc._read_table(pq, cache, None).equals(whole, check_metadata=True)
+    some = [whole.schema.names[3], whole.schema.names[0], whole.schema.names[-1]]
+    assert pc._read_table(pq, cache, some).equals(pq.read_table(cache, columns=some, pre_buffer=False),
+                                                  check_metadata=True)

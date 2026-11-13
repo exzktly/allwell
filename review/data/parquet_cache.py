@@ -111,6 +111,29 @@ _logger = logging.getLogger("review.parquet_cache")
 #: ``startswith(".")`` filter would catch if the cache were ever flattened.
 CACHE_DIRNAME = ".aw_parquet"
 
+#: Whether Arrow may run a well's decode and its conversion to pandas on its own C++ thread pool. **No**: every
+#: Arrow step of a well's load — the Parquet decode (:func:`read_cached`), the CSV parse
+#: (``data_loading._arrow_read``) and the conversion (:func:`table_to_frame`) — runs on the calling worker's thread.
+#:
+#: Reported: a Review session reading a 61-well plate from a network drive ended in ``Fatal Python error:
+#: Aborted`` while a worker was inside ``pyarrow.parquet.read_table`` for the Cell Gating tally, and faulthandler
+#: labelled none of the three Python threads ``Current thread`` — the abort was raised on a thread Python does not
+#: own, and Arrow's pool threads are the only native work in that path. On the calling thread, an abort here would
+#: name its own Python stack in the boot log, and an allocation failure becomes a ``MemoryError`` on a thread that
+#: can catch it instead of a process-wide terminate. The conversion's ``self_destruct`` is marked EXPERIMENTAL by
+#: pyarrow itself, which is one more reason not to run it across a pool. Measured on a 120,000-row x 37-column well
+#: with 4 CPUs (pyarrow 22): a cache hit about the same (56 ms threaded, 57 ms here, conversion included), a CSV
+#: parse 102 -> 229 ms (median of 3 to 5 reads; a CSV is parsed only on a cache miss).
+#:
+#: A single-threaded Parquet decode on its own costs memory, not only time: :func:`_read_table` says how it reads
+#: one column at a time to keep the pool's peak at about one table.
+#:
+#: What it covers, counted in a fresh process: a cache hit — the path the abort was in — starts no thread at all
+#: (with the pool it started three). A CSV parse, which happens only on a cache miss, still starts Arrow's I/O
+#: read-ahead threads (one for ``read_csv``, two for the streamed ``open_csv``) whatever ``use_threads`` says: they
+#: read the file's blocks, the parse itself runs here. ``tests/test_parquet_cache.py`` holds the cache-hit count.
+ARROW_THREADS = False
+
 #: The per-well summaries (``review/data/well_summary.py``) live in the same directory.
 _SUMMARY_SUFFIX = ".summary.json"
 
@@ -249,7 +272,7 @@ def table_to_frame(table) -> pd.DataFrame:
     under everything that follows.
     """
     release_arrow_memory()
-    frame = table.to_pandas(self_destruct=True, split_blocks=True)
+    frame = table.to_pandas(self_destruct=True, split_blocks=True, use_threads=ARROW_THREADS)
     del table
     for position in range(frame.shape[1]):
         column = frame.iloc[:, position]
@@ -421,11 +444,31 @@ def read_cached(csv_path: Path, columns: list[str] | None = None) -> pd.DataFram
         # chunk's compressed bytes into memory ahead of decoding them, which on
         # a single local file buys nothing and holds the whole file beside the
         # table it decodes to. See "What a read costs" in the module docstring.
-        return table_to_frame(pq.read_table(path, columns=subset, pre_buffer=False))
+        return table_to_frame(_read_table(pq, path, subset))
     except Exception as exc:  # noqa: BLE001 - any unreadable cache is just a miss
         _logger.debug("parquet cache unreadable for %s (%s); parsing the CSV",
                       csv_path.name, exc)
         return None
+
+
+def _read_table(pq, path: Path, columns):
+    """The cache file's table (*columns* of it, or all), decoded on this thread (:data:`ARROW_THREADS`).
+
+    **One column at a time.** A single-threaded ``read_table`` measured an Arrow pool peak of 4.05x the table on the
+    150,000-row fixture of ``tests/test_a_read_costs_about_one_frame.py`` (1.55x with the pool), and so did a
+    single-threaded read of each row group; reading each column on its own, single-threaded, peaked at 1.12x and
+    took the same time as the threaded read (57 against 56 ms on a 120,000-row x 37-column well, conversion
+    included). The table is the one ``read_table`` returns — the same columns, types, values and schema metadata."""
+    import pyarrow as pa
+
+    if ARROW_THREADS:
+        return pq.read_table(path, columns=columns, pre_buffer=False)
+    handle = pq.ParquetFile(path, pre_buffer=False)
+    schema = handle.schema_arrow
+    names = list(schema.names) if columns is None else list(columns)
+    fields = [schema.field(name) for name in names]
+    arrays = [handle.read(columns=[name], use_threads=False).column(0) for name in names]
+    return pa.table(arrays, schema=pa.schema(fields, metadata=schema.metadata))
 
 
 def write_cache(csv_path: Path, frame, fingerprint: str | None = None) -> bool:

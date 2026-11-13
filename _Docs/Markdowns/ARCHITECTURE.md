@@ -23242,6 +23242,14 @@ you're in before you type the command.
   `QT_QPA_PLATFORM="offscreen:configfile=<file>"` with
   `{"screens": [{"name": "phone", "x": 0, "y": 0, "width": 432, "height": 936,
   "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}]}`.
+  **The harness waits without holding the GIL.** `tests/_screens.pump` runs the event
+  loop and then waits through `wait_events`, which runs it in slices with a
+  `time.sleep` between them, rather than through `QTest.qWait`: `qWait` keeps the GIL
+  for its whole call, so a worker thread beside it — the Nanowells page's loads, its
+  Rare responders analysis — ran only once the wait returned, and an analysis of
+  1.9 s took 69–88 s. The app's own event loop (`QApplication.exec`) releases the GIL
+  and has no such cost. `tests/test_screens_wait_frees_workers.py` fails if the wait
+  holds the GIL again.
   The file runs three datasets (`tests/_page_datasets.py`: `mini`, `nanowell`,
   `images`) on those three screens, nine cases, each in a **subprocess of its own**
   (`python -m tests._page_render_case <dataset> <screen> <out.json>`, three at a

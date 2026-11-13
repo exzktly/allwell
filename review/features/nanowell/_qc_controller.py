@@ -38,7 +38,8 @@ def _nwc():
 
 
 def anchors_path(st, data_dir) -> Path | None:
-    """The anchors file, whether or not the page has read any well's tables yet."""
+    """The anchors file, whether or not the page has read any well's tables yet. Without the page's data this looks
+    for the ``in/`` folder on disk, so it is called on the worker (:func:`ensure_read`), never on the GUI thread."""
     from util.nanowell_anchors import anchors_path as path_in
 
     if st.data is not None:
@@ -50,7 +51,7 @@ def anchors_path(st, data_dir) -> Path | None:
 
 def matrix(ctx) -> qc.QcMatrix | None:
     """The plate's :class:`qc_compute.QcMatrix` from the records last read, or ``None`` before the first read lands.
-    Starts a read when the files have changed since (:func:`ensure_read`)."""
+    Starts a check of the files on a worker (:func:`ensure_read`); never waits for it."""
     st = _state(ctx)
     if st is None or not ctx.state.dataset.data_dir:
         return None
@@ -64,37 +65,69 @@ def matrix(ctx) -> qc.QcMatrix | None:
 
 
 def ensure_read(ctx, *, force: bool = False) -> None:
-    """Read the plate's records on a worker unless what is held matches the files on disk."""
+    """Check the plate's files on a worker, and read its records there too when they have changed since the last read.
+
+    **Nothing here touches the disk on the GUI thread.** The signature (``qc_compute.signature``) is a ``stat`` of
+    every well's grid record, identity sidecar and sites table — about three files a well — and it is asked for on
+    every refresh of the page's controls and every draw of the QC view. On a fast local disk that is a millisecond;
+    on a slow or synced one it held the window unresponsive for 30 to 100 s at a time, with every faulthandler dump
+    of the GUI thread inside ``pathlib.stat`` here. So the check runs on a worker, one at a time: a request while one
+    is in flight is remembered (``qc_recheck``) and runs once it lands, so a file changed during a check is still
+    found at the next refresh. A dataset switch is noticed without any file access, by the signature's folder."""
     from core.worker_bridge import run_off_thread
 
     st = _state(ctx)
     data_dir = ctx.state.dataset.data_dir
     if st is None or not data_dir:
         return
-    path = anchors_path(st, data_dir)
-    sig = qc.signature(data_dir, path)
-    if not force and (sig == st.qc_signature or sig == st.qc_reading):
-        return
-    if st.qc_signature is not None and st.qc_signature[0] != sig[0]:
+    if st.qc_signature is not None and st.qc_signature[0] != str(data_dir):
         st.qc_records, st.qc_signature = None, None      # another dataset: never draw the last one's plate
-    st.qc_reading = sig
+    if st.qc_reading is not None:
+        st.qc_recheck = True                             # one check at a time; this one runs when it lands
+        return
+    held = None if force else st.qc_signature
+    path = fmc.anchors_file(st.data) if st.data is not None else None
+    needs_lookup = st.data is None
+    token = object()
+    st.qc_reading, st.qc_recheck = token, False
 
-    def done(records) -> None:
-        if st.qc_reading != sig:
-            return                                       # a newer read was asked for; it will land instead
-        st.qc_records, st.qc_signature, st.qc_reading, st.qc_bridge = records, sig, None, None
-        st.qc_error = ""
-        _after_read(ctx)
+    def job():
+        anchors = anchors_path(st, data_dir) if needs_lookup else path
+        sig = qc.signature(data_dir, anchors)
+        if sig == held:
+            return sig, None, ""
+        try:
+            return sig, qc.read_plate(data_dir, anchors), ""
+        except Exception as exc:                         # held against *sig*, so it is not read again until it changes
+            log.warning("Nanowells QC: the plate's records could not be read: %s", exc, exc_info=True)
+            return sig, None, str(exc) or type(exc).__name__
+
+    def again() -> None:
+        if st.qc_recheck:
+            ensure_read(ctx)
+
+    def done(found) -> None:
+        if st.qc_reading is not token:
+            return
+        sig, records, error = found
+        st.qc_reading, st.qc_bridge = None, None
+        if str(ctx.state.dataset.data_dir or "") != sig[0]:
+            again()                                      # read for a dataset no longer loaded: drop it
+            return
+        if records is not None or error:
+            # A failure is held against the files as they were, so the figure says why rather than reading again on
+            # every refresh.
+            st.qc_records, st.qc_signature, st.qc_error = records, sig, error
+            _after_read(ctx)
+        again()
 
     def failed(message) -> None:
-        log.warning("Nanowells QC: the plate's records could not be read: %s", message)
-        if st.qc_reading == sig:
-            # Held against this signature, so the figure says why rather than reading again on every refresh.
-            st.qc_records, st.qc_signature, st.qc_reading, st.qc_bridge = None, sig, None, None
-            st.qc_error = str(message)
-            _after_read(ctx)
+        # Only the signature itself can fail here (``job`` holds a failed read); the next refresh tries again.
+        log.warning("Nanowells QC: the plate's files could not be checked: %s", message)
+        if st.qc_reading is token:
+            st.qc_reading, st.qc_bridge = None, None
 
-    st.qc_bridge = run_off_thread(lambda: qc.read_plate(data_dir, path), on_done=done, on_failed=failed)
+    st.qc_bridge = run_off_thread(job, on_done=done, on_failed=failed)
 
 
 def _after_read(ctx) -> None:

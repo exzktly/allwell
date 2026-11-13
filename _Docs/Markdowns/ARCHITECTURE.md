@@ -1792,6 +1792,13 @@ review/
 │   │                 observations.nanowell_metrics,
 │   │                 segmentation.nanowell_overlay and
 │   │                 image_table.nanowell_frame services (§6.2l)
+│   │                 rare_data_compute.py, rare_null_compute.py,
+│   │                 rare_exceedance_compute.py, rare_hc_compute.py,
+│   │                 rare_ad_compute.py, rare_report_compute.py,
+│   │                 rare_validate_compute.py, rare_export_compute.py,
+│   │                 _rare_render.py, _rare_controller.py ← the
+│   │                 rare-responder analysis and the Statistics view's
+│   │                 Rare responders test that runs it
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
 │   │                 + _svg_shapes.py (the PowerPoint export),
@@ -13794,7 +13801,8 @@ pop-out draw path — one nanowell, the window's rows, the hex composite — ren
 Unticking the last timepoint sets it too; a tick or *All* clears it. Tests: `test_nanowell_popout_grid.py` (the menu)
 and `test_nanowell_composite_render.py` (side by side, the Grid shape, the hex layout following the menu).
 `window_view.build_popout_window_controls`'s refresh hides `_nw_popout_go_to_btn` while `popout_source` is
-`"window"`: the button names one nanowell and the figure is of many.
+`"window"` or `"responders"` (the Rare responders test's flagged nanowells, `_rare_controller.draw_flagged_popout`),
+and shows the pager for both: the button names one nanowell and the figure is of many.
 
 **The crop store is bounded.** `NanowellState.crops` is a `crop_cache_compute.CropCache` — at most `CROPS_KEPT` (400)
 nanowells, the oldest inserted going first, never a key in `protected` (the page on screen and the selected nanowell,
@@ -13831,7 +13839,8 @@ test a second reading of the tables. `NanowellState.stats_unit` (persisted, `UNI
 `nanowells` makes each well a sample of its nanowells — a statement about those wells, which the figure says is not
 one about their conditions, since nanowells are not replicates (§6.2j, `summary_compute`) — and `wells` makes each
 group a sample of its wells' medians, one per well, as `group_summary` does. `NanowellState.stats_test` (persisted,
-`TESTS`: Welch, Student, Mann-Whitney U, Kolmogorov-Smirnov, Dunnett) picks the test. The band's *vs* combo
+`TESTS`: Welch, Student, Mann-Whitney U, Kolmogorov-Smirnov, Dunnett, and Rare responders, which is drawn by
+`_rare_controller` as described under *The rare-responder analysis* below) picks the test. The band's *vs* combo
 (`NanowellState.control`, shared with *Along x: Wells*) lists the samples of the unit on this view
 (`statistics_view.fill_control_combo`): with none chosen every pair is compared, with one each other sample against
 it; Dunnett requires one and corrects for its own family, the other tests are Benjamini-Hochberg adjusted
@@ -13854,6 +13863,67 @@ left out), and draws above them a box and dots per sample with its mean (with it
 sample's cumulative curve on a Kolmogorov-Smirnov run, with a bracket and stars over each comparison whose quoted p
 is below 0.05 (`MAX_BRACKETS`). `tests/test_nanowell_statistics.py` checks every test against scipy computed
 independently and drives the view through the real page builder and controls.
+
+**The rare-responder analysis** (`rare_*_compute.py`, drawn by `_rare_render.py`) asks whether a treatment well
+holds a *handful* of nanowells that grew faster than control nanowells do, while the rest of the well looks like
+control — a sparse effect that mean- and rank-based tests (the Statistics view's t-tests, Mann-Whitney, KS) are not
+built to find. It is a Qt-free engine with a programmatic entry, `rare_report_compute.analyse(table, RareParams(...),
+validate=...)`, and the Statistics view's *Rare responders* test runs it (below). Its rule throughout is that the **well** is the experimental
+unit: every p-value it reports is calibrated against the spread between replicate control wells, never against
+nanowells treated as independent. The modules, in the order the analysis runs them:
+
+* `rare_data_compute` — the per-nanowell table (`REQUIRED`: plate, well, condition, nanowell id, `n0`, `nt`; optional
+  times, `qc_*` flag columns and `crop_path`; `from_site_metrics` builds it from `series_compute.site_metrics`),
+  `FC = nt / n0` and `rate = log2(FC) / Δt` (NaN, not zero, when undefined), exclusions with their reasons (`n0 = 0`,
+  no final count, every QC flag), the loading strata (`n0 = 1, 2, 3, ≥4` by default), the optional per-well robust
+  normalisation (off by default, because it removes a real shift of the bulk), and the per-well summary.
+  `RareParams` holds every choice and `as_log()` writes it out.
+* `rare_null_compute` — wells as units (`Well`: values by stratum), leave-one-well-out control pools, `empirical_p`
+  (`(1 + #{null ≥ x}) / (n + 1)`), and `permutation_test`, which relabels whole wells, keeps each plate's treatment
+  count, enumerates every labeling up to `max_permutations` and samples distinct ones above it with the fixed seed,
+  and reports the labelings used and the smallest attainable p.
+* `rare_exceedance_compute` (Test A, primary) — per-stratum percentile thresholds (leave-one-out for control wells,
+  or a fixed threshold chosen beforehand), each well's count above them, and a beta-binomial regression with an
+  optional plate term tested one-sided by the signed-root likelihood ratio, with the odds ratio, its profile
+  interval and ρ. With fewer than three control or two treatment wells it falls back to per-well empirical p-values
+  and a Fisher test labelled anti-conservative, on which no interpretation rests.
+* `rare_hc_compute` (Test B) — per-nanowell p-values against the stratum's pool, the HC+ statistic over
+  `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when
+  the pool cannot resolve the `1/n` scale (two or fewer control wells, or a pool under three times a well's size).
+* `rare_ad_compute` (Test C) — the one-sided, upper-tail-weighted Anderson–Darling `A²_R` per stratum, combined by
+  nanowell share; the Scholz–Stephens k-sample test is reported as uncalibrated description only.
+* `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
+  refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
+  shown), Benjamini–Hochberg across units for each test, `interpret` (enrichment when exceedance or HC is significant,
+  a shape difference when only AD is), the flagged nanowells with their crop paths, and the parameter log.
+* `rare_validate_compute` — the self-check: control-versus-control splits for the false-positive share, and
+  synthetic responders (2–4× the stratum's control 99th percentile, k = 1, 3, 5, 10, 20 per well) for power.
+* `rare_export_compute` — `report_lines` and `write`, which puts every table, the parameter log and the text report
+  in a folder.
+
+**On the page**, the Statistics view's *Test* roster carries `rare` (kind `"rare"`, which `statistics_compute.compare`
+refuses, since it compares no samples). `controller._compose_statistics` hands that kind to
+`_rare_controller.compose`, which takes each group the page draws as a condition and the *vs* control as the control
+(`statistics_view.control_choices` lists groups for this test on either unit, and the unit combo is disabled),
+resolves the timepoint as the view's samples do (the latest the drawn wells have when none is named), builds the
+per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — the count fold
+change at that timepoint, whatever the Metric — and keys the result on a hash of that table and the parameters,
+so a key cannot return a result computed for other numbers. A key not in `NanowellState.rare_results` is computed
+by `analyse` on a worker through `controller._fetch` (kind `rare_results`; a failure is stored as its sentence),
+the figure saying so meanwhile; `_rare_render.render_rare_page` draws a row of ECDF / exceedance / HC per treatment
+(at most `MAX_UNIT_ROWS`) over the `rare_export_compute.report_lines` report. `rc.after_draw` (called from
+`_redraw`) keeps the drawn result's flagged nanowells on `NanowellState.rare_flagged` and at most `RESULTS_KEPT`
+results. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
+`draw_popout` sends to `rc.draw_flagged_popout`: rows of crops over time through `renderer.render_site_rows`,
+`FLAGGED_PAGE` to a page, cut through `_window_controller`'s crop pipeline and paged by its pager
+(`_window_controller.page_count` answers for this source). `tests/test_nanowell_rare_responders_page.py` drives
+it through the real page builder and was run against four mutations of the wiring (the rare branch never taken,
+the flagged list not kept, *vs* listing wells, the pop-out ignoring the source), each failing a test.
+
+`tests/test_nanowell_rare_responders.py` checks each rule against hand-computed values, includes a size check
+over twenty null plates with a real well-to-well shift, and was run against seven mutations (leave-one-out off,
+the HC+ bound off, permutations across plates, a two-sided AD, the guardrail off, a two-sided likelihood-ratio
+test, AD counted as enrichment), each of which fails a test.
 
 **The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an address on an ideal
 lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records) and kind

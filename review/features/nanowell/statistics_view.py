@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import QComboBox
+from PySide6.QtWidgets import QComboBox, QPushButton
 
+from review.features.nanowell import _rare_controller as rc
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import statistics_compute as sc
 
@@ -25,7 +26,13 @@ _TEST_TIP = ("The test each comparison is made with.\n"
              "t-tests compare means; Mann-Whitney U compares ranks; Kolmogorov-Smirnov compares whole distributions\n"
              "(the figure draws their cumulative curves); Dunnett compares each sample with the control chosen\n"
              "under vs, corrected for that family. With three or more samples an omnibus (ANOVA, or Kruskal-Wallis\n"
-             "for the rank tests) is stated first. Other tests' p-values are Benjamini-Hochberg adjusted (p_BH).")
+             "for the rank tests) is stated first. Other tests' p-values are Benjamini-Hochberg adjusted (p_BH).\n"
+             "Rare responders: each group against the control group under vs, wells as the units, for a handful of\n"
+             "nanowells per well growing faster than control nanowells do — the exceedance count, Higher Criticism\n"
+             "and an upper-tail Anderson-Darling, each calibrated on the control wells, on the count fold change.")
+_FLAGGED_TIP = ("Show the nanowells the Rare responders test flagged — above the threshold, or at or below their well's "
+                "HC threshold — in the pop-out, as rows of crops over time, to rule out segmentation errors, doublets "
+                "and debris.")
 STATS_CONTROL_TIP = ("Compare each sample with this one only — fewer comparisons than every pair, and the family a "
                      "plate design usually means. Dunnett needs one. None: every pair is compared.")
 
@@ -35,6 +42,7 @@ class StatisticsControls:
     unit: object
     test: object
     group: object
+    flagged: object = None
 
     @property
     def signalling(self) -> tuple:
@@ -54,13 +62,22 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     test.setToolTip(_TEST_TIP)
     test.currentIndexChanged.connect(lambda _i: nwc.set_stats_test(ctx, test.currentData() or sc.TEST_KEYS[0]))
     ctx.widgets.register("_nw_stats_test_cb", test)
-    group = band.add_scope("Compare", unit, test)
-    return StatisticsControls(unit, test, group)
+    flagged = QPushButton("Review flagged crops")
+    flagged.setProperty("variant", "secondary")
+    flagged.setToolTip(_FLAGGED_TIP)
+    flagged.clicked.connect(lambda _=False: rc.open_flagged_popout(ctx))
+    ctx.widgets.register("_nw_stats_flagged_btn", flagged)
+    group = band.add_scope("Compare", unit, test, flagged)
+    return StatisticsControls(unit, test, group, flagged)
 
 
 def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool) -> None:
     """Shown on the Statistics view only, on the state's choices. The caller blocks the signals."""
     controls.group.setVisible(on_view)
+    rare = sc.test_spec(st.stats_test)["kind"] == "rare"
+    controls.unit.setEnabled(not rare)                  # the rare-responder tests always take wells as the units
+    if controls.flagged is not None:
+        controls.flagged.setVisible(rare)
     for combo, value in ((controls.unit, st.stats_unit), (controls.test, st.stats_test)):
         index = combo.findData(value)
         if index >= 0:
@@ -83,6 +100,6 @@ def fill_control_combo(ctx, st, combo, *, on_statistics: bool, tip: str) -> None
 
 def control_choices(ctx, st) -> list[str]:
     """What the *vs* combo offers on the Statistics view: the samples of its unit — the wells drawn, or the groups."""
-    if st.stats_unit == sc.NANOWELLS:
+    if st.stats_unit == sc.NANOWELLS and sc.test_spec(st.stats_test)["kind"] != "rare":
         return nwc.page_wells(ctx)
     return list(nwc.page_groups(ctx))

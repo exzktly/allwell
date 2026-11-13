@@ -40,6 +40,7 @@ from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import _window_controller as wnc
+from review.features.nanowell import _rare_controller as rc
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -784,12 +785,12 @@ def _redraw(ctx) -> None:
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=page_subset(ctx, st), subset_label=page_subset_label(st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
-        gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
+        rare=rc.hook(ctx, st), gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
         dist_style=st.dist_style, violin_smooth=st.violin_smooth, hist_bins=st.hist_bins,
         hist_log=_y_log_drawn(ctx, fig), footer_out=True, **array)
     if st.view == "statistics":
-        pass                                             # its result is kept in ``st.stats_cache``; nothing to click
+        rc.after_draw(ctx, st, model)                    # nothing to click; a rare result's flagged nanowells kept
     elif isinstance(model, ArrayDrawn) or st.view == "array":
         if not _after_array_draw(ctx, st, model, well):
             return                                       # drawn again, at the region the Nanowell box asked for
@@ -1071,7 +1072,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
                   baseline_moving: int = 0, moving_centred: bool = False, layers: ArrayLayers | None = None, image=None, image_note: str = "",
                   region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
                   stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-                  stats_cache: dict | None = None, gate=None,
+                  stats_cache: dict | None = None, rare: dict | None = None, gate=None,
                   decoration: Decoration | None = None, names: dict | None = None,
                   swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
                   violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False) -> tuple[object, object]:
@@ -1140,19 +1141,11 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
         render_position(fig, series, label=_label(metric, channel, data, sizes), timepoint=timepoint, note=note)
         return None, None
     if view == "statistics":
-        # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
-        model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=WELLS,
-                                   groups=groups, timepoint=timepoint, time_source=data.time_source,
-                                   baseline=baseline, cohort=cohort, moving=moving,
-                                   baseline_moving=baseline_moving, moving_centred=moving_centred, sizes=sizes)
-        model.well_names = dict(names)
-        result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control,
-                                   cache=stats_cache)
-        if tableless:
-            note = " ".join(filter(None, [f"Selected without a nanowell table, so not compared: "
-                                          f"{', '.join(tableless)}.", note]))
-        render_statistics(fig, result, note=note)
-        return None, result
+        return None, _compose_statistics(
+            fig, metrics, data, groups=groups, metric=metric, channel=channel, timepoint=timepoint, control=control,
+            baseline=baseline, cohort=cohort, moving=moving, baseline_moving=baseline_moving,
+            moving_centred=moving_centred, sizes=sizes, names=names, tableless=tableless, note=note,
+            stats_unit=stats_unit, stats_test=stats_test, stats_cache=stats_cache, rare=rare)
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
@@ -1175,6 +1168,30 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
         return None, model
     return render_distribution(fig, model, selected=selected, spacing=swarm_spacing, footer_out=footer_out,
                                style=dist_style, smooth=violin_smooth, bins=hist_bins, log=hist_log), model
+
+
+def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channel, timepoint: str, control: str,
+                        baseline: str, cohort: bool, moving: int, baseline_moving: int, moving_centred: bool, sizes,
+                        names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare):
+    """The Statistics view: the samples compared by *stats_test* — or, for the Rare responders test, the groups
+    against the control group by the rare-responder analysis (``_rare_controller.compose``, *rare* carrying the
+    page's store of results and its worker request). Returns the result drawn."""
+    if tableless:
+        note = " ".join(filter(None, [f"Selected without a nanowell table, so not compared: "
+                                      f"{', '.join(tableless)}.", note]))
+    if sc.test_spec(stats_test)["kind"] == "rare":
+        return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note,
+                          moving_on=mvc.is_on(moving), cohort=cohort, unit_set=stats_unit != sc.WELLS,
+                          **(rare or {"store": None, "request": None}))
+    # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
+    model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds,
+                               channel=channel, axis=WELLS, groups=groups, timepoint=timepoint,
+                               time_source=data.time_source, baseline=baseline, cohort=cohort, moving=moving,
+                               baseline_moving=baseline_moving, moving_centred=moving_centred, sizes=sizes)
+    model.well_names = dict(names)
+    result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control, cache=stats_cache)
+    render_statistics(fig, result, note=note)
+    return result
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels, centred=False) -> str:
@@ -2154,8 +2171,8 @@ def draw_popout(ctx) -> None:
     fig, canvas = ctx.widgets.get_or_none("_nw_popout_fig"), ctx.widgets.get_or_none("_nw_popout_canvas")
     if st is None or window is None or fig is None or canvas is None or not window.isVisible():
         return
-    if st.popout_source == "window":
-        wnc.draw_window_popout(ctx, st, fig)
+    if st.popout_source in ("window", "responders"):
+        (wnc.draw_window_popout if st.popout_source == "window" else rc.draw_flagged_popout)(ctx, st, fig)
         canvas.draw_idle()
         return
     st.popout_hits, st.popout_tiles = {}, []
@@ -2250,8 +2267,9 @@ def save_popout_figure(ctx) -> None:
     fig = ctx.widgets.get_or_none("_nw_popout_fig")
     if st is None or fig is None:
         return
-    if st.popout_source == "window":
-        ctx.figures.save(fig, f"distribution_window_rows_{st.metric}")
+    if st.popout_source in ("window", "responders"):
+        ctx.figures.save(fig, f"distribution_window_rows_{st.metric}" if st.popout_source == "window"
+                         else "rare_responders_flagged")
         return
     site = crops_site(st)
     if site is None:

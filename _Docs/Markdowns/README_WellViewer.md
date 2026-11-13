@@ -7123,6 +7123,36 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   stars over each comparison below 0.05. A comparison that cannot be made says why in its row (fewer than two
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
+
+  **Test: Rare responders (vs control, wells as units)** asks a different question: does a treatment group hold a
+  *handful* of nanowells per well that grew faster than control nanowells do, while the rest of each well looks
+  like control? A mean or rank test is blind to an effect that sparse, so this one uses three tests built for it,
+  each calibrated on the spread between the control wells rather than treating nanowells as independent:
+  - an **exceedance count** — how many nanowells of each well exceed the control's 99th percentile, compared by a
+    beta-binomial regression that allows wells to differ (odds ratio, its 95% interval and the overdispersion ρ),
+    and repeated at the 95th and 99.9th percentiles so no threshold is picked after the fact;
+  - **Higher Criticism**, which needs no threshold and is sensitive to a few extreme nanowells;
+  - an **upper-tail Anderson–Darling** statistic, which reads any excess of mass in the upper tail. Significant on
+    its own, it means the shape of the tail differs, not that there are rare responders.
+
+  Choose the control group under **vs**; every other group drawn is tested against it, and p-values are
+  Benjamini-Hochberg corrected across groups. The value is always the **count fold change** (the count at the
+  **Timepoint** over the count at the **Baseline**), whatever the Metric shows, and nanowells are compared only
+  with nanowells that started with the same number of cells (1, 2, 3, or 4 and more), since a nanowell seeded
+  with one cell reaches an extreme fold change by chance far more easily. **Subset**, Cell Gating and the rim
+  focus rule apply; **Compare**, the moving average and the Fixed cohort do not, and the figure says so. Nanowells
+  with no cell at the start, or not measurable at the timepoint, are left out and counted in the report. A group
+  with fewer than two wells, or a control with fewer than two, gets no group-level result — only each well's
+  own empirical p — and the report says replication is insufficient. With fewer than three control wells there is
+  no regression either, and the report names the smallest p the design can reach.
+
+  The tests run in the background (the figure says so meanwhile). The figure draws, per treatment group, the
+  cumulative distributions with each threshold, every well's exceedance rate over the band of the control wells,
+  and the Higher Criticism curves, with the full report beneath. **Review flagged crops** opens the pop-out on the
+  nanowells the tests flagged — above the threshold, or at or below their well's Higher Criticism threshold —
+  as rows of crops over time, highest fold change first, so segmentation errors, doublets and debris can be
+  ruled out by eye; the pop-out's **Show** switches between them, the selected nanowell and the Distribution
+  window.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
   a QC picture and a full-resolution montage each did. Its **Well**, **Timepoint** and **Positions** are on the
   band's first row; its viewing row holds how the picture is drawn — **Image** and **Layers** — then **Set

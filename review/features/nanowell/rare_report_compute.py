@@ -37,6 +37,7 @@ from review.features.nanowell.rare_data_compute import Prepared, RareParams, exc
 from review.features.nanowell.rare_null_compute import (
     Permutation, Well, empirical_p, permutation_test, pool, wells_from,
 )
+from review.features.nanowell.rare_validate_compute import validate as run_validation
 from review.features.nanowell.statistics_compute import bh_adjust
 
 SUPPORTS = "supports rare-responder enrichment"
@@ -297,8 +298,6 @@ def analyse(data, params: RareParams | None = None, *, validate: bool = False) -
     result = RareResult(prepared, units, pd.DataFrame([_row(u) for u in units]), _sensitivity(units),
                         _per_well(units), responders(units, prepared), parameter_log(prepared, units), warnings)
     if validate:
-        from review.features.nanowell.rare_validate_compute import validate as run_validation
-
         result.validation = run_validation(prepared)
         result.log["validation"] = result.validation.log
     return result

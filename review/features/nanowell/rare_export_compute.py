@@ -27,6 +27,7 @@ from pathlib import Path
 
 from review.features.nanowell.rare_exceedance_compute import FISHER_LABEL
 from review.features.nanowell.rare_ad_compute import SCHOLZ_LABEL
+from util.json_write import write_json_atomic
 
 
 def _num(value, spec: str = ".3g") -> str:
@@ -92,7 +93,8 @@ def write(result, folder) -> list[Path]:
         frame.to_csv(path, index=False)
         written.append(path)
     log = folder / "rare_parameters.json"
-    log.write_text(json.dumps(result.log, indent=2, default=str), encoding="utf-8")
+    # Through ``default=str`` first: the log holds numpy scalars, which the JSON encoder does not take.
+    write_json_atomic(log, json.loads(json.dumps(result.log, default=str)))
     report = folder / "rare_report.txt"
     report.write_text("\n".join(report_lines(result)) + "\n", encoding="utf-8")
     return written + [log, report]

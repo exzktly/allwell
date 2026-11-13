@@ -12,7 +12,7 @@ import math
 
 import numpy as np
 
-from review.features.nanowell.renderer import _inks, _prepare_axes, GRID_TYPE_SCALE
+from review.features.nanowell.renderer import _ink, _inks, _prepare_axes, GRID_TYPE_SCALE
 
 #: Crops drawn at most per figure; the rest are counted in its title.
 MAX_CROPS = 48
@@ -65,8 +65,8 @@ def render_ecdf(fig, unit, value_label: str, *, log_axis: bool = True) -> None:
         ax.set_ylim(0, 1.01)
     axes[0].set_ylabel("cumulative fraction")
     axes[0].legend(fontsize=_TITLE_PT * 0.85, frameon=False)
-    fig.suptitle(f"{unit.label}: ECDF by loading stratum, threshold = {unit.primary.percentile:g}th percentile "
-                 "of control", fontsize=_TITLE_PT)
+    _ink(fig.suptitle(f"{unit.label}: ECDF by loading stratum, threshold = {unit.primary.percentile:g}th "
+                      "percentile of control", fontsize=_TITLE_PT, color=_inks(axes[0])[1]))
 
 
 def render_exceedance(fig, unit) -> None:
@@ -89,8 +89,8 @@ def render_exceedance(fig, unit) -> None:
         x = len(controls) + i
         ax.scatter([x], [c.rate * 100], color=colour, zorder=4, gid=f"rare-exceed-treated:{c.key}")
         if np.isfinite(c.empirical_p):
-            ax.annotate(f"p={c.empirical_p:.2g}", (x, c.rate * 100), textcoords="offset points", xytext=(0, 6),
-                        ha="center", fontsize=_TITLE_PT * 0.8, color=ink)
+            _ink(ax.annotate(f"p={c.empirical_p:.2g}", (x, c.rate * 100), textcoords="offset points", xytext=(0, 6),
+                             ha="center", fontsize=_TITLE_PT * 0.8, color=ink))
     ax.set_xticks(xs, [c.key for c in controls + treated], rotation=60, fontsize=_TITLE_PT * 0.8)
     ax.set_ylabel(f"% nanowells above the {unit.primary.percentile:g}th-percentile threshold")
     ax.set_title(f"{unit.label}: exceedance per well over the control-well null "
@@ -133,7 +133,8 @@ def render_crops(fig, responders, load, *, max_crops: int = MAX_CROPS) -> None:
     if n == 0:
         ax = fig.add_subplot(111)
         ax.axis("off")
-        ax.text(0.5, 0.5, "No nanowell was flagged", ha="center", va="center", gid="rare-crops-none")
+        _ink(ax.text(0.5, 0.5, "No nanowell was flagged", ha="center", va="center", color=_inks(ax)[1],
+                     gid="rare-crops-none"))
         return
     cols = int(math.ceil(math.sqrt(n * 1.5)))
     grid = fig.subplots(int(math.ceil(n / cols)), cols, squeeze=False)
@@ -145,11 +146,13 @@ def render_crops(fig, responders, load, *, max_crops: int = MAX_CROPS) -> None:
                                     if on)
         title = f"{row['well_key']} #{row['nanowell_id']}\nFC {row['fc']:.3g} (N0={row['n0']:g}) {why}"
         if image is None:
-            ax.text(0.5, 0.5, "no crop path" if not row["crop_path"] else "crop unreadable", ha="center",
-                    va="center", fontsize=_TITLE_PT * 0.8, gid=f"rare-crop-missing:{row['well_key']}:{row['nanowell_id']}")
+            _ink(ax.text(0.5, 0.5, "no crop path" if not row["crop_path"] else "crop unreadable", ha="center",
+                         va="center", fontsize=_TITLE_PT * 0.8, color=_inks(ax)[2],
+                         gid=f"rare-crop-missing:{row['well_key']}:{row['nanowell_id']}"), muted=True)
         else:
             ax.imshow(image, cmap="gray", gid=f"rare-crop:{row['well_key']}:{row['nanowell_id']}")
-        ax.set_title(title, fontsize=_TITLE_PT * 0.7)
+        _ink(ax.set_title(title, fontsize=_TITLE_PT * 0.7, color=_inks(ax)[1]))
     more = len(responders) - n
-    fig.suptitle(f"Flagged nanowells for manual review ({len(responders)} flagged"
-                 + (f"; {more} more not drawn" if more > 0 else "") + ")", fontsize=_TITLE_PT)
+    _ink(fig.suptitle(f"Flagged nanowells for manual review ({len(responders)} flagged"
+                      + (f"; {more} more not drawn" if more > 0 else "") + ")", fontsize=_TITLE_PT,
+                      color=_inks(grid.flat[0])[1]))

@@ -938,5 +938,12 @@ def build_subset_control(ctx, band, tp_text) -> SimpleNamespace:
     reg.register("_nw_subset_edit_btn", edit_btn)
     reg.register("_nw_subset_editor", editor)
     group = band.add_scope("Subset", combo, edit_btn)
-    return SimpleNamespace(group=group, refresh=refresh, editor=editor, signalling=())
+
+    def shown_on(on: bool) -> None:
+        """The Subset on a view that draws nanowells' values, gone with its editor on one that draws none (QC,
+        Identity); the editor comes back as it was left, open or closed."""
+        group.setVisible(on)
+        editor.setVisible(on and edit_btn.isChecked())
+
+    return SimpleNamespace(group=group, refresh=refresh, editor=editor, shown_on=shown_on, signalling=())
 

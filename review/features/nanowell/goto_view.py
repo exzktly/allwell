@@ -21,7 +21,6 @@ _TIP = ("Go to one nanowell: type its address and press Enter. Write it as the a
         "Clear the box to take the Identity view back to its whole view.")
 _DIAGNOSTICS_TIP = _TIP + ("\n\nDiagnostics draws the central square and its match, not the array: the nanowell is selected "
                            "but not zoomed onto there.")
-_OFF_TIP = "Array QC draws one row per well, not nanowells: there is no nanowell to go to on this view."
 _ORIGIN_TIP = "Go to the origin: nanowell 0,0, the centre of the array the addresses count from (ring 0)."
 
 
@@ -64,12 +63,11 @@ def go_to(ctx, edit, text: str) -> None:
 
 
 def refresh_goto_controls(st, controls: GotoControls, view: str) -> None:
-    """Shown on every view; greyed on Array QC; the box shows the address last gone to, unless the reader is
-    typing in it."""
+    """Shown on every view that draws nanowells, not on QC, which draws one row per well; the box shows the address
+    last gone to, unless the reader is typing in it."""
     goes = view not in gtc.NO_GOTO_VIEWS
-    controls.group.setVisible(True)
-    controls.group.setEnabled(goes)
+    controls.group.setVisible(goes)
     zooms = view != "identity" or st.identity_mode in FOCUS_MODES
-    controls.edit.setToolTip(_TIP if goes and zooms else _DIAGNOSTICS_TIP if goes else _OFF_TIP)
+    controls.edit.setToolTip(_TIP if zooms else _DIAGNOSTICS_TIP)
     if not controls.edit.hasFocus() and controls.edit.text().strip() != st.identity_focus:
         controls.edit.setText(st.identity_focus)          # the reader's typing is never overwritten

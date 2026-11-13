@@ -139,11 +139,13 @@ def test_a_well_not_drawn_or_an_address_not_in_the_table_is_said_and_selects_not
     assert st.selected_sites == [list(TARGET)]
 
 
-def test_array_qc_greys_the_box_and_says_why(page, qtbot):
+def test_the_qc_view_does_not_show_the_box(page, qtbot):
+    """QC draws one row per well, no nanowell to go to: the box has no role there and is not shown (asked for: "if
+    it has no role on that tab, it shouldn't be displayed"); back on a view of nanowells it is."""
     ctx = page
     _loaded(qtbot, ctx)
     nwc.set_view(ctx, "qc")
     edit = ctx.widgets.get("_nw_goto_edit")
-    assert edit.isVisibleTo(ctx.window) and not edit.isEnabled()
-    assert edit.toolTip().startswith("Array QC draws one row per well")
-    assert not ctx.widgets.get("_nw_goto_origin_btn").isEnabled()
+    assert not edit.isVisibleTo(ctx.window) and not ctx.widgets.get("_nw_goto_origin_btn").isVisibleTo(ctx.window)
+    nwc.set_view(ctx, "distribution")
+    assert edit.isVisibleTo(ctx.window) and edit.isEnabled()

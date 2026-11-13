@@ -13892,7 +13892,8 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 * `rare_null_compute` — wells as units (`Well`: values by stratum), leave-one-well-out control pools, `empirical_p`
   (`(1 + #{null ≥ x}) / (n + 1)`), and `permutation_test`, which relabels whole wells, keeps each plate's treatment
   count, enumerates every labeling up to `max_permutations` and samples distinct ones above it with the fixed seed,
-  and reports the labelings used and the smallest attainable p.
+  and reports the labelings used and the smallest attainable p. A labeling whose statistic is undefined counts as at
+  least as extreme as the observed one (it cannot be ruled out), so it never makes p smaller.
 * `rare_exceedance_compute` (Test A, primary) — per-stratum percentile thresholds (leave-one-out for control wells,
   or a fixed threshold chosen beforehand), each well's count above them, and a beta-binomial regression with an
   optional plate term tested one-sided by the signed-root likelihood ratio, with the odds ratio, its profile
@@ -13902,11 +13903,14 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when
   the pool cannot resolve the `1/n` scale (two or fewer control wells, or a pool under three times a well's size).
 * `rare_ad_compute` (Test C) — the one-sided, upper-tail-weighted Anderson–Darling `A²_R` per stratum, combined by
-  nanowell share; the Scholz–Stephens k-sample test is reported as uncalibrated description only.
+  nanowell share over the strata where it is defined; NaN — not computable, never 0 — when the control pool has no
+  value above its median and below its top (whole-number fold changes do this). The Scholz–Stephens k-sample test
+  is reported as uncalibrated description only.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
-  shown), Benjamini–Hochberg across units for each test, `interpret` (enrichment when exceedance or HC is significant,
-  a shape difference when only AD is), the flagged nanowells with their crop paths, and the parameter log.
+  shown), Benjamini–Hochberg across units for each test, `interpret` (the exceedance test alone decides the verdict;
+  HC and AD are supporting evidence), the flagged nanowells — past the control cutoff only — with their crop paths,
+  and the parameter log.
 * `rare_validate_compute` — the self-check: control-versus-control splits for the false-positive share, and
   synthetic responders (2–4× the stratum's control 99th percentile, k = 1, 3, 5, 10, 20 per well) for power.
 * `rare_export_compute` — `report_lines` and `write`, which puts every table, the parameter log and the text report
@@ -13915,24 +13919,45 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 **On the page**, the Statistics view's *Test* roster carries `rare` (kind `"rare"`, which `statistics_compute.compare`
 refuses, since it compares no samples). `controller._compose_statistics` hands that kind to
 `_rare_controller.compose`, which takes each group the page draws as a condition and the *vs* control as the control
-(`statistics_view.control_choices` lists groups for this test on either unit, and the unit combo is disabled),
+(`statistics_view.control_choices` lists groups for this test on either unit, and the unit combo is hidden, since
+it never applies — a greyed control reads as one to unlock),
 resolves the timepoint as the view's samples do (the latest the drawn wells have when none is named), builds the
 per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — the count fold
 change at that timepoint, whatever the Metric — and keys the result on a hash of that table and the parameters,
 so a key cannot return a result computed for other numbers. A key not in `NanowellState.rare_results` is computed
 by `analyse` on a worker through `controller._fetch` (kind `rare_results`; a failure is stored as its sentence),
-the figure saying so meanwhile; `_rare_render.render_rare_page` draws a row of ECDF / exceedance / HC per treatment
-over two lines per treatment (`rare_export_compute.verdict_lines`: the verdict, each test's p and q). It lays the
-figure out in inches, panels first: each row gets at least `ROW_MIN_IN`, as many treatments are drawn as fit (at
-most `MAX_UNIT_ROWS`, the rest named), and the text takes only what the rows leave, lines past it counted. A figure
+the figure saying what is tested against what meanwhile (`rc.computing_text`). **The verdict is decided by the
+exceedance test alone** (`rare_report_compute.interpret`: `DETECTED` when its q is below the FDR, `NOT_DETECTED`
+otherwise or when no nanowell passed the cutoff, `INSUFFICIENT` without two wells a side); Higher Criticism and
+the upper-tail shape test are supporting evidence that never changes it, so the verdict is not given two
+uncorrected chances. **Every sentence the figure says is built once, from the result's fields,** in
+`rare_export_compute`: `headline` (the verdict, then the counts past the cutoff in each condition and the wells
+behind them), `deciding_line`, `supporting_line` (each p marked when it is its permutation floor, and what a
+supporting test finding what the deciding one did not usually means) and `caveats` — the permutation floor at or
+above the FDR, an exceedance regression with no control nanowell past the cutoff (ρ at its bound, so its p is
+effectively nanowell-level, with the floor of a whole-well test beside it), and nanowells beyond Higher
+Criticism's reach (HC+ drops p ≤ 1/n, which with a control pool larger than a well are the most extreme ones) —
+gathered by `unit_text`; `report_lines`, the Details report, uses the same test names (`NAME_A/B/C`).
+`_rare_render.render_rare_page` draws, per treatment, its headline above its row of panels (gid `nw-rare-unit`) —
+how far nanowells grew (fold-change ticks `2×`, `4×` from `_fold_ticks`, a cutoff ≤ 0 not drawn on the log axis),
+each well's share past the cutoff labelled with its count, Higher Criticism — and under the panels each treatment's
+deciding line, its ⚠ caveats, then its supporting line (gid `nw-rare-line`). It lays the figure out in inches,
+panels first: each row gets at least `ROW_MIN_IN`, as many treatments are drawn as fit (at most `MAX_UNIT_ROWS`,
+the rest named in a line that is always drawn), and the text takes only what the rows and headlines leave. Text
+that does not fit is cut **between sentences**, never inside one, after the first deciding line, which is always
+drawn; what is left out is counted in one pointer to Details. A figure
 narrower than `STACK_BELOW_IN` (a phone's, about 4 in) stacks each treatment's three panels in one column, each at
 least `STACKED_ROW_MIN_IN` tall: side by side there each panel was about an inch across and its labels ran into its
-neighbours'. The exceedance panel raises its top by the height of a dot's p label in points (`_headroom`), so a dot
-at the top of a short panel keeps its label inside the axes rather than over the title. The full
+neighbours'. The exceedance panel starts its y axis at 0 and raises its top by the height of a dot's count label in
+points (`_headroom`), so a dot at the top of a short panel keeps its label inside the axes rather than over the
+title; a treatment dot is outlined in the plot ink (paired for the publication ground), so a dark plate colour
+shows on the dark card. Each treatment well's own empirical p is in Details, not on the panel: its floor is
+1/(control wells + 1), 0.25 with three, and beside a group p of 0.0007 it read as a contradiction. The full
 `report_lines` report, the result's warnings and the page's notes go to the page's **Details** field instead
 (`rc.footer_of` → `NanowellState.rare_footer`, which `details_view` shows on the Statistics view as it shows the
 Distribution view's footer): drawn into the figure, a long report had squeezed the panels to under an inch.
-The ECDF's x is log₂ FC on a linear axis, because the page's style pass resets an axis's scale after the draw.
+The first panel's x is log₂ FC on a linear axis, because the page's style pass resets an axis's scale after the
+draw; its ticks are labelled as the fold changes they stand for.
 **Colours.** The loading strata are a magnitude, so their curves, thresholds and legend take the page's
 `occupancy_ramp` (`_rare_render._stratum_shades`: the ramp's top shades, which with the default strata are the
 occupancy classes 1, 2 and 3+) in `Colors` or `CPub` by the figure's ground, each line marked with
@@ -13941,7 +13966,12 @@ A02 and A03. Each treatment well, on the exceedance and HC panels, is drawn in i
 (`selections_model.color_for_well`), never in the palette by its position among the treated wells, which drew B01
 in A01's colour.
 `rc.after_draw` (called from `_redraw`) keeps the drawn result's flagged nanowells on
-`NanowellState.rare_flagged`, its Details footer, and at most `RESULTS_KEPT` results. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
+`NanowellState.rare_flagged`, its Details footer, and at most `RESULTS_KEPT` results, and refreshes the band so
+**Review flagged crops** is enabled only when something was flagged, its tooltip saying why it is not
+(`statistics_view.FLAGGED_NONE_TIP` / `FLAGGED_NOT_RUN_TIP`; the pop-out says the same, `rc.FLAGGED_NONE`).
+**Flagged means past the control cutoff** (`rare_report_compute.responders`), the deciding test's own criterion;
+`hc_candidate` says whether a flagged nanowell is also one of Higher Criticism's candidates, which alone are never
+flagged — HC always has a peak, so on a plate with no responders every well still has candidates. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
 `draw_popout` sends to `rc.draw_flagged_popout`: rows of crops over time through `renderer.render_site_rows`,
 `FLAGGED_PAGE` to a page, cut through `_window_controller`'s crop pipeline and paged by its pager
 (`_window_controller.page_count` answers for this source). `tests/test_nanowell_rare_responders_page.py` drives

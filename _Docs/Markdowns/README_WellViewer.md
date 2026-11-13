@@ -7134,43 +7134,62 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   a control under **vs** or exclude wells. *Save figure* saves the figure and its report together.
 
   **Test: Rare responders (vs control, wells as units)** asks a different question: does a treatment group hold a
-  *handful* of nanowells per well that grew faster than control nanowells do, while the rest of each well looks
-  like control? ([Statistics primer: Rare responders](#statistics-primer-rare-responders) explains each test and
-  how to read it.) A mean or rank test is blind to an effect that sparse, so this one uses three tests built for it,
-  each calibrated on the spread between the control wells rather than treating nanowells as independent:
-  - an **exceedance count** — how many nanowells of each well exceed the control's 99th percentile, compared by a
-    beta-binomial regression that allows wells to differ (odds ratio, its 95% interval and the overdispersion ρ),
-    and repeated at the 95th and 99.9th percentiles so no threshold is picked after the fact;
-  - **Higher Criticism**, which needs no threshold and is sensitive to a few extreme nanowells;
-  - an **upper-tail Anderson–Darling** statistic, which reads any excess of mass in the upper tail. Significant on
-    its own, it means the shape of the tail differs, not that there are rare responders.
+  *handful* of nanowells per well that grew far more than control nanowells ever do, while the rest of each well
+  looks like control? ([Statistics primer: Rare responders](#statistics-primer-rare-responders) explains each test
+  and how to read it.) A mean or rank test is blind to an effect that sparse. Wells are the units throughout: the
+  nanowells of one well share its medium and handling, so they are not independent replicates.
+
+  **One test decides, two support it.**
+  - The **exceedance test** decides the verdict. It counts, per well, the nanowells that grew past the **control
+    cutoff** — the control's 99th percentile, for nanowells that started with the same number of cells — and asks
+    whether the treatment wells hold more of them than the control wells do (a beta-binomial regression that allows
+    wells to differ). It is the question asked, in counts you can check.
+  - **Higher Criticism** (a few extreme nanowells, with no fixed cutoff) and the **upper-tail shape test**
+    (Anderson–Darling: any difference in the top of the distribution) are reported beside it and never change the
+    verdict. When one of them finds what the exceedance test did not, the figure says what that usually means:
+    Higher Criticism alone points at nanowells just under the cutoff; the shape test alone is a shift of the tail,
+    which by itself is not rare responders.
 
   Choose the control group under **vs**, with the control and treatment groups shown on the plate. With replicate
   sets defined, a click on a well in the plate shows or hides that well's whole group, so a click on a group that is
   already shown hides it: when the control is hidden the figure says so and names the wells that bring it back, and
   when every group is hidden the page says that rather than "No nanowell wells selected". **All** under the plate shows
   every group again; *vs* keeps the control you chose meanwhile. Every other group drawn is tested against the
-  control, and p-values are
-  Benjamini-Hochberg corrected across groups. The value is always the **count fold change** (the count at the
-  **Timepoint** over the count at the **Baseline**), whatever the Metric shows, and nanowells are compared only
-  with nanowells that started with the same number of cells (1, 2, 3, or 4 and more), since a nanowell seeded
-  with one cell reaches an extreme fold change by chance far more easily. **Subset**, Cell Gating and the rim
-  focus rule apply; **Compare**, the moving average and the Fixed cohort do not, and the figure says so. Nanowells
-  with no cell at the start, or not measurable at the timepoint, are left out and counted in the report. A group
-  with fewer than two wells, or a control with fewer than two, gets no group-level result — only each well's
-  own empirical p — and the report says replication is insufficient. With fewer than three control wells there is
-  no regression either, and the report names the smallest p the design can reach.
+  control. The value is always the **count fold change** (the count at the **Timepoint** over the count at the
+  **Baseline**), whatever the Metric shows. **Subset**, Cell Gating and the rim focus rule apply; the moving average
+  and the Fixed cohort do not, and the report says so; *Compare* is hidden while this test is chosen, since it never
+  applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
+  report. A group or control with fewer than two wells is not tested as a group, and the figure says so.
 
-  The tests run in the background (the figure says so meanwhile). The figure draws, per treatment group, the
-  cumulative distributions with each threshold, every well's exceedance rate over the band of the control wells,
-  and the Higher Criticism curves, with two lines under them per group: the verdict, and each test's p and q. The
-  full report, its warnings and notes are in **Details ▸** under the figure, so the panels keep their room
-  however much the report says; a window too short for every group's row draws the first ones and names the rest.
-  **Review flagged crops** opens the pop-out on the
-  nanowells the tests flagged — above the threshold, or at or below their well's Higher Criticism threshold —
-  as rows of crops over time, highest fold change first, so segmentation errors, doublets and debris can be
-  ruled out by eye; the pop-out's **Show** switches between them, the selected nanowell and the Distribution
-  window.
+  **Reading the figure.** For each treatment group, the answer comes first, in bold, in counts: for example *drug:
+  rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its top 1%), against 0 of
+  180 control nanowells (0.0%) · 2 drug vs 3 control wells.* Under it, three panels (stacked one above the other on a
+  phone):
+  1. **How far nanowells grew, by starting cells** — for each fold change along the bottom (2×, 4×, 8×…), the share
+     of nanowells that grew no further than that; one blue shade per starting cell count, the same shades the
+     Distribution view gives a nanowell's cell count. Solid lines are the treatment group, dotted lines control,
+     the dashed line the control cutoff. Rare responders show as the solid curve matching the dotted one and then
+     stopping short of the top, past the cutoff; a whole curve moved sideways is a general shift instead.
+  2. **Share of each well's nanowells past the cutoff** — one dot per well with its count (*4/60*): control wells in
+     grey, the shaded band the range they span (what chance gives on this plate), treatment wells in their plate
+     colours. A treatment dot above the band is the effect.
+  3. **Higher Criticism** — each well's excess score over its nanowells, most extreme first; treatment wells in
+     colour, control wells in grey, the group p in the title (marked when it is the lowest the design allows).
+
+  Under the panels: the deciding test's p (and, with several groups, its q, corrected across them); then every
+  **⚠ caveat** that limits the verdict — too few wells for the supporting tests to reach significance at all, no
+  control nanowell past the cutoff (so the spread between wells could not be estimated and the exceedance p treats
+  nanowells as independent, which overstates the evidence), or nanowells too extreme for Higher Criticism to see —
+  then the supporting tests. A figure too short for all of it draws the most important first and counts the rest.
+  "Not detected" is not evidence that there is no effect: read it with the caveats. The full report — every
+  statistic, interval and q, each well's own count and p, the comparison tests that treat nanowells as independent,
+  and every note — is in **Details ▸** under the figure.
+
+  The tests run in the background; the figure says what is being tested against what meanwhile. **Review flagged
+  crops** opens the pop-out on the nanowells that grew past the control cutoff — the ones the verdict is counted
+  from — as rows of crops over time, highest fold change first, so segmentation errors, doublets and debris can be
+  ruled out by eye; it is greyed out, with the reason on it, before a result and when nothing grew past the cutoff.
+  The pop-out's **Show** switches between them, the selected nanowell and the Distribution window.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
   a QC picture and a full-resolution montage each did. Its **Well**, **Timepoint** and **Positions** are on the
   band's first row; its viewing row holds how the picture is drawn — **Image** and **Layers** — then **Set
@@ -11122,8 +11141,8 @@ variation, and the self-check measures whether it holds its false-positive rate 
 ### Guardrails, multiple testing, and what a result means
 
 **Replication guardrail.** A group, or a control, with fewer than **2 wells** gets no group-level result at all:
-no regression, no Fisher test, no permutation p. The report says *"replication insufficient — per-well empirical
-results only"* and still gives each treatment well's own empirical p. One well per condition cannot separate a
+no regression, no Fisher test, no permutation p. The figure says *"too few wells to test the group"* and the
+report still gives each treatment well's own empirical p. One well per condition cannot separate a
 treatment from that well's own luck, and the test refuses to pretend otherwise.
 
 **What each design can do.**
@@ -11139,50 +11158,73 @@ treatment from that well's own luck, and the test refuses to pretend otherwise.
 p-values are corrected separately by **Benjamini–Hochberg** (the *q* in the report), which controls the expected
 share of false discoveries among the results called significant. "Significant" in the report means q < 0.05.
 
-**The interpretation rule.**
+**The interpretation rule.** The exceedance test (A) alone decides, so the verdict is never given two chances:
 
-| Significant after correction | The report says |
+| The exceedance test, after correction | The figure says |
 | --- | --- |
-| Exceedance (A), HC (B), or both | **supports rare-responder enrichment** (naming which) |
-| AD (C) only | **general upper-tail shape difference only** — not evidence of rare responders |
-| None | **no evidence of rare-responder enrichment** — and, when the design cannot reach p < 0.05, the smallest p it could reach |
-| Fewer than 2 wells on a side | **replication insufficient** |
+| q < 0.05 | **rare responders detected** |
+| otherwise, or not testable (no nanowell in any well past the cutoff) | **rare responders not detected** |
+| Fewer than 2 wells on a side | **too few wells to test the group** |
 
-A and B are the rare-responder tests: A asks about a fixed bar, B finds its own. C on its own cannot distinguish
-a few fast nanowells from a whole tail that moved, so it never supports the rare-responder conclusion alone.
-"No evidence" is not evidence of no effect: read it with the smallest attainable p and the self-check's power.
+Higher Criticism (B) and the upper-tail shape test (C) are reported beside the verdict as supporting evidence and
+never change it. A finds rare responders against a fixed bar; B finds its own, which can point at nanowells just
+under the cutoff; C cannot distinguish a few fast nanowells from a whole tail that moved. "Not detected" is not
+evidence of no effect: read it with the caveats the figure prints under it, and the self-check's power.
+
+**Limits the figure states, beside the verdict.** Each is printed as a ⚠ caveat when it applies:
+- the supporting tests' floor is at or above 0.05 (3 control and 2 treatment wells: 0.1), so they can neither
+  confirm nor rule out anything;
+- no control nanowell grew past the cutoff, so the regression cannot estimate the spread between wells (ρ at its
+  bound) and its p behaves as if nanowells were independent, which overstates the evidence — with the smallest p a
+  test on whole wells could give;
+- Higher Criticism, in the HC+ form used here, leaves out nanowells whose p is at or below 1/n — with a control pool
+  larger than a well those are exactly the most extreme ones, so it says nothing about them.
+
+The upper-tail shape test is **not computable** when the control pool has no value above its median and below its
+top — whole-number fold changes (2×, 3×, 4×) do this — and it says so rather than reporting 0.
 
 ### Reading the figure, the report and the crops
 
 On the **Statistics** view, choose **Test: Rare responders (vs control, wells as units)**, then the control
-group under **vs**. The tests run in the background; the figure says so until they finish. Each treatment group
-then gets one row of three panels (up to three groups, and as many as the window's height fits; the report covers
-all of them), and under the panels two lines per group: the verdict, then each test's p and q. On a phone, or in a
+group under **vs**. The tests run in the background; the figure says what is being tested until they finish. Each
+treatment group then gets its answer in bold — the verdict and the counts behind it — and one row of three panels
+(up to three groups, and as many as the window's height fits; the report covers all of them). On a phone, or in a
 window too narrow for three panels side by side, each group's three panels are stacked one above the other:
 
-1. **ECDF by N0** — one shade per loading stratum (named in its key), from the same blue ramp the Distribution
-   view colours a nanowell's cell count with — never a well's colour — control dotted, treatment solid, the
-   stratum's threshold T dashed, on a log₂ fold-change axis. Rare responders show as the treatment curve peeling away *below* the
-   control curve only at its top right; a general shift shows as the whole curve displaced.
-2. **Exceedance per well over the control null** — every well's share of nanowells above T. Control wells (each
+1. **How far nanowells grew, by starting cells** — one shade per number of starting cells (named in its key),
+   from the same blue ramp the Distribution view colours a nanowell's cell count with — never a well's colour —
+   control dotted, treatment solid, the control cutoff dashed, on a fold-change axis marked 2×, 4×, 8×. Rare
+   responders show as the treatment curve stopping short of the top only at its right; a general shift shows as
+   the whole curve displaced.
+2. **Share of each well's nanowells past the cutoff** — every well's count (*4/60*) and share. Control wells (each
    scored leave-one-out) are grey dots; the shaded band spans them and the dotted line is their mean. Treatment
-   wells are drawn in their colour on the plate and labelled with their per-well empirical p. A treatment well above the band is unusual
-   for this plate.
-3. **Higher Criticism** — the HC curve against i/n for each well, control wells grey, treatment wells in their plate colours
-   with a dot at **i\***. A treatment curve that rises well above the grey bundle near the left edge is a sparse
+   wells are drawn in their colour on the plate, outlined so a dark one shows on the dark card. A treatment well
+   above the band is unusual for this plate. Each treatment well's own p is in the report: with 3 control wells
+   it cannot go below 0.25.
+3. **Higher Criticism** — each well's excess score over its nanowells, most extreme first; control wells grey,
+   treatment wells in their plate colours with a dot at the peak, the group p in the title (marked when it is the
+   lowest possible). A treatment curve that rises well above the grey bundle near the left edge is a sparse
    excess.
 
-The full **report** is in **Details ▸** under the figure, so the panels keep their room. It reads, per group: the verdict; Test A's odds ratio, 95 % interval, ρ, p and q, with the
-anti-conservative Fisher line under it; HC's mean, permutation p and q, the number of shufflings and the
-smallest attainable p; the same for A²R, with the uncalibrated Scholz–Stephens line; and any warnings (a stratum
-with too few control nanowells to resolve the percentile, a pool too small for HC, a plate effect that could not
-be estimated). Its first line counts the nanowells kept and excluded.
+Under the panels: the deciding test's p, every ⚠ caveat that applies, then the supporting tests' p (each marked
+when it is the lowest possible). A figure too short for all of it keeps the deciding line and the caveats first,
+and counts what it left for Details.
+
+The full **report** is in **Details ▸** under the figure. It says what each test asks, and per group: the verdict;
+the exceedance test's counts, odds ratio with its 95 % interval, ρ, p and q, with the anti-conservative Fisher
+line under it; Higher Criticism's mean score, permutation p and q, the number of relabelings and the lowest
+possible p; the same for the upper-tail shape test, or why it is not computable, with the uncalibrated
+Scholz–Stephens line (its p shown as *≥ 0.25* where scipy caps it); each treatment well's count and own p; and any
+warnings (a stratum with too few control nanowells to resolve the percentile, a pool too small for HC, a plate
+effect that could not be estimated). Its first line counts the nanowells kept and left out.
 
 **Review flagged crops.** A statistic can be fooled by an imaging artefact: a doublet counted as two cells,
-debris counted as a cell, a segmentation that split one cell into several. Every nanowell the tests flag is
-therefore shown for review by eye. **Review flagged crops** opens the crops pop-out on **Show: Flagged (N)**:
-each treatment-well nanowell above T, or at or below its well's HC threshold, as a row of crops over every
-timepoint, highest fold change first, 24 to a page. Click a row to select that nanowell on the page.
+debris counted as a cell, a segmentation that split one cell into several. Every nanowell the verdict is counted
+from is therefore shown for review by eye. **Review flagged crops** opens the crops pop-out on **Show: Flagged
+(N)**: each treatment-well nanowell past the control cutoff, as a row of crops over every timepoint, highest fold
+change first, 24 to a page. Click a row to select that nanowell on the page. Higher Criticism's own candidates
+are not flagged: it always has a peak, so on a plate with no responders every well still has candidates. The
+button is greyed out, with the reason on it, when nothing grew past the cutoff.
 
 If the flagged crops in treatment wells are artefacts, the result is too, however small its p. If the same kinds
 of artefact appear in control wells at the same rate, they are already in the null and the result stands — but
@@ -11224,22 +11266,24 @@ Statistics view; the view's report covers the analysis itself.
 | **vs** | Statistics view band | The control group every other group is tested against |
 | **Timepoint** / **Baseline** | Page band | The two counts whose ratio is the fold change |
 | **FC**, count fold change | Report, ECDF axis | Nt / N0: count at the Timepoint over count at the Baseline |
-| **N0 = 1, 2, 3, ≥4** | ECDF panel, report | Loading strata: nanowells compared only with nanowells of the same starting count |
-| **T**, threshold | ECDF panel (dashed) | The control's 99th percentile of FC within a stratum |
-| **Exceedance**, k / n | Exceedance panel, report | Nanowells above T, out of those kept |
+| **1 cell at start, 2 cells…** (N0 = 1, 2, 3, ≥4) | First panel's key, report | Loading strata: nanowells compared only with nanowells of the same starting count |
+| **Control cutoff** (T, threshold) | Headline, first panel (dashed), report | The control's 99th percentile of FC within a stratum (its top 1%) |
+| **Exceedance test**, k / n | Second panel's counts, report | Nanowells past the cutoff, out of those kept; the test that decides the verdict |
 | **OR** | Report, Test A | Odds ratio of exceeding T, treatment over control |
 | **ρ** (rho) | Report, Test A | Overdispersion: how much wells differ beyond nanowell noise |
-| **HC+**, **i\***, **p(i\*)** | HC panel, report | Higher Criticism; the rank where it peaks and the p threshold it picked |
-| **A²R** | Report, Test C | Upper-tail, one-sided Anderson–Darling statistic |
+| **Higher Criticism** (HC+), **i\***, **p(i\*)** | Third panel, report | Supporting test; its excess score, the rank where it peaks and the p threshold it picked |
+| **Upper-tail shape test** (A²R) | Supporting line, report | Upper-tail, one-sided Anderson–Darling statistic; *not computable* when the control pool has no value between its median and its top |
 | **Leave-one-out** | Report notes | A control well scored against the other control wells only |
-| **Per-well empirical p** | Exceedance panel labels, report | A treatment well's value placed among the control wells' values |
+| **Per-well empirical p** | Report | A treatment well's value placed among the control wells' values (≥ 0.25 with 3 control wells) |
 | **Permutation p**, **labelings** | Report, Tests B and C | Group p from shuffling whole wells between treatment and control |
-| **Smallest attainable p** | Report | The floor a design's permutations or control-well count allow |
+| **Lowest possible** p | Figure, report | The floor a design's permutations or control-well count allow |
 | **q** | Report | Benjamini–Hochberg corrected p across groups |
 | **anti-conservative** | Report, Fisher line | Ignores well-to-well variation; p too small; shown, never used |
 | **uncalibrated; i.i.d. assumption** | Report, Scholz–Stephens line | Textbook test over pooled nanowells; description only |
-| **replication insufficient** | Report | Fewer than 2 wells on a side; no group-level result |
-| **Review flagged crops**, **Show: Flagged (N)** | Statistics band, crops pop-out | The flagged nanowells as rows of crops over time, for review by eye |
+| **rare responders detected / not detected** | Headline | The verdict, decided by the exceedance test alone |
+| **too few wells to test the group** | Headline | Fewer than 2 wells on a side; no group-level result |
+| **⚠** | Under the panels | A caveat that limits the verdict |
+| **Review flagged crops**, **Show: Flagged (N)** | Statistics band, crops pop-out | The nanowells past the control cutoff as rows of crops over time, for review by eye |
 
 ---
 

@@ -131,7 +131,9 @@ def grouped_page(qtbot, tmp_path):
         {"id": "s1", "name": "ctrl", "wells": ["A01", "A02", "A03"], "hidden": False},
         {"id": "s2", "name": "drug", "wells": ["B01", "B02"], "hidden": False}]
     ctx.state.selection.active_solo_wells = set()
-    ctx.state.selection.selected_wells = {"A01", "A02", "A03", "B01", "B02"}
+    # In replicate mode the plate does not write selected_wells (a click toggles a group), so it holds none here, as
+    # in the reported session; with every set hidden the plot tabs draw selected_wells instead (roll-up review X4).
+    ctx.state.selection.selected_wells = set()
     return ctx
 
 

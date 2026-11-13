@@ -169,7 +169,10 @@ def _arrow_read(path: Path, names: list[str], text_dtypes: dict) -> pd.DataFrame
         import pyarrow.csv as pcsv
     except ImportError:
         return None
-    read_options = pcsv.ReadOptions(column_names=names, skip_rows=1)
+    from review.data.parquet_cache import ARROW_THREADS
+
+    # Parsed on this worker's thread, not Arrow's pool (``parquet_cache.ARROW_THREADS`` says why).
+    read_options = pcsv.ReadOptions(column_names=names, skip_rows=1, use_threads=ARROW_THREADS)
     convert_options = pcsv.ConvertOptions(
         column_types={c: pa.string() for c in text_dtypes},
         null_values=[""], strings_can_be_null=True, quoted_strings_can_be_null=True,
@@ -267,9 +270,11 @@ def _infinities_are_spelled(path: Path, names: list[str], column: str, is_inf) -
     import pyarrow.compute as pc
     import pyarrow.csv as pcsv
 
+    from review.data.parquet_cache import ARROW_THREADS
+
     raw = pcsv.read_csv(
         path,
-        read_options=pcsv.ReadOptions(column_names=names, skip_rows=1),
+        read_options=pcsv.ReadOptions(column_names=names, skip_rows=1, use_threads=ARROW_THREADS),
         convert_options=pcsv.ConvertOptions(include_columns=[column], column_types={column: pa.string()}),
     ).column(0)
     texts = pc.utf8_lower(pc.utf8_ltrim(pc.filter(raw, is_inf), characters="+-"))

@@ -94,13 +94,17 @@ def _arrow_site_table(path: str) -> pd.DataFrame | None:
         import pyarrow.csv as pcsv
     except ImportError:
         return None
+    from review.data.parquet_cache import ARROW_THREADS
+
     try:
         with open(path, newline="", encoding="utf-8-sig") as fh:
             header = next(csv.reader(fh), [])
         wanted = [c for c in header if c in SITE_COLUMNS]
         if len(set(wanted)) != len(wanted):
             return None          # a duplicated name: pandas' own renaming applies, so pandas reads it
-        table = pcsv.read_csv(path, convert_options=pcsv.ConvertOptions(
+        # Parsed and converted on this thread, not Arrow's pool (``parquet_cache.ARROW_THREADS`` says why).
+        table = pcsv.read_csv(path, read_options=pcsv.ReadOptions(use_threads=ARROW_THREADS),
+                              convert_options=pcsv.ConvertOptions(
             include_columns=wanted, strings_can_be_null=True, quoted_strings_can_be_null=True,
             column_types={c: pa.string() for c in _TEXT_COLUMNS if c in wanted}))
     except (OSError, UnicodeDecodeError, csv.Error, pa.ArrowException, ValueError) as exc:
@@ -115,7 +119,7 @@ def _arrow_site_table(path: str) -> pd.DataFrame | None:
                 or pa.types.is_null(kind)):
             return None          # a boolean or a date pandas would have read another way
     all_blank = {name for name in table.column_names if pa.types.is_null(table.schema.field(name).type)}
-    frame = table.to_pandas()
+    frame = table.to_pandas(use_threads=ARROW_THREADS)
     for name in frame.columns:
         if name in all_blank:
             frame[name] = frame[name].astype(float)      # pandas reads a column of blanks as NaN floats

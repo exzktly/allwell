@@ -1791,6 +1791,12 @@ review/
 │   │                 observations.nanowell_metrics,
 │   │                 segmentation.nanowell_overlay and
 │   │                 image_table.nanowell_frame services (§6.2l)
+│   │                 rare_data_compute.py, rare_null_compute.py,
+│   │                 rare_exceedance_compute.py, rare_hc_compute.py,
+│   │                 rare_ad_compute.py, rare_report_compute.py,
+│   │                 rare_validate_compute.py, rare_export_compute.py,
+│   │                 _rare_render.py ← the rare-responder analysis (a
+│   │                 Qt-free engine; not yet reachable from the page)
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py,
 │   │                 _report.py (PDF), _deck.py + _pptx.py + _drawingml.py
 │   │                 + _svg_shapes.py (the PowerPoint export),
@@ -13825,6 +13831,48 @@ left out), and draws above them a box and dots per sample with its mean (with it
 sample's cumulative curve on a Kolmogorov-Smirnov run, with a bracket and stars over each comparison whose quoted p
 is below 0.05 (`MAX_BRACKETS`). `tests/test_nanowell_statistics.py` checks every test against scipy computed
 independently and drives the view through the real page builder and controls.
+
+**The rare-responder analysis** (`rare_*_compute.py`, drawn by `_rare_render.py`) asks whether a treatment well
+holds a *handful* of nanowells that grew faster than control nanowells do, while the rest of the well looks like
+control — a sparse effect that mean- and rank-based tests (the Statistics view's t-tests, Mann-Whitney, KS) are not
+built to find. It is a Qt-free engine with a programmatic entry, `rare_report_compute.analyse(table, RareParams(...),
+validate=...)`; no control on the page reaches it yet. Its rule throughout is that the **well** is the experimental
+unit: every p-value it reports is calibrated against the spread between replicate control wells, never against
+nanowells treated as independent. The modules, in the order the analysis runs them:
+
+* `rare_data_compute` — the per-nanowell table (`REQUIRED`: plate, well, condition, nanowell id, `n0`, `nt`; optional
+  times, `qc_*` flag columns and `crop_path`; `from_site_metrics` builds it from `series_compute.site_metrics`),
+  `FC = nt / n0` and `rate = log2(FC) / Δt` (NaN, not zero, when undefined), exclusions with their reasons (`n0 = 0`,
+  no final count, every QC flag), the loading strata (`n0 = 1, 2, 3, ≥4` by default), the optional per-well robust
+  normalisation (off by default, because it removes a real shift of the bulk), and the per-well summary.
+  `RareParams` holds every choice and `as_log()` writes it out.
+* `rare_null_compute` — wells as units (`Well`: values by stratum), leave-one-well-out control pools, `empirical_p`
+  (`(1 + #{null ≥ x}) / (n + 1)`), and `permutation_test`, which relabels whole wells, keeps each plate's treatment
+  count, enumerates every labeling up to `max_permutations` and samples distinct ones above it with the fixed seed,
+  and reports the labelings used and the smallest attainable p.
+* `rare_exceedance_compute` (Test A, primary) — per-stratum percentile thresholds (leave-one-out for control wells,
+  or a fixed threshold chosen beforehand), each well's count above them, and a beta-binomial regression with an
+  optional plate term tested one-sided by the signed-root likelihood ratio, with the odds ratio, its profile
+  interval and ρ. With fewer than three control or two treatment wells it falls back to per-well empirical p-values
+  and a Fisher test labelled anti-conservative, on which no interpretation rests.
+* `rare_hc_compute` (Test B) — per-nanowell p-values against the stratum's pool, the HC+ statistic over
+  `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when
+  the pool cannot resolve the `1/n` scale (two or fewer control wells, or a pool under three times a well's size).
+* `rare_ad_compute` (Test C) — the one-sided, upper-tail-weighted Anderson–Darling `A²_R` per stratum, combined by
+  nanowell share; the Scholz–Stephens k-sample test is reported as uncalibrated description only.
+* `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
+  refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
+  shown), Benjamini–Hochberg across units for each test, `interpret` (enrichment when exceedance or HC is significant,
+  a shape difference when only AD is), the flagged nanowells with their crop paths, and the parameter log.
+* `rare_validate_compute` — the self-check: control-versus-control splits for the false-positive share, and
+  synthetic responders (2–4× the stratum's control 99th percentile, k = 1, 3, 5, 10, 20 per well) for power.
+* `rare_export_compute` — `report_lines` and `write`, which puts every table, the parameter log and the text report
+  in a folder.
+
+`tests/test_nanowell_rare_responders.py` checks each rule against hand-computed values, includes a size check
+over twenty null plates with a real well-to-well shift, and was run against seven mutations (leave-one-out off,
+the HC+ bound off, permutations across plates, a two-sided AD, the guardrail off, a two-sided likelihood-ratio
+test, AD counted as enrichment), each of which fails a test.
 
 **The other views.** `views_compute` holds what they draw as data. `lattice_xy` places an address on an ideal
 lattice of the well's measured pitch (`well_pitch`, the median of its timepoints' grid records) and kind

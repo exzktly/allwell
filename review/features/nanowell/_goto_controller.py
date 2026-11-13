@@ -1,4 +1,5 @@
-"""The band's **Nanowell** box: go to one nanowell, the same way on every view of the Nanowells page.
+"""The band's **Nanowell** box: go to one nanowell, the same way on every view of the Nanowells page that draws
+single nanowells (:data:`NO_GOTO_VIEWS` are the ones that do not, and do not show it).
 
 Typing an address (``q,r`` or a ring label, optionally led by a well: ``goto_compute``) and pressing Enter
 
@@ -19,8 +20,11 @@ from review.features.nanowell import goto_compute as gtc
 from review.features.nanowell import views_compute as vc
 from review.features.nanowell.series_compute import site_series
 
-#: The views with no nanowell of their own to go to: Array QC draws the plate's records, one row per well.
-NO_GOTO_VIEWS = frozenset({"qc"})
+#: The views whose figure draws no single nanowell, so the box is not shown on them: QC draws the plate's records,
+#: one row per well; Statistics draws a test's table and Position each ring's summary. On those the box could only
+#: have opened the site detail beside the figure, which is not a role on the view itself (asked for: hide it on
+#: Statistics and Position).
+NO_GOTO_VIEWS = frozenset({"qc", "statistics", "position"})
 
 
 def go_to_nanowell(ctx, text: str) -> None:

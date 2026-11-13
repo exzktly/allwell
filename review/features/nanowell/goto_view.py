@@ -63,8 +63,8 @@ def go_to(ctx, edit, text: str) -> None:
 
 
 def refresh_goto_controls(st, controls: GotoControls, view: str) -> None:
-    """Shown on every view that draws nanowells, not on QC, which draws one row per well; the box shows the address
-    last gone to, unless the reader is typing in it."""
+    """Shown on every view whose figure draws single nanowells, not on ``NO_GOTO_VIEWS`` (QC, Statistics, Position);
+    the box shows the address last gone to, unless the reader is typing in it."""
     goes = view not in gtc.NO_GOTO_VIEWS
     controls.group.setVisible(goes)
     zooms = view != "identity" or st.identity_mode in FOCUS_MODES

@@ -28,7 +28,9 @@ from review.features.nanowell.state import VIEWS  # noqa: E402
 from tests.test_nanowell_page import _loaded, page  # noqa: E402,F401 — the page fixture
 
 TARGET = ("B01", 2, 0)
-GOING_VIEWS = [v for v in VIEWS if v != "qc"]
+from review.features.nanowell._goto_controller import NO_GOTO_VIEWS  # noqa: E402
+
+GOING_VIEWS = [v for v in VIEWS if v not in NO_GOTO_VIEWS]
 
 
 def _type(ctx, text: str) -> None:
@@ -139,12 +141,14 @@ def test_a_well_not_drawn_or_an_address_not_in_the_table_is_said_and_selects_not
     assert st.selected_sites == [list(TARGET)]
 
 
-def test_the_qc_view_does_not_show_the_box(page, qtbot):
-    """QC draws one row per well, no nanowell to go to: the box has no role there and is not shown (asked for: "if
-    it has no role on that tab, it shouldn't be displayed"); back on a view of nanowells it is."""
+@pytest.mark.parametrize("view", ["qc", "statistics", "position"])
+def test_a_view_that_draws_no_single_nanowell_does_not_show_the_box(page, qtbot, view):
+    """QC draws one row per well, Statistics a test's table and Position each ring's summary: none draws a nanowell
+    to go to, so the box and Origin are not shown there (asked for: "if it has no role on that tab, it shouldn't be
+    displayed", and to hide it on Statistics and Position); back on a view of nanowells they are."""
     ctx = page
     _loaded(qtbot, ctx)
-    nwc.set_view(ctx, "qc")
+    nwc.set_view(ctx, view)
     edit = ctx.widgets.get("_nw_goto_edit")
     assert not edit.isVisibleTo(ctx.window) and not ctx.widgets.get("_nw_goto_origin_btn").isVisibleTo(ctx.window)
     nwc.set_view(ctx, "distribution")

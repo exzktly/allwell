@@ -6536,12 +6536,12 @@ plots over time and its crops (and **Pop out** shows it large), and then each vi
 - **Position**, **Statistics** and **Largest & smallest** summarise many nanowells, so it is shown in the site detail.
 
 A well that is not selected on the plate, an address the well's table does not hold, or text that is not an address
-is said on the status line, and nothing is selected. The box is not shown on the **QC** view, which draws one row
-per well rather than nanowells.
+is said on the status line, and nothing is selected. The box is not shown on the **QC**, **Statistics** and
+**Position** views, whose figures draw no single nanowell (one row per well, a test's table, each ring's summary).
 
 **Each view shows only the controls it uses.** A control with no role on a view is not on its band: the **QC** and
 **Identity** views draw no nanowell's value, so Metric, Channel, Baseline, Rim focus and Subset (with its editor, if
-open) are not shown there, and QC shows neither the Nanowell box nor Group by. On a view that does use a control but
+open) are not shown there; QC shows no Group by; and QC, Statistics and Position show no Nanowell box. On a view that does use a control but
 the current settings leave it unused — the Metric on an Array whose layers draw no value — it stays in place, greyed,
 and its tooltip says why.
 

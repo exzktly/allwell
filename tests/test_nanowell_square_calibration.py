@@ -208,8 +208,44 @@ def test_where_the_plate_stands_is_read_as_review_reads_it(tmp_path, monkeypatch
         ("ok (fiducial)", "not_checked", "no current identity result"): 1}
     lines = cal.standing_lines(out)
     assert lines[0] == "Where the 6 timepoint(s) stand (grid status, identity verdict, why):"
+    assert "Partial" not in "\n".join(lines)                    # none here, so no partial table
     assert "      1  ok (fiducial) · inconclusive · too_few" in lines
     assert "      1  unaddressed" in lines
+
+
+def test_partial_and_centre_inconclusive_timepoints_are_measured(tmp_path, monkeypatch):
+    """What decides whether a partial timepoint or one inconclusive on the array's outline needs a look: how much the
+    first leaves out, and how far the second's outline lands. Shares are put either side of each band's edge."""
+    ok = {"status": "ok", "origin_method": "fiducial"}
+    blocks = {tp: dict(ok) for tp in ("t1", "t2", "t3", "t4", "t5", "t6")}
+    out, _ = _dataset(tmp_path, {"A01": blocks})
+    left = lambda n, why="wrong_name": [[0, i, why] for i in range(n)]               # noqa: E731
+    sidecar = {"timepoints": {
+        "t1": {"verdict": "partial", "compared": 200, "excluded": left(2)},                       # 1%: first band
+        "t2": {"verdict": "partial", "compared": 200, "excluded": left(3)},                       # 1.5%: second
+        "t3": {"verdict": "partial", "compared": 100, "excluded": left(30, "misregistered_tile")},  # 30%: fourth
+        "t4": {"verdict": "inconclusive", "reason": CENTRE_REASON, "centre_agreement_pitches": 0.8},
+        "t5": {"verdict": "inconclusive", "reason": CENTRE_REASON, "centre_agreement_pitches": 1.3},
+        "t6": {"verdict": "inconclusive", "reason": "only 3 address(es) in common with the reference, 6 needed"}}}
+    monkeypatch.setattr("pipeline.nanowell_identity.read_sidecar", lambda out_dir, well, **k: sidecar)
+    found = cal.survey(out)
+    assert found.centre == [0.8, 1.3]                             # t6 is inconclusive for another reason
+    lines = cal.standing_lines(out)
+    text = "\n".join(lines)
+    assert ("Partial timepoints (3): nanowells left out per timepoint, min / median / max 2 / 3 / 30; as a share of "
+            "those compared:") in text
+    assert [ln for ln in lines if ln.endswith(("up to 1%", "up to 5%", "up to 20%", "up to half"))] == [
+        "      1  up to 1%", "      1  over 1%, up to 5%", "      0  over 5%, up to 20%", "      1  over 20%, up to half"]
+    assert "  nanowells left out, by why: misregistered_tile 30, wrong_name 5" in lines
+    assert "Inconclusive on the array's fitted centre (2): distance in pitches, min / median / max 0.80 / 1.30 / 1.30:" \
+        in text
+    assert [ln for ln in lines if ln.endswith(("0.75 to 1.0", "1.0 to 1.25", "1.25 to 1.5"))] == [
+        "      1  0.75 to 1.0", "      0  1.0 to 1.25", "      1  1.25 to 1.5"]
+
+
+CENTRE_REASON = ("every address lands on itself, but the array's fitted centre lands 0.80 pitch from this timepoint's "
+                 "once registered on the square: the square may have moved against the array (a decoy), or a fitted "
+                 "rim is loose")
 
 
 def test_the_packaged_app_reaches_the_command():

@@ -68,6 +68,14 @@ def class_of(state: str) -> ProblemClass | None:
     return CLASSES.get(state)
 
 
+def armed_for(item) -> bool:
+    """Whether *item* opens with *Set anchor* on: its class is armed and an anchor can change it
+    (``qc_compute.anchor_can_fix``). A contradicted or inconclusive timepoint whose doubt is not its square opens
+    unarmed, and its card says why: a click there would only anchor the square the run already used."""
+    cls = class_of(item.state)
+    return bool(cls is not None and cls.armed and qc.anchor_can_fix(item))
+
+
 def choices(matrix) -> list[tuple[str, int]]:
     """``(state, count)`` for every pickable class, worst first, with how many timepoints of it are on the plate."""
     counts = matrix.counts if matrix is not None else {}
@@ -206,6 +214,13 @@ def guide_for(item, hint: Hint, *, index: int, total: int, armed: bool, left_out
         else:
             problem = (f"The identity check could not tell whether its addresses name the same nanowells as at the "
                        f"reference timepoint{f': {why}' if why else ''}. It is still used, unconfirmed.")
+        if not qc.anchor_can_fix(item):
+            cause = qc.NOT_THE_SQUARE_WORDS.get(qc.why_code(item.reason), "something other than the square")
+            action = (f"Nothing to click: the doubt here is {cause}, not the central square, so an anchor — which "
+                      "only says where the square is — cannot change it. Look, then press Skip (→).")
+            then = ("A re-run with an anchor would address it from the same square and the check would find the same "
+                    f"thing. {after}.")
+            return Guide(kicker, title, problem, action, then)
         action = ("Click the middle of the true central square. " + _where(
             hint, "The view opens on the middle of the montage; press Fit to see the whole well if the square is not "
                   "in view.") + " If the ring is not on the square, click the square itself; if you cannot find it, "

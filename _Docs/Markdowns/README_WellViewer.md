@@ -7050,7 +7050,11 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   (until you choose, the worst class on the plate); **Resolve** — the highlighted button, which says what it will
   walk (*Resolve: 330 timepoints*) — steps through that class from its first timepoint; the **One per well** box
   narrows the walk to each well's first (*Resolve: 61 wells*); and **Re-run anchored wells…** puts the anchors to
-  use. While there is anything to walk, the figure says to press Resolve or click a cell.
+  use. While there is anything to walk, the figure says to press Resolve or click a cell. A contradicted or
+  inconclusive timepoint whose doubt is not its central square — most often an inconclusive one whose addresses all
+  land on themselves while the array's fitted outline disagrees — is left out of the walk, because an anchor only
+  says where the square is and cannot change it; the figure says how many were left out and why. Clicking such a
+  cell still opens it, with *Set anchor* off and a card saying what the doubt is.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -7519,7 +7523,9 @@ the square. It then prints how many right and wrong guesses today's thresholds a
 and the strictest thresholds that accept the most right guesses and no wrong one, with how many of today's refused
 timepoints they would accept. Last it says where every timepoint stands: how many the run left unaddressed (or
 not located), and for the addressed ones the identity check's verdict and, when it is not good, a short reason code —
-the same reading the QC view's matrix makes, so it shows which kind of problem the timepoints needing a look are. With few wrong guesses to test against it says so: check a sample of the newly
+the same reading the QC view's matrix makes, so it shows which kind of problem the timepoints needing a look are. Under
+that, for the partial timepoints, how many nanowells each leaves out and why, and for those inconclusive on the
+array's outline, how far the outline's centre lands from the square's (in nanowell spacings). With few wrong guesses to test against it says so: check a sample of the newly
 accepted timepoints before relying on the suggestion. It changes nothing in the dataset. Add `--csv` for one row per
 timepoint (scores and labels only, no images or paths) to share.
 

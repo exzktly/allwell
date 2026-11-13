@@ -283,15 +283,29 @@ def summary_lines(examples, counts: dict, current: tuple[float, float]) -> list[
 STANDING_ROWS = 15
 
 
-def standing(out_dir) -> dict[tuple[str, str, str], int]:
-    """``(grid status and origin, identity verdict, why) -> timepoints``, for every timepoint of every grid record:
-    where the plate stands, as the QC view reads it. An addressed timepoint takes its verdict from a current identity
-    sidecar the way Review does (``nanowell_identity.verdict_in``, the stage flag overruling the image) and *not
-    checked* without one; ``why`` is the identity summary's short code for a verdict that is not good
-    (``nanowell_identity._WHY``). A timepoint the run did not address has no verdict: its status says it all."""
-    from pipeline.nanowell_identity import _WHY, GOOD, NOT_CHECKED, read_sidecar, verdict_in
+@dataclass
+class Survey:
+    """What :func:`survey` read: the standing counts, and the numbers behind the two verdicts most of a plate's
+    timepoints needing a look can turn out to be."""
 
-    out: dict[tuple[str, str, str], int] = {}
+    counts: dict                       # (grid status and origin, verdict, why) -> timepoints
+    #: Per *partial* timepoint: (nanowells left out, nanowells compared, {cause: nanowells}).
+    partial: list
+    #: Per timepoint *inconclusive* on the array's fitted centre alone: how far it lands from this timepoint's, in
+    #: pitches (``centre_agreement_pitches``).
+    centre: list
+
+
+def survey(out_dir) -> Survey:
+    """Every timepoint of every grid record: where it stands, as the QC view reads it, and for the partial and
+    centre-inconclusive ones the numbers that decided them. An addressed timepoint takes its verdict from a current
+    identity sidecar the way Review does (``nanowell_identity.verdict_in``, the stage flag overruling the image) and
+    *not checked* without one; ``why`` is the identity summary's short code for a verdict that is not good
+    (``nanowell_identity._WHY``). A timepoint the run did not address has no verdict: its status says it all."""
+    from pipeline.nanowell_identity import _WHY, GOOD, INCONCLUSIVE, NOT_CHECKED, PARTIAL, read_sidecar, verdict_in
+
+    counts: dict[tuple[str, str, str], int] = {}
+    partial, centre = [], []
     for well, blocks in read_grids(out_dir).items():
         payload = None
         for tp, block in blocks.items():
@@ -305,20 +319,93 @@ def standing(out_dir) -> dict[tuple[str, str, str], int]:
                 why = "" if verdict in GOOD else next((code for phrase, code in _WHY if phrase in reason),
                                                       "no current identity result" if not payload else "other")
                 key = (f"ok ({block.get('origin_method') or '?'})", verdict, why)
-            out[key] = out.get(key, 0) + 1
-    return out
+                entry = (payload.get("timepoints") or {}).get(tp) if payload else None
+                entry = entry if isinstance(entry, dict) else {}
+                if verdict == PARTIAL:
+                    excluded = [row for row in entry.get("excluded") or () if isinstance(row, (list, tuple))]
+                    causes: dict[str, int] = {}
+                    for row in excluded:
+                        cause = str(row[2]) if len(row) > 2 else "?"
+                        causes[cause] = causes.get(cause, 0) + 1
+                    partial.append((len(excluded), _number(entry.get("compared")), causes))
+                elif verdict == INCONCLUSIVE and why == "centre":
+                    distance = _number(entry.get("centre_agreement_pitches"))
+                    if distance is not None:
+                        centre.append(distance)
+            counts[key] = counts.get(key, 0) + 1
+    return Survey(counts, partial, centre)
 
 
-def standing_lines(out_dir) -> list[str]:
-    """:func:`standing` as a short table, largest first; the rows past :data:`STANDING_ROWS` summed into one."""
-    rows = sorted(standing(out_dir).items(), key=lambda kv: (-kv[1], kv[0]))
-    total = sum(n for _key, n in rows)
-    lines = [f"Where the {total} timepoint(s) stand (grid status, identity verdict, why):"]
+def standing(out_dir) -> dict[tuple[str, str, str], int]:
+    """:func:`survey`'s counts alone."""
+    return survey(out_dir).counts
+
+
+def _table(counts: dict) -> list[str]:
+    rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    lines = [f"Where the {sum(counts.values())} timepoint(s) stand (grid status, identity verdict, why):"]
     for (status, verdict, why), n in rows[:STANDING_ROWS]:
         lines.append(f"  {n:>5}  {' · '.join(part for part in (status, verdict, why) if part)}")
     rest = rows[STANDING_ROWS:]
     if rest:
         lines.append(f"  {sum(n for _key, n in rest):>5}  in {len(rest)} smaller group(s)")
+    return lines
+
+
+#: The bands :func:`partial_lines` counts partial timepoints into, by the share of their compared nanowells left out.
+PARTIAL_BANDS = ((0.01, "up to 1%"), (0.05, "over 1%, up to 5%"), (0.20, "over 5%, up to 20%"),
+                 (0.5, "over 20%, up to half"))
+#: The bands :func:`centre_lines` counts centre-inconclusive timepoints into, in pitches. The identity check calls
+#: them inconclusive beyond 0.75 (``CENTRE_AGREEMENT_PITCHES``) and contradicted from 1.5.
+CENTRE_BANDS = ((1.0, "0.75 to 1.0"), (1.25, "1.0 to 1.25"), (1.5, "1.25 to 1.5"))
+
+
+def partial_lines(partial: list) -> list[str]:
+    """How much each *partial* timepoint leaves out, banded by share of what it compared, and why."""
+    if not partial:
+        return []
+    shares = [left / compared for left, compared, _c in partial if compared]
+    lefts = sorted(left for left, _n, _c in partial)
+    lines = [f"Partial timepoints ({len(partial)}): nanowells left out per timepoint, min / median / max "
+             f"{lefts[0]} / {lefts[len(lefts) // 2]} / {lefts[-1]}; as a share of those compared:"]
+    lower = 0.0
+    for upper, words in PARTIAL_BANDS:
+        n = sum(1 for share in shares if lower < share <= upper or (lower == 0.0 and share == 0.0))
+        lines.append(f"  {n:>5}  {words}")
+        lower = upper
+    causes: dict[str, int] = {}
+    for _left, _n, by in partial:
+        for cause, k in by.items():
+            causes[cause] = causes.get(cause, 0) + k
+    if causes:
+        lines.append("  nanowells left out, by why: " + ", ".join(f"{cause} {k}" for cause, k in
+                                                              sorted(causes.items(), key=lambda kv: -kv[1])))
+    return lines
+
+
+def centre_lines(centre: list) -> list[str]:
+    """How far the array's fitted centre landed from the square's registration, for each centre-inconclusive
+    timepoint, banded in pitches."""
+    if not centre:
+        return []
+    values = sorted(centre)
+    lines = [f"Inconclusive on the array's fitted centre ({len(values)}): distance in pitches, min / median / max "
+             f"{values[0]:.2f} / {values[len(values) // 2]:.2f} / {values[-1]:.2f}:"]
+    lower = 0.0
+    for upper, words in CENTRE_BANDS:
+        lines.append(f"  {sum(1 for v in values if lower < v <= upper):>5}  {words}")
+        lower = upper
+    return lines
+
+
+def standing_lines(out_dir) -> list[str]:
+    """:func:`survey` as short tables: where every timepoint stands, largest first (the rows past
+    :data:`STANDING_ROWS` summed into one), then the partial and centre-inconclusive numbers."""
+    found = survey(out_dir)
+    lines = _table(found.counts)
+    for extra in (partial_lines(found.partial), centre_lines(found.centre)):
+        if extra:
+            lines += [""] + extra
     return lines
 
 

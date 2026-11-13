@@ -11330,7 +11330,10 @@ guesses that pair would accept. It changes nothing; it says so when the current 
 warns when fewer than five wrong guesses back the suggestion. It ends with `standing_lines`: every timepoint
 counted by grid status and origin and, when addressed, by the verdict Review would read (`verdict_in` on a current
 sidecar, *not checked* without one) and `_WHY`'s code, so the plate's timepoints needing a look are broken down by
-cause. **A refused square says which test it failed.** `describe_fiducial` turns the
+cause; then, for the partial timepoints, how many nanowells each leaves out (banded by share of those compared, up
+to 1 %, 5 %, 20 % and half) and why, and for those inconclusive on the array's fitted centre, how far it lands
+(0.75–1.0, 1.0–1.25 and 1.25–1.5 pitches): the numbers a change to what counts as needing a look, or to
+`CENTRE_AGREEMENT_PITCHES`, would be decided from. **A refused square says which test it failed.** `describe_fiducial` turns the
 search into a block — sites scored, the best and runner-up squareness, the floor, where the
 square was, and a sentence naming the failure when there is no candidate (no site could be
 scored; only one could; the most square outline read under the floor) — and `resolve_origin`
@@ -14232,7 +14235,18 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   armed, because an anchor set by hand comes first in `nanowell_lattice.resolve_origin` and so re-addresses even a
   timepoint whose square the run did find; partial on Identity, since its left-out nanowells already stay out of
   every join and there is nothing to set, only which nanowells to see; not located and anchor waiting on Array,
-  unarmed (no anchor changes the first; the second already has one and needs a re-run). `build_queue(ctx, states)`
+  unarmed (no anchor changes the first; the second already has one and needs a re-run). A contradicted or
+  inconclusive timepoint whose doubt is not its square is neither walked nor armed: `qc_compute.anchor_can_fix` reads
+  the identity reason's short code (`why_code`, `nanowell_identity._WHY`) against `NOT_THE_SQUARE` — inconclusive on
+  the array's fitted centre, the tile layout, too few addresses in common, a missing montage, the reference square at
+  its montage's edge, a mirror or lattice kind; contradicted on a mirror, lattice kind or tile — because an anchor
+  says only where the square is, the run re-addresses such a timepoint from the same square, and the check finds the
+  same thing (a reported plate had 65 timepoints inconclusive on the centre alone, every address landing on itself).
+  A reason that names no code, and `no_reference_square` (whose phrase also matches "the run did not accept a central
+  square"), stay walked. `queue_items` leaves such cells out (counted by `set_aside`, said by `set_aside_text` on the
+  figure, the greyed *Resolve*'s tip and an empty walk's message) except the cell a click on the matrix opens
+  (`keep`), which `resolve_compute.armed_for` opens unarmed with a card saying the doubt and that an anchor cannot
+  change it. `build_queue(ctx, states, keep=)`
   takes the class's timepoints from the QC view's matrix (`qc_compute.queue_items`), so the walk and the matrix
   cannot disagree, and finds the anchors file from the dataset folder (`_qc_controller.anchors_path`) so a click can
   start a walk before any well's tables are read; the plate need not be selected. Its *not addressed* cells come from

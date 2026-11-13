@@ -298,15 +298,49 @@ def queue_tip(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
     if queue_items(matrix, states):
         return ""
     tip = f"No timepoint is “{walk_words(states)}”."
+    aside = set_aside_text(matrix, states)
+    if aside:
+        tip = f"No “{walk_words(states)}” timepoint can be fixed with an anchor. {aside}"
     waiting = matrix.counts.get(ANCHOR_WAITING, 0)
     if waiting:
         tip += f" {waiting} have an anchor waiting for a re-run: Re-run anchored wells… addresses them."
     return tip
 
 
-def queue_items(matrix: QcMatrix | None, states) -> list:
+#: The identity check's reason codes (``pipeline.nanowell_identity._WHY``) for a *contradicted* or *inconclusive*
+#: timepoint whose doubt is not about its central square, so an anchor — which only says where the square is —
+#: cannot change the verdict: the run re-addresses it from the same square and the check finds the same thing. On a
+#: real plate 65 of 336 timepoints needing a look were *inconclusive* on the array's fitted centre alone, with every
+#: address landing on itself, and walking them for anchors changed nothing. Any other code, and a reason that names
+#: none (``other``), is the square's business, or may be, and is walked as it always was — ``no_reference_square``
+#: among them, since its phrase ("central square") is also what "the run did not accept a central square" reads as.
+NOT_THE_SQUARE = {
+    CONTRADICTED: frozenset({"mirror", "lattice_kind", "tile", "tile_grid"}),
+    INCONCLUSIVE: frozenset({"centre", "tile", "tile_grid", "too_few", "no_montage", "square_at_montage_edge",
+                             "mirror", "lattice_kind"}),
+}
+
+
+def why_code(reason: str) -> str:
+    """The identity summary's short code for *reason* (``pipeline.nanowell_identity._WHY``), ``"other"`` when it
+    names none."""
+    from pipeline.nanowell_identity import _WHY
+
+    return next((code for phrase, code in _WHY if phrase in (reason or "")), "other")
+
+
+def anchor_can_fix(cell) -> bool:
+    """Whether an anchor can change *cell*'s state (a ``QcCell`` or ``QueueItem``): always for a state an anchor is
+    the remedy of, except a contradicted or inconclusive one whose reason is not about its square
+    (:data:`NOT_THE_SQUARE`)."""
+    return why_code(getattr(cell, "why", None) or getattr(cell, "reason", "")) not in NOT_THE_SQUARE.get(
+        cell.state, frozenset())
+
+
+def queue_items(matrix: QcMatrix | None, states, *, keep=None) -> list:
     """The ``anchor_queue_compute.QueueItem`` of every cell in *states*, plate order then time order: what *Resolve*
-    walks."""
+    walks. A contradicted or inconclusive cell an anchor cannot change (:func:`anchor_can_fix`) is left out — it is
+    counted by :func:`set_aside` — unless it is *keep* (``(well, timepoint)``), the cell a click on the matrix opens."""
     if matrix is None:
         return []
     wanted = set(states)
@@ -314,9 +348,46 @@ def queue_items(matrix: QcMatrix | None, states) -> list:
     for well in matrix.wells:
         for tp in matrix.timepoints:
             cell = matrix.cells.get((well, tp))
-            if cell is not None and cell.state in wanted:
-                out.append(aqc.QueueItem(well, tp, cell.why, cell.refused, cell.state))
+            if cell is None or cell.state not in wanted:
+                continue
+            if not anchor_can_fix(cell) and (well, tp) != keep:
+                continue
+            out.append(aqc.QueueItem(well, tp, cell.why, cell.refused, cell.state))
     return out
+
+
+def set_aside(matrix: QcMatrix | None, states) -> dict[str, int]:
+    """``why code -> timepoints`` in *states* that :func:`queue_items` leaves out because an anchor cannot change
+    them."""
+    out: dict[str, int] = {}
+    if matrix is None:
+        return out
+    for cell in matrix.cells.values():
+        if cell.state in set(states) and not anchor_can_fix(cell):
+            code = why_code(cell.why)
+            out[code] = out.get(code, 0) + 1
+    return out
+
+
+#: How each reason code of :data:`NOT_THE_SQUARE` reads in a sentence.
+NOT_THE_SQUARE_WORDS = {"centre": "the array's fitted outline", "tile": "a tile's placement",
+                        "tile_grid": "the tile grid", "too_few": "too few addresses in common with the reference",
+                        "no_montage": "a missing montage",
+                        "square_at_montage_edge": "the reference's square at its montage's edge",
+                        "mirror": "a mirrored lattice", "lattice_kind": "the lattice kind"}
+
+
+def set_aside_text(matrix: QcMatrix | None, states) -> str:
+    """The sentence saying what :func:`set_aside` left out of a walk of *states*, or ``""``."""
+    counts = set_aside(matrix, states)
+    if not counts:
+        return ""
+    n = sum(counts.values())
+    causes = ", ".join(f"{NOT_THE_SQUARE_WORDS.get(code, code)} ({k})" for code, k in
+                       sorted(counts.items(), key=lambda kv: -kv[1]))
+    return (f"{n:,} timepoint{'s' if n != 1 else ''} of this class {'are' if n != 1 else 'is'} not walked: the doubt is "
+            f"{causes}, not the central square, so an anchor cannot change {'them' if n != 1 else 'it'}. Click a "
+            "cell to look at one.")
 
 
 def waiting_wells(matrix: QcMatrix | None) -> set:
@@ -345,10 +416,12 @@ def action_line(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
     """What to do about the timepoints needing a look, said on the figure (a tooltip is not seen over VNC on a
     phone); ``""`` when *Resolve* has nothing to walk."""
     n = len(queue_items(matrix, states))
+    aside = set_aside_text(matrix, states)
     if not n:
-        return ""
+        return aside
     return (f"Press Resolve to step through the {n:,} {walk_words(states)} timepoint{'s' if n != 1 else ''}, each "
-            "opened where it is fixed with what to do, or click any cell to start at it. Problem chooses the class.")
+            "opened where it is fixed with what to do, or click any cell to start at it. Problem chooses the class."
+            + (f" {aside}" if aside else ""))
 
 
 def walk_words(states) -> str:

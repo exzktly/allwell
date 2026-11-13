@@ -202,7 +202,7 @@ def test_clicking_a_nanowell_on_the_map_selects_it_and_cuts_its_crop_from_the_mo
     assert len(images) == 2
     # What the crops are is stated on the figure, not only on the state.
     caption = [t.get_text() for t in detail.texts if t.get_gid() == "nw-crop-caption"]
-    assert caption == ["Crops (phase image): A01 · q 1, r 0, from the montage, at its lower resolution; one brightness scale; "
+    assert caption == ["Crops (phase image): A01 · nanowell 1,0, from the montage, at its lower resolution; one brightness scale; "
                        "from the montage: the input archive is not beside this dataset"]
     # Nothing kept once delivered. The crops arriving is not every read finishing — the redraw they cause can
     # start others — so the reads are waited out first, and then not one bridge may be left behind.

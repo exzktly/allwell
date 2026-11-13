@@ -485,8 +485,14 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
     assert not set(treatment_lines().values()) & {c.upper() for c in WELL_COLORS_TUPLE}
     repaint_theme_pairs(ecdf, "publication")
     assert treatment_lines() == {s: CPub.occupancy_ramp[i].upper() for i, s in enumerate(strata)}
-    legend = [to_hex(ln.get_color()).upper() for ln in ecdf.get_legend().get_lines()]
-    assert legend == [c.upper() for c in CPub.occupancy_ramp]
+    # The strata are labelled on the panel, each with a dot in its shade, which repaints with the lines.
+    dots = {c.get_gid().split(":", 1)[1]: to_hex(c.get_facecolors()[0]).upper() for c in ecdf.collections
+            if (c.get_gid() or "").startswith("rare-ecdf-dot:")}
+    assert dots == {s: CPub.occupancy_ramp[i].upper() for i, s in enumerate(strata)}
+    labels = {t.get_gid().split(":", 1)[1]: t.get_text() for t in ecdf.texts
+              if (t.get_gid() or "").startswith("rare-ecdf-label:")}
+    assert labels == {s: rd._stratum_name(s) for s in strata} and ecdf.get_legend() is None
+    assert [t.get_text() for t in ecdf.texts if t.get_gid() == "rare-cutoff-label"] == ["control cutoff"]
     threshold = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-threshold:{strata[0]}")
     assert to_hex(threshold.get_color()).upper() == CPub.occupancy_ramp[0].upper()
 

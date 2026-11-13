@@ -144,6 +144,9 @@ class NanowellState:
     timepoint: str = ""                     # the Array view's timepoint; "" = the earliest
     selected_sites: list = field(default_factory=list)  # [[well, q, r]] or [] — one nanowell; not a plate selection
     control: str = ""                       # the group compared against on *Along x: Wells* ("" = none)
+    #: The control the page chose by its name (``_rare_controller.guess_control``), "" once the user chooses one. Not
+    #: saved: a guess is said on the figure each time it is made, never carried into a later session as a choice.
+    control_guessed: str = ""
     cohort: bool = False                    # only nanowells with a value at every timepoint (tracker I8)
     #: The moving average's window in timepoints on Distribution and Trajectories; 0 is off (``moving_compute``).
     moving: int = 0

@@ -97,18 +97,18 @@ def _fig_texts(ctx, gid):
 
 def test_the_montage_shows_only_the_timepoints_chosen_and_always_the_ranked_one(page, qtbot):  # noqa: F811
     _choose_extremes(qtbot, page)
-    assert _fig_texts(page, "nw-extremes-tp")[:3] == ["t_c", "t_a", "t_d · ranked"]
+    assert _fig_texts(page, "nw-extremes-tp")[:3] == ["0 h", "5 h", "10 h · ranked"]
     menu = page.widgets.get("_nw_extremes_tps_menu")
     page.widgets.get("_nw_extremes_tps_rebuild")()                             # what opening the menu does
     actions = {a.data(): a for a in menu.actions() if a.isCheckable()}
     assert all(a.isChecked() for a in actions.values()) and not actions["t_d"].isEnabled()
     actions["t_a"].setChecked(False)                                           # as a click on it does
     assert page.state.feature_slice("nanowell").extremes_tps == ["t_c", "t_d"]
-    assert _fig_texts(page, "nw-extremes-tp")[:2] == ["t_c", "t_d · ranked"]
+    assert _fig_texts(page, "nw-extremes-tp")[:2] == ["0 h", "10 h · ranked"]
     assert page.widgets.get("_nw_extremes_tps_btn").text() == "Timepoints: 2 of 3"
     assert any("Timepoints not shown: t_a." in t for t in _fig_texts(page, "nw-extremes-caption"))
     nwc.set_extremes_timepoints(page, [])
-    assert _fig_texts(page, "nw-extremes-tp")[:3] == ["t_c", "t_a", "t_d · ranked"]
+    assert _fig_texts(page, "nw-extremes-tp")[:3] == ["0 h", "5 h", "10 h · ranked"]
     assert page.widgets.get("_nw_extremes_tps_btn").text() == "Timepoints: all"
 
 
@@ -117,7 +117,7 @@ def test_each_crop_is_captioned_with_its_nanowell_s_metrics_at_that_timepoint(pa
     st = page.state.feature_slice("nanowell")
     nwc.set_extremes_timepoints(page, ["t_d"])                                # one column: crops large enough
     first = next(t for t in page.widgets.get("_nw_fig").texts if t.get_gid() == "nw-extremes-row")
-    assert first.get_text().startswith("#1  q 0, r 0")
+    assert first.get_text().startswith("#1  nanowell 0,0")
     row = site_series(st.metrics, "A01", 0, 0).set_index("timepoint").loc["t_d"].to_dict()
     expected = crop_metric_lines({**row, "timepoint": "t_d"}, nwc.match_channel("gfp", st.data.channels))
     fig = page.widgets.get("_nw_fig")

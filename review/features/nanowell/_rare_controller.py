@@ -43,7 +43,7 @@ FLAGGED_PAGE = 24
 RESULTS_KEPT = 4
 COMPUTING = "Testing"                                   # the start of every computing message (computing_text)
 NO_CONTROL = ("Rare responders test each group of wells against a control group: choose the control group under "
-              "vs.")
+              "Control, above.")
 NOT_APPLIED = "The moving average and the Fixed cohort do not apply to the rare-responder tests."
 UNIT_IGNORED = ("The rare-responder tests always compare groups with wells as the units; Compare does not apply.")
 VALUE_NOTE = "Values: count fold change Nt/N0 at the page's Timepoint over its Baseline, whatever the Metric."
@@ -92,8 +92,8 @@ def why_not(groups: dict, control: str, metrics: pd.DataFrame, timepoint: str, h
         if control in hidden:
             return (f"The control group {control} is hidden on the plate, so there is nothing to test against. "
                     + _nwc().hidden_sentence({control: hidden[control]}))
-        return (f"{control} is not one of the groups drawn: choose a group under vs (the Rare responders test compares "
-                "groups, not single wells' nanowells).")
+        return (f"{control} is not one of the groups drawn: choose a group under Control (the Rare responders test "
+                "compares groups, not single wells' nanowells).")
     if not any(name != control for name in groups):
         if hidden:
             return "Only the control group is drawn. " + _nwc().hidden_sentence(hidden)
@@ -106,7 +106,7 @@ def why_not(groups: dict, control: str, metrics: pd.DataFrame, timepoint: str, h
 
 def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: str = "", store: dict | None,
             request, moving_on: bool = False, cohort: bool = False, unit_set: bool = False,
-            hidden: dict | None = None) -> RareResult | None:
+            hidden: dict | None = None, guessed: str = "") -> RareResult | None:
     """Draw the Rare responders test into *fig*: its result when *store* holds it, else a sentence while *request*
     (``request(key, job)``) has it computed, or one saying why it cannot run. Returns the result drawn, or ``None``."""
     timepoint = drawn_timepoint(metrics, groups, timepoint)
@@ -133,7 +133,8 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     notes = [f"{VALUE_NOTE} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.", *([NOT_APPLIED] if moving_on or cohort else []),
              *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
-    render_rare_page(fig, held, note=DETAILS_POINTER)
+    render_rare_page(fig, held, note=DETAILS_POINTER,
+                     lead=[guessed_note(control)] if guessed and guessed == control else [])
     return held
 
 
@@ -143,6 +144,26 @@ def timepoint_hours(metrics: pd.DataFrame, timepoint: str) -> float:
         return float("nan")
     hours = pd.to_numeric(metrics.loc[metrics["timepoint"] == timepoint, "time_h"], errors="coerce").dropna()
     return float(hours.iloc[0]) if len(hours) else float("nan")
+
+
+#: Words that name a control group. A group whose name has one of them as a word is taken as the control when the
+#: Rare responders test is chosen with none (:func:`guess_control`).
+CONTROL_WORDS = frozenset({"control", "controls", "ctrl", "ctl", "dmso", "vehicle", "veh", "untreated", "mock",
+                           "negative", "neg"})
+
+
+def guess_control(names: list) -> str:
+    """The one group among *names* whose name says it is a control (:data:`CONTROL_WORDS`, any case, as a word:
+    ``DMSO 0.1%``, ``Ctrl-A``), or ``""`` when none or several do — a guess between two is no guess."""
+    import re
+
+    hits = [n for n in names if CONTROL_WORDS & set(re.split(r"[^a-z0-9]+", str(n).lower()))]
+    return hits[0] if len(hits) == 1 else ""
+
+
+def guessed_note(control: str) -> str:
+    """The figure's sentence when the control was chosen by its name."""
+    return f"⚠ {control} was taken as the control because of its name: choose another under Control if it is not."
 
 
 def computing_text(groups: dict, control: str) -> str:
@@ -170,7 +191,7 @@ def hook(ctx, st) -> dict:
     def request(key, job) -> None:
         _nwc()._fetch(ctx, "rare_results", key, job,
                       failed=lambda message: f"The rare-responder tests could not be run: {message}")
-    return {"store": st.rare_results, "request": request}
+    return {"store": st.rare_results, "request": request, "guessed": st.control_guessed}
 
 
 def flagged_rows(result: RareResult) -> list[dict]:
@@ -275,4 +296,4 @@ def draw_flagged_popout(ctx, st, fig) -> None:
         wnc._page_crops(st, sites, columns), label="count fold change", empty=head, head=head,
         title="Rare responders · flagged nanowells", cells=st.crop_cells, numbers=st.crop_metrics,
         image_channel=nwc.page_image_channel(st), display_range=nwc.display_range(ctx), timepoints=columns,
-        with_well=True)
+        with_well=True, tp_names=nwc.timepoint_names(st))

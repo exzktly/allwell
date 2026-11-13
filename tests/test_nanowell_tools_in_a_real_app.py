@@ -229,7 +229,7 @@ def test_the_crops_pop_out_is_owned_by_the_app_window_and_go_to_nanowell_moves_t
     assert popout.parent() is viewer_app and popout.window() is popout and not popout.isModal()
     fig = ctx.widgets.get("_nw_popout_fig")
     qtbot.waitUntil(lambda: bool(fig.axes), timeout=10000)
-    assert fig.texts[0].get_text().startswith("A01 · q 1, r 0 over time") and not [t for t in fig.texts if t.get_gid() == "nw-popout-empty"]   # the crops, not the hint
+    assert fig.texts[0].get_text().startswith("A01 · nanowell 1,0 over time") and not [t for t in fig.texts if t.get_gid() == "nw-popout-empty"]   # the crops, not the hint
 
     ctx.widgets.get("_nw_popout_go_to_btn").click()
     _settle(qtbot, ctx, st)

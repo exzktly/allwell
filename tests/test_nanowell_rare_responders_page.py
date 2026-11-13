@@ -66,9 +66,10 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     st = _open(qtbot, page)
     _choose(page, "_nw_stats_test_cb", "rare")
     assert st.stats_test == "rare"
-    assert _texts(page, "nw-rare-why") == [rc.NO_CONTROL]
+    # A group named as a control is preselected, and the figure says it was chosen by its name.
+    assert st.control == "ctrl" and st.control_guessed == "ctrl"
+    qtbot.waitUntil(lambda: rc.guessed_note("ctrl") in _texts(page, "nw-rare-line"), timeout=30000)
     assert not page.widgets.get("_nw_stats_unit_cb").isVisibleTo(page.window)     # never applies: hidden, not greyed
-    assert not page.widgets.get("_nw_stats_flagged_btn").isEnabled()                # nothing to review before a result
     assert page.widgets.get("_nw_stats_flagged_btn").isVisibleTo(page.window)
     # vs lists the groups, not the wells, even on the Wells unit: the test compares groups.
     control = page.widgets.get("_nw_control_cb")
@@ -113,6 +114,12 @@ def test_review_flagged_crops_shows_them_in_the_pop_out(page, qtbot):
     fig = page.widgets.get("_nw_popout_fig")
     texts = [t.get_text() for t in fig.texts] + [t.get_text() for ax in fig.axes for t in ax.texts]
     assert any("Rare responders · flagged nanowells" in t for t in texts)
+    # Its columns name each timepoint as the band does (by its hours), and each row names its nanowell as the Array
+    # view draws the address, never "q 5, r 0", which beside a statistics report reads as a q-value.
+    heads = [t.get_text() for t in fig.texts if t.get_gid() == "nw-extremes-tp"]
+    assert [h.split(" ·")[0] for h in heads[:2]] == ["0 h", "5 h"]
+    rows = [t.get_text().split("\n")[0] for t in fig.texts if t.get_gid() == "nw-extremes-row"]
+    assert rows and all(" nanowell " in r and " q " not in r for r in rows), rows
     # Each drawn row is a flagged nanowell, so a click on it selects that nanowell.
     assert set(st.popout_hits.values()) <= {row["site"] for row in st.rare_flagged}
     assert st.popout_hits
@@ -231,8 +238,6 @@ def test_with_nothing_flagged_review_flagged_crops_is_greyed_out_and_says_why(qt
     st = _open(qtbot, page)
     _choose(page, "_nw_stats_test_cb", "rare")
     button = page.widgets.get("_nw_stats_flagged_btn")
-    assert not button.isEnabled() and button.toolTip() == sv.FLAGGED_NOT_RUN_TIP
-    _choose(page, "_nw_control_cb", "ctrl")
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
     assert st.rare_flagged == []
     assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders not detected. 0 of 120")
@@ -251,3 +256,48 @@ def test_the_computing_message_says_what_is_being_tested():
     """It said "Running the rare-responder tests on a worker…" — where it runs, not what it is doing."""
     assert rc.computing_text({"ctrl": ["A01"], "drug": ["B01"], "dmso": ["C01"]}, "ctrl") == (
         "Testing drug, dmso against ctrl for rare responders…")
+
+
+def test_a_control_is_guessed_only_from_one_unambiguous_name_and_a_choice_ends_the_guess():
+    assert rc.guess_control(["ctrl", "drug"]) == "ctrl"
+    assert rc.guess_control(["DMSO 0.1%", "Compound A"]) == "DMSO 0.1%"
+    assert rc.guess_control(["Vehicle-ctl", "drug"]) == "Vehicle-ctl"
+    assert rc.guess_control(["drug", "doxorubicin"]) == ""                   # no name says control
+    assert rc.guess_control(["ctrl", "DMSO"]) == ""                          # two do: no guess between them
+    assert rc.guess_control(["controller line", "drug"]) == ""              # a word, not a substring
+
+
+def test_with_no_control_named_the_figure_asks_for_one(qtbot, tmp_path, monkeypatch):
+    from review.domain import plot_members
+    from review.domain.batch_models import ReplicateSet
+
+    monkeypatch.setattr(plot_members, "plot_replicate_sets",
+                        lambda ctx: [ReplicateSet("plain", ["A01", "A02", "A03"]),
+                                     ReplicateSet("drug", ["B01", "B02"])])
+    page = _page(qtbot, _write_nanowell_dataset(tmp_path, counts=_plate()))
+    page.state.selection.selected_wells = {"A01", "A02", "A03", "B01", "B02"}
+    st = _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    from review.features.nanowell import statistics_view as sv
+
+    assert st.control == "" and st.control_guessed == ""
+    assert _texts(page, "nw-rare-why") == [rc.NO_CONTROL]
+    button = page.widgets.get("_nw_stats_flagged_btn")
+    assert not button.isEnabled() and button.toolTip() == sv.FLAGGED_NOT_RUN_TIP
+    _choose(page, "_nw_control_cb", "plain")
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
+    assert not any(t.startswith("⚠ plain was taken") for t in _texts(page, "nw-rare-line"))
+
+
+def test_the_control_combo_is_captioned_control_for_this_test_and_vs_for_the_others(page, qtbot):
+    from PySide6.QtWidgets import QLabel
+
+    from review.features.nanowell import tab_view
+
+    _open(qtbot, page)
+    caption = page.widgets.get("_nw_control_cb").parentWidget().findChild(QLabel)
+    assert caption.text() == tab_view.VS_CAPTION
+    _choose(page, "_nw_stats_test_cb", "rare")
+    assert caption.text() == tab_view.CONTROL_CAPTION
+    _choose(page, "_nw_stats_test_cb", "welch")
+    assert caption.text() == tab_view.VS_CAPTION

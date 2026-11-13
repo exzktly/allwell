@@ -309,6 +309,14 @@ def page_groups(ctx) -> dict:
     return replicate_groups(ctx, have) if have else {}
 
 
+def timepoint_names(st) -> dict:
+    """``timepoint -> how the band names it`` (``5 h``, or its label when its time is unknown), for column headers."""
+    from review.features.nanowell.summary_compute import timepoint_short
+
+    times = st.data.times_h if st is not None and st.data is not None else {}
+    return {str(tp): timepoint_short(str(tp), times.get(tp)) for tp in (st.data.timepoints() if st.data else [])}
+
+
 def hidden_groups(ctx) -> dict:
     """``group name -> wells`` for the groups hidden on the plate that hold a well this page could draw: the
     replicate sets (or a variable's values) the user switched off, named as :func:`page_groups` names a group, so a
@@ -2124,7 +2132,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                                       image_channel=image_channel, numbers=st.crop_metrics,
                                       display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
-                                      metrics=crop_metrics(st, model.sites(), channel))
+                                      metrics=crop_metrics(st, model.sites(), channel), tp_names=timepoint_names(st))
     stamp_subset(fig, _named(page_subset_label(st), sizes))
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
@@ -2910,9 +2918,18 @@ def set_stats_unit(ctx, unit: str) -> None:
 
 
 def set_stats_test(ctx, test: str) -> None:
-    """The test the Statistics view runs (``statistics_compute.TESTS``)."""
-    if test in sc.TEST_KEYS:
-        _set(ctx, "stats_test", test)
+    """The test the Statistics view runs (``statistics_compute.TESTS``). Choosing the Rare responders test with no
+    control chosen preselects a group named as a control (``_rare_controller.guess_control``) and says so on the
+    figure, rather than opening on a sentence asking for one."""
+    if test not in sc.TEST_KEYS:
+        return
+    st = _state(ctx)
+    if st is not None and not st.control and sc.test_spec(test)["kind"] == "rare":
+        guess = rc.guess_control(list(page_groups(ctx)))
+        if guess:
+            st.control, st.control_guessed = guess, guess
+            _call(ctx, "_nw_refresh_controls")
+    _set(ctx, "stats_test", test)
 
 
 def set_cohort(ctx, on: bool) -> None:
@@ -2965,6 +2982,9 @@ def set_timepoint(ctx, timepoint: str) -> None:
 
 
 def set_control(ctx, control: str) -> None:
+    st = _state(ctx)
+    if st is not None and (control or "") != st.control_guessed:
+        st.control_guessed = ""                         # the user's own choice: no longer a guess
     _set(ctx, "control", control or "")
 
 

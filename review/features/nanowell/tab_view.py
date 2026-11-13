@@ -691,6 +691,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             _refresh_baseline_moving(baseline_moving_spin, st, nwc.drawn_metric_column(ctx))
             grp_baseline_moving.setVisible(over_time_or_tested)
             grp_control.setVisible(compares)
+            _label_control(grp_control, st, stats_view)
             column = nwc.drawn_metric_column(ctx)
             cut = st.thresholds.get(column) if column else None
             responding_edit.setText("" if cut is None else format_cut(cut))
@@ -724,6 +725,28 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_page_visible", page_visible)
     reg.register("_nw_refresh_controls", refresh_controls)
     refresh_controls()
+
+
+#: The control combo's caption: "vs" beside a comparison of samples, **Control** for the Rare responders test, whose
+#: every message asks for "the control group" — a two-letter "vs" was easy to miss and named it differently.
+CONTROL_CAPTION = "Control"
+VS_CAPTION = "vs"
+
+
+def sc_test_is_rare(st) -> bool:
+    from review.features.nanowell import statistics_compute as sc
+
+    return sc.test_spec(st.stats_test)["kind"] == "rare"
+
+
+def _label_control(group, st, stats_view: bool) -> None:
+    """Caption the control combo's group for the test on screen: :data:`CONTROL_CAPTION` on the Statistics view with
+    the Rare responders test, :data:`VS_CAPTION` otherwise. Its own function so the page's refresh keeps one branch."""
+    from PySide6.QtWidgets import QLabel
+
+    caption = group.findChild(QLabel)
+    if caption is not None:
+        caption.setText(CONTROL_CAPTION if stats_view and sc_test_is_rare(st) else VS_CAPTION)
 
 
 def timepoint_text(tp: str, times_h: dict) -> str:

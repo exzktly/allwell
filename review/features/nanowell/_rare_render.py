@@ -146,7 +146,6 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     """Every stratum on one axes: control dotted, treatment solid, one colour per stratum, each threshold dashed."""
     strata = _strata(unit)
     publication = _is_publication(ax)
-    legend_pairs = []
     for stratum, pair in zip(strata, _stratum_shades(len(strata))):
         colour = pair[1] if publication else pair[0]
         for group, style, gid in ((unit.controls, ":", "rare-ecdf-control"),
@@ -156,8 +155,6 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
                 line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1,
                                label=_stratum_name(stratum) if style == "-" else None)[0]
                 _paired(line, pair).set_gid(f"{gid}:{stratum}")
-                if style == "-":
-                    legend_pairs.append(pair)
         if stratum in unit.thresholds and np.isfinite(_x(unit.thresholds[stratum], log_axis)):
             _paired(ax.axvline(_x(unit.thresholds[stratum], log_axis), color=colour, linestyle="--", linewidth=0.8),
                     pair).set_gid(f"rare-threshold:{stratum}")
@@ -165,14 +162,33 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     ax.set_ylabel("share of nanowells at or below")
     _fold_ticks(ax, log_axis)
     ax.set_ylim(0, 1.01)
+    _label_strata(ax, unit, strata, log_axis, publication)
+    _title(ax, f"How far nanowells grew, by starting cells\nsolid: {unit.treatment} · dotted: control")
+
+
+def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:
+    """Label the lines on the panel itself rather than in a key: each stratum's treatment curve where it crosses its
+    own height (staggered, since every cumulative curve ends at the same top right corner, where labels at the ends
+    would pile up), with a dot in the stratum's shade; and the dashed line as the control cutoff."""
     _ground, ink, _muted = _inks(ax)
-    legend = ax.legend(fontsize=_TITLE_PT * 0.75, frameon=False, loc="lower right", handlelength=1.2)
-    for text in legend.get_texts():
-        _ink(text).set_color(ink)
-    for line, pair in zip(legend.get_lines(), legend_pairs):    # the legend's handles are copies: pair them too
-        _paired(line, pair)
-    _title(ax, f"How far nanowells grew, by starting cells\nsolid: {unit.treatment} · dotted: control · "
-               "dashed: control cutoff")
+    for i, (stratum, pair) in enumerate(zip(strata, _stratum_shades(len(strata)))):
+        xy = _pooled(unit.treated, stratum, log_axis)
+        if xy is None or not len(xy[0]):
+            continue
+        level = 0.78 - 0.56 * i / (len(strata) - 1) if len(strata) > 1 else 0.5   # spread over the panel's height
+        x = float(xy[0][min(int(np.searchsorted(xy[1], level)), len(xy[0]) - 1)])
+        dot = ax.scatter([x], [level], s=14, color=pair[1] if publication else pair[0], zorder=5,
+                         gid=f"rare-ecdf-dot:{stratum}")
+        _paired(dot, ((pair[0], pair[0]), (pair[1], pair[1])))
+        _ink(ax.annotate(_stratum_name(stratum), (x, level), textcoords="offset points", xytext=(6, 0), va="center",
+                         fontsize=_TITLE_PT * 0.75, color=ink, gid=f"rare-ecdf-label:{stratum}"))
+    cuts = [_x(unit.thresholds[s], log_axis) for s in strata if s in unit.thresholds]
+    cuts = [c for c in cuts if np.isfinite(c)]
+    if cuts:
+        # At the foot of the dashed line, clear of the stratum labels, which sit at mid-height.
+        _ink(ax.annotate("control cutoff", (max(cuts), 0.02), textcoords="offset points", xytext=(-3, 0),
+                         rotation=90, ha="right", va="bottom", fontsize=_TITLE_PT * 0.7, color=ink,
+                         gid="rare-cutoff-label"))
 
 
 #: Points a dot's count label takes above the dot: its 6 pt offset and one line of its type, with leading.
@@ -306,12 +322,13 @@ _TOP_IN, _ROW_PAD_IN, _TEXT_PAD_IN, _HEAD_GAP_IN = 0.12, 1.2, 0.12, 0.1
 _HEAD_PT = 9.0
 
 
-def render_rare_page(fig, result, lines=(), *, note: str = "") -> None:
+def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
     """The Statistics view's figure for the rare-responder tests. For each treatment, **the answer first**: its headline
     (``rare_export_compute.headline`` — the verdict and the counts behind it, gid ``nw-rare-unit``) above its row of
     panels — how far nanowells grew, the share of each well past the cutoff, Higher Criticism. Under the panels, each
     treatment's deciding and supporting tests and its caveats (``unit_text``; each line gid ``nw-rare-line``, a
-    caveat marked ⚠), then any extra *lines* and *note*. The full report is not drawn here: the page shows it under
+    caveat marked ⚠), then any extra *lines* and *note*. *lead* is drawn before all of it and never cut (a control
+    chosen by its name says so there). The full report is not drawn here: the page shows it under
     the figure (Details).
 
     **The panels are laid out first, in inches.** Each row gets at least :data:`ROW_MIN_IN`; the text takes only what
@@ -348,12 +365,13 @@ def render_rare_page(fig, result, lines=(), *, note: str = "") -> None:
     # Always drawn, whatever else is cut: the first treatment's deciding test, and that some treatments are not drawn.
     must = _wrapped(fig, [f"{extra} more treatment(s) are not drawn: each is in Details, below the figure."], 0.96) \
         if extra else []
+    first = _wrapped(fig, list(lead), 0.96)
     # The text takes what the panels leave, never more. It is cut between sentences, never inside one — a caveat cut
     # half way reads as a different sentence — and what is left out is counted; Details holds it all.
     fits = max(1, int((height - _TOP_IN - sum(head_in) - len(units) * per_unit * row_min - 2 * _TEXT_PAD_IN)
                       // step_in))
     tail = _wrapped(fig, [note], 0.96) if note else []
-    text, left_out = [], 0
+    text, left_out = list(first), 0
     for i, item in enumerate(items):
         wrapped = _wrapped(fig, [item], 0.96)
         if i and (left_out or len(text) + len(wrapped) + len(must) + 1 > fits):

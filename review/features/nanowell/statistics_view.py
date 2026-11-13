@@ -34,7 +34,8 @@ _FLAGGED_TIP = ("Show the nanowells that grew past the control cutoff — the on
                 "pop-out, as rows of crops over time, to rule out segmentation errors, doublets and debris.")
 #: Why **Review flagged crops** is greyed out, said on the button itself.
 FLAGGED_NONE_TIP = "No nanowell grew past the control cutoff, so there is nothing to review."
-FLAGGED_NOT_RUN_TIP = "Choose the control group under vs: the nanowells the test flags can then be reviewed here."
+FLAGGED_NOT_RUN_TIP = "Choose the control group under Control: the nanowells the test flags can then be reviewed here."
+FLAGGED_RUNNING_TIP = "Available once the test has run: the nanowells it flags can then be reviewed here."
 STATS_CONTROL_TIP = ("Compare each sample with this one only — fewer comparisons than every pair, and the family a "
                      "plate design usually means. Dunnett needs one. None: every pair is compared.")
 
@@ -85,7 +86,7 @@ def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool)
         ready = bool(st.rare_flagged)
         controls.flagged.setEnabled(ready)
         controls.flagged.setToolTip(_FLAGGED_TIP if ready else FLAGGED_NONE_TIP if st.rare_footer is not None
-                                    else FLAGGED_NOT_RUN_TIP)
+                                    else FLAGGED_RUNNING_TIP if st.control else FLAGGED_NOT_RUN_TIP)
     for combo, value in ((controls.unit, st.stats_unit), (controls.test, st.stats_test)):
         index = combo.findData(value)
         if index >= 0:

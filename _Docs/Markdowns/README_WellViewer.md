@@ -7508,7 +7508,10 @@ which it did not trust — keeps turning out to be right, the run is refusing sq
 square only when the square's score leads the next most square outline by more than 0.15 and is at least 3 times
 it; both numbers were set on synthetic images, not on a real plate. To see what your plate supports, run
 `python -m pipeline.nanowell_square_calibration <output folder>` (in the packaged app,
-`<where the app is>/AllWell-<version>.app/Contents/MacOS/AllWell --run-square-calibration <output folder>`). It reads
+`<where the app is>/AllWell-<version>.app/Contents/MacOS/AllWell --run-square-calibration <output folder>`). The
+output folder is the run's `out/` folder, the one holding `nanowells/`; the dataset folder above it, or `nanowells/`
+itself, is taken to mean the same. A path it cannot use is named back with what it resolved to and what that folder
+holds, or as unreadable when the Terminal is not allowed into it. It reads
 the anchors you have set (from the `in/` folder beside the output folder, or `--input_dir <folder>`): a guess within
 half a nanowell spacing of your click counts as right, any other as wrong. Squares the run accepted itself count as
 right when the identity check confirmed the timepoint, and as wrong when it found the run took something else for

@@ -288,6 +288,46 @@ def csv_rows(examples, current: tuple[float, float]) -> list[dict]:
             for e in examples]
 
 
+def _listing(folder: Path) -> tuple[list[str] | None, str]:
+    """``(names, "")`` of *folder*'s entries, or ``(None, why)`` when it cannot be listed."""
+    import os
+
+    try:
+        return sorted(os.listdir(folder)), ""
+    except PermissionError:
+        return None, (f"{folder} cannot be read: permission denied. On a Mac this is usually the Terminal not being "
+                      "allowed into that location (an external drive, Desktop, Documents or a cloud folder): allow it "
+                      "under System Settings → Privacy & Security → Files and Folders (or Full Disk Access) and try "
+                      "again")
+    except OSError as exc:
+        return None, f"{folder} cannot be read: {exc}"
+
+
+def find_output_dir(given) -> tuple[Path | None, str]:
+    """The analysed output folder *given* names — the folder itself, the dataset folder whose ``out/`` it is, or its
+    ``nanowells/`` folder — or ``(None, why)``, saying what the path resolved to and what it holds, so a path that
+    is wrong, unreadable or simply another folder each reads differently."""
+    typed = str(given)
+    path = Path(typed).expanduser()
+    shown = f"{typed!r}" + (f" (resolved to {path.resolve()})" if str(path.resolve()) != typed else "")
+    if not path.exists():
+        return None, (f"{shown} does not exist. Check the spelling, and quote a path that holds spaces; a ~ inside "
+                      "quotes is not expanded by the shell, so write the path out in full or leave the ~ outside them")
+    if not path.is_dir():
+        return None, f"{shown} is a file, not a folder: give the run's output folder (the one holding {NANOWELL_DIR}/)"
+    candidates = [path, path / "out"] + ([path.parent] if path.name == NANOWELL_DIR else [])
+    for candidate in candidates:
+        names, why = _listing(candidate) if candidate.is_dir() else ([], "")
+        if names is None:
+            return None, why
+        if NANOWELL_DIR in names and (candidate / NANOWELL_DIR).is_dir():
+            return candidate, ""
+    names, _why = _listing(path)
+    held = ", ".join(names[:12]) + (f", … ({len(names)} in all)" if len(names) > 12 else "") if names else "nothing"
+    return None, (f"{shown} holds no {NANOWELL_DIR}/ folder, and neither does an out/ inside it, so it is not an "
+                  f"analysed nanowell dataset. It holds: {held}")
+
+
 def main(argv=None) -> int:
     """Print the calibration of *output folder*; exit 2 when it is not an analysed nanowell dataset or its anchors
     file cannot be read, 0 otherwise."""
@@ -301,9 +341,9 @@ def main(argv=None) -> int:
     parser.add_argument("--input_dir", help="the dataset's in/ folder (default: the in/ beside the output folder)")
     parser.add_argument("--csv", action="store_true", help="print one row per timepoint with a square guess instead")
     args = parser.parse_args(argv)
-    out_dir = Path(args.output_dir)
-    if not (out_dir / NANOWELL_DIR).is_dir():
-        print(f"{out_dir} holds no {NANOWELL_DIR}/ folder: it is not an analysed nanowell dataset")
+    out_dir, why = find_output_dir(args.output_dir)
+    if out_dir is None:
+        print(why)
         return 2
     input_dir = Path(args.input_dir) if args.input_dir else out_dir.parent / "in"
     try:

@@ -144,10 +144,41 @@ def test_the_command(tmp_path, capsys):
     rows = capsys.readouterr().out.splitlines()
     assert rows[0] == ",".join(cal.CSV_COLUMNS) and len(rows) == 5
     assert any(r.startswith("B01,0h,unaddressed,,0.2429,0.1429,0.1,1.7,False,wrong,anchor,2.0") for r in rows), rows
-    assert cal.main([str(tmp_path / "in")]) == 2                                  # no nanowells/ folder
+    (tmp_path / "elsewhere").mkdir()
+    assert cal.main([str(tmp_path / "elsewhere")]) == 2                           # no nanowells/ folder
     anchors_path(tmp_path / "in").write_text("{not json")
     assert cal.main([str(out)]) == 2
     assert "cannot be used" in capsys.readouterr().out
+
+
+def test_the_output_folder_is_found_from_the_dataset_folder_or_its_nanowells_folder(tmp_path, capsys):
+    out, _ = _dataset(tmp_path, WELLS, ANCHORS)
+    for given in (out, tmp_path, out / "nanowells"):
+        assert cal.find_output_dir(given) == (out, ""), given
+    assert cal.main([str(tmp_path)]) == 0
+    assert "Suggested: lead > 0.12" in capsys.readouterr().out
+
+
+def test_a_folder_that_is_not_a_dataset_says_what_it_resolved_to_and_holds(tmp_path):
+    (tmp_path / "plate").mkdir()
+    (tmp_path / "plate" / "notes.txt").write_text("x")
+    found, why = cal.find_output_dir(tmp_path / "plate")
+    assert found is None and "holds no nanowells/ folder" in why and "It holds: notes.txt" in why
+    found, why = cal.find_output_dir(tmp_path / "missing")
+    assert found is None and "does not exist" in why and "quote a path" in why
+
+
+def test_an_unreadable_folder_is_named_as_unreadable(tmp_path, monkeypatch):
+    import os
+
+    (tmp_path / "out").mkdir()
+
+    def refuse(path):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "listdir", refuse)
+    found, why = cal.find_output_dir(tmp_path)
+    assert found is None and "permission denied" in why and "Privacy & Security" in why
 
 
 def test_the_packaged_app_reaches_the_command():

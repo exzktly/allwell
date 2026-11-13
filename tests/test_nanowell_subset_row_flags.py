@@ -19,7 +19,8 @@ q3     measured at t_a with no count
 q4     in field F1, which the gate leaves out at t_a
 q5     its rim far softer than the well's at t_a
 q6     left out by a partial identity check at t_a
-q7–11  nothing
+q7     its own rim not fitted at t_a (no rim focus measured): its crop there says "rim not fitted"
+q8–11  nothing
 =====  =========================================================
 
 B01 has two nanowells and its t_a was never located (a failed grid), so it answers *timepoint not addressed*.
@@ -70,6 +71,8 @@ def _a01_rows() -> list:
                 row["owner"] = "F1"
             if q == 5 and tp == "t_a":
                 row["focus"] = 0.05
+            if q == 7 and tp == "t_a":
+                row["focus"] = None                                 # measured, its own rim not fitted
             rows.append(row)
     return rows
 
@@ -157,7 +160,8 @@ def test_the_properties_are_offered_written_and_persisted():
     offered = {name: group for name, _label, group in ss.field_choices(("GFP",))}
     assert {n: offered[n] for n in ss.ROW_FLAGS} == {
         "found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking", "rim_fitted": "Tracking",
-        "occluded": "Quality", "rim_out_of_focus": "Quality", "field_left_out": "Quality", "no_count": "Quality"}
+        "nw_rim_fitted": "Quality", "occluded": "Quality", "rim_out_of_focus": "Quality", "field_left_out": "Quality",
+        "no_count": "Quality"}
     assert offered["identity"] == "Tracking"
     assert C("found", "yes", at="every").validated().text() == "Found by the run at every timepoint: yes"
     for bad in (C("found", "ge", 1), C("occluded", "in", values=("x",))):
@@ -229,3 +233,36 @@ def test_every_verdict_the_identity_check_gives_can_be_named():
     from pipeline.nanowell_identity import VERDICTS
 
     assert set(ss.IDENTITY_VERDICTS) == set(VERDICTS)
+
+
+# ── the nanowell's own rim ───────────────────────────────────────────────────
+# Reported: "requiring fitted rim for all timepoints of a given nanowell appears to be dropped" — a nanowell kept by
+# *Array rim fitted at every timepoint: yes* showed crops captioned "rim not fitted". The condition was applied; it
+# asked about the circle around the well's whole array, which A01 has at every timepoint but t_a and which says
+# nothing of one nanowell's rim. *Nanowell rim fitted* asks the question the crop's caption answers.
+def test_nanowell_rim_fitted_at_every_timepoint_leaves_out_a_nanowell_whose_own_rim_was_not_fitted(metrics):
+    kept, done = _kept(metrics, C("nw_rim_fitted", "yes", at="every"))
+    # q7 is outside. q1 (not found at t_a) and B01 (t_a never located) were not measured there, so whether their
+    # rim was fitted is unknown — undecided, never kept and never "no". q2, occluded at t_a, had its rim's focus
+    # measured there: its rim was fitted, whatever hid its contents.
+    assert kept == _in_a01(0, 2, 3, 4, 5, 6, 8, 9, 10, 11)
+    assert (done.outside, done.unknown) == (1, 3)
+    assert _kept(metrics, C("nw_rim_fitted", "no", at="any"))[0] == _in_a01(7)
+    # The array's outline is a different property: A01's was not fitted at t_a, for every nanowell alike.
+    assert _kept(metrics, C("rim_fitted", "no", at="any"))[0] == _in_a01(*range(12))
+
+
+def test_nanowell_rim_fitted_agrees_with_every_crop_caption(metrics):
+    """The flag is *no* exactly where a crop is captioned "rim not fitted" (``series_compute.rim_focus_text``)."""
+    from review.features.nanowell.series_compute import rim_focus_text
+
+    flags = ss._row_flag(metrics, "nw_rim_fitted")
+    captions = [rim_focus_text(row) for row in metrics.to_dict("records")]
+    said_not = [c == "rim not fitted" for c in captions]
+    assert said_not == [f == 0 for f in flags]
+    assert sum(said_not) == 1                                        # q7 at t_a, and nothing else
+
+
+def test_the_two_rim_properties_are_named_apart():
+    assert C("rim_fitted", "yes", at="every").validated().text() == "Array outline fitted at every timepoint: yes"
+    assert C("nw_rim_fitted", "yes", at="every").validated().text() == "Nanowell rim fitted at every timepoint: yes"

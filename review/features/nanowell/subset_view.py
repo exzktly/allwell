@@ -79,9 +79,11 @@ _FIELD_TIP = ("What the condition tests: the cells at the start (the count at th
               "nanowell sits in its array, the imaging field it was cut from, or whether it lay on a tile seam "
               "(measured from a crop blended from the tiles that cover it). On a tile seam: no at every timepoint "
               "leaves the seam nanowells out; yes at any timepoint keeps only them.\n"
-              "Identity verdict: the identity check's verdict on the nanowell's timepoint. Array rim fitted: whether "
-              "a circular rim was fitted to the well's array at that timepoint (no for a fit that failed, and for "
-              "an array whose outline is not a circle).")
+              "Identity verdict: the identity check's verdict on the nanowell's timepoint. Array outline fitted: "
+              "whether a circle was fitted to the outline of the well's whole array at that timepoint (no for a fit "
+              "that failed, and for an array whose outline is not a circle) — one answer for every nanowell of the "
+              "well. Nanowell rim fitted: whether this nanowell's own rim was fitted there (no where its crop says "
+              "'rim not fitted').")
 _AT_TIP = ("The timepoint the value is read at: the baseline (the count's), the well's earliest or latest, a named "
            "timepoint, or at any / every timepoint of the well (every: the nanowell needs a passing value at each).")
 _OP_TIP = "How the value is compared. Both bounds of a range are included."

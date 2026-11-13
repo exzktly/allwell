@@ -13293,7 +13293,11 @@ well), `occluded` (`occluded` or `clipped`), `identity_out` (not `identity_ok`),
 _rim_fitted` from the timepoint's grid block: true when `array_boundary` holds a circle — `fit_array_boundary`'s, or a
 contrast run's inferred circle — false when it is `null`, because no circle with 120° of arc fitted or the array's
 outline is not a circle, and no value when the block has no `array_boundary` key, a timepoint refused before its
-lattice was placed), `rim_out_of_focus` (not
+lattice was placed; one answer for the well's whole array, labelled *Array outline fitted*), `nw_rim_fitted` (the
+nanowell's own rim, *Nanowell rim fitted*: 1 where `focus` > 0, 0 where it is not and `run_state` is `measured` or
+`empty`, NaN where the run did not measure the nanowell — exactly where `series_compute.rim_focus_text` captions a crop
+*rim not fitted*, which `test_nanowell_subset_row_flags.py::test_nanowell_rim_fitted_agrees_with_every_crop_caption`
+holds), `rim_out_of_focus` (not
 `rim_focus_ok`), `field_left_out` (`state` is `field_excluded`) and `no_count` (a measurable `run_state` with no
 `n_cells`). Each is read from its own column by `_row_flag` so that none stands in for another: `run_state` is
 `state` as `_addressed_grid` left it, copied by `site_metrics` before Cell Gating (`field_excluded`) and the
@@ -13343,7 +13347,12 @@ drawn under a Subset writes `Subset: “name”` at its top left, gid `nw-subset
 by `saved_name_of` against the page's unbound `st.subset`, else the conditions (`Subset.label`). It is written on the
 figure rather than only in the page's Details field because a saved, exported or pasted figure leaves Details behind.
 `controller.draw_view` takes it as `subset_label` and stamps after `_compose_view` (the view composition, which clears
-the figure first), for every view but Identity; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
+the figure first), for every view but Identity, joined with ` · ` to `controller.moving_tag` — the moving average's
+short phrase (`moving_compute.figure_tag`: `Moving average over 3 timepoints (trailing)`, `; baseline over N` for a
+fold change's own baseline window) on `MOVING_VIEWS` (Distribution, Trajectories, Statistics) for a metric with values
+over time, `""` otherwise — so a figure of averaged values says so on the same line with or without a subset (the
+footer keeps `moving_compute.describe`'s full sentence; Statistics writes no footer sentence of it, which is why the
+tag is on the figure). The Distribution window's rows pop-out puts the same tag in its title; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
 Nanowells mode passes `subset_label` from its run settings, and the Scatter Plot's nanowell scatter reads it through
 the `nanowell.subset_label` service (`_plot_links.subset_label`) and replaces its own copy on each redraw. The Subset
 combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when
@@ -13569,7 +13578,10 @@ since it orders the rows; the caption names those left out) — every crop on on
 shared with the enlarged crops), the ranking timepoint's column outlined, each row labelled with rank, address and
 value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
 at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
-foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
+foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, then — given the page's
+`GateTally.sizes`, which `controller.crop_metrics` passes — the count in each size class and in neither
+(`size_class_compute.breakdown_items`: nothing under an incomplete rule or where the classes are undefined, never a
+split of zeros), confluence as a
 percentage, the shared channel's nanowell fluorescence and cell fluorescence as `fluor.` and `per cell`, in that order of
 importance, `compact_number` for thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
@@ -13711,7 +13723,9 @@ the members, not the first page of ranks sorted among themselves
 `_nw_popout_label_cb`) is resolved by `composite_labels` into `{timepoint: {site: value}}`, each panel's at its own
 timepoint, and `_composite_render._draw_corners` writes `corner_text(value)` (a whole number as one, else three
 significant figures, `—` with no value) in each tile's top-left corner, white on a dark stroke (`nw-composite-value`);
-the caption names the metric;
+the caption names the metric. *Cell count* under an active size-class rule is written as text with its split
+(`"4 (2/1)"`, from `size_class_compute.site_splits`; a nanowell with no defined split keeps its bare number, and
+`corner_text` writes a string as it is), and the caption names the two classes;
 `page` takes `COMPOSITE_PAGE` (91, a radius-5 hexagon) ranks at a time. `Composite` and `CompositeTile(x, y, source,
 rank, patch)` carry **no well id**: a tile's `source` is the real `(well, q, r)` it stands for, and nothing of the
 composite reaches `NanowellState.well`, the plate selection, the CSV export or Batch Export (`tests/
@@ -14157,7 +14171,10 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   axes: the address and ring, the timepoint and its hours, the state (and the run's own state when Cell Gating or the
   rim-focus rule overwrote it, `run_state`) with the fused / partially-visible / count-disagreement flags and the
   row's `reason`, the shown metric's value as the figure labels it (`ArrayDrawn.label`) or why it has none
-  (`ArrayScene.why`), the count and confluence (with the run's own count when the state leaves none), the occupancy
+  (`ArrayScene.why`), the count and confluence (with the run's own count when the state leaves none), the count split by size class on a
+line of its own under an active `GateTally.sizes` (`_size_line`: `Size classes: 2 T cells · 1 DCs · 1 in neither`, or
+`no value —` and `size_class_compute.breakdown_why` for a counted nanowell whose classes are undefined; the Window
+composite's `tile_card` passes the same rule), the occupancy
   class and baseline count, each channel's cell and nanowell fluorescence, every fold change from the baseline and the
   growth rate, the rim focus against the well's sharp rims and the page's rule's verdict (`focus_line`: in focus, out
   of focus, rule off, or why it was not judged — no rim fitted, fewer than `MIN_SITES` rims, a state that is not

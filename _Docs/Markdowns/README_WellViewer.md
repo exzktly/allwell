@@ -6759,9 +6759,14 @@ the sentence names it.
     - *Timepoint not addressed* — the run could not address that timepoint of the well at all, so every nanowell
       in it is unfound. Add *Timepoint not addressed · at every timepoint · no* to tell a single lost nanowell
       apart from a whole timepoint that failed.
-    - *Array rim fitted* — the run fitted a circle to the outer edge of the well's nanowell array at that timepoint
-      (it locates the array's centre from it). *No* when no circle could be fitted, and always for an array whose
+    - *Array outline fitted* — the run fitted a circle to the outer edge of the well's whole nanowell array at that
+      timepoint (it locates the array's centre from it). It is one answer for every nanowell of the well, and says
+      nothing about any one nanowell's rim. *No* when no circle could be fitted, and always for an array whose
       outline is not a circle; no value for a timepoint the run could not place a lattice in at all.
+    - *Nanowell rim fitted* — the nanowell's own rim was fitted at that timepoint (its rim focus was measured).
+      *No* exactly where its crop is captioned *rim not fitted*; no value where the run did not measure the
+      nanowell. **Nanowell rim fitted · at every timepoint · yes** keeps only the nanowells whose rim was fitted
+      in every image.
     - *Identity contradicted* — the identity check found that the nanowell's address at that timepoint may name
       a different nanowell (a contradicted timepoint, or a nanowell a partial check left out).
     - *Occluded or clipped* — found, but its contents could not be measured.
@@ -6846,7 +6851,11 @@ the sentence names it.
   its window, so the first timepoints (before a full window), and any window with a gap or a timepoint whose
   nanowell identity is not confirmed, have no value; they are counted among the exclusions with that reason
   rather than averaged over fewer timepoints. With *Fixed cohort* ticked too, the cohort is chosen from the
-  measured values and then averaged. The footer states the window.
+  measured values and then averaged. The footer states the window, and the figure's top-left line — where the
+  Subset's name goes — says *Moving average over 3 timepoints (trailing)* (or *centred*, and *; baseline over 2*
+  when the baseline has its own window), beside the subset's name or on its own, so a saved or copied figure still
+  says its values are averaged. The Distribution window's pop-out says the same in its title. Views the moving
+  average does not reach (Array, Position, Extremes) and metrics with one value per nanowell say nothing of it.
 
   The menu in place of the label chooses the kind of window. **Moving average** (the default) is the one above:
   it ends at the timepoint, so no later timepoint — one that may already show a treatment — reaches it, but every
@@ -7233,7 +7242,8 @@ timepoint with no crop says why. **Pop out**, above the strip, opens the crops l
 one panel per timepoint, all of a channel's panels on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
-(the display range), **Cells**, **Metrics** (the measurements under each crop, ending with the rim's focus — *rim 88% of sharpest* — as a
+(the display range), **Cells**, **Metrics** (the measurements under each crop — the cell count first and, with size classes set on Home ▸ Cell
+Gating, the count in each class and in neither, *4 cells · 2 T cells · 1 DCs · 1 in neither* — ending with the rim's focus — *rim 88% of sharpest* — as a
 percentage of its well's sharpest rims at that timepoint, the same scale as the **Rim focus** threshold, so a crop
 reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
@@ -7308,7 +7318,9 @@ order: *Window rank* (the default), or any of the page's metrics at the latest t
 (largest first) or **Ascending**; a nanowell with no value sorts last, and the title says what the tiles are placed
 by. The order runs across the whole window, so the first page holds the largest (or smallest) of all its nanowells. The wells' patches follow the same order. **Corner** writes a metric of your choice — cell count, confluence, a fluorescence, a
 fold change — in each tile's top-left corner, at the timepoint of the panel the tile is in (a dash where the nanowell
-has no value there); the caption names it. Zoom in to read it on a full page. Tiles are
+has no value there); the caption names it. With size classes set on Home ▸ Cell Gating, *Cell count* is written with
+its split, first class then second — *4 (2/1)* is 4 cells, 2 T cells and 1 DC, the rest in neither class — and the
+caption names the classes. Zoom in to read it on a full page. Tiles are
 drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the
 title says it is not a real array. Each tile has a coloured **stripe**
 along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well* (a well keeps its colour on every page and whatever the Sort), any of the

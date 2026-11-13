@@ -180,6 +180,64 @@ def apply(frame: pd.DataFrame, gate) -> None:
     frame[REASON_COLUMN] = reason
 
 
+def _finite(row, key) -> float | None:
+    value = row.get(key)
+    return (float(value) if isinstance(value, (int, float, np.floating, np.integer)) and np.isfinite(value)
+            else None)
+
+
+def breakdown_items(row, rule: SizeClassRule | None) -> list[str]:
+    """One nanowell's cell count split by size class, as short items in class order — ``["4 T cells", "1 DCs",
+    "2 in neither"]`` — for the labels that write a nanowell's count (a crop's caption, the Array view's card), so a
+    count is never shown without the subsets the user defined. *row* is one row of the page's metrics (a mapping
+    holding :data:`COUNT_COLUMNS` and :data:`UNCLASSIFIED_COLUMN`, as :func:`apply` writes them); *rule* is the rule
+    the counts were made with (``GateTally.sizes``).
+
+    ``[]`` when no complete rule is set, or when the row's classes are undefined (no count, or a reason in
+    :data:`REASON_COLUMN`; :func:`breakdown_why` says which) — never a count of zero for a class that was not
+    counted. The cells in neither class are written only when there are some."""
+    if rule is None or not rule.active():
+        return []
+    first, second = (_finite(row, column) for column in COUNT_COLUMNS)
+    if first is None or second is None:
+        return []
+    labels = rule.labels
+    items = [f"{first:g} {labels[0]}", f"{second:g} {labels[1]}"]
+    rest = _finite(row, UNCLASSIFIED_COLUMN)
+    if rest:
+        items.append(f"{rest:g} in neither")
+    return items
+
+
+def breakdown_why(row, rule: SizeClassRule | None) -> str:
+    """Why a row with a count has no :func:`breakdown_items` under an active *rule* (``""`` when it has them, when
+    no rule is set, or when the row has no count to break down)."""
+    if rule is None or not rule.active() or breakdown_items(row, rule) or _finite(row, "n") is None:
+        return ""
+    return str(row.get(REASON_COLUMN) or "") or NOT_READ
+
+
+def site_splits(metrics: pd.DataFrame, sites, timepoint, rule: SizeClassRule | None) -> dict:
+    """``site -> (first, second)``: each nanowell of *sites* (``(well, q, r)``) counted per size class at *timepoint*,
+    read from the page's *metrics* as :func:`apply` wrote them. Only nanowells whose classes are defined are keys, so a
+    nanowell missing from the result has no split rather than a split of zeros; ``{}`` with no complete *rule*."""
+    if rule is None or not rule.active() or metrics is None or not set(COUNT_COLUMNS) <= set(metrics.columns):
+        return {}
+    wanted = {tuple(site) for site in sites}
+    rows = metrics[metrics["timepoint"].astype(str) == str(timepoint)]
+    first, second = (pd.to_numeric(rows[c], errors="coerce").to_numpy(dtype=float) for c in COUNT_COLUMNS)
+    q = pd.to_numeric(rows["nw_q"], errors="coerce").to_numpy(dtype=float)
+    r = pd.to_numeric(rows["nw_r"], errors="coerce").to_numpy(dtype=float)
+    out = {}
+    for well, qq, rr, a, b in zip(rows["well"].astype(str), q, r, first, second):
+        if not (np.isfinite(qq) and np.isfinite(rr) and np.isfinite(a) and np.isfinite(b)):
+            continue
+        site = (well, int(qq), int(rr))
+        if site in wanted:
+            out[site] = (float(a), float(b))
+    return out
+
+
 def exclusion_reason(metrics: pd.DataFrame, column: str, state_reason: pd.Series) -> pd.Series:
     """Why size metric *column* is undefined at each row (``""`` where defined). *state_reason* is
     ``series_compute``'s reason for the rows whose state, or count, has no value — it comes first."""

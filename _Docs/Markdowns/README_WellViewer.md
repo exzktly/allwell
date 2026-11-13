@@ -4411,8 +4411,11 @@ or column number to toggle the whole row / column. Under the plate, the
 **selection footer** says how many wells are selected ("3 wells selected"), and
 its **All** and **None** buttons fill or clear the selection in one click. With
 replicate groups defined, the plate on a plotting tab shows groups rather than
-wells: the footer then counts the groups shown ("2/3 sets visible"), and **All**
-/ **None** show or hide every group. On Home and Review CSV, which edit wells
+wells: a click on any well of a group shows or hides the whole group — so a click
+on a group that is already shown hides it — and a short message says which
+("drug hidden (B01, B02): click one of its wells again to show it."). A hidden
+group's wells are dimmed and marked **×**. The footer then counts the groups shown
+("2/3 sets visible"), and **All** / **None** show or hide every group. On Home and Review CSV, which edit wells
 one at a time, the plate always selects wells and **All** / **None** select and
 clear them. On a page that shows one well at a time (smFISH, Playground) the
 plate picks a single well and **All** is not offered — unless groups are
@@ -7150,7 +7153,11 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
     Higher Criticism alone points at nanowells just under the cutoff; the shape test alone is a shift of the tail,
     which by itself is not rare responders.
 
-  Choose the control group under **vs**, with the control and treatment groups shown on the plate. With replicate
+  Choose the control group under **Control** (the band's *vs* combo, captioned *Control* while this test is chosen),
+  with the control and treatment groups shown on the plate. When one group's name says it is a control — *ctrl*,
+  *control*, *DMSO*, *vehicle*, *untreated*, *mock*, *negative* — and no control is chosen yet, choosing this test
+  preselects it, and the figure says so first ("ctrl was taken as the control because of its name…"); choosing a
+  control yourself ends the guess. Two such names, or none, and nothing is guessed. With replicate
   sets defined, a click on a well in the plate shows or hides that well's whole group, so a click on a group that is
   already shown hides it: when the control is hidden the figure says so and names the wells that bring it back, and
   when every group is hidden the page says that rather than "No nanowell wells selected". **All** under the plate shows
@@ -7167,8 +7174,8 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   phone):
   1. **How far nanowells grew, by starting cells** — for each fold change along the bottom (2×, 4×, 8×…), the share
      of nanowells that grew no further than that; one blue shade per starting cell count, the same shades the
-     Distribution view gives a nanowell's cell count. Solid lines are the treatment group, dotted lines control,
-     the dashed line the control cutoff. Rare responders show as the solid curve matching the dotted one and then
+     Distribution view gives a nanowell's cell count, each labelled on its curve. Solid lines are the treatment
+     group, dotted lines control, the dashed line the control cutoff (labelled at its foot). Rare responders show as the solid curve matching the dotted one and then
      stopping short of the top, past the cutoff; a whole curve moved sideways is a general shift instead.
   2. **Share of each well's nanowells past the cutoff** — one dot per well with its count (*4/60*): control wells in
      grey, the shaded band the range they span (what chance gives on this plate), treatment wells in their plate
@@ -7189,7 +7196,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   crops** opens the pop-out on the nanowells that grew past the control cutoff — the ones the verdict is counted
   from — as rows of crops over time, highest fold change first, so segmentation errors, doublets and debris can be
   ruled out by eye; it is greyed out, with the reason on it, before a result and when nothing grew past the cutoff.
-  The pop-out's **Show** switches between them, the selected nanowell and the Distribution window.
+  The pop-out's **Show** switches between them, the selected nanowell and the Distribution window. Its columns name
+  each timepoint as the band does (by its hours, *5 h*), and each row names its nanowell as the Array view writes
+  its address — *B01 nanowell 5,0* — as the page's crop pop-outs, Extremes and the selected-nanowell panel all do.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
   a QC picture and a full-resolution montage each did. Its **Well**, **Timepoint** and **Positions** are on the
   band's first row; its viewing row holds how the picture is drawn — **Image** and **Layers** — then **Set
@@ -11186,12 +11195,13 @@ top — whole-number fold changes (2×, 3×, 4×) do this — and it says so rat
 ### Reading the figure, the report and the crops
 
 On the **Statistics** view, choose **Test: Rare responders (vs control, wells as units)**, then the control
-group under **vs**. The tests run in the background; the figure says what is being tested until they finish. Each
+group under **Control**. The tests run in the background; the figure says what is being tested until they finish. Each
 treatment group then gets its answer in bold — the verdict and the counts behind it — and one row of three panels
 (up to three groups, and as many as the window's height fits; the report covers all of them). On a phone, or in a
 window too narrow for three panels side by side, each group's three panels are stacked one above the other:
 
-1. **How far nanowells grew, by starting cells** — one shade per number of starting cells (named in its key),
+1. **How far nanowells grew, by starting cells** — one shade per number of starting cells (each labelled on its
+   curve, with a dot in its shade),
    from the same blue ramp the Distribution view colours a nanowell's cell count with — never a well's colour —
    control dotted, treatment solid, the control cutoff dashed, on a fold-change axis marked 2×, 4×, 8×. Rare
    responders show as the treatment curve stopping short of the top only at its right; a general shift shows as
@@ -11263,10 +11273,10 @@ Statistics view; the view's report covers the analysis itself.
 | Label | Where it appears | Meaning |
 | --- | --- | --- |
 | **Rare responders (vs control, wells as units)** | Statistics view, **Test** | The test this section describes |
-| **vs** | Statistics view band | The control group every other group is tested against |
+| **Control** (*vs*) | Statistics view band | The control group every other group is tested against; captioned Control for this test |
 | **Timepoint** / **Baseline** | Page band | The two counts whose ratio is the fold change |
 | **FC**, count fold change | Report, ECDF axis | Nt / N0: count at the Timepoint over count at the Baseline |
-| **1 cell at start, 2 cells…** (N0 = 1, 2, 3, ≥4) | First panel's key, report | Loading strata: nanowells compared only with nanowells of the same starting count |
+| **1 cell at start, 2 cells…** (N0 = 1, 2, 3, ≥4) | First panel's line labels, report | Loading strata: nanowells compared only with nanowells of the same starting count |
 | **Control cutoff** (T, threshold) | Headline, first panel (dashed), report | The control's 99th percentile of FC within a stratum (its top 1%) |
 | **Exceedance test**, k / n | Second panel's counts, report | Nanowells past the cutoff, out of those kept; the test that decides the verdict |
 | **OR** | Report, Test A | Odds ratio of exceeding T, treatment over control |

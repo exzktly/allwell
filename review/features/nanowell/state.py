@@ -50,8 +50,9 @@ METRIC_KEYS = ("n", "c", "brightness", "signal", "count_fc", "log2_count_fc", "c
 #: dozen rows of crops is already small on a laptop screen.
 EXTREMES_DEFAULT_N, EXTREMES_MAX_N = 5, 12
 
-#: What the pop-out shows: the selected nanowell, or the nanowells inside the Distribution window.
-POPOUT_SOURCES = ("selected", "window")
+#: What the pop-out shows: the selected nanowell, the nanowells inside the Distribution window, or the nanowells the
+#: Statistics view's rare-responder tests flagged (``_rare_controller``).
+POPOUT_SOURCES = ("selected", "window", "responders")
 #: How the pop-out lays out the window's nanowells: rows of crops over time, or the hex composite.
 POPOUT_LAYOUTS = ("rows", "hex")
 
@@ -296,6 +297,10 @@ class NanowellState:
     #: The Extremes view's crop panels on screen, ``{axes: (well, q, r)}``: a click on a row selects its nanowell.
     extreme_axes: dict = field(default_factory=dict)
     window_page: int = 0                    # the pop-out's page of the window's nanowells; 0 when the window changes
+    #: The rare-responder results computed on a worker, ``_rare_controller.result_key -> RareResult`` (or the
+    #: sentence a failed run left), and the flagged nanowells of the one drawn last, as the pop-out pages them.
+    rare_results: dict = field(default_factory=dict)
+    rare_flagged: list = field(default_factory=list)
     window_press: object = None             # (axes, x px, y px) of a press on the Distribution figure
     window_model: object = None             # the DistributionModel last drawn, which windows are read against
     popout_hits: dict = field(default_factory=dict)   # the pop-out's crop axes -> (well, q, r), for a click
@@ -391,6 +396,7 @@ class NanowellState:
         self.crops, self.montages, self.fetching, self.fetch_bridges = CropCache(), {}, set(), []
         self.window_crops = TimepointCropCache()
         self.popout_crops = {}
+        self.rare_results, self.rare_flagged = {}, []
         self.region = self.region_for = self.press = self.drawn = self.array_goto = None
         self.anchor_mode, self.array_message = False, ""
         self.extreme_axes = {}

@@ -317,7 +317,10 @@ def page_size(st) -> int:
 
 
 def page_count(st) -> int:
-    """How many pages the window's nanowells make in the layout shown (1 with none)."""
+    """How many pages the window's nanowells — or the rare-responder tests' flagged ones — make in the layout shown
+    (1 with none)."""
+    if st.popout_source == "responders":
+        return _nwc().rc.page_count(st)
     result = current(st)[1]
     return max(1, -(-len(result.rows) // page_size(st))) if result is not None else 1
 

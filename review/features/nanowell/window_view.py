@@ -141,7 +141,8 @@ def build_window_strip(ctx, parent) -> QWidget:
     return strip
 
 
-_SOURCE_TIP = "What the pop-out shows: the selected nanowell over time, or the nanowells inside the Distribution window."
+_SOURCE_TIP = ("What the pop-out shows: the selected nanowell over time, the nanowells inside the Distribution window, "
+               "or the nanowells the Statistics view's Rare responders test flagged, for review by eye.")
 _LAYOUT_TIP = ("How the window's nanowells are laid out: one row of crops over time for each (Rows), or all at once "
                "as an artificial hex array, a patch for each source well, once per timepoint chosen in Timepoints, side by "
                "side (Hex).")
@@ -167,6 +168,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     source = QComboBox(window)
     source.addItem("This nanowell", "selected")
     source.addItem("Window", "window")
+    source.addItem("Flagged (rare responders)", "responders")
     source.setToolTip(_SOURCE_TIP)
     layout = QComboBox(window)
     for key in POPOUT_LAYOUTS:
@@ -214,10 +216,13 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         if st is None:
             return
         in_window = st.popout_source == "window"
+        many = in_window or st.popout_source == "responders"     # rows of many nanowells, paged
         result = wnc.current(st)[1]
         blocked = [w.blockSignals(True) for w in (source, layout, colour, sort, order, corner)]
         try:
             source.setItemText(1, f"Window ({len(result.rows):,})" if result is not None and result.rows else "Window")
+            source.setItemText(2, f"Flagged ({len(st.rare_flagged):,})" if st.rare_flagged
+                               else "Flagged (rare responders)")
             source.setCurrentIndex(source.findData(st.popout_source))
             layout.setCurrentIndex(layout.findData(st.popout_layout))
             for widget in (layout_group, layout_caption, layout):   # a layout for the window's nanowells: none for one
@@ -237,13 +242,13 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         pages = wnc.page_count(st)
         page.setText(f"Page {st.window_page + 1} of {pages}")
         for widget in pager:
-            widget.setVisible(in_window and pages > 1)
+            widget.setVisible(many and pages > 1)
         zoom = ctx.widgets.get_or_none("_nw_popout_zoom_refresh")
         if callable(zoom):
             zoom()
         go_to = ctx.widgets.get_or_none("_nw_popout_go_to_btn")
         if go_to is not None:
-            go_to.setVisible(not in_window)              # one nanowell's button: no meaning over the window's many
+            go_to.setVisible(not many)                   # one nanowell's button: no meaning over many
 
     source.currentIndexChanged.connect(lambda _i: wnc.set_popout_source(ctx, source.currentData()))
     layout.currentIndexChanged.connect(lambda _i: wnc.set_popout_layout(ctx, layout.currentData()))

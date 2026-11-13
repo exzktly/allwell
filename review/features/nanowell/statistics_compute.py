@@ -60,6 +60,10 @@ TESTS: tuple[dict, ...] = (
     {"key": "ks", "label": "Kolmogorov-Smirnov (distributions)", "kind": "pairwise", "parametric": False,
      "stat": "D"},
     {"key": "dunnett", "label": "Dunnett (vs control)", "kind": "dunnett", "parametric": True, "stat": "t"},
+    # Not a comparison of samples: each group against the control group, wells as the units, by the calibrated
+    # exceedance, Higher Criticism and upper-tail Anderson-Darling tests (``_rare_controller``, ``rare_*_compute``).
+    {"key": "rare", "label": "Rare responders (vs control, wells as units)", "kind": "rare", "parametric": False,
+     "stat": "HC"},
 )
 TEST_KEYS = tuple(t["key"] for t in TESTS)
 
@@ -301,6 +305,10 @@ def compare(samples: list, test_key: str, *, control: str = "", unit: str = NANO
     test = test_spec(test_key)
     control = control if any(s.name == control for s in samples) else ""
     result = StatisticsResult(unit, test, label, timepoint, list(samples), control=control, statistic=statistic)
+    if test["kind"] == "rare":
+        # The page draws this test through ``_rare_controller``, never through a comparison of samples.
+        result.undefined = "The rare-responder tests compare groups of wells, not these samples."
+        return result
     if len(samples) < 2:
         what = "wells" if unit == NANOWELLS else "groups"
         result.undefined = (f"A test compares two or more {what}; the figure draws {len(samples)}. "

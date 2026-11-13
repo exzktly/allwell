@@ -319,7 +319,7 @@ def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: 
     out["qc_state"] = np.where(np.isin(state, ["measured", "empty"]), "", state)
     for column, flag in SITE_QC_FLAGS.items():
         if column in final.columns:
-            out[flag] = final[column].fillna(False).astype(bool).to_numpy()
+            out[flag] = final[column].eq(True).to_numpy()            # NA is not a flag
     if "identity_ok" in final.columns:
         out["qc_identity"] = (final["identity_ok"] != True).to_numpy()  # noqa: E712 — NA is not a pass
     out["crop_path"] = ([crop_path(w, int(q), int(r)) for w, q, r in zip(final["well"], final["nw_q"], final["nw_r"])]

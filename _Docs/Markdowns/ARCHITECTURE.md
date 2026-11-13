@@ -14405,7 +14405,10 @@ editor, `SubsetEditor`, is a panel the page places under the band — never a di
 condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply* (each line a `FlowLayout` that wraps rather
 than cutting its words and controls at a phone's width, each condition's × kept at its right edge, and its field,
 timepoint and gate combos making room for twelve characters rather than their longest entry; the whole panel sits in
-`_EditorScroll`, which takes as much of its page's height as it needs up to `_ROWS_SHARE` and scrolls past it, and
+`_EditorScroll`, which takes as much of its page's height as it needs up to `_ROWS_SHARE` and scrolls past it (it
+re-asks when its content or page changes size through `_GrowWatch`, a separate watcher that checks each object
+alive with `shiboken6.isValid` — the area itself overrides no `eventFilter`, since a Python filter on its own
+tree was reached during teardown and crashed Windows with an access violation), and
 `share_page` lets the editor take the figure's place while it is open on a page too short for both — a phone held
 sideways, where the figure and its footer alone fill the page — decided by the page's height, not by phone layout,
 with the figure redrawn when Close brings it back; opening it closes the ⚙ Controls sheet,

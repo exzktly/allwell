@@ -81,14 +81,22 @@ def drawn_timepoint(metrics: pd.DataFrame, groups: dict, timepoint: str) -> str:
     return str(rows.sort_values(order, kind="stable")["timepoint"].iloc[-1])
 
 
-def why_not(groups: dict, control: str, metrics: pd.DataFrame, timepoint: str) -> str:
-    """The sentence the figure says instead of a result, or ``""`` when the tests can run."""
+def why_not(groups: dict, control: str, metrics: pd.DataFrame, timepoint: str, hidden: dict | None = None) -> str:
+    """The sentence the figure says instead of a result, or ``""`` when the tests can run. *hidden* is the groups
+    hidden on the plate (``controller.hidden_groups``): a control or treatment the plate hides is named, with how to
+    show it again — a click on a group's well toggles the group, so choosing a group by clicking it can hide it."""
+    hidden = hidden or {}
     if not control:
         return NO_CONTROL
     if control not in groups:
+        if control in hidden:
+            return (f"The control group {control} is hidden on the plate, so there is nothing to test against. "
+                    + _nwc().hidden_sentence({control: hidden[control]}))
         return (f"{control} is not one of the groups drawn: choose a group under vs (the Rare responders test compares "
                 "groups, not single wells' nanowells).")
     if not any(name != control for name in groups):
+        if hidden:
+            return "Only the control group is drawn. " + _nwc().hidden_sentence(hidden)
         return "Only the control group is drawn: select a treatment group too, or define replicate sets."
     at = metrics[metrics["timepoint"] == timepoint]
     if len(at) and (at["baseline_timepoint"] == timepoint).all():
@@ -97,11 +105,12 @@ def why_not(groups: dict, control: str, metrics: pd.DataFrame, timepoint: str) -
 
 
 def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: str = "", store: dict | None,
-            request, moving_on: bool = False, cohort: bool = False, unit_set: bool = False) -> RareResult | None:
+            request, moving_on: bool = False, cohort: bool = False, unit_set: bool = False,
+            hidden: dict | None = None) -> RareResult | None:
     """Draw the Rare responders test into *fig*: its result when *store* holds it, else a sentence while *request*
     (``request(key, job)``) has it computed, or one saying why it cannot run. Returns the result drawn, or ``None``."""
     timepoint = drawn_timepoint(metrics, groups, timepoint)
-    reason = why_not(groups, control, metrics, timepoint)
+    reason = why_not(groups, control, metrics, timepoint, hidden)
     if reason:
         render_message(fig, reason, gid="nw-rare-why")
         return None

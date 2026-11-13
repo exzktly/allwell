@@ -14542,7 +14542,9 @@ timepoints a view offers and the one it draws — the Array view offers its well
 the first, Position and *Along x: Wells* offer every timepoint and start at the latest (U13) — so the combo,
 the slider and the figure always agree. `page_well` is the chosen well when it is drawn, else the first drawn
 well. Wells are what `data_loading.plot_group_well_lists(ctx, fallback_to_all=False)` says every plotting tab
-draws — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
+draws — with replicate sets defined, only the shown sets and the solo wells toggled on, and nothing at all when
+every set is hidden (it does not fall back to `selected_wells`, which a Saved selection load or the plate before
+the sets existed leaves behind) — — so a group-by variable, hidden sets and the solo-well toggles mean the same here as elsewhere — never
 every loaded well as a fallback, grouped by `replicate_groups` over those wells only. **Groups and wells are named as
 every plot tab names them.** `replicate_groups` keys each group by its display name through `named_groups` — a set by
 `selections_model.replicate_display_label`, a solo set or lone well by its label — because the key is what the ticks,
@@ -14665,8 +14667,16 @@ nothing stale meanwhile. Batch Export's Nanowells mode reuses the page's tables 
 well that has a table, and otherwise reads exactly the exported wells (`NanowellBatchExportPanel._load`). The page's saved choices are loaded once per dataset, on the dataset load and on first
 activation (`_load_config`), so one dataset's choices never carry into another. `nanowell_empty_reason`
 names each state: no dataset, tables unreadable (with the refused scheme version), reading, no nanowell
-tables, no usable well, the selected wells' tables unusable, and no nanowell wells selected (listing
-`available`, the wells that have tables). A click on the
+tables, no usable well, the selected wells' tables unusable, every group hidden on the plate, and no nanowell
+wells selected (listing `available`, the wells that have tables). **A hidden group is named, never left as a
+blank page.** In replicate mode a click on a group's well toggles the whole group, so clicking the control's and
+the treatment's wells to "choose" them hides both. `controller.hidden_groups` names the sets (or a variable's
+values) hidden on the plate that hold a drawable well, keyed as `page_groups` keys a group, and `hidden_sentence`
+says which wells bring each back. The empty state uses it when every group is hidden; the Rare responders test's
+`why_not` when its control is hidden ("The control group ctrl is hidden on the plate…") or only the control is
+drawn; and the sample tests' report (`controller.control_not_drawn`) when the well or group chosen under *vs* is
+not among the samples, so every pair was compared instead — which `statistics_compute.compare` does silently.
+*vs* keeps its choice (`NanowellState.control`) while its group is hidden, so showing it again restores the test. A click on the
 figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to six, read from matplotlib's
 `event.modifiers`); empty space clears; the plate selection is never touched.
 

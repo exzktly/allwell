@@ -309,6 +309,30 @@ def page_groups(ctx) -> dict:
     return replicate_groups(ctx, have) if have else {}
 
 
+def hidden_groups(ctx) -> dict:
+    """``group name -> wells`` for the groups hidden on the plate that hold a well this page could draw: the
+    replicate sets (or a variable's values) the user switched off, named as :func:`page_groups` names a group, so a
+    sentence can say which group the page is missing and which wells bring it back. A click on a group's well in
+    the plate toggles it, so a click meant to choose a group can hide it; the page says so rather than going blank."""
+    from review.domain.plot_members import plot_replicate_sets, plot_replicate_sets_loaded
+
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return {}
+    usable = set(st.data.available) - set(st.excluded_wells)
+    shown = {tuple(r.wells) for r in plot_replicate_sets(ctx) or []}
+    sets = [(r, [w for w in r.wells if w in usable]) for r in plot_replicate_sets_loaded(ctx) or []
+            if tuple(r.wells) not in shown]
+    return named_groups(ctx, [(r, members) for r, members in sets if members], [])
+
+
+def hidden_sentence(hidden: dict) -> str:
+    """How to bring back the *hidden* groups (:func:`hidden_groups`), each named with its wells."""
+    named = "; ".join(f"{name} ({', '.join(wells)})" for name, wells in hidden.items())
+    return (f"Hidden on the plate: {named}. A click on a well of a group toggles the whole group: click one of its "
+            "wells to show it again, or All under the plate to show every group.")
+
+
 def excluded_note(ctx) -> str:
     """The sentence every figure on the page carries while wells are excluded from it: which, and where to bring
     them back — a figure drawn short of a selected well says so (CLAUDE.md §7)."""
@@ -404,6 +428,10 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         if chosen:
             return _empty("None of the selected wells' nanowell tables could be used.",
                           " ".join(st.data.problems))
+        hidden = hidden_groups(ctx)
+        if hidden:
+            return _empty("Every group is hidden on the plate." if len(hidden) > 1 else "The group is hidden on the plate.",
+                          hidden_sentence(hidden))
         return _empty("No nanowell wells selected.",
                       "Click wells with nanowell tables on the plate at the left: "
                       + ", ".join(available[:12]) + ("…" if len(available) > 12 else "") + ".")
@@ -785,7 +813,7 @@ def _redraw(ctx) -> None:
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=page_subset(ctx, st), subset_label=page_subset_label(st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
-        rare=rc.hook(ctx, st), gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
+        rare=rc.hook(ctx, st), hidden=hidden_groups(ctx), gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
         dist_style=st.dist_style, violin_smooth=st.violin_smooth, hist_bins=st.hist_bins,
         hist_log=_y_log_drawn(ctx, fig), footer_out=True, **array)
@@ -1072,7 +1100,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
                   baseline_moving: int = 0, moving_centred: bool = False, layers: ArrayLayers | None = None, image=None, image_note: str = "",
                   region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
                   stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-                  stats_cache: dict | None = None, rare: dict | None = None, gate=None,
+                  stats_cache: dict | None = None, rare: dict | None = None, hidden: dict | None = None, gate=None,
                   decoration: Decoration | None = None, names: dict | None = None,
                   swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
                   violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False) -> tuple[object, object]:
@@ -1145,7 +1173,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
             fig, metrics, data, groups=groups, metric=metric, channel=channel, timepoint=timepoint, control=control,
             baseline=baseline, cohort=cohort, moving=moving, baseline_moving=baseline_moving,
             moving_centred=moving_centred, sizes=sizes, names=names, tableless=tableless, note=note,
-            stats_unit=stats_unit, stats_test=stats_test, stats_cache=stats_cache, rare=rare)
+            stats_unit=stats_unit, stats_test=stats_test, stats_cache=stats_cache, rare=rare, hidden=hidden)
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
@@ -1172,15 +1200,18 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
 
 def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channel, timepoint: str, control: str,
                         baseline: str, cohort: bool, moving: int, baseline_moving: int, moving_centred: bool, sizes,
-                        names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare):
+                        names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare,
+                        hidden: dict | None = None):
     """The Statistics view: the samples compared by *stats_test* — or, for the Rare responders test, the groups
     against the control group by the rare-responder analysis (``_rare_controller.compose``, *rare* carrying the
-    page's store of results and its worker request). Returns the result drawn."""
+    page's store of results and its worker request). Returns the result drawn. *hidden* is the groups hidden on the
+    plate (:func:`hidden_groups`): a control chosen under *vs* that is not drawn is named, with how to show it again,
+    rather than the test silently comparing every pair."""
     if tableless:
         note = " ".join(filter(None, [f"Selected without a nanowell table, so not compared: "
                                       f"{', '.join(tableless)}.", note]))
     if sc.test_spec(stats_test)["kind"] == "rare":
-        return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note,
+        return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note, hidden=hidden,
                           moving_on=mvc.is_on(moving), cohort=cohort, unit_set=stats_unit != sc.WELLS,
                           **(rare or {"store": None, "request": None}))
     # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
@@ -1190,8 +1221,20 @@ def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channe
                                baseline_moving=baseline_moving, moving_centred=moving_centred, sizes=sizes)
     model.well_names = dict(names)
     result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control, cache=stats_cache)
-    render_statistics(fig, result, note=note)
+    render_statistics(fig, result, note=" ".join(filter(None, [control_not_drawn(result, control, hidden), note])))
     return result
+
+
+def control_not_drawn(result, control: str, hidden: dict | None) -> str:
+    """The sentence a Statistics result carries when the *control* chosen under *vs* is not among its samples, so
+    every pair was compared instead — naming where it went when it is hidden on the plate; ``""`` otherwise."""
+    if not control or result.control == control or result.undefined:
+        return ""
+    where = next((name for name, wells in (hidden or {}).items() if control == name or control in wells), "")
+    if where:
+        return (f"vs {control} is not drawn: {'it is' if where == control else f'its group {where} is'} hidden on the "
+                f"plate, so every pair is compared instead. {hidden_sentence({where: hidden[where]})}")
+    return f"vs {control} is not drawn, so every pair is compared instead: select it, or choose another under vs."
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels, centred=False) -> str:

@@ -120,3 +120,81 @@ def test_switching_back_to_a_sample_test_draws_the_samples_again(page, qtbot):
     assert not _texts(page, "nw-rare-line") and _texts(page, sc.GID_HEADER)
     assert st.rare_flagged == [] and st.rare_footer is None
     assert not page.widgets.get("_nw_details_btn").isVisibleTo(page.window)
+
+
+@pytest.fixture
+def grouped_page(qtbot, tmp_path):
+    """The same plate with two real replicate sets, ``ctrl`` and ``drug``, whose hidden flags the plate's clicks toggle
+    — not a stubbed ``plot_replicate_sets``, so hiding one goes through the rule every tab draws by."""
+    ctx = _page(qtbot, _write_nanowell_dataset(tmp_path, counts=_plate()))
+    ctx.state.selection.selections = [
+        {"id": "s1", "name": "ctrl", "wells": ["A01", "A02", "A03"], "hidden": False},
+        {"id": "s2", "name": "drug", "wells": ["B01", "B02"], "hidden": False}]
+    ctx.state.selection.active_solo_wells = set()
+    ctx.state.selection.selected_wells = {"A01", "A02", "A03", "B01", "B02"}
+    return ctx
+
+
+def _hide(ctx, name, hidden=True):
+    from review.features.nanowell import controller as nwc
+
+    next(s for s in ctx.state.selection.selections if s["name"] == name)["hidden"] = hidden
+    nwc.selection_changed(ctx)
+
+
+def test_a_control_hidden_on_the_plate_is_named_with_how_to_show_it_again(grouped_page, qtbot):
+    """The reported defect: with vs set to the control, clicking the control's and the treatment's wells on the plate
+    (which toggles each group off) left the page blank — the figure said the control "is not one of the groups
+    drawn", and then the page said no wells were selected, although they all were. Each state now says which group
+    the plate hides and how to bring it back, and showing the control again runs the test against it."""
+    from review.features.nanowell import controller as nwc
+
+    page = grouped_page
+    st = _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
+
+    _hide(page, "ctrl")
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-why")), timeout=10000)
+    assert _texts(page, "nw-rare-why") == [
+        "The control group ctrl is hidden on the plate, so there is nothing to test against. Hidden on the plate: "
+        "ctrl (A01, A02, A03). A click on a well of a group toggles the whole group: click one of its wells to show "
+        "it again, or All under the plate to show every group."]
+
+    _hide(page, "drug")
+    reason = nwc.nanowell_empty_reason(page)
+    assert reason is not None and reason.title == "Every group is hidden on the plate."
+    assert "ctrl (A01, A02, A03); drug (B01, B02)" in reason.hint
+
+    _hide(page, "drug", False)
+    _hide(page, "ctrl", False)
+    assert nwc.nanowell_empty_reason(page) is None
+    assert st.control == "ctrl"                          # the choice under vs survives the group being hidden
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
+    assert "drug: 2 vs 3 control wells" in " ".join(_texts(page, "nw-rare-line"))
+
+
+def test_only_the_control_drawn_names_the_hidden_treatment(grouped_page, qtbot):
+    page = grouped_page
+    _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    _hide(page, "drug")
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-why")), timeout=10000)
+    assert _texts(page, "nw-rare-why")[0].startswith("Only the control group is drawn. Hidden on the plate: drug (B01, "
+                                                     "B02).")
+
+
+def test_a_sample_test_whose_vs_well_is_hidden_says_it_compared_every_pair(grouped_page, qtbot):
+    """A t-test with vs set to a well compares each other well against it; once that well's group is hidden it
+    compares every pair instead, and says so rather than printing a report that reads as the one asked for."""
+    page = grouped_page
+    _open(qtbot, page)
+    _choose(page, "_nw_control_cb", "A01")
+    assert not any("vs A01" in t for t in _texts(page, sc.GID_NOTE))
+    _hide(page, "ctrl")
+    qtbot.waitUntil(lambda: any("vs A01" in t for t in _texts(page, sc.GID_NOTE)), timeout=10000)
+    note = " ".join(_texts(page, sc.GID_NOTE))
+    assert ("vs A01 is not drawn: its group ctrl is hidden on the plate, so every pair is compared instead. Hidden on "
+            "the plate: ctrl (A01, A02, A03).") in note

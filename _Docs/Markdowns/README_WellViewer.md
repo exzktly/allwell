@@ -7145,7 +7145,12 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   - an **upper-tail Anderson–Darling** statistic, which reads any excess of mass in the upper tail. Significant on
     its own, it means the shape of the tail differs, not that there are rare responders.
 
-  Choose the control group under **vs**; every other group drawn is tested against it, and p-values are
+  Choose the control group under **vs**, with the control and treatment groups shown on the plate. With replicate
+  sets defined, a click on a well in the plate shows or hides that well's whole group, so a click on a group that is
+  already shown hides it: when the control is hidden the figure says so and names the wells that bring it back, and
+  when every group is hidden the page says that rather than "No nanowell wells selected". **All** under the plate shows
+  every group again; *vs* keeps the control you chose meanwhile. Every other group drawn is tested against the
+  control, and p-values are
   Benjamini-Hochberg corrected across groups. The value is always the **count fold change** (the count at the
   **Timepoint** over the count at the **Baseline**), whatever the Metric shows, and nanowells are compared only
   with nanowells that started with the same number of cells (1, 2, 3, or 4 and more), since a nanowell seeded

@@ -14033,8 +14033,9 @@ of the same well, timepoint and mode (montages arriving, a setting changed) and 
 changes; a Blink frame flip leaves it alone.
 
 **Going to one nanowell, on every view.** The band's *Nanowell* box and **Origin** (`goto_view.build_goto_controls`,
-registered as `_nw_goto_edit` and `_nw_goto_origin_btn`) lead the viewing row on every view, as one scope, except
-QC (`_goto_controller.NO_GOTO_VIEWS`: it draws one row per well, not nanowells), where they are not shown. Enter
+registered as `_nw_goto_edit` and `_nw_goto_origin_btn`) lead the viewing row on every view whose figure draws
+single nanowells, as one scope; `_goto_controller.NO_GOTO_VIEWS` — QC (one row per well), Statistics (a test's
+table) and Position (each ring's summary) — do not show them. Enter
 calls `_goto_controller.go_to_nanowell`. `goto_compute.resolve` reads the text — an address, optionally led by a well
 (`B04 2,-1`, `B04: 2,-1`, `b4/3.7`; a well matched against the page's drawn wells ignoring case and a column's leading
 zeros, so a well not selected on the plate is refused rather than read as an address in the page's well; without one,
@@ -14302,7 +14303,7 @@ composite's `tile_card` passes the same rule), the occupancy
 shown on it; one with a role that the current settings leave unused is greyed.** `tab_view.NO_VALUE_VIEWS` (QC,
 Identity) draw no nanowell's value, so Metric, Channel, Baseline, Rim focus (`grp_rim`) and the Subset
 (`subset_view` `shown_on`, which hides its editor too and brings it back as it was left) are hidden there; the
-Nanowell box is hidden on QC (`refresh_goto_controls`), and so is Group by (`variables_view`), since QC reads every
+Nanowell box is hidden on QC, Statistics and Position (`refresh_goto_controls`, `NO_GOTO_VIEWS`), and Group by on QC (`variables_view`), since QC reads every
 well of the plate ungrouped; `test_nanowell_page_views_ui.py::test_a_control_with_no_role_on_a_view_is_not_shown_there`
 walks every view. Within a view every control that cannot act is greyed with
   its reason after its own tooltip (`tab_view._grey`, `_refresh_array_greying`): Image on Lattice; the image

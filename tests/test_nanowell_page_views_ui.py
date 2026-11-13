@@ -426,4 +426,4 @@ def test_a_control_with_no_role_on_a_view_is_not_shown_there(page, qtbot):
         values = view not in ("identity", "qc")
         assert {name: shown(name) for name in _VALUE_CONTROLS} == {name: values for name in _VALUE_CONTROLS}, view
         assert shown("_nw_subset_editor") == values, view
-        assert shown("_nw_goto_edit") == (view != "qc"), view
+        assert shown("_nw_goto_edit") == (view not in ("qc", "statistics", "position")), view

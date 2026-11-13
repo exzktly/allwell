@@ -7107,7 +7107,8 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   latest by default), modelled on the Statistics tab. It compares exactly the dots the Distribution view draws
   *Along x: Wells*: the **Baseline**, **Subset**, **Fixed cohort**, **Moving average** and excluded wells all apply
   (the report states the cohort and the window when they are on), and every nanowell
-  left out is counted under its sample. **Compare** chooses what one value is:
+  left out is counted under its sample. The report's first line names the timepoint by its label and its hours
+  (*at t_a · 5 h*), so it can be matched to the Timepoint menu, which lists the hours. **Compare** chooses what one value is:
   - *Wells (nanowells as values)* — each well is a sample and its nanowells are the values. This says whether
     these wells' distributions differ. It says nothing about the conditions behind them, because the nanowells
     of one well share its medium and handling and are not independent replicates; the figure says so whenever
@@ -11153,14 +11154,15 @@ group under **vs**. The tests run in the background; the figure says so until th
 then gets one row of three panels (up to three groups, and as many as the window's height fits; the report covers
 all of them), and under the panels two lines per group: the verdict, then each test's p and q:
 
-1. **ECDF by N0** — one colour per loading stratum (named in its key), control dotted, treatment solid, the
+1. **ECDF by N0** — one shade per loading stratum (named in its key), from the same blue ramp the Distribution
+   view colours a nanowell's cell count with — never a well's colour — control dotted, treatment solid, the
    stratum's threshold T dashed, on a log₂ fold-change axis. Rare responders show as the treatment curve peeling away *below* the
    control curve only at its top right; a general shift shows as the whole curve displaced.
 2. **Exceedance per well over the control null** — every well's share of nanowells above T. Control wells (each
    scored leave-one-out) are grey dots; the shaded band spans them and the dotted line is their mean. Treatment
-   wells are coloured and labelled with their per-well empirical p. A treatment well above the band is unusual
+   wells are drawn in their colour on the plate and labelled with their per-well empirical p. A treatment well above the band is unusual
    for this plate.
-3. **Higher Criticism** — the HC curve against i/n for each well, control wells grey, treatment wells coloured
+3. **Higher Criticism** — the HC curve against i/n for each well, control wells grey, treatment wells in their plate colours
    with a dot at **i\***. A treatment curve that rises well above the grey bundle near the left edge is a sparse
    excess.
 

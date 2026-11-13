@@ -85,7 +85,7 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     details = page.widgets.get("_nw_details_body").text()
     assert "drug (all): 2 treatment vs 3 control wells" in details
     assert "anti-conservative" in details and "uncalibrated" in details
-    assert f"{rc.VALUE_NOTE} Timepoint: t_a." in details and rc.UNIT_IGNORED in details
+    assert f"{rc.VALUE_NOTE} Timepoint: t_a · 5 h." in details      # its hours, as the Timepoint control names it and rc.UNIT_IGNORED in details
     # The flagged nanowells are exactly the spiked ones of the treatment wells, highest fold change first.
     flagged = {row["site"] for row in st.rare_flagged}
     assert {(w, q, 0) for w in ("B01", "B02") for q in RESPONDERS} <= flagged

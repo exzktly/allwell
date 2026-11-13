@@ -28,7 +28,8 @@ import pandas as pd
 from review.features.nanowell import background_compute, moving_compute, size_class_compute
 from review.features.nanowell.decorate_compute import Decoration, band_spans, order_groups, sub_band_spans
 from review.features.nanowell.series_compute import NO_BASELINE_TIMEPOINT, exclusion_reason
-from review.features.nanowell.summary_compute import LOG_METRICS, group_summary, well_statistic, well_summary
+from review.features.nanowell.summary_compute import (LOG_METRICS, group_summary, names_its_hours, timepoint_phrase,
+                                                       well_statistic, well_summary)
 
 TIME, WELLS = "time", "wells"
 
@@ -209,6 +210,7 @@ class DistributionModel:
     integer: bool
     panels: list
     timepoint: str = ""
+    timepoint_h: float = math.nan                      # *timepoint*'s hours, NaN when unknown or not one timepoint
     control: str = ""
     baseline: str = "earliest"
     notes: list = field(default_factory=list)          # sentences printed in the footer: how to read the figure
@@ -461,13 +463,6 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
         model.panels.append(panel)
 
 
-def names_its_hours(timepoint: str, hours: float) -> bool:
-    """Whether the label *timepoint* is just its own time in hours (``24 h``, ``24h``, ``24``), so writing the hours
-    beside it would say the same thing twice. An exact match: a substring test left the hours out of ``T12`` at 2 h,
-    whose name merely contains a 2."""
-    return timepoint in (f"{hours:g} h", f"{hours:g}h", f"{hours:g}")
-
-
 def _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels) -> None:
     tps = _order(frame)
     if model.metric not in PER_NANOWELL:
@@ -476,8 +471,8 @@ def _wells_panel(model, frame, column, reasons, groups, timepoint, control, chan
         reasons = reasons[frame.index]
     model.timepoint = timepoint if model.metric not in PER_NANOWELL else ""
     at = _hours(frame, timepoint) if model.timepoint else math.nan
-    panel = Panel(title=((f"At {timepoint}" + (f" · {at:g} h" if math.isfinite(at) and not names_its_hours(timepoint, at)
-                                                 else "")) if model.timepoint else "One value per nanowell"),
+    model.timepoint_h = at
+    panel = Panel(title=f"At {timepoint_phrase(timepoint, at)}" if model.timepoint else "One value per nanowell",
                   swarms=[], ticks=[])
     summary = (well_summary(frame, column, channels, reasons=reasons, responding_above=model.responding_above)
                if len(frame) else pd.DataFrame(columns=["well", "timepoint", "median", "n_used", "excluded", "time_h",

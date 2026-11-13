@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from review.features.nanowell.summary_compute import well_value
+from review.features.nanowell.summary_compute import timepoint_phrase, well_value
 from review.domain.stats_tests import (
     BOOTSTRAP_RESAMPLES, EffectSize, Omnibus, dunnett_vs_control, effect_size, omnibus,
 )
@@ -178,6 +178,7 @@ class StatisticsResult:
     notes: list = field(default_factory=list)
     #: How a well's nanowells became its value in a *Groups* comparison (``summary_compute.well_statistic``).
     statistic: str = "median"
+    timepoint_h: float = math.nan                      # *timepoint*'s hours, written beside it in the report
 
     @property
     def family(self) -> str:
@@ -299,12 +300,13 @@ def _pairs(samples: list, control: str) -> list[tuple]:
 
 
 def compare(samples: list, test_key: str, *, control: str = "", unit: str = NANOWELLS, label: str = "",
-            timepoint: str = "", statistic: str = "median") -> StatisticsResult:
+            timepoint: str = "", statistic: str = "median", timepoint_h: float = math.nan) -> StatisticsResult:
     """Run *test_key* over *samples*: the omnibus (three or more samples), then the comparisons of the family —
     every pair, or each against *control* when one is named (Dunnett always needs one)."""
     test = test_spec(test_key)
     control = control if any(s.name == control for s in samples) else ""
-    result = StatisticsResult(unit, test, label, timepoint, list(samples), control=control, statistic=statistic)
+    result = StatisticsResult(unit, test, label, timepoint, list(samples), control=control, statistic=statistic,
+                              timepoint_h=timepoint_h)
     if test["kind"] == "rare":
         # The page draws this test through ``_rare_controller``, never through a comparison of samples.
         result.undefined = "The rare-responder tests compare groups of wells, not these samples."
@@ -461,7 +463,8 @@ def report_lines(result: StatisticsResult) -> list[tuple[str, str]]:
     line per sample, one per comparison, and the notes."""
     from review.domain.significance import p_phrase, significance_stars
 
-    at = f" · at {result.timepoint}" if result.timepoint else " · one value per nanowell"
+    at = (f" · at {timepoint_phrase(result.timepoint, result.timepoint_h)}" if result.timepoint
+          else " · one value per nanowell")
     lines = [(GID_HEADER, f"{result.test['label']} · {result.label}{at}"),
              (GID_HEADER, unit_sentence(result.unit, result.statistic))]
     if result.undefined:

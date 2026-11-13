@@ -13505,7 +13505,7 @@ leaves any of them out.
 Every text and line is in the plot's ink and tagged `follows_theme`; the dots take `occupancy_ramp` from
 `Colors` or `CPub` by the figure's ground (U7), class 0 hollow, and carry both through
 `widgets.plot_card.theme_paired_colours`, the hook `PlotCard.setPlotTheme` uses to repaint a paired data
-palette — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowell's series (one at a time: `controller._select` replaces the
+palette (on a collection its faces and edges; on a `Line2D`, on the axes or in its legend, its one colour) — so a capture, which flips the theme without a redraw, puts the publication shades on white. `render_site_detail` draws the selected nanowell's series (one at a time: `controller._select` replaces the
 selection on every click, whatever keys are held, and `NanowellState.apply_config` keeps only the last of a saved
 list)
 against recorded time, a timepoint without a number as a gap and a hatched band, with each timepoint's state
@@ -13863,7 +13863,12 @@ and is printed as that reason. The effect-size bootstrap is scaled down for samp
 and exclusions by reason, the notes it carries, the unit, test, control, column, label and timepoint — so a redraw
 that changes none of them — a theme flip, a resize — does not rerun the tests, and a change that moves only what
 the report says (the cohort ticked over nanowells that all have a value) is not answered from the cache. `statistics_compute.report_lines` writes
-the report as `(gid, text)` lines (`nw-stats-header`, `-omnibus`, `-sample`, `-pair`, `-note`); the renderer wraps
+the report as `(gid, text)` lines (`nw-stats-header`, `-omnibus`, `-sample`, `-pair`, `-note`). The header names
+the timepoint through `summary_compute.timepoint_phrase` — its label with its hours beside it (`at t_a · 5 h`,
+`StatisticsResult.timepoint_h` from `DistributionModel.timepoint_h`), the label alone when the time is unknown or
+the label is the hours (`names_its_hours`) — because the band's Timepoint control names a timepoint by its hours
+alone, and a report naming only the label read as a different timepoint from the one chosen. The Distribution
+panel's title and the Rare responders notes (`_rare_controller.timepoint_hours`) use the same phrase. The renderer wraps
 them to the figure's width, shrinks the type to at least `REPORT_MIN_PT` before leaving a line out (and counts any
 left out), and draws above them a box and dots per sample with its mean (with its 95% interval on groups), or each
 sample's cumulative curve on a Kolmogorov-Smirnov run, with a bracket and stars over each comparison whose quoted p
@@ -13919,11 +13924,22 @@ by `analyse` on a worker through `controller._fetch` (kind `rare_results`; a fai
 the figure saying so meanwhile; `_rare_render.render_rare_page` draws a row of ECDF / exceedance / HC per treatment
 over two lines per treatment (`rare_export_compute.verdict_lines`: the verdict, each test's p and q). It lays the
 figure out in inches, panels first: each row gets at least `ROW_MIN_IN`, as many treatments are drawn as fit (at
-most `MAX_UNIT_ROWS`, the rest named), and the text takes only what the rows leave, lines past it counted. The full
+most `MAX_UNIT_ROWS`, the rest named), and the text takes only what the rows leave, lines past it counted. A figure
+narrower than `STACK_BELOW_IN` (a phone's, about 4 in) stacks each treatment's three panels in one column, each at
+least `STACKED_ROW_MIN_IN` tall: side by side there each panel was about an inch across and its labels ran into its
+neighbours'. The exceedance panel raises its top by the height of a dot's p label in points (`_headroom`), so a dot
+at the top of a short panel keeps its label inside the axes rather than over the title. The full
 `report_lines` report, the result's warnings and the page's notes go to the page's **Details** field instead
 (`rc.footer_of` → `NanowellState.rare_footer`, which `details_view` shows on the Statistics view as it shows the
 Distribution view's footer): drawn into the figure, a long report had squeezed the panels to under an inch.
 The ECDF's x is log₂ FC on a linear axis, because the page's style pass resets an axis's scale after the draw.
+**Colours.** The loading strata are a magnitude, so their curves, thresholds and legend take the page's
+`occupancy_ramp` (`_rare_render._stratum_shades`: the ramp's top shades, which with the default strata are the
+occupancy classes 1, 2 and 3+) in `Colors` or `CPub` by the figure's ground, each line marked with
+`theme_paired_colours` so a capture repaints it; drawn in the well palette's first slots they read as wells A01,
+A02 and A03. Each treatment well, on the exceedance and HC panels, is drawn in its own plate colour
+(`selections_model.color_for_well`), never in the palette by its position among the treated wells, which drew B01
+in A01's colour.
 `rc.after_draw` (called from `_redraw`) keeps the drawn result's flagged nanowells on
 `NanowellState.rare_flagged`, its Details footer, and at most `RESULTS_KEPT` results. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
 `draw_popout` sends to `rc.draw_flagged_popout`: rows of crops over time through `renderer.render_site_rows`,
@@ -23226,6 +23242,14 @@ you're in before you type the command.
   `QT_QPA_PLATFORM="offscreen:configfile=<file>"` with
   `{"screens": [{"name": "phone", "x": 0, "y": 0, "width": 432, "height": 936,
   "logicalDpi": 96, "logicalBaseDpi": 96, "dpr": 1}]}`.
+  **The harness waits without holding the GIL.** `tests/_screens.pump` runs the event
+  loop and then waits through `wait_events`, which runs it in slices with a
+  `time.sleep` between them, rather than through `QTest.qWait`: `qWait` keeps the GIL
+  for its whole call, so a worker thread beside it — the Nanowells page's loads, its
+  Rare responders analysis — ran only once the wait returned, and an analysis of
+  1.9 s took 69–88 s. The app's own event loop (`QApplication.exec`) releases the GIL
+  and has no such cost. `tests/test_screens_wait_frees_workers.py` fails if the wait
+  holds the GIL again.
   The file runs three datasets (`tests/_page_datasets.py`: `mini`, `nanowell`,
   `images`) on those three screens, nine cases, each in a **subprocess of its own**
   (`python -m tests._page_render_case <dataset> <screen> <out.json>`, three at a

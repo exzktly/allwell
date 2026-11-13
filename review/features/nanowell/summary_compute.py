@@ -38,6 +38,22 @@ LOG_METRICS = frozenset({"log2_count_fc"})
 MEAN_METRICS = frozenset(size_class_compute.ALL_COLUMNS)
 
 
+def names_its_hours(timepoint: str, hours: float) -> bool:
+    """Whether the label *timepoint* is just its own time in hours (``24 h``, ``24h``, ``24``), so writing the hours
+    beside it would say the same thing twice. An exact match: a substring test left the hours out of ``T12`` at 2 h,
+    whose name merely contains a 2."""
+    return timepoint in (f"{hours:g} h", f"{hours:g}h", f"{hours:g}")
+
+
+def timepoint_phrase(timepoint: str, hours: float | None) -> str:
+    """*timepoint* as a report names it: its label with its hours beside it (``t_a · 5 h``), since the page's
+    Timepoint control names it by its hours alone and a report naming only the label reads as a different timepoint
+    from the one chosen. The label alone when the time is unknown, or when the label already is the hours."""
+    if hours is None or not math.isfinite(hours) or names_its_hours(timepoint, hours):
+        return timepoint
+    return f"{timepoint} · {hours:g} h"
+
+
 def well_statistic(column: str) -> str:
     """``"mean"`` or ``"median"``: how a well's nanowells are reduced to the well's one value for *column*."""
     return "mean" if column in MEAN_METRICS else "median"

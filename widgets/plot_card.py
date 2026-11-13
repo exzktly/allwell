@@ -125,24 +125,31 @@ def theme_paired_colours(collection, *, screen: tuple, publication: tuple):
     palette that is *defined* as a pair — the same ordered classes, each shade readable on its own ground —
     is the stated exception, and without this a capture (which flips the theme with the redraw suppressed)
     would put the screen shades on publication white. *screen* and *publication* are ``(facecolors,
-    edgecolors)``.
+    edgecolors)`` for a collection, and one colour each for a line (a ``Line2D``, on the axes or in its legend).
     """
     setattr(collection, THEME_PAIR_ATTR, {"screen": screen, "publication": publication})
     return collection
 
 
 def repaint_theme_pairs(ax, mode: str) -> None:
-    """Give every collection on *ax* marked by :func:`theme_paired_colours` its colours for *mode*."""
+    """Give every collection and line on *ax* (its legend's lines included) marked by :func:`theme_paired_colours`
+    its colours for *mode*."""
+    side = "publication" if mode == "publication" else "screen"
     for coll in ax.collections:
         pair = getattr(coll, THEME_PAIR_ATTR, None)
         if pair is None:
             continue
-        faces, edges = pair["publication" if mode == "publication" else "screen"]
+        faces, edges = pair[side]
         try:
             coll.set_facecolors(faces)
             coll.set_edgecolors(edges)
         except Exception:
             swallowed()
+    legend = ax.get_legend()
+    for line in [*ax.lines, *(legend.get_lines() if legend is not None else [])]:
+        pair = getattr(line, THEME_PAIR_ATTR, None)
+        if pair is not None:
+            line.set_color(pair[side])
 
 
 def repaint_theme_ink(host, fg: str, muted: str) -> None:

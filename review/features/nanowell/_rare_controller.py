@@ -35,6 +35,7 @@ from review.features.nanowell.rare_data_compute import RareParams, from_site_met
 from review.features.nanowell.rare_export_compute import report_lines, verdict_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
 from review.features.nanowell.renderer import Footer, render_message, render_site_rows
+from review.features.nanowell.summary_compute import timepoint_phrase
 
 #: Flagged nanowells the pop-out shows to a page, as the Distribution window's rows.
 FLAGGED_PAGE = 24
@@ -120,11 +121,19 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     if isinstance(held, str):
         render_message(fig, held, gid="nw-rare-why")
         return None
-    notes = [f"{VALUE_NOTE} Timepoint: {timepoint}.", *([NOT_APPLIED] if moving_on or cohort else []),
+    notes = [f"{VALUE_NOTE} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.", *([NOT_APPLIED] if moving_on or cohort else []),
              *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
     render_rare_page(fig, held, verdict_lines(held), note=DETAILS_POINTER)
     return held
+
+
+def timepoint_hours(metrics: pd.DataFrame, timepoint: str) -> float:
+    """*timepoint*'s hours as the page's metrics carry them (``time_h``), NaN when they carry none."""
+    if "time_h" not in metrics:
+        return float("nan")
+    hours = pd.to_numeric(metrics.loc[metrics["timepoint"] == timepoint, "time_h"], errors="coerce").dropna()
+    return float(hours.iloc[0]) if len(hours) else float("nan")
 
 
 #: What the figure says under its verdicts: the full report is in the field under it, not in the figure.

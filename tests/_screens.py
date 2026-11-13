@@ -57,13 +57,37 @@ class FakeScreen:
 
 def pump(qapp, n: int = 20, wait_ms: int = 120) -> None:
     """Run the event loop: queued calls, polish, layout, and a short real wait for timers."""
-    from PySide6.QtTest import QTest
+    for _ in range(n):
+        qapp.processEvents()
+    wait_events(qapp, wait_ms)
+    for _ in range(n):
+        qapp.processEvents()
 
-    for _ in range(n):
+
+#: The longest a :func:`wait_events` slice sleeps, in seconds, before it runs the event loop again.
+_WAIT_SLICE_S = 0.005
+
+
+def wait_events(qapp, wait_ms: int) -> None:
+    """Wait *wait_ms* while running the event loop — timers, queued calls and deferred deletes — as
+    ``QTest.qWait`` does, but sleeping in Python between slices so the GIL is free while it waits.
+
+    ``QTest.qWait`` keeps the GIL for the whole wait: a worker thread (the Nanowells page's loads, its
+    Rare responders analysis) got about 0.3% of its time beside it, and an analysis that takes 1.9 s took
+    69–88 s, so a page measured after a wait was measured before its data could arrive. The app's own
+    event loop (``QApplication.exec``) releases the GIL and has no such cost."""
+    import time
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    deadline = time.monotonic() + wait_ms / 1000
+    while True:
         qapp.processEvents()
-    QTest.qWait(wait_ms)
-    for _ in range(n):
-        qapp.processEvents()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(_WAIT_SLICE_S, remaining))
 
 
 def place(window, rect: QRect, qapp) -> None:

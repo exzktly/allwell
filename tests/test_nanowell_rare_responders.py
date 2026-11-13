@@ -430,3 +430,100 @@ def test_the_page_figure_keeps_its_panels_legible_however_long_the_text():
         if len(drawn) < len(res.units):
             assert any("not drawn" in t.get_text() for t in texts), size
         del renderer
+
+
+def _plate_wells(t: pd.DataFrame) -> pd.DataFrame:
+    """*t* with its wells renamed to plate positions: control wells along row A, treatment wells along row B, so
+    each has the colour the plate gives it."""
+    t = t.copy()
+    rows = {"control": "A"}
+    for cond in t["condition"].unique():
+        names = sorted(t.loc[t["condition"] == cond, "well_id"].unique())
+        row = rows.get(cond, "B")
+        t.loc[t["condition"] == cond, "well_id"] = t.loc[t["condition"] == cond, "well_id"].map(
+            {name: f"{row}{i + 1:02d}" for i, name in enumerate(names)})
+    return t
+
+
+def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_plate_does():
+    """The reported defect: the ECDF's strata were drawn in the plate's first well colours, so N0 1 read as A01, and
+    the treatment wells took the first slots too (B01 in A01's colour). Strata are the occupancy ramp — screen
+    shades on screen, publication shades after a capture's repaint, legend included — and each treatment well is
+    its own plate colour."""
+    from matplotlib.colors import to_hex
+    from matplotlib.figure import Figure
+
+    from review.domain.selections_model import color_for_well
+    from review.features.nanowell import _rare_render as rd
+    from review.features.nanowell.renderer import _is_publication
+    from ui.theme import WELL_COLORS_TUPLE, Colors, CPub
+    from widgets.plot_card import repaint_theme_pairs
+
+    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)))
+    unit = res.units[0]
+    strata = rd._strata(unit)
+    assert len(strata) == 4                                    # n0 1…5: strata 1, 2, 3 and 4 and over
+    fig = Figure(figsize=(14.5, 7.0))
+    rd.render_rare_page(fig, res, ["verdict"])
+    ecdf, exceed, hc_ax = [ax for ax in fig.axes if ax.axison][:3]
+
+    def treatment_lines():
+        return {ln.get_gid().split(":", 1)[1]: to_hex(ln.get_color()).upper() for ln in ecdf.lines
+                if (ln.get_gid() or "").startswith("rare-ecdf-treatment:")}
+
+    drawn_on = CPub if _is_publication(ecdf) else Colors       # drawn in the shades of the figure's own ground
+    assert treatment_lines() == {s: drawn_on.occupancy_ramp[i].upper() for i, s in enumerate(strata)}
+    repaint_theme_pairs(ecdf, "screen")
+    assert treatment_lines() == {s: Colors.occupancy_ramp[i].upper() for i, s in enumerate(strata)}
+    assert not set(treatment_lines().values()) & {c.upper() for c in WELL_COLORS_TUPLE}
+    repaint_theme_pairs(ecdf, "publication")
+    assert treatment_lines() == {s: CPub.occupancy_ramp[i].upper() for i, s in enumerate(strata)}
+    legend = [to_hex(ln.get_color()).upper() for ln in ecdf.get_legend().get_lines()]
+    assert legend == [c.upper() for c in CPub.occupancy_ramp]
+    threshold = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-threshold:{strata[0]}")
+    assert to_hex(threshold.get_color()).upper() == CPub.occupancy_ramp[0].upper()
+
+    for well in ("B01", "B02"):
+        key = next(w.key for w in unit.treated if w.key.endswith(well))
+        dot = next(c for c in exceed.collections if c.get_gid() == f"rare-exceed-treated:{key}")
+        assert to_hex(dot.get_facecolors()[0]).upper() == color_for_well(well).upper()
+        curve = next(ln for ln in hc_ax.lines if ln.get_gid() == f"rare-hc-treated:{key}")
+        assert to_hex(curve.get_color()).upper() == color_for_well(well).upper()
+    assert color_for_well("B01").upper() != WELL_COLORS_TUPLE[0].upper()   # the fixture tells right from wrong
+
+
+def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
+    """The reported defect: on a phone (a figure about 4 × 7.3 in) the three panels sat side by side, each about an
+    inch across, their axis labels running into one another. Narrower than STACK_BELOW_IN they stack, every panel the
+    figure's width, none overlapping another or the verdict under them, all inside the figure; wider, they stay in one
+    row. The exceedance panel keeps headroom over its highest dot for that dot's p label."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)))
+    lines = ["drug: 2 vs 3 control wells — supports rare-responder enrichment", "A exceedance: p 0.001"]
+    for size, stacked in (((4.06, 7.32), True), ((14.5, 7.0), False)):
+        fig = Figure(figsize=size)
+        rd.render_rare_page(fig, res, lines, note="a note")
+        panels = [ax for ax in fig.axes if ax.axison]
+        assert len(panels) == 3, size
+        boxes = [ax.get_position() for ax in panels]
+        if stacked:
+            assert len({round(b.x0, 6) for b in boxes}) == 1, size              # one column
+            assert all(b.width * size[0] >= 2.5 for b in boxes), [b.width * size[0] for b in boxes]
+            ordered = sorted(boxes, key=lambda b: -b.y0)
+            assert all(upper.y0 > lower.y1 for upper, lower in zip(ordered, ordered[1:])), size
+            assert min(b.height for b in boxes) * size[1] >= rd.STACKED_ROW_MIN_IN - rd._ROW_PAD_IN - 1e-6
+        else:
+            assert len({round(b.y0, 6) for b in boxes}) == 1, size              # one row
+        assert all(b.y0 >= 0 and b.y1 <= 1 for b in boxes), size
+        texts = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
+        assert max(t.get_position()[1] for t in texts) < min(b.y0 for b in boxes), size
+        renderer = FigureCanvasAgg(fig).get_renderer()
+        exceed = panels[1]
+        box = exceed.get_window_extent(renderer)
+        labels = [t for t in exceed.texts if t.get_text().startswith("p=")]
+        assert labels, size
+        assert all(t.get_window_extent(renderer).y1 <= box.y1 for t in labels), size   # inside, under the title

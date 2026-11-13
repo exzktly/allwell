@@ -1225,13 +1225,14 @@ def statistics_result(model, groups: dict, *, unit: str, test: str, control: str
     value as it was: ticking the cohort over nanowells that all have a value changes the report's note only."""
     samples = sc.samples_from_model(model, groups, unit)
     notes = [n for n in [*model.alerts, *model.notes] if n.startswith(_STATS_NOTES)]
-    key = (unit, test, control, model.column, model.label, model.timepoint, tuple(notes),
+    key = (unit, test, control, model.column, model.label, model.timepoint,
+           sc.timepoint_phrase(model.timepoint, model.timepoint_h), tuple(notes),
            tuple((s.name, s.label, s.wells, s.values.tobytes(), s.n_roster, tuple(sorted(s.excluded.items())),
                   s.without_value) for s in samples))
     if cache is not None and cache.get("key") == key:
         return cache["result"]
     result = sc.compare(samples, test, control=control, unit=unit, label=model.label, timepoint=model.timepoint,
-                        statistic=well_statistic(model.column))
+                        statistic=well_statistic(model.column), timepoint_h=model.timepoint_h)
     result.notes = notes
     if cache is not None:
         cache.clear()

@@ -209,7 +209,9 @@ def test_the_statistics_view_tests_the_wells_drawn_and_names_what_it_compared(pa
     seg = page.widgets.get("_nw_view_bar")
     assert seg.tabText(seg.count() - 1) == "Statistics"
     header = " ".join(_report(page, sc.GID_HEADER))
-    assert header.startswith("t-test (Welch, unequal var) · Cell count · at t_a")
+    # The timepoint is named as the Timepoint control names it (by its hours, 5 h from the acquisition record) beside
+    # its label, so the report never reads as a different timepoint from the one chosen.
+    assert header.startswith("t-test (Welch, unequal var) · Cell count · at t_a · 5 h")
     assert "This compares these wells, not the conditions behind them" in header
     samples = " ".join(_report(page, sc.GID_SAMPLE))
     assert "A01:  n = 4   mean = 2.5" in samples
@@ -255,7 +257,7 @@ def test_the_band_shows_the_views_controls_and_each_one_changes_the_test(page, q
     # Another timepoint is another test: at t_c, A01's occluded nanowell is the excluded one.
     _choose(page, "_nw_stats_test_cb", "welch")
     _choose(page, "_nw_tp_cb", "t_c")
-    assert "· at t_c" in _report(page, sc.GID_HEADER)[0]
+    assert "· at t_c · 0 h" in _report(page, sc.GID_HEADER)[0]
     assert "A01:  n = 3   mean = 1" in " ".join(_report(page, sc.GID_SAMPLE))
 
 
@@ -349,3 +351,15 @@ def test_a_dunnett_family_of_one_is_not_labelled_corrected_on_the_page(page, qtb
     assert len(pair) == 1 and pair[0].startswith("B01 vs A01   t = ") and "p_Dunnett" not in pair[0], pair
     family = [t for t in _report(page, sc.GID_NOTE) if t.startswith("Compared:")]
     assert family == ["Compared: each against A01 (1 comparison); one comparison, so nothing to correct for."], family
+
+
+def test_a_report_names_a_timepoint_with_its_hours_unless_the_label_is_them():
+    from review.features.nanowell.summary_compute import timepoint_phrase
+
+    assert timepoint_phrase("t_a", 5.0) == "t_a · 5 h"
+    assert timepoint_phrase("T12", 2.0) == "T12 · 2 h"                 # a label containing the hours' digit is not them
+    assert timepoint_phrase("24 h", 24.0) == "24 h" and timepoint_phrase("24", 24.0) == "24"
+    assert timepoint_phrase("t_a", float("nan")) == "t_a" and timepoint_phrase("t_a", None) == "t_a"
+    result = sc.compare([_sample("A01", [1, 2]), _sample("B01", [3, 4])], "welch", label="Cell count",
+                        timepoint="t_a", timepoint_h=5.0)
+    assert sc.report_lines(result)[0][1] == "t-test (Welch, unequal var) · Cell count · at t_a · 5 h"

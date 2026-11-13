@@ -1713,14 +1713,6 @@ def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, 
             out.append((rset.name, wells,
                         None if getattr(rset, "solo", False) else rset))
         return out
-    # No set is *shown*, but sets may still be *defined*, every one hidden. Then
-    # group visibility still decides, and it says "nothing": falling through to
-    # ``selected_wells`` here drew a stale selection well by well while the plate
-    # showed every group off (``tests/test_plot_group_well_lists.py``).
-    from review.domain.plot_members import plot_replicate_sets_loaded
-
-    if any(w in well_paths for rset in plot_replicate_sets_loaded(ctx) or [] for w in rset.wells):
-        return out
 
     if not selected:
         if not fallback_to_all:

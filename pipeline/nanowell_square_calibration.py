@@ -279,6 +279,49 @@ def summary_lines(examples, counts: dict, current: tuple[float, float]) -> list[
     return lines
 
 
+#: How many rows of :func:`standing_lines` are printed before the rest are summed into one.
+STANDING_ROWS = 15
+
+
+def standing(out_dir) -> dict[tuple[str, str, str], int]:
+    """``(grid status and origin, identity verdict, why) -> timepoints``, for every timepoint of every grid record:
+    where the plate stands, as the QC view reads it. An addressed timepoint takes its verdict from a current identity
+    sidecar the way Review does (``nanowell_identity.verdict_in``, the stage flag overruling the image) and *not
+    checked* without one; ``why`` is the identity summary's short code for a verdict that is not good
+    (``nanowell_identity._WHY``). A timepoint the run did not address has no verdict: its status says it all."""
+    from pipeline.nanowell_identity import _WHY, GOOD, NOT_CHECKED, read_sidecar, verdict_in
+
+    out: dict[tuple[str, str, str], int] = {}
+    for well, blocks in read_grids(out_dir).items():
+        payload = None
+        for tp, block in blocks.items():
+            status = str(block.get("status") or "no status")
+            if status != "ok":
+                key = (status, "", "")
+            else:
+                if payload is None:
+                    payload = read_sidecar(out_dir, well) or {}
+                verdict, reason = verdict_in(payload, tp) if payload else (NOT_CHECKED, "")
+                why = "" if verdict in GOOD else next((code for phrase, code in _WHY if phrase in reason),
+                                                      "no current identity result" if not payload else "other")
+                key = (f"ok ({block.get('origin_method') or '?'})", verdict, why)
+            out[key] = out.get(key, 0) + 1
+    return out
+
+
+def standing_lines(out_dir) -> list[str]:
+    """:func:`standing` as a short table, largest first; the rows past :data:`STANDING_ROWS` summed into one."""
+    rows = sorted(standing(out_dir).items(), key=lambda kv: (-kv[1], kv[0]))
+    total = sum(n for _key, n in rows)
+    lines = [f"Where the {total} timepoint(s) stand (grid status, identity verdict, why):"]
+    for (status, verdict, why), n in rows[:STANDING_ROWS]:
+        lines.append(f"  {n:>5}  {' · '.join(part for part in (status, verdict, why) if part)}")
+    rest = rows[STANDING_ROWS:]
+    if rest:
+        lines.append(f"  {sum(n for _key, n in rest):>5}  in {len(rest)} smaller group(s)")
+    return lines
+
+
 def csv_rows(examples, current: tuple[float, float]) -> list[dict]:
     return [{"well": e.well, "timepoint": e.timepoint, "status": e.status, "origin_method": e.origin_method,
              "best": round(e.best, 4), "runner_up": round(e.runner_up, 4), "lead": round(e.lead, 4),
@@ -362,7 +405,7 @@ def main(argv=None) -> int:
         writer.writeheader()
         writer.writerows(csv_rows(examples, current))
     else:
-        for line in summary_lines(examples, counts, current):
+        for line in summary_lines(examples, counts, current) + [""] + standing_lines(out_dir):
             print(line)
     return 0
 

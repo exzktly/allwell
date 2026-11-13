@@ -7517,7 +7517,9 @@ half a nanowell spacing of your click counts as right, any other as wrong. Squar
 right when the identity check confirmed the timepoint, and as wrong when it found the run took something else for
 the square. It then prints how many right and wrong guesses today's thresholds accept, the lead and ratio of each,
 and the strictest thresholds that accept the most right guesses and no wrong one, with how many of today's refused
-timepoints they would accept. With few wrong guesses to test against it says so: check a sample of the newly
+timepoints they would accept. Last it says where every timepoint stands: how many the run left unaddressed (or
+not located), and for the addressed ones the identity check's verdict and, when it is not good, a short reason code —
+the same reading the QC view's matrix makes, so it shows which kind of problem the timepoints needing a look are. With few wrong guesses to test against it says so: check a sample of the newly
 accepted timepoints before relying on the suggestion. It changes nothing in the dataset. Add `--csv` for one row per
 timepoint (scores and labels only, no images or paths) to share.
 

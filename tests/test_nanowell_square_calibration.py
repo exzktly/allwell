@@ -182,6 +182,36 @@ def test_an_unreadable_folder_is_named_as_unreadable(tmp_path, monkeypatch):
     assert found is None and "permission denied" in why and "Privacy & Security" in why
 
 
+def test_where_the_plate_stands_is_read_as_review_reads_it(tmp_path, monkeypatch):
+    """Each addressed timepoint by its identity verdict and why, the stage flag overruling a good image verdict as in
+    Review, *not checked* without a sidecar, and each timepoint the run did not address by its status alone."""
+    blocks = {"0h": _block(0.8, 0.05, (1.0, 1.0), status="ok", method="fiducial"),
+              "12h": _block(0.7, 0.1, (1.0, 1.0), status="ok", method="fiducial"),
+              "24h": _block(0.7, 0.1, (1.0, 1.0), status="ok", method="plate_rigid"),
+              "36h": _block(0.7, 0.1, (1.0, 1.0), status="ok", method="fiducial"),
+              "48h": _block(None, None, None)}
+    out, _ = _dataset(tmp_path, {"A01": blocks, "A02": {"0h": _block(0.8, 0.05, (1.0, 1.0), status="ok",
+                                                                      method="fiducial")}})
+    sidecars = {"A01": {"timepoints": {
+        "0h": {"verdict": "reference"},
+        "12h": {"verdict": "inconclusive", "reason": "only 3 address(es) in common with the reference, 8 needed"},
+        "24h": {"verdict": "confirmed"},
+        "36h": {"verdict": "confirmed"}},
+        "stage": {"timepoints": {"36h": {"ok": False, "reason": "the plate's rigid motion puts it 40 um away"}}}}}
+    monkeypatch.setattr("pipeline.nanowell_identity.read_sidecar", lambda out_dir, well, **k: sidecars.get(well))
+    assert cal.standing(out) == {
+        ("ok (fiducial)", "reference", ""): 1,
+        ("ok (fiducial)", "inconclusive", "too_few"): 1,
+        ("ok (plate_rigid)", "confirmed", ""): 1,
+        ("ok (fiducial)", "contradicted", "stage"): 1,
+        ("unaddressed", "", ""): 1,
+        ("ok (fiducial)", "not_checked", "no current identity result"): 1}
+    lines = cal.standing_lines(out)
+    assert lines[0] == "Where the 6 timepoint(s) stand (grid status, identity verdict, why):"
+    assert "      1  ok (fiducial) · inconclusive · too_few" in lines
+    assert "      1  unaddressed" in lines
+
+
 def test_the_packaged_app_reaches_the_command():
     """The launcher is never imported in a test (its docstring says why): its source and the spec are read."""
     from tests._repo_scan import REPO_ROOT

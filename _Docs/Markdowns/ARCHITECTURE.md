@@ -11327,7 +11327,10 @@ identity check (`confirmed` is right; `contradicted` with `square_agreement_pitc
 pair accepts and searches margins 0.00–0.50 and ratios 1.00–5.00 for the pair accepting the most right guesses and
 no wrong one (the strictest among ties), judged by `fiducial_accepted`'s own rule, and how many of today's refused
 guesses that pair would accept. It changes nothing; it says so when the current pair already does as well, and
-warns when fewer than five wrong guesses back the suggestion. **A refused square says which test it failed.** `describe_fiducial` turns the
+warns when fewer than five wrong guesses back the suggestion. It ends with `standing_lines`: every timepoint
+counted by grid status and origin and, when addressed, by the verdict Review would read (`verdict_in` on a current
+sidecar, *not checked* without one) and `_WHY`'s code, so the plate's timepoints needing a look are broken down by
+cause. **A refused square says which test it failed.** `describe_fiducial` turns the
 search into a block — sites scored, the best and runner-up squareness, the floor, where the
 square was, and a sentence naming the failure when there is no candidate (no site could be
 scored; only one could; the most square outline read under the floor) — and `resolve_origin`

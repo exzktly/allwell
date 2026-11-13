@@ -132,3 +132,29 @@ def test_edit_closes_the_controls_sheet_it_was_pressed_in(qtbot, page):
     page.widgets.get("_nw_subset_edit_btn").click()
     assert not sheet.isOpen(), "the editor opened under the Controls sheet"
     assert page.widgets.get("_nw_subset_editor").isVisibleTo(page.window)
+
+
+def test_the_editor_s_scroll_area_hooks_nothing_python_onto_its_own_tree(qtbot):
+    """Reported on Windows: ``Windows fatal exception: access violation``, the main thread inside
+    ``_EditorScroll.eventFilter``, on switching the Nanowells page to the QC view. The area overrode ``eventFilter``
+    and installed itself on its content and its page — and a QScrollArea installs itself on its content anyway — so
+    a Python call reached the area while its tree was torn down (``widgets/footer_scroll_area.py`` records the same
+    crash). The area now defines no ``eventFilter``; a separate watcher holds the references and checks each object
+    alive before it touches one."""
+    import shiboken6
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QScrollArea, QWidget
+
+    from review.features.nanowell import subset_view as sv
+
+    assert "eventFilter" not in vars(sv._EditorScroll)
+    assert sv._EditorScroll.eventFilter is QScrollArea.eventFilter
+    host = QWidget()
+    qtbot.addWidget(host)
+    scroll = sv._EditorScroll(host)
+    body = QWidget()
+    scroll.setWidget(body)
+    watch = scroll._watch
+    assert watch.eventFilter(body, QEvent(QEvent.Resize)) is False         # alive: asks again, filters nothing
+    shiboken6.delete(scroll)                                                # the area and its content gone
+    assert watch.eventFilter(body, QEvent(QEvent.Resize)) is False         # does nothing, touches nothing

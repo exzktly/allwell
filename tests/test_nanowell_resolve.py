@@ -218,3 +218,54 @@ def test_a_timepoint_not_located_offers_to_exclude_its_well(qc_page, qtbot):
     button.click()
     assert "A01" in st.excluded_wells
     assert st.anchor_queue is None and st.view == "qc"                # the only one: the walk ended
+
+
+# ── a walk skips what an anchor cannot change ────────────────────────────────
+#: Reasons as ``pipeline.nanowell_identity.compare`` words them. The reported plate had 65 timepoints needing a look
+#: that were inconclusive on the first alone, every address landing on itself; the walk armed an anchor at each, the
+#: re-run addressed them from the same square, and nothing changed.
+CENTRE = ("every address lands on itself, but the array's fitted centre lands 0.90 pitch from this timepoint's once "
+          "registered on the square: the square may have moved against the array (a decoy), or a fitted rim is loose")
+MARGIN = ("the square's best match (0.40) leads the next place more than half a pitch away by only 0.05, under 0.1: "
+          "something else in the window looks as much like it")
+NOT_ACCEPTED = "the run did not accept a central square (squareness 0.21 against a runner-up of 0.12)"
+TILE = ("tile(s) 3 (120 um, 1.00 pitch) placed a lattice step differently against the rest of the grid than at the "
+        "reference, so their nanowells' addresses are wrong in one of the two")
+STEP = "40 of 60 addresses land on other nanowells: a lattice step"
+
+
+def _walk_matrix():
+    cells = {("A01", "t1"): qc.QcCell("A01", "t1", qc.INCONCLUSIVE, CENTRE),
+             ("A02", "t1"): qc.QcCell("A02", "t1", qc.INCONCLUSIVE, MARGIN),
+             ("A03", "t1"): qc.QcCell("A03", "t1", qc.INCONCLUSIVE, NOT_ACCEPTED),
+             ("A04", "t1"): qc.QcCell("A04", "t1", qc.CONTRADICTED, TILE),
+             ("A05", "t1"): qc.QcCell("A05", "t1", qc.CONTRADICTED, STEP)}
+    return qc.QcMatrix(wells=["A01", "A02", "A03", "A04", "A05"], timepoints=["t1"], cells=cells)
+
+
+def test_a_walk_leaves_out_what_an_anchor_cannot_change_and_says_so():
+    m = _walk_matrix()
+    walked = lambda state: [i.well for i in qc.queue_items(m, (state,))]       # noqa: E731
+    assert walked(qc.INCONCLUSIVE) == ["A02", "A03"]          # the square's own doubt; "central square" is not set aside
+    assert walked(qc.CONTRADICTED) == ["A05"]
+    assert qc.set_aside(m, (qc.INCONCLUSIVE,)) == {"centre": 1}
+    assert qc.set_aside(m, (qc.CONTRADICTED,)) == {"tile": 1}
+    assert qc.queue_label(m, False, (qc.INCONCLUSIVE,)) == "Resolve: 2 timepoints"
+    assert ("1 timepoint of this class is not walked: the doubt is the array's fitted outline (1), not the central "
+            "square") in qc.action_line(m, (qc.INCONCLUSIVE,))
+    # The cell clicked on the matrix is opened whatever its reason.
+    assert [i.well for i in qc.queue_items(m, (qc.INCONCLUSIVE,), keep=("A01", "t1"))] == ["A01", "A02", "A03"]
+
+
+def test_only_a_timepoint_an_anchor_can_change_opens_armed_and_its_card_says_so():
+    centre, margin = QueueItem("A01", "t1", CENTRE, state=qc.INCONCLUSIVE), QueueItem("A02", "t1", MARGIN,
+                                                                                    state=qc.INCONCLUSIVE)
+    assert (rc.armed_for(centre), rc.armed_for(margin)) == (False, True)
+    assert rc.armed_for(QueueItem("A04", "t1", TILE, state=qc.CONTRADICTED)) is False
+    assert rc.armed_for(QueueItem("A05", "t1", STEP, state=qc.CONTRADICTED)) is True
+    card = rc.guide_for(centre, rc.Hint(), index=0, total=1, armed=False)
+    assert card.action.startswith("Nothing to click: the doubt here is the array's fitted outline, not the central "
+                                  "square")
+    assert "Click the middle" not in card.action
+    assert rc.guide_for(margin, rc.Hint(), index=0, total=1, armed=True).action.startswith(
+        "Click the middle of the true central square.")

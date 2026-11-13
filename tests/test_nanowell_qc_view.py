@@ -113,7 +113,9 @@ def test_each_state_is_drawn_with_its_own_texture_and_the_line_plots_hatches():
 
     assert HATCH == {"not_addressed": "", "anchor_waiting": "----", "not_located": "||||", "contradicted": "xxxx",
                      "inconclusive": "////", "partial": "\\\\\\\\", "not_checked": "....", "reference": "",
-                     "confirmed": ""}
+                     "confirmed": "",
+                     # Needing no look, so in the confirmed ink, keeping the texture of the check's own verdict.
+                     "minor_partial": "\\\\\\\\", "addresses_agree": "////"}
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
@@ -367,3 +369,65 @@ def test_problem_chooses_one_class_and_each_opens_where_it_is_fixed(qc_page, qtb
     assert st.anchor_queue is None and st.view == "qc" and st.identity_focus == ""
     assert st.qc_message == ("Resolve finished: looked at 1 of 1 partial timepoint(s). Next: choose not addressed "
                              "(2) under Problem and press Resolve.")
+
+
+# ── what needs no look though the check did not say confirmed ───────────────
+#: ``nanowell_identity.compare``'s wording for an inconclusive timepoint doubted only by the array's fitted centre.
+CENTRE_ONLY = ("every address lands on itself, but the array's fitted centre lands 1.30 pitch from this timepoint's "
+               "once registered on the square: the square may have moved against the array (a decoy), or a fitted "
+               "rim is loose")
+
+
+def _eased_records():
+    ok = {"status": "ok"}
+    grids = {"A01": {tp: dict(ok) for tp in ("t0", "t1", "t2", "t3", "t4", "t5")}}
+    verdicts = {"A01": {"t0": ("reference", ""),
+                        "t1": ("partial", "5 of 100 nanowells left out"),        # exactly 5 %: minor
+                        "t2": ("partial", "6 of 100 nanowells left out"),        # just over: still needs a look
+                        "t3": ("partial", "1 of ? nanowells left out"),          # compared unknown: not eased
+                        "t4": ("inconclusive", CENTRE_ONLY),
+                        "t5": ("inconclusive", "the square's best match (0.40) leads the next place more than half a "
+                                               "pitch away by only 0.05, under 0.1")}}
+    left = lambda n: frozenset((0, i) for i in range(n))                         # noqa: E731
+    excluded = {"A01": {"t1": left(5), "t2": left(6), "t3": left(1)}}
+    compared = {"A01": {"t1": 100, "t2": 100}}
+    return qc.PlateRecords(grids=grids, verdicts=verdicts, excluded=excluded, anchors={}, checked_any=True,
+                           compared=compared)
+
+
+def test_a_minor_partial_and_an_outline_only_doubt_need_no_look_and_say_so():
+    m = qc.plate_qc(_eased_records(), order=sorted)
+    assert {tp: m.cells[("A01", tp)].state for tp in ("t1", "t2", "t3", "t4", "t5")} == {
+        "t1": qc.MINOR_PARTIAL, "t2": qc.PARTIAL, "t3": qc.PARTIAL, "t4": qc.ADDRESSES_AGREE, "t5": qc.INCONCLUSIVE}
+    assert m.needing_count() == 3
+    assert qc.summary(m) == "3 of 6 timepoints need a look, in 1 of 1 wells."
+    assert ("Not counted as needing a look: 1 partial timepoint(s) leave out at most 5% of their nanowells; 1 "
+            "inconclusive one(s) have every address landing on itself and only the array's outline in doubt.") \
+        in qc.notes(m, "needing", None)
+    assert m.cells[("A01", "t1")].left_out == 5
+    assert qc.hover_text(m.cells[("A01", "t4")]).startswith(
+        "A01 · t4 — addresses agree: every address lands on itself at the reference")
+    # Neither is walked: an anchor has nothing to do at either.
+    assert [i.timepoint for i in qc.queue_items(m, (qc.INCONCLUSIVE,))] == ["t5"]
+    assert [i.timepoint for i in qc.queue_items(m, (qc.PARTIAL,))] == ["t2", "t3"]
+
+
+def test_a_plate_with_only_eased_timepoints_says_nothing_needs_a_look():
+    records = _eased_records()
+    keep = {"t0", "t1", "t4"}
+    records = qc.PlateRecords(grids={"A01": {tp: b for tp, b in records.grids["A01"].items() if tp in keep}},
+                              verdicts=records.verdicts, excluded=records.excluded, anchors={}, checked_any=True,
+                              compared=records.compared)
+    m = qc.plate_qc(records, order=sorted)
+    assert qc.summary(m) == ("Nothing needs a look: all 3 timepoints of 1 wells are addressed, 2 of them a minor "
+                             "partial or with only the array's outline in doubt.")
+
+
+def test_the_count_compared_is_read_from_the_well_s_sidecar(tmp_path):
+    from pipeline.nanowell_identity import IDENTITY_VERSION, sidecar_path
+
+    (tmp_path / "nanowells").mkdir()
+    sidecar_path(tmp_path, "A01").write_text(json.dumps({"version": IDENTITY_VERSION, "well": "A01", "timepoints": {
+        "t0": {"verdict": "reference"}, "t1": {"verdict": "partial", "compared": 140}, "t2": {"compared": "x"}}}))
+    assert qc._compared(tmp_path, "A01") == {"t1": 140}
+    assert qc._compared(tmp_path, "B01") == {}

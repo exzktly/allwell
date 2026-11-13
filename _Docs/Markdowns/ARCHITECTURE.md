@@ -1136,7 +1136,8 @@ allwell/
 ├── allwell_report.py            ← `python allwell_report.py` — draw a dataset's saved plots without a
 │                                  window (Saved Plots → *The headless report*)
 ├── all_well_launcher.py         ← the module PyInstaller boots + the --run-pipeline / --run-zipper
-│                                  / --run-bootstrap / --run-report / --run-nanowell-preview / --run-identity dispatch. A helper the *app* spawns is not an entry
+│                                  / --run-bootstrap / --run-report / --run-nanowell-preview / --run-identity
+│                                  / --run-square-calibration dispatch. A helper the *app* spawns is not an entry
 │                                  point in this sense and does not belong here — it lives in the package
 │                                  whose work it does (see pipeline/well_plate_zipper.py below)
 │
@@ -11315,7 +11316,24 @@ accepts it when it leads the runner-up by more than `FIDUCIAL_MARGIN` (0.15) and
 least circular of a set of circles. A fixed floor of 0.4 decided it before: rendered squares with
 rounded corners, a halo or a few micrometres of defocus read 0.34 to 0.50 against circles at 0.01 to
 0.15, and were refused while standing six times above every circle. All three numbers are assumed
-until real squares calibrate them (tracker F6). **A refused square says which test it failed.** `describe_fiducial` turns the
+until real squares calibrate them (tracker F6). **A plate calibrates them from its own answers**:
+`pipeline/nanowell_square_calibration.py` (Qt-free; `python -m pipeline.nanowell_square_calibration <output_dir>
+[--input_dir <in>] [--csv]`, in the packaged app the executable with `--run-square-calibration`) reads every grid
+record's `fiducial` block and labels each square guess from what the disk already knows: an anchor set by hand at
+the same well and timepoint (right when the guess lies within half a pitch of the click, wrong otherwise — the
+search never sees the anchor, so the guess is independent of it), else, for a square the run accepted itself, the
+identity check (`confirmed` is right; `contradicted` with `square_agreement_pitches` above
+`SQUARE_AGREEMENT_PITCHES` is wrong; any other verdict says nothing about the square). It reports what the current
+pair accepts and searches margins 0.00–0.50 and ratios 1.00–5.00 for the pair accepting the most right guesses and
+no wrong one (the strictest among ties), judged by `fiducial_accepted`'s own rule, and how many of today's refused
+guesses that pair would accept. It changes nothing; it says so when the current pair already does as well, and
+warns when fewer than five wrong guesses back the suggestion. It ends with `standing_lines`: every timepoint
+counted by grid status and origin and, when addressed, by the verdict Review would read (`verdict_in` on a current
+sidecar, *not checked* without one) and `_WHY`'s code, so the plate's timepoints needing a look are broken down by
+cause; then, for the partial timepoints, how many nanowells each leaves out (banded by share of those compared, up
+to 1 %, 5 %, 20 % and half) and why, and for those inconclusive on the array's fitted centre, how far it lands
+(0.75–1.0, 1.0–1.25 and 1.25–1.5 pitches): the numbers a change to what counts as needing a look, or to
+`CENTRE_AGREEMENT_PITCHES`, would be decided from. **A refused square says which test it failed.** `describe_fiducial` turns the
 search into a block — sites scored, the best and runner-up squareness, the floor, where the
 square was, and a sentence naming the failure when there is no candidate (no site could be
 scored; only one could; the most square outline read under the floor) — and `resolve_origin`
@@ -13504,7 +13522,18 @@ anchor set and not yet used is *anchor waiting*, `unaddressed` otherwise *not ad
 last run tried the anchor set there), any other status but `ok` *not located* (an anchor cannot change it), and only
 an `ok` timepoint takes the identity verdict — an unaddressed timepoint has no addresses for the check to confirm,
 and reading it as *inconclusive* would hide the remedy. Which timepoints are *not addressed* and *anchor waiting* is
-`anchor_queue_compute.waiting_items`'s answer, the function the queue walks, so the two cannot disagree.
+`anchor_queue_compute.waiting_items`'s answer, the function the queue walks, so the two cannot disagree. Two
+readings of the identity verdict need no look and have states of their own, so the matrix still says the check did
+not answer *confirmed*: **minor partial** (`MINOR_PARTIAL`), a *partial* timepoint leaving out at most
+`MINOR_PARTIAL_SHARE` (5 %) of the nanowells it compared — the count is read from the sidecar's `compared`
+(`read_plate` → `PlateRecords.compared`, `_compared` reading without re-hashing once `verdicts` has decided the
+sidecar is current), and a timepoint with no count stays *partial* — and **addresses agree** (`ADDRESSES_AGREE`), an
+*inconclusive* one whose reason is the array's fitted centre alone with every address landing on itself
+(`_addresses_agree`, on `nanowell_identity.compare`'s wording). Both are out of `NEEDS_A_LOOK` (spelled out, not a
+slice of `QC_STATES`) and of every walk, are drawn in the confirmed ink with the check's own verdict's hatch, and
+are counted in a note under the title. On a real plate they were 239 and 65 of the 336 timepoints needing a look,
+the partial ones leaving out a median of one nanowell and the centre ones spread from 0.75 to 1.42 pitches; only
+the QC view reads them so, and the identity verdicts every other view reads are unchanged.
 `_qc_render.draw_qc` fills each state with its own ink and texture — solid for *not addressed*, the line plots'
 hatches for the identity verdicts (`_identity_marks.HATCH`), horizontal and vertical lines for *anchor waiting* and
 *not located* — so it reads without colour; cells tall enough carry a glyph too (a partial cell its left-out count),
@@ -14234,7 +14263,18 @@ composite's `tile_card` passes the same rule), the occupancy
   armed, because an anchor set by hand comes first in `nanowell_lattice.resolve_origin` and so re-addresses even a
   timepoint whose square the run did find; partial on Identity, since its left-out nanowells already stay out of
   every join and there is nothing to set, only which nanowells to see; not located and anchor waiting on Array,
-  unarmed (no anchor changes the first; the second already has one and needs a re-run). `build_queue(ctx, states)`
+  unarmed (no anchor changes the first; the second already has one and needs a re-run). A contradicted or
+  inconclusive timepoint whose doubt is not its square is neither walked nor armed: `qc_compute.anchor_can_fix` reads
+  the identity reason's short code (`why_code`, `nanowell_identity._WHY`) against `NOT_THE_SQUARE` — inconclusive on
+  the array's fitted centre, the tile layout, too few addresses in common, a missing montage, the reference square at
+  its montage's edge, a mirror or lattice kind; contradicted on a mirror, lattice kind or tile — because an anchor
+  says only where the square is, the run re-addresses such a timepoint from the same square, and the check finds the
+  same thing (a reported plate had 65 timepoints inconclusive on the centre alone, every address landing on itself).
+  A reason that names no code, and `no_reference_square` (whose phrase also matches "the run did not accept a central
+  square"), stay walked. `queue_items` leaves such cells out (counted by `set_aside`, said by `set_aside_text` on the
+  figure, the greyed *Resolve*'s tip and an empty walk's message) except the cell a click on the matrix opens
+  (`keep`), which `resolve_compute.armed_for` opens unarmed with a card saying the doubt and that an anchor cannot
+  change it. `build_queue(ctx, states, keep=)`
   takes the class's timepoints from the QC view's matrix (`qc_compute.queue_items`), so the walk and the matrix
   cannot disagree, and finds the anchors file from the dataset folder (`_qc_controller.anchors_path`) so a click can
   start a walk before any well's tables are read; the plate need not be selected. Its *not addressed* cells come from
@@ -14365,7 +14405,10 @@ editor, `SubsetEditor`, is a panel the page places under the band — never a di
 condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply* (each line a `FlowLayout` that wraps rather
 than cutting its words and controls at a phone's width, each condition's × kept at its right edge, and its field,
 timepoint and gate combos making room for twelve characters rather than their longest entry; the whole panel sits in
-`_EditorScroll`, which takes as much of its page's height as it needs up to `_ROWS_SHARE` and scrolls past it, and
+`_EditorScroll`, which takes as much of its page's height as it needs up to `_ROWS_SHARE` and scrolls past it (it
+re-asks when its content or page changes size through `_GrowWatch`, a separate watcher that checks each object
+alive with `shiboken6.isValid` — the area itself overrides no `eventFilter`, since a Python filter on its own
+tree was reached during teardown and crashed Windows with an access violation), and
 `share_page` lets the editor take the figure's place while it is open on a page too short for both — a phone held
 sideways, where the figure and its footer alone fill the page — decided by the page's height, not by phone layout,
 with the figure redrawn when Close brings it back; opening it closes the ⚙ Controls sheet,

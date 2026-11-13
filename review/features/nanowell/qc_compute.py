@@ -35,17 +35,34 @@ from review.features.nanowell.identity_compute import audit_command
 NOT_ADDRESSED, ANCHOR_WAITING, NOT_LOCATED = "not_addressed", "anchor_waiting", "not_located"
 CONTRADICTED, INCONCLUSIVE, PARTIAL = "contradicted", "inconclusive", "partial"
 NOT_CHECKED, REFERENCE, CONFIRMED = "not_checked", "reference", "confirmed"
+#: Two readings of the identity check's verdicts that need no look, though the check did not say *confirmed*:
+#:
+#: * **minor partial** — a *partial* timepoint that leaves out at most :data:`MINOR_PARTIAL_SHARE` of the nanowells it
+#:   compared. The rest land on themselves and the left-out ones already stay out of every join; on a real plate 239
+#:   of 336 timepoints needing a look were partial, 215 of them leaving out 1 % or less (the median was one nanowell).
+#: * **addresses agree** — an *inconclusive* timepoint whose every address lands on itself and whose only doubt is the
+#:   array's fitted centre (``nanowell_identity.compare``: beyond ``CENTRE_AGREEMENT_PITCHES``, short of
+#:   ``CENTRE_CONTRADICTS_PITCHES``). On the same plate 65 were, spread from 0.75 to 1.42 pitches with no gap, and
+#:   every one whose square was checked by hand was right: the rim fit is looser there than the check assumes, and
+#:   the addresses are the stronger evidence.
+#:
+#: Both keep a state of their own, so the matrix says the check's own verdict was not *confirmed*; only the QC view
+#: reads them this way, and the identity check's verdicts — which every other view reads — are unchanged.
+MINOR_PARTIAL, ADDRESSES_AGREE = "minor_partial", "addresses_agree"
+#: The most of its compared nanowells a partial timepoint may leave out and still be :data:`MINOR_PARTIAL`.
+MINOR_PARTIAL_SHARE = 0.05
 #: Every state a cell can hold, worst first: the legend's order.
 QC_STATES = (NOT_ADDRESSED, ANCHOR_WAITING, NOT_LOCATED, CONTRADICTED, INCONCLUSIVE, PARTIAL, NOT_CHECKED,
-             REFERENCE, CONFIRMED)
+             MINOR_PARTIAL, ADDRESSES_AGREE, REFERENCE, CONFIRMED)
 #: The states that need a look: a well holding any of them gets a row under *Wells: Needing a look*.
-NEEDS_A_LOOK = QC_STATES[:7]
+NEEDS_A_LOOK = (NOT_ADDRESSED, ANCHOR_WAITING, NOT_LOCATED, CONTRADICTED, INCONCLUSIVE, PARTIAL, NOT_CHECKED)
 #: The states a click opens on the Array view (an anchor's business); the rest open on the Identity view.
 ARRAY_STATES = (NOT_ADDRESSED, ANCHOR_WAITING, NOT_LOCATED)
 #: How each state is named on the legend and in the readout.
 WORDS = {NOT_ADDRESSED: "not addressed", ANCHOR_WAITING: "anchor waiting", NOT_LOCATED: "not located",
          CONTRADICTED: "contradicted", INCONCLUSIVE: "inconclusive", PARTIAL: "partial", NOT_CHECKED: "not checked",
-         REFERENCE: "reference", CONFIRMED: "confirmed"}
+         MINOR_PARTIAL: "minor partial", ADDRESSES_AGREE: "addresses agree", REFERENCE: "reference",
+         CONFIRMED: "confirmed"}
 #: The states *Resolve* can walk: every state that needs a look and is a timepoint the Array view can show.
 #: *Anchor waiting* is not one: its remedy is a re-run, not another look.
 WALKABLE = (NOT_ADDRESSED, CONTRADICTED, INCONCLUSIVE, PARTIAL, NOT_LOCATED)
@@ -115,6 +132,8 @@ class PlateRecords:
     checked_any: bool = False
     #: ``timepoint -> hours`` from the acquisition record (or the labels), as the page's tables get them.
     times_h: dict = field(default_factory=dict)
+    #: well -> {timepoint -> nanowells the identity check compared}, for telling a minor partial timepoint.
+    compared: dict = field(default_factory=dict)
 
 
 def _stat(path: Path) -> tuple:
@@ -151,11 +170,12 @@ def read_plate(data_dir, anchors_path) -> PlateRecords:
     folder = nanowell_dir(data_dir)
     grids = aqc.grid_statuses(folder)
     out_dir = Path(folder).parent if folder is not None else None
-    found, left_out, checked_any = {}, {}, False
+    found, left_out, compared, checked_any = {}, {}, {}, False
     for well, blocks in grids.items():
         found[well] = verdicts(out_dir, well, list(blocks))
         left_out[well] = exclusions(out_dir, well)
         checked_any = checked_any or sidecar_path(out_dir, well).is_file()
+        compared[well] = _compared(out_dir, well)
     anchors, problem = {}, ""
     if anchors_path is not None:
         try:
@@ -164,7 +184,22 @@ def read_plate(data_dir, anchors_path) -> PlateRecords:
             problem = str(exc)
     tps = {tp for blocks in grids.values() for tp in blocks}
     times = timepoint_hours(data_dir, tps) if tps else {}
-    return PlateRecords(grids, found, left_out, anchors, problem, checked_any, times)
+    return PlateRecords(grids, found, left_out, anchors, problem, checked_any, times, compared)
+
+
+def _compared(out_dir, well: str) -> dict:
+    """``timepoint -> nanowells compared`` from the well's sidecar, read without hashing again: :func:`read_plate`'s
+    ``verdicts`` has just decided whether it is current, and a stale one gives every timepoint *not checked*, so its
+    counts are never read."""
+    from pipeline.nanowell_identity import read_sidecar
+
+    payload = read_sidecar(out_dir, well, verify=False) or {}
+    out = {}
+    for tp, entry in (payload.get("timepoints") or {}).items():
+        n = entry.get("compared") if isinstance(entry, dict) else None
+        if isinstance(n, int) and n > 0:
+            out[tp] = n
+    return out
 
 
 def _verdict_state(verdict: str) -> str:
@@ -200,11 +235,28 @@ def plate_qc(records: PlateRecords, order=None) -> QcMatrix:
                 verdict, why = (records.verdicts.get(well) or {}).get(tp, (NOT_CHECKED, ""))
                 state = _verdict_state(verdict)
                 n = len((records.excluded.get(well) or {}).get(tp) or ()) if state == PARTIAL else None
+                if state == PARTIAL and n is not None and _minor(n, (records.compared.get(well) or {}).get(tp)):
+                    state = MINOR_PARTIAL
+                elif state == INCONCLUSIVE and _addresses_agree(why):
+                    state = ADDRESSES_AGREE
                 cells[key] = QcCell(well, tp, state, str(why or ""), left_out=n, grid_status=status)
     tps = {tp for blocks in records.grids.values() for tp in blocks}
     timepoints = list(order(list(tps)))
     return QcMatrix(wells=sorted(records.grids), timepoints=timepoints, cells=cells,
                     anchors_problem=records.anchors_problem, checked_any=records.checked_any)
+
+
+def _minor(left_out: int, compared) -> bool:
+    """Whether a partial timepoint leaving out *left_out* of *compared* nanowells is :data:`MINOR_PARTIAL`; never
+    when the count compared is unknown."""
+    return isinstance(compared, int) and compared > 0 and left_out <= MINOR_PARTIAL_SHARE * compared
+
+
+def _addresses_agree(reason: str) -> bool:
+    """Whether an inconclusive verdict's *reason* is the array's fitted centre alone, every address landing on
+    itself (``nanowell_identity.compare``'s wording)."""
+    reason = reason or ""
+    return reason.startswith("every address lands on itself") and why_code(reason) == "centre"
 
 
 def _natural(label: str) -> tuple:
@@ -242,6 +294,13 @@ def hover_text(cell: QcCell, hours=None) -> str:
     elif cell.state == CONTRADICTED:
         body = (f"contradicted{f': {why}' if why else ''}. Left out of every comparison over time; set its central "
                 "square." + walk)
+    elif cell.state == MINOR_PARTIAL:
+        body = (f"minor partial: {cell.left_out or 0:,} nanowell(s) left out of comparisons over time, at most "
+                f"{MINOR_PARTIAL_SHARE:.0%} of those compared; the rest land on themselves."
+                + (f" {why}." if why else "") + identity)
+    elif cell.state == ADDRESSES_AGREE:
+        body = (f"addresses agree: every address lands on itself at the reference, and only the array's fitted outline "
+                f"disagrees{f' — {why}' if why else ''}. Used in comparisons over time; nothing to set." + identity)
     elif cell.state == NOT_CHECKED:
         body = f"not checked{f': {why}' if why else ''}." + identity
     elif cell.state == NOT_ADDRESSED and cell.refused:
@@ -265,6 +324,10 @@ def summary(matrix: QcMatrix) -> str:
         return ""
     bad, wells = matrix.needing_count(), len(matrix.needing())
     if not bad:
+        eased = sum(matrix.counts.get(state, 0) for state in (MINOR_PARTIAL, ADDRESSES_AGREE))
+        if eased:
+            return (f"Nothing needs a look: all {total:,} timepoints of {len(matrix.wells)} wells are addressed, "
+                    f"{eased:,} of them a minor partial or with only the array's outline in doubt.")
         return f"All {total:,} timepoints of {len(matrix.wells)} wells are addressed and confirmed."
     return f"{bad:,} of {total:,} timepoints need a look, in {wells} of {len(matrix.wells)} wells."
 
@@ -274,9 +337,15 @@ def notes(matrix: QcMatrix, which: str, out_dir) -> list[str]:
     out = []
     hidden = len(matrix.wells) - len(matrix.shown_wells(which))
     if hidden and matrix.needing():
-        out.append(f"{hidden} well(s) with every timepoint confirmed are not shown — Wells: All shows them.")
+        out.append(f"{hidden} well(s) with nothing needing a look are not shown — Wells: All shows them.")
     elif hidden:
         out.append("Wells: All shows them.")
+    minor, agree = matrix.counts.get(MINOR_PARTIAL, 0), matrix.counts.get(ADDRESSES_AGREE, 0)
+    if minor or agree:
+        parts = ([f"{minor:,} partial timepoint(s) leave out at most {MINOR_PARTIAL_SHARE:.0%} of their nanowells"]
+                 if minor else []) + ([f"{agree:,} inconclusive one(s) have every address landing on itself and only "
+                                       "the array's outline in doubt"] if agree else [])
+        out.append("Not counted as needing a look: " + "; ".join(parts) + ".")
     if not matrix.checked_any and any(c.state == NOT_CHECKED for c in matrix.cells.values()):
         out.append("The identity check has not been run on these tables, so no addressed timepoint is confirmed. "
                    f"Run it from a terminal: {audit_command(out_dir)}")
@@ -298,15 +367,49 @@ def queue_tip(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
     if queue_items(matrix, states):
         return ""
     tip = f"No timepoint is “{walk_words(states)}”."
+    aside = set_aside_text(matrix, states)
+    if aside:
+        tip = f"No “{walk_words(states)}” timepoint can be fixed with an anchor. {aside}"
     waiting = matrix.counts.get(ANCHOR_WAITING, 0)
     if waiting:
         tip += f" {waiting} have an anchor waiting for a re-run: Re-run anchored wells… addresses them."
     return tip
 
 
-def queue_items(matrix: QcMatrix | None, states) -> list:
+#: The identity check's reason codes (``pipeline.nanowell_identity._WHY``) for a *contradicted* or *inconclusive*
+#: timepoint whose doubt is not about its central square, so an anchor — which only says where the square is —
+#: cannot change the verdict: the run re-addresses it from the same square and the check finds the same thing. On a
+#: real plate 65 of 336 timepoints needing a look were *inconclusive* on the array's fitted centre alone, with every
+#: address landing on itself, and walking them for anchors changed nothing. Any other code, and a reason that names
+#: none (``other``), is the square's business, or may be, and is walked as it always was — ``no_reference_square``
+#: among them, since its phrase ("central square") is also what "the run did not accept a central square" reads as.
+NOT_THE_SQUARE = {
+    CONTRADICTED: frozenset({"mirror", "lattice_kind", "tile", "tile_grid"}),
+    INCONCLUSIVE: frozenset({"centre", "tile", "tile_grid", "too_few", "no_montage", "square_at_montage_edge",
+                             "mirror", "lattice_kind"}),
+}
+
+
+def why_code(reason: str) -> str:
+    """The identity summary's short code for *reason* (``pipeline.nanowell_identity._WHY``), ``"other"`` when it
+    names none."""
+    from pipeline.nanowell_identity import _WHY
+
+    return next((code for phrase, code in _WHY if phrase in (reason or "")), "other")
+
+
+def anchor_can_fix(cell) -> bool:
+    """Whether an anchor can change *cell*'s state (a ``QcCell`` or ``QueueItem``): always for a state an anchor is
+    the remedy of, except a contradicted or inconclusive one whose reason is not about its square
+    (:data:`NOT_THE_SQUARE`)."""
+    return why_code(getattr(cell, "why", None) or getattr(cell, "reason", "")) not in NOT_THE_SQUARE.get(
+        cell.state, frozenset())
+
+
+def queue_items(matrix: QcMatrix | None, states, *, keep=None) -> list:
     """The ``anchor_queue_compute.QueueItem`` of every cell in *states*, plate order then time order: what *Resolve*
-    walks."""
+    walks. A contradicted or inconclusive cell an anchor cannot change (:func:`anchor_can_fix`) is left out — it is
+    counted by :func:`set_aside` — unless it is *keep* (``(well, timepoint)``), the cell a click on the matrix opens."""
     if matrix is None:
         return []
     wanted = set(states)
@@ -314,9 +417,46 @@ def queue_items(matrix: QcMatrix | None, states) -> list:
     for well in matrix.wells:
         for tp in matrix.timepoints:
             cell = matrix.cells.get((well, tp))
-            if cell is not None and cell.state in wanted:
-                out.append(aqc.QueueItem(well, tp, cell.why, cell.refused, cell.state))
+            if cell is None or cell.state not in wanted:
+                continue
+            if not anchor_can_fix(cell) and (well, tp) != keep:
+                continue
+            out.append(aqc.QueueItem(well, tp, cell.why, cell.refused, cell.state))
     return out
+
+
+def set_aside(matrix: QcMatrix | None, states) -> dict[str, int]:
+    """``why code -> timepoints`` in *states* that :func:`queue_items` leaves out because an anchor cannot change
+    them."""
+    out: dict[str, int] = {}
+    if matrix is None:
+        return out
+    for cell in matrix.cells.values():
+        if cell.state in set(states) and not anchor_can_fix(cell):
+            code = why_code(cell.why)
+            out[code] = out.get(code, 0) + 1
+    return out
+
+
+#: How each reason code of :data:`NOT_THE_SQUARE` reads in a sentence.
+NOT_THE_SQUARE_WORDS = {"centre": "the array's fitted outline", "tile": "a tile's placement",
+                        "tile_grid": "the tile grid", "too_few": "too few addresses in common with the reference",
+                        "no_montage": "a missing montage",
+                        "square_at_montage_edge": "the reference's square at its montage's edge",
+                        "mirror": "a mirrored lattice", "lattice_kind": "the lattice kind"}
+
+
+def set_aside_text(matrix: QcMatrix | None, states) -> str:
+    """The sentence saying what :func:`set_aside` left out of a walk of *states*, or ``""``."""
+    counts = set_aside(matrix, states)
+    if not counts:
+        return ""
+    n = sum(counts.values())
+    causes = ", ".join(f"{NOT_THE_SQUARE_WORDS.get(code, code)} ({k})" for code, k in
+                       sorted(counts.items(), key=lambda kv: -kv[1]))
+    return (f"{n:,} timepoint{'s' if n != 1 else ''} of this class {'are' if n != 1 else 'is'} not walked: the doubt is "
+            f"{causes}, not the central square, so an anchor cannot change {'them' if n != 1 else 'it'}. Click a "
+            "cell to look at one.")
 
 
 def waiting_wells(matrix: QcMatrix | None) -> set:
@@ -345,10 +485,12 @@ def action_line(matrix: QcMatrix | None, states=WALK_DEFAULT) -> str:
     """What to do about the timepoints needing a look, said on the figure (a tooltip is not seen over VNC on a
     phone); ``""`` when *Resolve* has nothing to walk."""
     n = len(queue_items(matrix, states))
+    aside = set_aside_text(matrix, states)
     if not n:
-        return ""
+        return aside
     return (f"Press Resolve to step through the {n:,} {walk_words(states)} timepoint{'s' if n != 1 else ''}, each "
-            "opened where it is fixed with what to do, or click any cell to start at it. Problem chooses the class.")
+            "opened where it is fixed with what to do, or click any cell to start at it. Problem chooses the class."
+            + (f" {aside}" if aside else ""))
 
 
 def walk_words(states) -> str:

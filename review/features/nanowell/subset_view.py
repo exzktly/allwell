@@ -121,7 +121,17 @@ class _EditorScroll(QScrollArea):
     line; and a share rather than a height, so the figure keeps the rest on any screen. The rows wrap to the width,
     never past it, so it scrolls only vertically. It asks for its content's height at its own width (the content's
     flows reserve their wrapped height, ``sync_flow_height``), and asks again when the content or the page changes
-    size — a condition added, a phone turned."""
+    size — a condition added, a phone turned.
+
+    **Nothing Python is installed as this area's own event filter.** It used to override ``eventFilter`` and install
+    itself on its content and on the page, and a Windows run crashed with an access violation inside that override
+    (``Windows fatal exception: access violation``, the main thread in ``eventFilter``) on switching the Nanowells
+    page to the QC view: a Python hook on a widget is still called while the widget tree it belongs to is being
+    torn down, and a call back into the area from there touched C++ objects already gone —
+    ``widgets/footer_scroll_area.py`` records the same crash. A QScrollArea also installs itself as a filter on its
+    own content, so the override was reached for every event of the content too. The watching is done by
+    :class:`_GrowWatch` instead, a separate object the area holds, which checks that the area and the object it is
+    told about are still alive before touching either."""
 
     def __init__(self, parent: QWidget):
         super().__init__(parent)
@@ -130,13 +140,27 @@ class _EditorScroll(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self._page = None
+        self._body = None
+        #: Asks the area for its height again when the content or the page changes size (no Qt parent: it lives as
+        #: long as this area's Python object, and an event that reaches it after the area is gone does nothing).
+        self._watch = _GrowWatch(self)
         #: The share of the page the editor may take: :data:`_ROWS_SHARE` beside the figure, all of it while the
         #: figure has stepped aside for it (:func:`share_page`).
         self.share = _ROWS_SHARE
 
     def setWidget(self, widget: QWidget) -> None:  # Qt override
         super().setWidget(widget)
-        widget.installEventFilter(self)
+        self._body = widget
+        widget.installEventFilter(self._watch)
+
+    def _live_page(self):
+        """The page, or ``None`` once its C++ object is gone."""
+        import shiboken6
+
+        page = self._page
+        if page is not None and not shiboken6.isValid(page):
+            self._page = page = None
+        return page
 
     def _need(self) -> int:
         """The content's height at the width it is shown at: its wrapped lines and status sentence, measured there
@@ -155,7 +179,8 @@ class _EditorScroll(QScrollArea):
 
     def height_at(self, share: float) -> int:
         """The height the editor's content is given at *share* of its page."""
-        page = self._page.height() if self._page is not None else self.window().height()
+        page = self._live_page()
+        page = page.height() if page is not None else self.window().height()
         return min(self._need(), max(self._floor(), int(page * share)))
 
     def _height(self) -> int:
@@ -174,14 +199,29 @@ class _EditorScroll(QScrollArea):
         # The page is the editor's parent: the widget whose height is shared between the editor and the figure.
         editor = self.parentWidget()
         page = editor.parentWidget() if editor is not None else None
-        if page is not None and page is not self._page:
-            page.installEventFilter(self)
+        if page is not None and page is not self._live_page():
+            page.installEventFilter(self._watch)
             self._page = page
         self.updateGeometry()
 
+
+class _GrowWatch(QObject):
+    """:class:`_EditorScroll`'s eye on its content and its page: a LayoutRequest or Resize of either asks the area for
+    its height again. Every object is checked alive before it is touched (``shiboken6.isValid``), and the content and
+    page are told apart by the Python references the area keeps, never by asking the area's C++ side — so an event
+    delivered while the tree is being torn down does nothing."""
+
+    def __init__(self, scroll: _EditorScroll):
+        super().__init__()
+        self._scroll = scroll
+
     def eventFilter(self, obj, event) -> bool:  # Qt naming
-        if event.type() in (QEvent.LayoutRequest, QEvent.Resize) and (obj is self.widget() or obj is self._page):
-            self.updateGeometry()
+        import shiboken6
+
+        scroll = self._scroll
+        if (event.type() in (QEvent.LayoutRequest, QEvent.Resize) and shiboken6.isValid(scroll)
+                and shiboken6.isValid(obj) and (obj is scroll._body or obj is scroll._page)):
+            scroll.updateGeometry()
         return False
 
 

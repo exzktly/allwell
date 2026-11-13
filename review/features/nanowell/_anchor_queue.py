@@ -65,7 +65,7 @@ def active_queue(ctx) -> aqc.AnchorQueue | None:
     return queue
 
 
-def build_queue(ctx, states=None) -> tuple[aqc.AnchorQueue | None, str]:
+def build_queue(ctx, states=None, *, keep=None) -> tuple[aqc.AnchorQueue | None, str]:
     """The :class:`anchor_queue_compute.AnchorQueue` of this dataset's timepoints in *states* (the class *Problem*
     chooses when ``None``), or ``(None, why)``. The anchors file is found from the dataset folder, so a click on the
     matrix can start a walk before any well's tables are read."""
@@ -86,7 +86,7 @@ def build_queue(ctx, states=None) -> tuple[aqc.AnchorQueue | None, str]:
     if matrix is None:
         return None, "The plate's grid records and identity checks are still being read."
     states = rc.walk_states(matrix, st.anchor_queue_states) if states is None else tuple(states)
-    items = qc.queue_items(matrix, states)
+    items = qc.queue_items(matrix, states, keep=keep)
     pending = frozenset(k for k, c in matrix.cells.items() if c.state == qc.ANCHOR_WAITING)
     queue = aqc.AnchorQueue(items, selection_before=frozenset(ctx.state.selection.selected_wells),
                             pending_rerun=pending, data_dir=str(data_dir))
@@ -101,6 +101,9 @@ def build_queue(ctx, states=None) -> tuple[aqc.AnchorQueue | None, str]:
             why += (f" with One per well: {len(items)} more wait in wells that already have one. One per well is now "
                     "off, so Resolve walks them all")
         why += "."
+        aside = qc.set_aside_text(matrix, states)
+        if aside:
+            why += f" {aside}"
         if pending:
             why += (f" {len(pending)} timepoint(s) have an anchor that no run has used yet: Re-run anchored wells… "
                     "addresses them.")
@@ -122,7 +125,7 @@ def start_class(ctx, state: str, well: str, timepoint: str) -> bool:
         return False
     per_well, st.anchor_queue_per_well = st.anchor_queue_per_well, False
     try:
-        queue, why = build_queue(ctx, (state,))
+        queue, why = build_queue(ctx, (state,), keep=(well, timepoint))
     finally:
         st.anchor_queue_per_well = per_well
     if queue is not None:
@@ -167,7 +170,7 @@ def _open_current(ctx, queue) -> bool:
         nwc._call(ctx, "_nw_refresh_controls")
         return shown
     _forget_focus(st)
-    armed = cls.armed
+    armed = rc.armed_for(item)
     zoom = rc.HINT_ZOOM if hint.point_um is not None else OPEN_ZOOM
     shown = nwc.open_for_anchor(ctx, item.well, item.timepoint, zoom=zoom, arm=armed, at=hint.point_um)
     if shown and st is not None:
@@ -244,7 +247,7 @@ def current_guide(ctx) -> rc.Guide | None:
     if st is None or item is None:
         return None
     cls = rc.class_of(item.state)
-    armed = bool(cls is not None and cls.armed and (st.anchor_mode or st.anchor_pending is not None))
+    armed = bool(cls is not None and rc.armed_for(item) and (st.anchor_mode or st.anchor_pending is not None))
     records = st.qc_records
     left_out = None
     hours = ""

@@ -312,6 +312,9 @@ hiddenimports = [
     # The nanowell identity audit, reached through the launcher's
     # --run-identity dispatch (a function-level import).
     "pipeline.nanowell_identity",
+    # The central square's threshold calibration, reached through the
+    # launcher's --run-square-calibration dispatch (a function-level import).
+    "pipeline.nanowell_square_calibration",
     # Qt-free flat-field estimators shared by pipeline + viewer (imported lazily
     # inside the review-image controller, so static analysis can miss it).
     "pipeline.flatfield",

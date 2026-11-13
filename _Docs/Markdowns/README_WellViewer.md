@@ -7045,6 +7045,11 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   - **contradicted** (`xx`, `X`), **inconclusive** (`//`, `?`), **partial** (`\\`, with how many nanowells it leaves
     out) and **not checked** (`..`) — what the identity check said (see *Is each nanowell the same
     nanowell at every timepoint?* below), with the same hatches the line plots use;
+  - **minor partial** (`\\` in green) — a partial timepoint leaving out at most 5% of the nanowells it compared,
+    and **addresses agree** (`//` in green) — an inconclusive one whose every address lands on itself, doubted only
+    by the array's fitted outline. Neither needs a look: the first's few left-out nanowells already stay out of every
+    comparison, and no anchor changes the second. They are not counted in the title, which says how many there are
+    in a note beneath it;
   - **reference** (`R`) and **confirmed** — nothing to do.
 
   A timepoint that was not addressed is shown as such even when the identity check calls it inconclusive: the
@@ -7059,7 +7064,11 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   (until you choose, the worst class on the plate); **Resolve** — the highlighted button, which says what it will
   walk (*Resolve: 330 timepoints*) — steps through that class from its first timepoint; the **One per well** box
   narrows the walk to each well's first (*Resolve: 61 wells*); and **Re-run anchored wells…** puts the anchors to
-  use. While there is anything to walk, the figure says to press Resolve or click a cell.
+  use. While there is anything to walk, the figure says to press Resolve or click a cell. A contradicted or
+  inconclusive timepoint whose doubt is not its central square — most often an inconclusive one whose addresses all
+  land on themselves while the array's fitted outline disagrees — is left out of the walk, because an anchor only
+  says where the square is and cannot change it; the figure says how many were left out and why. Clicking such a
+  cell still opens it, with *Set anchor* off and a card saying what the doubt is.
 - **Trajectories** — one panel per well: a thin line per nanowell through its values over time, coloured by
   its occupancy at baseline, and a thick line for each occupancy class's median. A gap is a timepoint without
   a value. Growth rate and occupancy have one value per nanowell, so they are greyed here.
@@ -7512,6 +7521,30 @@ In the packaged app there is no `python` to run this with: run the app's own exe
 well that has not been checked gives the exact line for the copy of All-Well you are running, ready to paste. A dataset
 made by Subset, Concatenate, Merge Plates or a Validate relabel always starts out not checked, since its tables are new;
 run the check on its output folder.
+
+#### Calibrating the central square's thresholds
+
+When the QC view asks for an anchor at a timepoint and the ring it draws — the run's own guess at the central square,
+which it did not trust — keeps turning out to be right, the run is refusing squares it found correctly. It accepts a
+square only when the square's score leads the next most square outline by more than 0.15 and is at least 3 times
+it; both numbers were set on synthetic images, not on a real plate. To see what your plate supports, run
+`python -m pipeline.nanowell_square_calibration <output folder>` (in the packaged app,
+`<where the app is>/AllWell-<version>.app/Contents/MacOS/AllWell --run-square-calibration <output folder>`). The
+output folder is the run's `out/` folder, the one holding `nanowells/`; the dataset folder above it, or `nanowells/`
+itself, is taken to mean the same. A path it cannot use is named back with what it resolved to and what that folder
+holds, or as unreadable when the Terminal is not allowed into it. It reads
+the anchors you have set (from the `in/` folder beside the output folder, or `--input_dir <folder>`): a guess within
+half a nanowell spacing of your click counts as right, any other as wrong. Squares the run accepted itself count as
+right when the identity check confirmed the timepoint, and as wrong when it found the run took something else for
+the square. It then prints how many right and wrong guesses today's thresholds accept, the lead and ratio of each,
+and the strictest thresholds that accept the most right guesses and no wrong one, with how many of today's refused
+timepoints they would accept. Last it says where every timepoint stands: how many the run left unaddressed (or
+not located), and for the addressed ones the identity check's verdict and, when it is not good, a short reason code —
+the same reading the QC view's matrix makes, so it shows which kind of problem the timepoints needing a look are. Under
+that, for the partial timepoints, how many nanowells each leaves out and why, and for those inconclusive on the
+array's outline, how far the outline's centre lands from the square's (in nanowell spacings). With few wrong guesses to test against it says so: check a sample of the newly
+accepted timepoints before relying on the suggestion. It changes nothing in the dataset. Add `--csv` for one row per
+timepoint (scores and labels only, no images or paths) to share.
 
 ### Image Browser
 

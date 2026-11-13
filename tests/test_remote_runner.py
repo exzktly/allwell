@@ -1859,6 +1859,9 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/nanowell_inspect.py",
         "pipeline/nanowell_frames.py",
         "pipeline/nanowell_identity.py",
+        # The central square's threshold calibration: run by hand on a downloaded dataset, never on the
+        # remote, and listed because the manifest mirrors every pipeline/ file.
+        "pipeline/nanowell_square_calibration.py",
         "pipeline/nanowell_reference.py",
         "pipeline/nanowell_run.py",
         "pipeline/nanowell_task.py",

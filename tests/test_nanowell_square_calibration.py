@@ -153,7 +153,8 @@ def test_the_command(tmp_path, capsys):
 
 def test_the_output_folder_is_found_from_the_dataset_folder_or_its_nanowells_folder(tmp_path, capsys):
     out, _ = _dataset(tmp_path, WELLS, ANCHORS)
-    for given in (out, tmp_path, out / "nanowells"):
+    # The last two as Windows' command line hands over "…\out\" typed with a trailing backslash.
+    for given in (out, tmp_path, out / "nanowells", f'{out}"', f'{tmp_path}"'):
         assert cal.find_output_dir(given) == (out, ""), given
     assert cal.main([str(tmp_path)]) == 0
     assert "Suggested: lead > 0.12" in capsys.readouterr().out

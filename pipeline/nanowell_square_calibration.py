@@ -308,7 +308,9 @@ def find_output_dir(given) -> tuple[Path | None, str]:
     ``nanowells/`` folder — or ``(None, why)``, saying what the path resolved to and what it holds, so a path that
     is wrong, unreadable or simply another folder each reads differently."""
     typed = str(given)
-    path = Path(typed).expanduser()
+    # Windows' command line reads a backslash before the closing quote ("…\out\") as an escaped quote, so the
+    # argument arrives as …\out" with the quote in it; no folder name ends in one, so it is taken off.
+    path = Path(typed[:-1] if typed.endswith('"') else typed).expanduser()
     shown = f"{typed!r}" + (f" (resolved to {path.resolve()})" if str(path.resolve()) != typed else "")
     if not path.exists():
         return None, (f"{shown} does not exist. Check the spelling, and quote a path that holds spaces; a ~ inside "

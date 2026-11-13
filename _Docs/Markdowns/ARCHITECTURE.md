@@ -13924,7 +13924,11 @@ by `analyse` on a worker through `controller._fetch` (kind `rare_results`; a fai
 the figure saying so meanwhile; `_rare_render.render_rare_page` draws a row of ECDF / exceedance / HC per treatment
 over two lines per treatment (`rare_export_compute.verdict_lines`: the verdict, each test's p and q). It lays the
 figure out in inches, panels first: each row gets at least `ROW_MIN_IN`, as many treatments are drawn as fit (at
-most `MAX_UNIT_ROWS`, the rest named), and the text takes only what the rows leave, lines past it counted. The full
+most `MAX_UNIT_ROWS`, the rest named), and the text takes only what the rows leave, lines past it counted. A figure
+narrower than `STACK_BELOW_IN` (a phone's, about 4 in) stacks each treatment's three panels in one column, each at
+least `STACKED_ROW_MIN_IN` tall: side by side there each panel was about an inch across and its labels ran into its
+neighbours'. The exceedance panel raises its top by the height of a dot's p label in points (`_headroom`), so a dot
+at the top of a short panel keeps its label inside the axes rather than over the title. The full
 `report_lines` report, the result's warnings and the page's notes go to the page's **Details** field instead
 (`rc.footer_of` → `NanowellState.rare_footer`, which `details_view` shows on the Statistics view as it shows the
 Distribution view's footer): drawn into the figure, a long report had squeezed the panels to under an inch.

@@ -11152,7 +11152,8 @@ a few fast nanowells from a whole tail that moved, so it never supports the rare
 On the **Statistics** view, choose **Test: Rare responders (vs control, wells as units)**, then the control
 group under **vs**. The tests run in the background; the figure says so until they finish. Each treatment group
 then gets one row of three panels (up to three groups, and as many as the window's height fits; the report covers
-all of them), and under the panels two lines per group: the verdict, then each test's p and q:
+all of them), and under the panels two lines per group: the verdict, then each test's p and q. On a phone, or in a
+window too narrow for three panels side by side, each group's three panels are stacked one above the other:
 
 1. **ECDF by N0** — one shade per loading stratum (named in its key), from the same blue ramp the Distribution
    view colours a nanowell's cell count with — never a well's colour — control dotted, treatment solid, the

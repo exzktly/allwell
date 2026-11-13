@@ -490,3 +490,40 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
         curve = next(ln for ln in hc_ax.lines if ln.get_gid() == f"rare-hc-treated:{key}")
         assert to_hex(curve.get_color()).upper() == color_for_well(well).upper()
     assert color_for_well("B01").upper() != WELL_COLORS_TUPLE[0].upper()   # the fixture tells right from wrong
+
+
+def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
+    """The reported defect: on a phone (a figure about 4 × 7.3 in) the three panels sat side by side, each about an
+    inch across, their axis labels running into one another. Narrower than STACK_BELOW_IN they stack, every panel the
+    figure's width, none overlapping another or the verdict under them, all inside the figure; wider, they stay in one
+    row. The exceedance panel keeps headroom over its highest dot for that dot's p label."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)))
+    lines = ["drug: 2 vs 3 control wells — supports rare-responder enrichment", "A exceedance: p 0.001"]
+    for size, stacked in (((4.06, 7.32), True), ((14.5, 7.0), False)):
+        fig = Figure(figsize=size)
+        rd.render_rare_page(fig, res, lines, note="a note")
+        panels = [ax for ax in fig.axes if ax.axison]
+        assert len(panels) == 3, size
+        boxes = [ax.get_position() for ax in panels]
+        if stacked:
+            assert len({round(b.x0, 6) for b in boxes}) == 1, size              # one column
+            assert all(b.width * size[0] >= 2.5 for b in boxes), [b.width * size[0] for b in boxes]
+            ordered = sorted(boxes, key=lambda b: -b.y0)
+            assert all(upper.y0 > lower.y1 for upper, lower in zip(ordered, ordered[1:])), size
+            assert min(b.height for b in boxes) * size[1] >= rd.STACKED_ROW_MIN_IN - rd._ROW_PAD_IN - 1e-6
+        else:
+            assert len({round(b.y0, 6) for b in boxes}) == 1, size              # one row
+        assert all(b.y0 >= 0 and b.y1 <= 1 for b in boxes), size
+        texts = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
+        assert max(t.get_position()[1] for t in texts) < min(b.y0 for b in boxes), size
+        renderer = FigureCanvasAgg(fig).get_renderer()
+        exceed = panels[1]
+        box = exceed.get_window_extent(renderer)
+        labels = [t for t in exceed.texts if t.get_text().startswith("p=")]
+        assert labels, size
+        assert all(t.get_window_extent(renderer).y1 <= box.y1 for t in labels), size   # inside, under the title

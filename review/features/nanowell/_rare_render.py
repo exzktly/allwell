@@ -153,6 +153,25 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     _title(ax, "ECDF by N0 (treatment solid, control dotted, T dashed)")
 
 
+#: Points a dot's p label takes above the dot: its 6 pt offset and one line of its type, with leading.
+_P_LABEL_PT = 6 + _TITLE_PT * 0.75 * 1.4
+
+
+def _headroom(ax, labelled) -> None:
+    """Raise *ax*'s top so the p label over each of the *labelled* y values stays inside the axes rather than running
+    into the panel's title. The room is in points, so it is taken as a share of the axes' own height: a margin in data
+    units left a short phone panel's label above it."""
+    tops = [v for v in labelled if np.isfinite(v)]
+    axes_in = ax.get_position().height * ax.figure.get_figheight()
+    if not tops or axes_in <= 0:
+        return
+    share = min(0.6, _P_LABEL_PT / 72 / axes_in)
+    low, high = ax.get_ylim()
+    need = (max(tops) - share * low) / (1 - share)
+    if need > high:
+        ax.set_ylim(low, need)
+
+
 def draw_exceedance(ax, unit) -> None:
     """Each well's exceedance rate; control wells (leave-one-out) as the null, treatment wells with their p."""
     _ground, ink, muted = _inks(ax)
@@ -174,6 +193,7 @@ def draw_exceedance(ax, unit) -> None:
     ax.set_xticks(xs, [c.key.split(":", 1)[-1] for c in controls + treated], rotation=60,
                   fontsize=_TITLE_PT * 0.75)
     ax.set_ylabel(f"% above the {unit.primary.percentile:g}th pct.")
+    _headroom(ax, [c.rate * 100 for c in treated if np.isfinite(c.empirical_p)])
     _title(ax, "Exceedance per well over the control null")
 
 
@@ -222,6 +242,13 @@ def _wrapped(fig, lines, width_frac: float) -> list[str]:
 
 #: The height one row of panels needs to be read, in inches: titles, ticks and labels take about 1.1 of it.
 ROW_MIN_IN = 2.4
+#: Below this figure width, in inches, a treatment's three panels are stacked in one column rather than laid side by
+#: side: under it each of three panels is less than about 1.25 in across once the y labels and gaps are taken, and
+#: its tick labels run together. A phone's figure is about 4 in wide; a desk window's, 7 in and over.
+STACK_BELOW_IN = 6.5
+#: A stacked panel's least height, in inches: lower than :data:`ROW_MIN_IN` so one treatment's three panels and its
+#: verdict fit a phone's figure (about 7.3 in tall) without running off its bottom.
+STACKED_ROW_MIN_IN = 1.9
 #: Inches: the figure's top margin, and the space a row's x labels and title take beyond its axes.
 _TOP_IN, _ROW_PAD_IN, _TEXT_PAD_IN = 0.15, 1.05, 0.12
 
@@ -233,32 +260,37 @@ def render_rare_page(fig, result, lines, *, note: str = "") -> None:
 
     **The panels are laid out first, in inches.** Each row gets at least :data:`ROW_MIN_IN`; the text takes only what
     its lines need, and as many treatments are drawn as their rows fit — the rest named in a line — so a long report
-    or a short window never squeezes the panels below legibility."""
+    or a short window never squeezes the panels below legibility. A figure narrower than :data:`STACK_BELOW_IN` (a
+    phone's) stacks each treatment's three panels in a column, each at least :data:`STACKED_ROW_MIN_IN` tall:
+    side by side at that width each panel was about an inch across, its axis labels run into its neighbours."""
     fig.clear()
     width, height = max(fig.get_figwidth(), 1.0), max(fig.get_figheight(), 1.0)
+    stacked = width < STACK_BELOW_IN
+    per_unit, cols = (3, 1) if stacked else (1, 3)      # rows of panels per treatment, panels per row
+    row_min = STACKED_ROW_MIN_IN if stacked else ROW_MIN_IN
     step_in = _REPORT_PT * _LEADING / 72
-    room = max(1, int((height - _TOP_IN - (len(lines) + 2) * step_in) // ROW_MIN_IN))
+    room = max(1, int((height - _TOP_IN - (len(lines) + 2) * step_in) // (row_min * per_unit)))
     units = result.units[:min(MAX_UNIT_ROWS, room)]
     extra = len(result.units) - len(units)
     text = _wrapped(fig, [*lines, *([f"{extra} more treatment(s) are not drawn: each is in Details, below the "
                                      "figure."] if extra else []), *([note] if note else [])], 0.96)
     # The text takes what the panels leave, never more: lines past it are counted, and Details holds them all.
-    fits = max(1, int((height - _TOP_IN - len(units) * ROW_MIN_IN - 2 * _TEXT_PAD_IN) // step_in))
+    fits = max(1, int((height - _TOP_IN - len(units) * per_unit * row_min - 2 * _TEXT_PAD_IN) // step_in))
     if len(text) > fits:
         text = text[:fits - 1] + [f"… {len(text) - fits + 1} more line(s) not drawn: Details ▸ under the figure."]
     text_in = len(text) * step_in + 2 * _TEXT_PAD_IN
-    band_in = max(ROW_MIN_IN, (height - _TOP_IN - text_in) / max(1, len(units)))
+    band_in = max(row_min, (height - _TOP_IN - text_in) / max(1, len(units) * per_unit))
     log_axis = not result.prepared.params.normalize
     left, gap = 0.75 / width, 0.85 / width
-    panel_w = (1.0 - left - 0.25 / width - 2 * gap) / 3
+    panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
+    axes_h = band_in - _ROW_PAD_IN
     for r, unit in enumerate(units):
-        top = height - _TOP_IN - r * band_in
-        bottom = top - band_in + 0.62                    # the x labels sit below the axes
-        axes_h = band_in - _ROW_PAD_IN
         panels = (lambda ax, u=unit: draw_ecdf_strata(ax, u, result.prepared.value_label, log_axis),
                   lambda ax, u=unit: draw_exceedance(ax, u), lambda ax, u=unit: draw_hc(ax, u))
         for c, draw in enumerate(panels):
-            ax = fig.add_axes([left + c * (panel_w + gap), bottom / height, panel_w, axes_h / height])
+            row, col = (r * per_unit + c, 0) if stacked else (r, c)
+            bottom = height - _TOP_IN - (row + 1) * band_in + 0.62      # the x labels sit below the axes
+            ax = fig.add_axes([left + col * (panel_w + gap), bottom / height, panel_w, axes_h / height])
             _prepare_axes(ax, GRID_TYPE_SCALE)
             draw(ax)
             if c == 0:

@@ -229,15 +229,34 @@ def beta_binomial_test(counts: list[WellCount], percentile: float, *, ci: bool =
     z = math.copysign(math.sqrt(lrt), full.coef[1])
     result.beta1, result.lrt, result.rho = float(full.coef[1]), lrt, full.rho
     result.p = float(stats.norm.sf(z))
-    result.odds_ratio = math.exp(full.coef[1]) if not full.at_bound else (0.0 if full.coef[1] < 0 else math.inf)
+    # One arm with no exceedance at all separates the design: the likelihood keeps rising as the odds ratio runs off
+    # to 0 or ∞, and wherever the optimiser stopped is no estimate. Say so, never print that number.
+    separated = _separation(rows)
+    result.odds_ratio = (math.exp(full.coef[1]) if not (full.at_bound or separated)
+                         else (0.0 if separated == "treatment" or (not separated and full.coef[1] < 0) else math.inf))
     if ci:
         result.ci = _profile_ci(k, n, X, full)
-    if full.at_bound:
+    if separated:
+        result.notes.append(f"no {separated} well has a nanowell above the threshold, so the odds ratio is unbounded "
+                            f"(reported as {'0' if separated == 'treatment' else '∞'}); the p-value and the "
+                            "interval's finite end stand")
+    elif full.at_bound:
         result.notes.append("complete separation: an estimate reached its bound, so the odds ratio is reported as "
                             f"{'0' if full.coef[1] < 0 else '∞'}")
     if len(names) > 2:
         result.notes.append("covariates: " + ", ".join(names[2:]))
     return result
+
+
+def _separation(rows: list[WellCount]) -> str:
+    """``"control"`` or ``"treatment"`` when that arm has no exceedance at all (the other having some), else ``""``."""
+    kt = sum(r.k for r in rows if r.treated)
+    kc = sum(r.k for r in rows if not r.treated)
+    if kc == 0 and kt > 0:
+        return "control"
+    if kt == 0 and kc > 0:
+        return "treatment"
+    return ""
 
 
 def _min_p(counts: list[WellCount]) -> float:

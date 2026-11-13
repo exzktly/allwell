@@ -13911,9 +13911,15 @@ change at that timepoint, whatever the Metric — and keys the result on a hash 
 so a key cannot return a result computed for other numbers. A key not in `NanowellState.rare_results` is computed
 by `analyse` on a worker through `controller._fetch` (kind `rare_results`; a failure is stored as its sentence),
 the figure saying so meanwhile; `_rare_render.render_rare_page` draws a row of ECDF / exceedance / HC per treatment
-(at most `MAX_UNIT_ROWS`) over the `rare_export_compute.report_lines` report. `rc.after_draw` (called from
-`_redraw`) keeps the drawn result's flagged nanowells on `NanowellState.rare_flagged` and at most `RESULTS_KEPT`
-results. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
+over two lines per treatment (`rare_export_compute.verdict_lines`: the verdict, each test's p and q). It lays the
+figure out in inches, panels first: each row gets at least `ROW_MIN_IN`, as many treatments are drawn as fit (at
+most `MAX_UNIT_ROWS`, the rest named), and the text takes only what the rows leave, lines past it counted. The full
+`report_lines` report, the result's warnings and the page's notes go to the page's **Details** field instead
+(`rc.footer_of` → `NanowellState.rare_footer`, which `details_view` shows on the Statistics view as it shows the
+Distribution view's footer): drawn into the figure, a long report had squeezed the panels to under an inch.
+The ECDF's x is log₂ FC on a linear axis, because the page's style pass resets an axis's scale after the draw.
+`rc.after_draw` (called from `_redraw`) keeps the drawn result's flagged nanowells on
+`NanowellState.rare_flagged`, its Details footer, and at most `RESULTS_KEPT` results. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
 `draw_popout` sends to `rc.draw_flagged_popout`: rows of crops over time through `renderer.render_site_rows`,
 `FLAGGED_PAGE` to a page, cut through `_window_controller`'s crop pipeline and paged by its pager
 (`_window_controller.page_count` answers for this source). `tests/test_nanowell_rare_responders_page.py` drives

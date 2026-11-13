@@ -32,9 +32,9 @@ from review.features.nanowell import controller as _controller
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._rare_render import render_rare_page
 from review.features.nanowell.rare_data_compute import RareParams, from_site_metrics
-from review.features.nanowell.rare_export_compute import report_lines
+from review.features.nanowell.rare_export_compute import report_lines, verdict_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
-from review.features.nanowell.renderer import render_message, render_site_rows
+from review.features.nanowell.renderer import Footer, render_message, render_site_rows
 
 #: Flagged nanowells the pop-out shows to a page, as the Distribution window's rows.
 FLAGGED_PAGE = 24
@@ -120,10 +120,25 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     if isinstance(held, str):
         render_message(fig, held, gid="nw-rare-why")
         return None
-    notes = [f"{VALUE_NOTE} Timepoint: {timepoint}.", *([NOT_APPLIED] if moving_on or cohort else []), *([UNIT_IGNORED] if unit_set else []),
-             *([note] if note else [])]
-    render_rare_page(fig, held, report_lines(held), note=" ".join(notes))
+    notes = [f"{VALUE_NOTE} Timepoint: {timepoint}.", *([NOT_APPLIED] if moving_on or cohort else []),
+             *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
+    held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
+    render_rare_page(fig, held, verdict_lines(held), note=DETAILS_POINTER)
     return held
+
+
+#: What the figure says under its verdicts: the full report is in the field under it, not in the figure.
+DETAILS_POINTER = "Full report, warnings and notes: Details ▸ under the figure."
+
+
+def footer_of(result: RareResult) -> Footer:
+    """The page's **Details** field for a rare result: the counts, the warnings, then the full report and the page's
+    notes — everything the figure leaves out so its panels keep their room."""
+    log = result.log
+    counts = (f"Rare responders: {len(result.units)} treatment(s) · {log['nanowells_kept']:,} nanowells kept, "
+              f"{log['nanowells_excluded']:,} excluded")
+    return Footer(counts=counts, alerts=list(result.warnings),
+                  notes=[*report_lines(result), *result.page_notes])
 
 
 def hook(ctx, st) -> dict:
@@ -153,9 +168,11 @@ def after_draw(ctx, st, model) -> None:
     """After the Statistics view is drawn: keep the flagged nanowells of the rare result drawn (none otherwise), drop
     results beyond :data:`RESULTS_KEPT`, and refresh the pop-out when it shows them."""
     st.rare_flagged = flagged_rows(model) if isinstance(model, RareResult) else []
+    st.rare_footer = footer_of(model) if isinstance(model, RareResult) else None
     while len(st.rare_results) > RESULTS_KEPT:
         st.rare_results.pop(next(iter(st.rare_results)))
     nwc = _nwc()
+    nwc._call(ctx, "_nw_details_refresh")
     nwc._call(ctx, "_nw_popout_window_refresh")
     if st.popout_source == "responders":
         nwc.draw_popout(ctx)

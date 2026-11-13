@@ -98,3 +98,22 @@ def write(result, folder) -> list[Path]:
     report = folder / "rare_report.txt"
     report.write_text("\n".join(report_lines(result)) + "\n", encoding="utf-8")
     return written + [log, report]
+
+
+def verdict_lines(result, units=None) -> list[str]:
+    """Two lines per treatment for the figure: the verdict, then each test's p and q — the rest is in
+    :func:`report_lines`, which the page shows under the figure (Details)."""
+    rows = result.table if units is None else result.table.head(units)
+    lines = []
+    for _i, r in rows.iterrows():
+        lines.append(f"{r['treatment']}{'' if r['plate'] == 'all' else ' @ ' + str(r['plate'])}: "
+                     f"{r['n_treatment_wells']} vs {r['n_control_wells']} control wells — {r['interpretation']}")
+        if not r["group_inference"]:
+            lines.append(f"    {r['refusal']}")
+            continue
+        lines.append(f"    A exceedance: OR {_num(r['exceedance_or'])} (95% CI {_num(r['exceedance_or_ci_low'])}–"
+                     f"{_num(r['exceedance_or_ci_high'])}), p {_num(r['exceedance_p'])}, q {_num(r['exceedance_q'])}"
+                     f"   ·   B HC: p {_num(r['hc_p'])}, q {_num(r['hc_q'])}"
+                     f"   ·   C A²R: p {_num(r['a2r_p'])}, q {_num(r['a2r_q'])}"
+                     f"   ·   smallest attainable p {_num(r['hc_min_p'])}")
+    return lines

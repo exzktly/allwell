@@ -92,6 +92,7 @@ class RareResult:
     log: dict
     warnings: list = field(default_factory=list)
     validation: object = None    # rare_validate_compute.Validation, when run
+    page_notes: list = field(default_factory=list)   # what the Nanowells page adds under the report (its Details)
 
 
 def _units(wells: dict[str, Well], params: RareParams) -> list[tuple[str, str, list, list]]:

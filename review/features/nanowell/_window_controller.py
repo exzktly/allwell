@@ -20,10 +20,11 @@ from dataclasses import replace
 
 from review.features.nanowell import array_hover_compute as ahc
 from review.features.nanowell import composite_compute as cc
+from review.features.nanowell import size_class_compute as scc
 from review.features.nanowell import controller as _controller
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import window_compute as wc
-from review.features.nanowell._composite_render import render_composite
+from review.features.nanowell._composite_render import corner_text, render_composite
 from review.features.nanowell._window_render import DRAG_GID, draw_drag, draw_window
 from review.features.nanowell.distribution_compute import METRICS, PER_NANOWELL, metric_column
 from review.features.nanowell.crop_grid_compute import shown_timepoints
@@ -485,18 +486,29 @@ def set_composite_label(ctx, key) -> None:
 
 def composite_labels(ctx, st, sites, timepoints) -> tuple[dict, str]:
     """``({timepoint: {site: value}}, sentence)`` for **Corner**: the chosen metric at each panel's own timepoint, and
-    the caption's sentence naming it — or why it could not be read. ``({}, "")`` with no label chosen."""
+    the caption's sentence naming it — or why it could not be read. ``({}, "")`` with no label chosen.
+
+    The cell count, with size classes set on Cell Gating, is written with its split — ``"6 (4/1)"``, the first class
+    then the second, the rest in neither — and the sentence names the classes; a nanowell whose classes are undefined
+    keeps its bare count."""
     key = st.composite_label
     if key not in METRICS:
         return {}, ""
+    sizes = getattr(getattr(st, "gate", None), "sizes", None)
+    split = key == "n" and sizes is not None and sizes.active()
     out, label, why = {}, "", ""
     for tp in timepoints:
         values, label, why = metric_values(ctx, st, key, sites, tp)
         if values is None:
             return {}, f"No corner labels: {why}." if why else ""
+        if split:
+            splits = scc.site_splits(st.metrics, values, tp, sizes)
+            values = {site: (f"{corner_text(v)} ({splits[site][0]:g}/{splits[site][1]:g})" if site in splits else v)
+                      for site, v in values.items()}
         out[str(tp)] = values
     at = "" if key in PER_NANOWELL else " at its panel's timepoint"
-    return out, f"Corner: each tile's {label}{at}."
+    classes = f", then in brackets {sizes.labels[0]} / {sizes.labels[1]} (the rest in neither)" if split else ""
+    return out, f"Corner: each tile's {label}{at}{classes}."
 
 
 def set_popout_layout(ctx, layout: str) -> None:
@@ -730,13 +742,15 @@ def on_popout_motion(ctx, event) -> None:
 
 def tile_card(st, site, timepoint) -> str:
     """The Array view's hover card for the real nanowell *site* at *timepoint* (``""`` without one): its address,
-    state, counts, fluorescence, fold changes, rim focus and place, read from its row of the nanowell table."""
+    state, counts (split by size class when Cell Gating sets classes), fluorescence, fold changes, rim focus and place,
+    read from its row of the nanowell table."""
     if timepoint is None or st.metrics is None or st.data is None:
         return ""
     well, q, r = site
     rows = ahc.rows_by_address(st.metrics, well, str(timepoint))
     return ahc.hover_text(ahc.row_for(rows, site, None, None), site, timepoint=str(timepoint),
-                          channels=list(st.data.channels), rule=st.rim_focus_rule())
+                          channels=list(st.data.channels), rule=st.rim_focus_rule(),
+                          sizes=getattr(getattr(st, "gate", None), "sizes", None))
 
 
 def on_popout_scroll(ctx, event) -> None:

@@ -7224,7 +7224,8 @@ timepoint with no crop says why. **Pop out**, above the strip, opens the crops l
 one panel per timepoint, all of a channel's panels on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
 it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
-(the display range), **Cells**, **Metrics** (the measurements under each crop, ending with the rim's focus — *rim 88% of sharpest* — as a
+(the display range), **Cells**, **Metrics** (the measurements under each crop — the cell count first and, with size classes set on Home ▸ Cell
+Gating, the count in each class and in neither, *4 cells · 2 T cells · 1 DCs · 1 in neither* — ending with the rim's focus — *rim 88% of sharpest* — as a
 percentage of its well's sharpest rims at that timepoint, the same scale as the **Rim focus** threshold, so a crop
 reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
 not fitted* where the rim was not found), **Labels** (each crop's timepoint
@@ -7299,7 +7300,9 @@ order: *Window rank* (the default), or any of the page's metrics at the latest t
 (largest first) or **Ascending**; a nanowell with no value sorts last, and the title says what the tiles are placed
 by. The order runs across the whole window, so the first page holds the largest (or smallest) of all its nanowells. The wells' patches follow the same order. **Corner** writes a metric of your choice — cell count, confluence, a fluorescence, a
 fold change — in each tile's top-left corner, at the timepoint of the panel the tile is in (a dash where the nanowell
-has no value there); the caption names it. Zoom in to read it on a full page. Tiles are
+has no value there); the caption names it. With size classes set on Home ▸ Cell Gating, *Cell count* is written with
+its split, first class then second — *4 (2/1)* is 4 cells, 2 T cells and 1 DC, the rest in neither class — and the
+caption names the classes. Zoom in to read it on a full page. Tiles are
 drawn apart inside a dashed frame — the edge of each timepoint's panel, so it stays put when you zoom or pan — and the
 title says it is not a real array. Each tile has a coloured **stripe**
 along its foot, and **Colour** (beside **Layout**, in the Hex layout) chooses what it says: *Source well* (a well keeps its colour on every page and whatever the Sort), any of the

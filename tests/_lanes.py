@@ -274,6 +274,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_size_classes_panel.py": "The size classes through the real controls: typed into Cell Gating's panel …",
     "test_nanowell_saved_subsets.py": "Subsets are named and saved in the dataset, listed in the Subset box and applied from it",
     "test_nanowell_array_hover.py": "Hovering a nanowell on the Array view shows its address, state, counts, focus and place",
+    "test_nanowell_count_labels_split_by_size_class.py": "A nanowell's count, in crop captions, hover cards and Corner, split by size class",
     "test_nanowell_array_key.py": "The Array view keys its nanowell outlines: a ring swatch per state in view, with counts",
     "test_nanowell_array_marks_are_distinct.py": "Every cause of a nanowell's exclusion draws its own mark on the Array view",
     "test_nanowell_page_array_layers.py": "The Array view's elements are each turned on and off, and the three views it replaced are …",

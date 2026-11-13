@@ -2,7 +2,7 @@
 
 Hovering a nanowell on the Array view shows one card of everything its row of the nanowell table holds at the
 timepoint drawn: its address and ring, its state and why, the value the figure is coloured by (or why it has none),
-its counts and confluence, each channel's fluorescence, the fold changes from its baseline and its growth rate, its
+its counts and confluence (the count split by size class when Cell Gating sets classes), each channel's fluorescence, the fold changes from its baseline and its growth rate, its
 rim focus against the well's sharp rims, the identity check, and where it sits. The card is the controller's
 tooltip (``controller.on_motion``); the one-line summary leads the canvas's own readout chip
 (``axes._aw_hover_label``, set by ``renderer.render_array``).
@@ -22,6 +22,7 @@ import numpy as np
 
 from review.domain.nanowell_rim_focus import MEASURABLE, OUT_OF_FOCUS, REFERENCE_PERCENTILE, MIN_SITES
 from review.features.nanowell._array_key import state_word
+from review.features.nanowell.size_class_compute import breakdown_items, breakdown_why
 
 #: The fold-change and rate columns the card writes, as (column, words); a channel's are added per channel.
 _DERIVED = (("count_fc", "count fold change"), ("log2_count_fc", "log₂ count fold change"),
@@ -136,11 +137,12 @@ def focus_line(row: dict, rule=None) -> str:
 
 
 def hover_text(row: dict | None, site, *, timepoint: str, value=None, label: str = "", why: str = "",
-               channels=(), rule=None, name: str = "", state: str = "") -> str:
+               channels=(), rule=None, name: str = "", state: str = "", sizes=None) -> str:
     """The card for the nanowell *site* ``(well, q, r)`` at *timepoint*, from its table *row* (``None`` when the
     table has no row for it, which the card then says). *value* and *label* are the metric the figure is coloured by,
     *why* why the nanowell has no value of it; *rule* is the page's rim focus rule; *name* what the page calls the
-    well."""
+    well; *sizes* the size-class rule the counts were made with (``GateTally.sizes``), whose split of the count the
+    card writes on its own line."""
     well, q, r = site
     lines = []
     head = f"{name or well} · nanowell {_address(q, r)}"
@@ -168,6 +170,9 @@ def hover_text(row: dict | None, site, *, timepoint: str, value=None, label: str
     if label:
         lines.append(f"Shown — {label}: {value_or_why(value, st, why)}")
     lines.append(_counts_line(row))
+    classes = _size_line(row, sizes)
+    if classes:
+        lines.append(classes)
     lines += _channel_lines(row, channels)
     derived = _derived_line(row, channels)
     if derived:
@@ -200,6 +205,16 @@ def _counts_line(row: dict) -> str:
         at = ", ".join(filter(None, [f"{n0} cells" if n0 else "", base]))
         parts.append(f"occupancy at baseline {occupancy}" + (f" ({at})" if at else ""))
     return " · ".join(parts)
+
+
+def _size_line(row: dict, sizes) -> str:
+    """The count split by size class (``"Size classes: 4 T cells · 1 DCs · 2 in neither"``), or why a counted
+    nanowell has no split; ``""`` with no classes set or no count to split."""
+    items = breakdown_items(row, sizes)
+    if items:
+        return "Size classes: " + " · ".join(items)
+    why = breakdown_why(row, sizes)
+    return f"Size classes: no value — {why}" if why else ""
 
 
 def _channel_lines(row: dict, channels) -> list[str]:

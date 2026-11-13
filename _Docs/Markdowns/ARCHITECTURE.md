@@ -13540,7 +13540,10 @@ since it orders the rows; the caption names those left out) — every crop on on
 shared with the enlarged crops), the ranking timepoint's column outlined, each row labelled with rank, address and
 value, and **every word a crop carries is written inside it**, on a translucent band of the ground: the fold change
 at its timepoint in its top-left corner (`format_value`: `2.31×`, or a signed difference on log₂), and along its
-foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, confluence as a
+foot one line of the nanowell's metrics there (`series_compute.crop_metric_lines`: count, then — given the page's
+`GateTally.sizes`, which `controller.crop_metrics` passes — the count in each size class and in neither
+(`size_class_compute.breakdown_items`: nothing under an incomplete rule or where the classes are undefined, never a
+split of zeros), confluence as a
 percentage, the shared channel's nanowell fluorescence and cell fluorescence as `fluor.` and `per cell`, in that order of
 importance, `compact_number` for thousands; a state without numbers by name; a missing measurement left out, never zero) — as many as fit the
 crop's width (`renderer._one_line`), the caption saying when some were left for the pop-out, which writes each
@@ -13682,7 +13685,9 @@ the members, not the first page of ranks sorted among themselves
 `_nw_popout_label_cb`) is resolved by `composite_labels` into `{timepoint: {site: value}}`, each panel's at its own
 timepoint, and `_composite_render._draw_corners` writes `corner_text(value)` (a whole number as one, else three
 significant figures, `—` with no value) in each tile's top-left corner, white on a dark stroke (`nw-composite-value`);
-the caption names the metric;
+the caption names the metric. *Cell count* under an active size-class rule is written as text with its split
+(`"4 (2/1)"`, from `size_class_compute.site_splits`; a nanowell with no defined split keeps its bare number, and
+`corner_text` writes a string as it is), and the caption names the two classes;
 `page` takes `COMPOSITE_PAGE` (91, a radius-5 hexagon) ranks at a time. `Composite` and `CompositeTile(x, y, source,
 rank, patch)` carry **no well id**: a tile's `source` is the real `(well, q, r)` it stands for, and nothing of the
 composite reaches `NanowellState.well`, the plate selection, the CSV export or Batch Export (`tests/
@@ -14128,7 +14133,10 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   axes: the address and ring, the timepoint and its hours, the state (and the run's own state when Cell Gating or the
   rim-focus rule overwrote it, `run_state`) with the fused / partially-visible / count-disagreement flags and the
   row's `reason`, the shown metric's value as the figure labels it (`ArrayDrawn.label`) or why it has none
-  (`ArrayScene.why`), the count and confluence (with the run's own count when the state leaves none), the occupancy
+  (`ArrayScene.why`), the count and confluence (with the run's own count when the state leaves none), the count split by size class on a
+line of its own under an active `GateTally.sizes` (`_size_line`: `Size classes: 2 T cells · 1 DCs · 1 in neither`, or
+`no value —` and `size_class_compute.breakdown_why` for a counted nanowell whose classes are undefined; the Window
+composite's `tile_card` passes the same rule), the occupancy
   class and baseline count, each channel's cell and nanowell fluorescence, every fold change from the baseline and the
   growth rate, the rim focus against the well's sharp rims and the page's rule's verdict (`focus_line`: in focus, out
   of focus, rule off, or why it was not judged — no rim fitted, fewer than `MIN_SITES` rims, a state that is not

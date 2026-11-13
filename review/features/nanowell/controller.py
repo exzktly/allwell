@@ -1778,7 +1778,8 @@ def _array_hover(ctx, st, event) -> None:
     text = ahc.hover_text(row, site, timepoint=scene.timepoint,
                           value=scene.sites.values[k], label=drawn.label,
                           why=scene.why.get((site[1], site[2]), ""), channels=list(st.data.channels),
-                          rule=st.rim_focus_rule(), name=scene.name, state=str(scene.sites.state[k]))
+                          rule=st.rim_focus_rule(), name=scene.name, state=str(scene.sites.state[k]),
+                          sizes=getattr(getattr(st, "gate", None), "sizes", None))
     tip.point((scene.well, scene.timepoint, tuple(site)), text)
 
 
@@ -2062,15 +2063,17 @@ def extremes_columns(timepoints, ranked: str, chosen) -> list:
 
 def crop_metrics(st, sites, channel, *, focus: bool = False) -> dict:
     """``site -> {timepoint: [caption lines]}``: each nanowell's computed measurements at each timepoint, for the
-    captions under its crops (``series_compute.crop_metric_lines``); with *focus*, its rim focus as a share of the
+    captions under its crops (``series_compute.crop_metric_lines``), its count split by the page's size classes when
+    Cell Gating sets them; with *focus*, its rim focus as a share of the
     well's sharpest at the end (``series_compute.rim_focus_text``) — the pop-out's, where a crop has the room."""
     out: dict = {}
     if st.metrics is None:
         return out
+    sizes = getattr(getattr(st, "gate", None), "sizes", None)
     for site in sites:
         well, q, r = site
         frame = site_series(st.metrics, well, q, r)
-        out[tuple(site)] = {str(row["timepoint"]): crop_metric_lines(row, channel)
+        out[tuple(site)] = {str(row["timepoint"]): crop_metric_lines(row, channel, sizes)
                             + ([text] if focus and (text := rim_focus_text(row)) else [])
                             for row in frame.to_dict("records")}
     return out

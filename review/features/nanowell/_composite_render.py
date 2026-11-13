@@ -87,7 +87,11 @@ def _tile_outlines(tile, crop) -> tuple[list, np.ndarray]:
 
 
 def corner_text(value) -> str:
-    """A tile's corner label: a whole number as one, any other to three significant figures, ``—`` with no value."""
+    """A tile's corner label: a whole number as one, any other to three significant figures, ``—`` with no value. A
+    label already written as text (a cell count with its size-class split, ``"6 (4/1)"``,
+    ``_window_controller.composite_labels``) is written as it is."""
+    if isinstance(value, str):
+        return value
     if value is None or not math.isfinite(value):
         return "—"
     return f"{value:.0f}" if float(value).is_integer() else f"{value:.3g}"

@@ -70,6 +70,12 @@ VIEWS = (("distribution", "Distribution"), ("qc", "QC"), ("array", "Array"), ("t
 ONE_WELL_VIEWS = ("array", "identity")
 #: The views that show one well at one timepoint chosen from a list: the well picker and the timepoint combo.
 RANKED_WELL_VIEWS = ("extremes",)
+#: The views that draw no nanowell's value: Identity draws the identity check's distances and the montages, QC the
+#: plate's run records. Every control that chooses or narrows the values — Metric, Channel, Baseline, Rim focus,
+#: Subset — has no role there and is not shown. (On a view that does draw values, a control the current settings
+#: leave unused — the Metric on an Array whose layers draw no value — is greyed instead and says why, so turning a
+#: layer on or off never moves the controls beside it.)
+NO_VALUE_VIEWS = ("identity", "qc")
 #: The views that draw values over time, where a metric with one value per nanowell has nothing to draw.
 _OVER_TIME_VIEWS = ("trajectories", "extremes")
 #: The Array view's image layer, as its combo lists it.
@@ -383,7 +389,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     selection_row_end = band.add_break()
 
     rim_focus = build_rim_focus_controls(ctx)
-    band.add_scope("", rim_focus.box, rim_focus.spin)
+    grp_rim = band.add_scope("", rim_focus.box, rim_focus.spin)
 
     cohort_box = QCheckBox("Fixed cohort")
     cohort_box.setToolTip(_COHORT_TIP)
@@ -651,9 +657,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             # it: hidden, they came and went with the Layers menu and every control after them jumped sideways.
             by_metric = _metric_reaches_figure(st, view)
             metric_cb.setEnabled(by_metric)
-            grp_metric.setVisible(True)
-            grp_channel.setVisible(True)          # never hidden: a greyed control says why, an absent one cannot
-            grp_baseline.setVisible(True)
+            # Shown on every view that draws values (greyed where these settings leave them unused, saying why);
+            # not shown where no value is drawn at all (``NO_VALUE_VIEWS``).
+            values = view not in NO_VALUE_VIEWS
+            grp_metric.setVisible(values)
+            grp_channel.setVisible(values)
+            grp_baseline.setVisible(values)
+            grp_rim.setVisible(values)
+            start.shown_on(values)
             grp_axis.setVisible(distribution)
             dist_style.refresh(st, distribution)
             cohort_box.setChecked(st.cohort)
@@ -1245,7 +1256,7 @@ def _metric_reaches_figure(st, view: str) -> bool:
     """Whether the Metric and Baseline controls change what *view* draws: on the Array view only through the
     nanowells' fill or their written values, so not when neither is drawn; never on the Identity view, which draws
     the identity check's distances and the montages, no metric."""
-    if view in ("identity", "qc"):
+    if view in NO_VALUE_VIEWS:
         return False
     layers = nwc.drawn_layers(st)
     return view != "array" or (layers.nanowells and layers.colour == "metric") or layers.values

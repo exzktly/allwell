@@ -76,7 +76,7 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
 
         has_variables = fill_group_by_combo(ctx, group_cb)
         fill_decoration_combos(ctx, combos, {"colour_by_variable": NO_COLOUR_LABEL})
-        group_grp.setVisible(has_variables)
+        group_grp.setVisible(has_variables and view != "qc")     # QC reads every well of the plate, ungrouped
         button.setVisible(has_variables and view in nwc.DECORATED_VIEWS)
 
     return SimpleNamespace(group_by=group_cb, group=group_grp, decorate=button, combos=combos, refresh=refresh,

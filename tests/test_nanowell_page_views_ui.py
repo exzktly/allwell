@@ -117,15 +117,13 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     assert _visible_scopes(page) == {"Metric", "Baseline", "Timepoint"}
     _choose_view(page, "extremes")
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint", "Extremes"}
-    # The Identity view draws no metric: its Metric and Baseline stay on the band, greyed, beside its well and
-    # timepoint.
+    # The Identity view draws no nanowell's value: Metric and Baseline are not on its band (asked for: "if it has no
+    # role on that tab, it shouldn't be displayed"), only its well and timepoint.
     _choose_view(page, "identity")
-    assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
-    assert not page.widgets.get("_nw_metric_cb").isEnabled() and not page.widgets.get("_nw_baseline_cb").isEnabled()
-    # The QC view draws the plate's records, no metric: Metric and Baseline greyed, and the Resolve walk here alone.
+    assert _visible_scopes(page) == {"Well", "Timepoint"}
+    # The QC view draws the plate's records, no value: the Resolve walk here alone.
     _choose_view(page, "qc")
-    assert _visible_scopes(page) == {"Metric", "Baseline", "Wells", "Resolve"}
-    assert not page.widgets.get("_nw_metric_cb").isEnabled() and not page.widgets.get("_nw_baseline_cb").isEnabled()
+    assert _visible_scopes(page) == {"Wells", "Resolve"}
 
 
 # ── V2: the Array view as the lattice map ────────────────────────────────────
@@ -405,3 +403,27 @@ def test_the_views_are_a_tab_strip_in_the_shell_band_and_a_click_chooses_the_vie
     assert st.view == "position"
     nwc.set_view(ctx, "statistics")                                  # the state moves; the strip follows it
     assert bar.tabData(bar.currentIndex()) == "statistics"
+
+
+#: Every control that chooses or narrows the values a view draws, and the Nanowell box, by registered name.
+_VALUE_CONTROLS = ("_nw_metric_cb", "_nw_channel_cb", "_nw_baseline_cb", "_nw_rim_focus_box", "_nw_subset_cb",
+                   "_nw_subset_edit_btn")
+
+
+def test_a_control_with_no_role_on_a_view_is_not_shown_there(page, qtbot):
+    """Asked for: "if it has no role on that tab, it shouldn't be displayed". QC and Identity draw no nanowell's
+    value, so nothing that chooses or narrows values is on their band, and QC, one row per well, has no nanowell to
+    go to. Every other view draws values and shows them all. An open Subset editor goes with its control and comes
+    back as it was left."""
+    from review.features.nanowell import tab_view as tv
+
+    _loaded(qtbot, page)
+    shown = lambda name: page.widgets.get(name).isVisibleTo(page.window)          # noqa: E731
+    page.widgets.get("_nw_subset_edit_btn").click()                               # the editor open
+    assert shown("_nw_subset_editor")
+    for view, _label in tv.VIEWS:
+        _choose_view(page, view)
+        values = view not in ("identity", "qc")
+        assert {name: shown(name) for name in _VALUE_CONTROLS} == {name: values for name in _VALUE_CONTROLS}, view
+        assert shown("_nw_subset_editor") == values, view
+        assert shown("_nw_goto_edit") == (view != "qc"), view

@@ -82,9 +82,13 @@ _ROWS_BY_VIEW = {
               ("_nw_image_cb", "_nw_layers_btn", "_nw_anchor_btn", "_nw_clear_anchor_btn", "_nw_rerun_btn")),
     "distribution": (_CENTRAL, _FILTER + _AVERAGES + ("_nw_responding_edit",), ("_nw_axis_seg",)),
     "statistics": (_CENTRAL + ("_nw_tp_cb",), _FILTER + _AVERAGES, ("_nw_control_cb",)),
-    "qc": (_CENTRAL, _FILTER, ("_nw_qc_wells_seg", "_nw_qc_walk_btn", "_nw_queue_btn", "_nw_qc_rerun_btn")),
+    # QC and Identity draw no nanowell's value, so neither shows Metric, Channel, Rim focus, Subset or Baseline
+    # (asked for: "if it has no role on that tab, it shouldn't be displayed"): QC is its viewing row alone, and
+    # Identity's first two rows hold only its well, timepoint and Exclude.
+    "qc": (("_nw_qc_wells_seg", "_nw_qc_walk_btn", "_nw_queue_btn", "_nw_qc_rerun_btn"),),
     "extremes": (*_ONE_WELL, ("_nw_extremes_spin", "_nw_extremes_metrics_box")),
-    "identity": (*_ONE_WELL, ("_nw_identity_mode_seg", "_nw_goto_origin_btn")),
+    "identity": (("_nw_well_cb", "_nw_tp_cb"), ("_nw_exclude_well_btn",),
+                 ("_nw_identity_mode_seg", "_nw_goto_origin_btn")),
     "trajectories": (_CENTRAL, _FILTER + _AVERAGES),
     "position": (_CENTRAL + ("_nw_tp_cb",), _FILTER),
 }

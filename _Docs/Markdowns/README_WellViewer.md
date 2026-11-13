@@ -6759,9 +6759,14 @@ the sentence names it.
     - *Timepoint not addressed* — the run could not address that timepoint of the well at all, so every nanowell
       in it is unfound. Add *Timepoint not addressed · at every timepoint · no* to tell a single lost nanowell
       apart from a whole timepoint that failed.
-    - *Array rim fitted* — the run fitted a circle to the outer edge of the well's nanowell array at that timepoint
-      (it locates the array's centre from it). *No* when no circle could be fitted, and always for an array whose
+    - *Array outline fitted* — the run fitted a circle to the outer edge of the well's whole nanowell array at that
+      timepoint (it locates the array's centre from it). It is one answer for every nanowell of the well, and says
+      nothing about any one nanowell's rim. *No* when no circle could be fitted, and always for an array whose
       outline is not a circle; no value for a timepoint the run could not place a lattice in at all.
+    - *Nanowell rim fitted* — the nanowell's own rim was fitted at that timepoint (its rim focus was measured).
+      *No* exactly where its crop is captioned *rim not fitted*; no value where the run did not measure the
+      nanowell. **Nanowell rim fitted · at every timepoint · yes** keeps only the nanowells whose rim was fitted
+      in every image.
     - *Identity contradicted* — the identity check found that the nanowell's address at that timepoint may name
       a different nanowell (a contradicted timepoint, or a nanowell a partial check left out).
     - *Occluded or clipped* — found, but its contents could not be measured.

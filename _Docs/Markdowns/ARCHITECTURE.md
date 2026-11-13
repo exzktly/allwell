@@ -13275,7 +13275,11 @@ well), `occluded` (`occluded` or `clipped`), `identity_out` (not `identity_ok`),
 _rim_fitted` from the timepoint's grid block: true when `array_boundary` holds a circle — `fit_array_boundary`'s, or a
 contrast run's inferred circle — false when it is `null`, because no circle with 120° of arc fitted or the array's
 outline is not a circle, and no value when the block has no `array_boundary` key, a timepoint refused before its
-lattice was placed), `rim_out_of_focus` (not
+lattice was placed; one answer for the well's whole array, labelled *Array outline fitted*), `nw_rim_fitted` (the
+nanowell's own rim, *Nanowell rim fitted*: 1 where `focus` > 0, 0 where it is not and `run_state` is `measured` or
+`empty`, NaN where the run did not measure the nanowell — exactly where `series_compute.rim_focus_text` captions a crop
+*rim not fitted*, which `test_nanowell_subset_row_flags.py::test_nanowell_rim_fitted_agrees_with_every_crop_caption`
+holds), `rim_out_of_focus` (not
 `rim_focus_ok`), `field_left_out` (`state` is `field_excluded`) and `no_count` (a measurable `run_state` with no
 `n_cells`). Each is read from its own column by `_row_flag` so that none stands in for another: `run_state` is
 `state` as `_addressed_grid` left it, copied by `site_metrics` before Cell Gating (`field_excluded`) and the

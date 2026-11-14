@@ -7165,7 +7165,8 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   **Timepoint** over the count at the **Baseline**), whatever the Metric shows, and nanowells are compared only
   with nanowells that started with the same number of cells (1, 2, 3, or 4 and more), since a nanowell seeded
   with one cell reaches an extreme fold change by chance far more easily. **Subset**, Cell Gating and the rim
-  focus rule apply; **Compare**, the moving average and the Fixed cohort do not, and the figure says so. Nanowells
+  focus rule apply; **Compare**, the moving average and the Fixed cohort do not, and Details says so (the figure carries
+  no moving-average tag under this test, since its values are not averaged). Nanowells
   with no cell at the start, or not measurable at the timepoint, are left out and counted in the report. A group
   with fewer than two wells, or a control with fewer than two, gets no group-level result — only each well's
   own empirical p — and the report says replication is insufficient. With fewer than three control wells there is
@@ -10951,7 +10952,8 @@ in the report — when:
   **identity check** could not confirm it is the same nanowell over time.
 
 The page's **Subset**, **Cell Gating** and the **rim-focus rule** have already been applied to the counts. The
-**moving average** and **Fixed cohort** do not apply, and the figure says so when they are on.
+**moving average** and **Fixed cohort** do not apply: Details says so when they are on, and the figure carries no
+"Moving average" tag under this test, because none of its values is averaged.
 
 **Per-well normalisation** — dividing out each well's bulk (the median and spread of its central 80 %) — is
 available in the analysis and **off** by default. It removes a plate-position effect, but it also removes a real

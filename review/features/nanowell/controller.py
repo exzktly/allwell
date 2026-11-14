@@ -1057,10 +1057,14 @@ MOVING_VIEWS = ("distribution", "trajectories", "statistics")
 
 
 def moving_tag(view: str, *, metric: str = "", channel=None, moving: int = 0, baseline_moving: int = 0,
-               moving_centred: bool = False, baseline: str = "", **_rest) -> str:
+               moving_centred: bool = False, baseline: str = "", stats_test: str = "", **_rest) -> str:
     """What *view*'s figure says on its subset line when it is drawn from moving averages
-    (``moving_compute.figure_tag``); ``""`` for a view or metric (one value per nanowell) the window does not apply to."""
+    (``moving_compute.figure_tag``); ``""`` for a view or metric (one value per nanowell) the window does not apply to,
+    and for the Statistics view under a rare-responder test, which reads raw Nt/N0 whatever the window says
+    (``_rare_controller.NOT_APPLIED`` says so in Details)."""
     if view not in MOVING_VIEWS or metric in PER_NANOWELL:
+        return ""
+    if view == "statistics" and stats_test and sc.test_spec(stats_test)["kind"] == "rare":
         return ""
     return mvc.figure_tag(moving, metric_column(metric, channel) if metric in METRICS else "", baseline,
                           baseline_moving, moving_centred)

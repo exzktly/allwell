@@ -72,3 +72,13 @@ def test_a_metric_with_one_value_per_nanowell_is_not_averaged_and_does_not_say_i
     _set_moving(page, 3)
     nwc.redraw(page)
     assert _stamp(page) == []
+
+
+def test_the_rare_responder_test_does_not_claim_the_moving_average_it_ignores():
+    """The Rare responders test reads raw Nt/N0 whatever the moving-average control says, so its figure must not be
+    stamped "Moving average over N timepoints" — a tag over values that were not averaged says the opposite of what
+    was drawn. The pairwise tests on the same view do use the averaged values, and keep the tag."""
+    kwargs = dict(metric="n", moving=3, baseline_moving=2, baseline="tp:t_a")
+    assert nwc.moving_tag("statistics", stats_test="rare", **kwargs) == ""
+    assert nwc.moving_tag("statistics", stats_test="welch", **kwargs).startswith("Moving average over 3 timepoints")
+    assert nwc.moving_tag("distribution", stats_test="rare", **kwargs).startswith("Moving average over 3")

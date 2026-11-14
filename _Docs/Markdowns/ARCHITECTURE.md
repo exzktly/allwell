@@ -13386,7 +13386,7 @@ figure rather than only in the page's Details field because a saved, exported or
 the figure first), for every view but Identity, joined with ` · ` to `controller.moving_tag` — the moving average's
 short phrase (`moving_compute.figure_tag`: `Moving average over 3 timepoints (trailing)`, `; baseline over N` for a
 fold change's own baseline window) on `MOVING_VIEWS` (Distribution, Trajectories, Statistics) for a metric with values
-over time, `""` otherwise — so a figure of averaged values says so on the same line with or without a subset (the
+over time, `""` otherwise — and `""` on Statistics under a rare-responder test (`statistics_compute.test_spec(...)["kind"] == "rare"`), which reads raw Nt/N0 whatever the window says — so a figure of averaged values says so on the same line with or without a subset (the
 footer keeps `moving_compute.describe`'s full sentence; Statistics writes no footer sentence of it, which is why the
 tag is on the figure). The Distribution window's rows pop-out puts the same tag in its title; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
 Nanowells mode passes `subset_label` from its run settings, and the Scatter Plot's nanowell scatter reads it through

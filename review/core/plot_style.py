@@ -637,12 +637,21 @@ def apply_axis_log_scale(ax, which: str, on: bool,
     set_scale("function", functions=(_fwd, _inv))
     from matplotlib.ticker import FixedLocator, FuncFormatter
     mpl_axis = ax.xaxis if which == "x" else ax.yaxis
-    # 0, then every power of the base up to ten million — the reach the decade
-    # ticks always had; matplotlib draws only the ones inside the view.
+    # 0, then the powers of the base up to ten million — the reach the decade
+    # ticks always had; matplotlib draws only the ones inside the view. A base
+    # just above 1 has thousands of powers in that reach (1,621 at 1.01), each
+    # a tick the draw lays out — seconds per redraw, and unreadable — so every
+    # stride-th power is kept, at most _LOG1P_MAX_POWERS of them.
     steps = int(math.floor(math.log(10_000_000) / log_base + 1e-9))
-    powers = [0.0] + [base ** k for k in range(steps + 1)]
+    stride = max(1, math.ceil((steps + 1) / _LOG1P_MAX_POWERS))
+    powers = [0.0] + [base ** k for k in range(0, steps + 1, stride)]
     mpl_axis.set_major_locator(FixedLocator(powers))
     mpl_axis.set_major_formatter(FuncFormatter(_log_tick_text))
+
+
+#: The most powers of the base a log(x+1) axis is ticked at between 1 and ten
+#: million (:func:`apply_axis_log_scale`). Decades give 8, base 2 gives 24.
+_LOG1P_MAX_POWERS = 24
 
 
 def _log_tick_text(value, _pos=None) -> str:

@@ -82,7 +82,13 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
         "drug: rare responders detected. 8 of 120 drug nanowells (6.7%) rose above the control cutoff (its top 1%) on "
         "cell count, against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells."]
     figure = " ".join(_texts(page, "nw-rare-line"))
-    assert "Deciding: exceedance test p = 0.00072." in figure
+    # The p is the result's own (its last digit depends on the platform's numeric libraries: 0.00072 here, 0.000717
+    # on the CI runner), so the sentence is checked against the result and the value to 2%.
+    from review.features.nanowell import rare_export_compute as rx
+
+    drawn = st.rare_results[next(reversed(st.rare_results))].units[0].primary.p
+    assert drawn == pytest.approx(0.00072, rel=0.02)
+    assert f"Deciding: exceedance test p = {rx._num(drawn)}." in figure
     # Unstratified, the control pool is larger than a well, so the spikes fall where HC+ does not look: said so.
     assert "Higher Criticism cannot see the 8 most extreme drug nanowell(s)" in figure
     assert "⚠ With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1" in figure

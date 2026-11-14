@@ -562,6 +562,16 @@ def _small_plate(*, spiked: bool, n_ctrl: int = 3, n_treat: int = 2, seed: int =
     return pd.DataFrame(rows)
 
 
+def _deciding(unit) -> str:
+    """The deciding line *unit* should print: its own p, formatted as the figure formats it. The beta-binomial fit is
+    iterative and, on a separated plate, its last digit depends on the platform's numeric libraries (0.00072 here,
+    0.000717 on the CI runner), so tests check the sentence against the result and the value against 0.00072 to 2%."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    assert unit.primary.p == pytest.approx(0.00072, rel=0.02)
+    return f"Deciding: exceedance test p = {rx._num(unit.primary.p)}."
+
+
 def test_a_plate_with_no_responders_flags_nothing_and_says_the_test_could_not_run():
     """The reported defect: the null plate listed 15 "flagged" nanowells — Higher Criticism's candidates, which every
     well has — beside a verdict of none. Only nanowells past the cutoff are flagged (user decision), and with none
@@ -590,7 +600,7 @@ def test_the_spiked_plate_leads_with_counts_and_names_every_limit_of_the_design(
                                        "the control cutoff (its top 1%) on fold change (Nt / N0), against 0 of 180 "
                                        "control nanowells (0.0%)")
     assert text["lines"] == [
-        "Deciding: exceedance test p = 0.00072.",
+        _deciding(unit),
         # Unstratified, the control pool (180) is larger than a well (60), so every spiked nanowell falls at p ≤ 1/n,
         # where HC+ does not look: its p is 0.9, and the third caveat says why.
         "Supporting, not deciding: Higher Criticism p = 0.9 · shape test p = 0.1 (the lowest possible with these "
@@ -668,7 +678,7 @@ def test_the_figure_draws_counts_and_fold_changes_not_p_values_and_logarithms():
     heads = [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-rare-unit"]
     assert heads and heads[0].startswith("drug: rare responders detected. 8 of 120")
     lines = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
-    assert lines[0].get_text() == "Deciding: exceedance test p = 0.00072."
+    assert lines[0].get_text() == _deciding(res.units[0])
     assert lines[0].get_position()[1] < min(ax.get_position().y0 for ax in (ecdf, exceed, hc_ax))
     assert min(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-unit") > max(
         ax.get_position().y1 for ax in (ecdf, exceed, hc_ax))        # the answer above the panels
@@ -686,7 +696,7 @@ def test_a_short_figure_cuts_its_text_between_sentences_and_keeps_the_caveats_fi
         fig = Figure(figsize=size)
         rd.render_rare_page(fig, res, note="pointer")
         lines = [t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-line"]
-        assert lines[0] == "Deciding: exceedance test p = 0.00072.", size
+        assert lines[0] == _deciding(res.units[0]), size
         joined = " ".join(line.strip() for line in lines)
         if "Supporting" in joined:
             assert "⚠" in joined and joined.index("⚠") < joined.index("Supporting"), size

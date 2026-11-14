@@ -40,10 +40,15 @@ from review.features.nanowell.rare_null_compute import (
 from review.features.nanowell.rare_validate_compute import validate as run_validation
 from review.features.nanowell.statistics_compute import bh_adjust
 
-SUPPORTS = "supports rare-responder enrichment"
-SHAPE_ONLY = "general upper-tail shape difference only (AD) — not evidence of rare responders"
-NO_EVIDENCE = "no evidence of rare-responder enrichment"
-INSUFFICIENT = "replication insufficient — per-well empirical results only"
+#: The verdict. **The exceedance test (Test A) alone decides it** — the question asked, in counts a reader can check;
+#: Higher Criticism (B) and the upper-tail shape test (C) are reported beside it as supporting evidence and never
+#: change it (``rare_export_compute.supporting_line``), so two tests are never given two chances at one verdict.
+DETECTED = "rare responders detected"
+NOT_DETECTED = "rare responders not detected"
+INSUFFICIENT = "too few wells to test the group"
+#: The deciding test could not give a group p (too few wells for its regression) while nanowells were past the
+#: cutoff: the design cannot decide, which is not the same as having found nothing.
+UNDECIDED = "cannot be decided with these wells"
 
 
 @dataclass
@@ -69,6 +74,9 @@ class Unit:
     q: dict = field(default_factory=dict)                # "exceedance" / "hc" / "ad" -> BH q
     interpretation: str = ""
     thresholds: dict = field(default_factory=dict)       # stratum -> primary threshold (from all control wells)
+    #: +1, or -1 when the analysed values are negated to read the bottom tail (``Prepared.sign``): a figure or sentence
+    #: shows ``sign * value`` and ``sign * threshold``.
+    sign: int = 1
 
     @property
     def label(self) -> str:
@@ -176,26 +184,36 @@ def _bh(units: list[Unit], key: str, ps: list[float]) -> None:
         unit.q[key] = q if q is not None else math.nan
 
 
+def significant(unit: Unit, test: str, fdr: float) -> bool:
+    """Whether *test* (``"exceedance"``, ``"hc"`` or ``"ad"``) is significant for *unit*: its q below *fdr*."""
+    q = unit.q.get(test, math.nan)
+    return bool(np.isfinite(q) and q < fdr)
+
+
 def interpret(unit: Unit, fdr: float) -> str:
+    """The verdict, decided by the exceedance test alone (:data:`DETECTED`). What the design cannot show — a
+    permutation floor above *fdr*, a regression that could not estimate the spread between wells — is said beside
+    the verdict (``rare_export_compute.caveats``), not folded into it."""
     if not unit.group_allowed:
         return INSUFFICIENT
-    sig = {k: np.isfinite(v) and v < fdr for k, v in unit.q.items()}
-    if sig.get("exceedance") or sig.get("hc"):
-        which = [name for name, k in (("exceedance", "exceedance"), ("HC", "hc")) if sig.get(k)]
-        return f"{SUPPORTS} ({' and '.join(which)})"
-    if sig.get("ad"):
-        return SHAPE_ONLY
-    # Without the regression, the only calibrated group p-values are the permutations', which cannot go below 1/n.
-    floor = unit.hc_perm.min_p if unit.hc_perm is not None else math.nan
-    if not unit.bb_allowed and np.isfinite(floor) and floor >= fdr:
-        return f"{NO_EVIDENCE} — this design cannot reach p < {fdr:g} (smallest attainable p {floor:.3g})"
-    return NO_EVIDENCE
+    if significant(unit, "exceedance", fdr):
+        return DETECTED
+    past = sum(c.k for c in unit.primary.counts) if unit.exceedance else 0
+    if past and not np.isfinite(unit.primary.p):
+        return UNDECIDED                    # nanowells past the cutoff, and no group p to weigh them: not a "no"
+    return NOT_DETECTED
+
+
+def _finite_mean(values) -> float:
+    """The mean of the finite *values*; NaN — not computed — when there are none (no "mean of empty slice")."""
+    finite = [float(v) for v in values if np.isfinite(v)]
+    return float(np.mean(finite)) if finite else math.nan
 
 
 def _row(unit: Unit) -> dict:
     a = unit.primary
-    mean_hc = np.nanmean([unit.hc[w.key].value for w in unit.treated]) if unit.treated else math.nan
-    mean_a2 = np.nanmean([unit.a2[w.key][0] for w in unit.treated]) if unit.treated else math.nan
+    mean_hc = _finite_mean([unit.hc[w.key].value for w in unit.treated])
+    mean_a2 = _finite_mean([unit.a2[w.key][0] for w in unit.treated])
     return {
         "treatment": unit.treatment, "plate": unit.plate, "n_treatment_wells": len(unit.treated),
         "n_control_wells": len(unit.controls), "group_inference": unit.group_allowed, "refusal": unit.refusal,
@@ -250,7 +268,11 @@ def _per_well(units: list[Unit]) -> pd.DataFrame:
 
 
 def responders(units: list[Unit], prepared: Prepared) -> pd.DataFrame:
-    """Every treatment-well nanowell above the primary threshold or at or below its well's HC p-value threshold."""
+    """Every treatment-well nanowell flagged for review: **above the control cutoff** (the primary threshold of its
+    stratum), the deciding test's own criterion. ``hc_candidate`` says whether it is also at or below its well's
+    Higher Criticism threshold. HC's candidates alone are not flagged: HC always has a peak, so on a plate with no
+    responders every well still has candidates (15 on the synthetic null plate), and flagging them read as a
+    finding beside a verdict of none."""
     kept = prepared.kept.set_index(["well_key", "nanowell_id"])
     rows = []
     for unit in units:
@@ -260,7 +282,7 @@ def responders(units: list[Unit], prepared: Prepared) -> pd.DataFrame:
             for s, values in w.values.items():
                 for nid, v in zip(w.ids[s], values):
                     above = s in thr and v > thr[s]
-                    if not (above or nid in hc_ids):
+                    if not above:
                         continue
                     src = kept.loc[(w.key, nid)]
                     rows.append({"unit": unit.label, "well_key": w.key, "plate_id": w.plate,
@@ -283,12 +305,15 @@ def parameter_log(prepared: Prepared, units: list[Unit]) -> dict:
             "notes": list(prepared.notes)}
 
 
-def analyse(data, params: RareParams | None = None, *, validate: bool = False) -> RareResult:
+def analyse(data, params: RareParams | None = None, *, validate: bool = False,
+            value_label: str = "") -> RareResult:
     """Run the rare-responder analysis on a per-nanowell table (or a ``Prepared`` one); see the module docstring."""
-    prepared = data if isinstance(data, Prepared) else prepare(data, params)
+    prepared = data if isinstance(data, Prepared) else prepare(data, params, value_label=value_label)
     params = prepared.params
     wells = wells_from(prepared.kept)
     units = [_run_unit(*spec, params) for spec in _units(wells, params)]
+    for u in units:
+        u.sign = prepared.sign
     _bh(units, "exceedance", [u.primary.p for u in units])
     _bh(units, "hc", [_p(u.hc_perm) for u in units])
     _bh(units, "ad", [_p(u.a2_perm) for u in units])

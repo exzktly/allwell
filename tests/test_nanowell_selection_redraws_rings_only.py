@@ -79,7 +79,7 @@ def test_a_click_on_another_dot_moves_the_ring_onto_that_dot_without_rebuilding(
     assert len(counted) == before
     assert _rings(page) == _dots_of(page, ("B01", 0, 0)) and _rings(page)
     texts = [t.get_text() for t in page.widgets.get("_nw_detail_fig").texts]
-    assert len(texts) == 1 and texts[0].startswith("B01 · q 0, r 0"), texts
+    assert len(texts) == 1 and texts[0].startswith("B01 · nanowell 0,0"), texts
 
 
 def test_the_rings_moved_are_the_rings_a_full_redraw_draws(page, qtbot):  # noqa: F811

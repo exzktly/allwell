@@ -13050,9 +13050,11 @@ that label, so renaming the class leaves it saying no metric of that name exists
 counted cells fell in neither class. The long CSV carries a `size_classes` column naming the ranges, since its
 columns are `size_1` and `size_2`.
 
-**Each well's value of a size metric is the mean over its nanowells, not the median**
-(`summary_compute.MEAN_METRICS`, `well_statistic`, `well_value`): the user asked for the average, and a median of
-small whole-number counts jumps between integers. `well_summary`'s `median` column holds that mean — one shape for
+**Each well's value of a size count, ratio or share is the mean over its nanowells, not the median**
+(`summary_compute.MEAN_METRICS` = `size_class_compute.COLUMNS`, `well_statistic`, `well_value`): the user asked for
+the average, and a median of small whole-number counts jumps between integers. The size classes' fold changes
+(`FC_COLUMNS`) are not in it and take the median, as `count_fc` does: a mean of ratios is asymmetric and carried by
+single-cell starts, and a class holding every cell must give the same well value as `count_fc`. `well_summary`'s `median` column holds that mean — one shape for
 every caller — and its `statistic` column names it; the Distribution view's per-well line and its note, the group
 centre's note, the Statistics view's group values and its "one mean per well" sentence, and a density's tick all
 follow it. The plot tools get the same answer through `ObservationMetric.well_statistic` (below).
@@ -13189,8 +13191,8 @@ the size metric each is of. `series_compute.site_metrics` adds those values to t
 change with the `count_fc` rule, `_ratio`, which is NaN unless the baseline is above zero.
 `size_class_compute.ALL_COLUMNS` (the measurements and these) is the roster the page joins them through:
 - the metric menu (`distribution_compute.METRICS` via `LABELS`) and `BASELINE_METRICS`;
-- `state.METRIC_KEYS` and the well statistic (`summary_compute.MEAN_METRICS`: mean over nanowells, like the other
-  size metrics);
+- `state.METRIC_KEYS` and the well statistic (`summary_compute.well_statistic`: the median over nanowells, as for
+  `count_fc` — `MEAN_METRICS` holds only the counts, ratio and share);
 - the plots' Nanowells observations (`observation_compute`) and the size note (`controller._with_size_note`);
 - `moving_compute.base_value`, held to `metric_kinds` by a test;
 - the long export, with one `<fc>_baseline_timepoint` column each, since under *First measurable* the ratio's

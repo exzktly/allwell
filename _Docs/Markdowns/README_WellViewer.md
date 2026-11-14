@@ -6665,7 +6665,8 @@ use them.
   *DCs count fold change* and *T cells : DCs ratio fold change*. Each is the value at a timepoint divided by the
   same nanowell's value at the baseline. A class with no cell at baseline has no count fold change, and a ratio
   of zero at baseline has no ratio fold change. The footer counts each such nanowell with that reason, as it does
-  for *Count fold change*. Like the five above, each well's value is the mean over its nanowells, and the Moving
+  for *Count fold change*. Unlike the five above, and like *Count fold change*, each well's value is the median over
+  its nanowells: a mean of ratios is pulled up by the nanowells that started from one cell. The Moving
   average and its baseline window apply to them as to the other fold changes. The export writes them as
   `size_1_fc`, `size_2_fc` and `size_ratio_fc`. Each has its own baseline timepoint column
   (`size_1_fc_baseline_timepoint`, …). Under *First measurable* the ratio's baseline is the first timepoint at

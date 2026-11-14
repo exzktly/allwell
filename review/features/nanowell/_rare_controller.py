@@ -138,7 +138,7 @@ def windowed(metrics: pd.DataFrame, wells, column: str, *, moving: int, baseline
 def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: str = "", store: dict | None,
             request, moving: int = 0, baseline_moving: int = 0, moving_centred: bool = False, cohort: bool = False,
             unit_set: bool = False, hidden: dict | None = None, guessed: str = "", column: str = "",
-            value_label: str = "", direction: str = "higher") -> RareResult | None:
+            value_label: str = "", direction: str = "higher", stamped: bool = False) -> RareResult | None:
     """Draw the Rare responders test into *fig*: its result when *store* holds it, else a sentence while *request*
     (``request(key, job)``) has it computed, or one saying why it cannot run. Returns the result drawn, or ``None``.
 
@@ -184,7 +184,7 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
              *([mvc.describe(moving, column, baseline_moving, moving_centred)] if averaging else []),
              *([NOT_APPLIED] if cohort else []), *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
-    render_rare_page(fig, held, note=DETAILS_POINTER,
+    render_rare_page(fig, held, note=DETAILS_POINTER, stamped=stamped,
                      lead=[guessed_note(control)] if guessed and guessed == control else [])
     return held
 

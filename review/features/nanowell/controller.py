@@ -1079,10 +1079,11 @@ def draw_view(fig, view: str, metrics, data, *, subset_label: str = "", **kwargs
     Subset. On the same line, a figure drawn from moving averages says so (:func:`moving_tag`), with or without a
     subset. The rest of the keywords are :func:`_compose_view`'s.
     """
-    drawn = _compose_view(fig, view, metrics, data, **kwargs)
-    if view != "identity":
-        stamp_subset(fig, " · ".join(filter(None, [_named(subset_label, _sizes_of(kwargs.get("gate"), kwargs.get("sizes"))),
-                                                   moving_tag(view, **kwargs)])))
+    stamp = "" if view == "identity" else " · ".join(filter(None, [
+        _named(subset_label, _sizes_of(kwargs.get("gate"), kwargs.get("sizes"))), moving_tag(view, **kwargs)]))
+    # Known before the view is drawn, so a view whose text starts at the very top leaves the label its line.
+    drawn = _compose_view(fig, view, metrics, data, stamped=bool(stamp), **kwargs)
+    stamp_subset(fig, stamp)
     return drawn
 
 
@@ -1111,8 +1112,10 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
                   stats_cache: dict | None = None, rare: dict | None = None, hidden: dict | None = None, gate=None,
                   decoration: Decoration | None = None, names: dict | None = None,
                   swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
-                  violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False) -> tuple[object, object]:
-    """The composition :func:`draw_view` stamps; see it for every keyword."""
+                  violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False,
+                  stamped: bool = False) -> tuple[object, object]:
+    """The composition :func:`draw_view` stamps; see it for every keyword. *stamped* says a label will be written at
+    the figure's top left afterwards (``renderer.stamp_subset``), which the Rare responders page leaves room for."""
     names = names or {}
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -1181,7 +1184,8 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
             fig, metrics, data, groups=groups, metric=metric, channel=channel, timepoint=timepoint, control=control,
             baseline=baseline, cohort=cohort, moving=moving, baseline_moving=baseline_moving,
             moving_centred=moving_centred, sizes=sizes, names=names, tableless=tableless, note=note,
-            stats_unit=stats_unit, stats_test=stats_test, stats_cache=stats_cache, rare=rare, hidden=hidden)
+            stats_unit=stats_unit, stats_test=stats_test, stats_cache=stats_cache, rare=rare, hidden=hidden,
+            stamped=stamped)
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
@@ -1209,7 +1213,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
 def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channel, timepoint: str, control: str,
                         baseline: str, cohort: bool, moving: int, baseline_moving: int, moving_centred: bool, sizes,
                         names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare,
-                        hidden: dict | None = None) -> object | None:
+                        hidden: dict | None = None, stamped: bool = False) -> object | None:
     """The Statistics view: the samples compared by *stats_test* — or, for the Rare responders test, the groups
     against the control group by the rare-responder analysis (``_rare_controller.compose``, *rare* carrying the
     page's store of results and its worker request). Returns the result drawn. *hidden* is the groups hidden on the
@@ -1223,7 +1227,7 @@ def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channe
         averaged = metric not in PER_NANOWELL
         return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note, hidden=hidden,
                           moving=moving if averaged else 0, baseline_moving=baseline_moving if averaged else 0,
-                          moving_centred=moving_centred, cohort=cohort, unit_set=stats_unit != sc.WELLS,
+                          moving_centred=moving_centred, cohort=cohort, unit_set=stats_unit != sc.WELLS, stamped=stamped,
                           column=metric_column(metric, channel), value_label=_label(metric, channel, data, sizes),
                           **(rare or {"store": None, "request": None}))
     # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).

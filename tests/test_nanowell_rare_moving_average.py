@@ -199,3 +199,29 @@ def test_the_rare_figure_carries_the_moving_average_tag_only_when_it_is_on(plate
                       well_timepoint="t4", stats_test="rare", moving=moving,
                       rare={"store": held, "request": lambda key, job: None})
         assert _stamp(fig) == want
+
+
+@pytest.mark.parametrize("size", [(15.0, 8.6), (4.3, 7.3)], ids=["desk", "phone"])
+@pytest.mark.parametrize("moving, subset_label", [(3, ""), (0, "Subset: “Big”"), (3, "Subset: “Big”")])
+def test_the_top_left_label_never_overlaps_the_headline(plate, size, moving, subset_label):
+    """Seen on the page: with the moving average on, "Moving average over 3 timepoints (centred)" was drawn across the
+    start of the verdict's headline. The label is stamped at the top left after the view is drawn, and the Rare
+    responders page started its headline in that same strip. A saved subset's name collided the same way. Measured
+    on the drawn figure: the label's box ends above the headline's."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    metrics, data = plate
+    key, result = _result(plate, moving=moving)
+    fig = Figure(figsize=size)
+    canvas = FigureCanvasAgg(fig)
+    nwc.draw_view(fig, "statistics", metrics, data, groups=GROUPS, metric="n", channel=None, axis="wells",
+                  timepoint="t4", control="ctrl", baseline="earliest", cohort=False, well="A01", well_timepoint="t4",
+                  stats_test="rare", moving=moving, subset_label=subset_label,
+                  rare={"store": {key: result}, "request": lambda k, j: None})
+    canvas.draw()
+    renderer = canvas.get_renderer()
+    (label,) = [t for t in fig.texts if t.get_gid() == "nw-subset-label"]
+    head = [t for t in fig.texts if t.get_gid() == "nw-rare-unit"][0]
+    assert label.get_text() and head.get_text().startswith("drug:")
+    label_box, head_box = label.get_window_extent(renderer), head.get_window_extent(renderer)
+    assert label_box.y0 >= head_box.y1, (label_box, head_box)        # display y grows upwards

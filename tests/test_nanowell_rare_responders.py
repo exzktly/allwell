@@ -892,3 +892,20 @@ def test_seeding_that_differs_between_the_sides_is_said_beside_the_verdict():
 def test_equal_seeding_says_nothing_about_it():
     unit = rr.analyse(_seeded(0, 2.0, 2.0), RareParams(control="ctrl"), value_label="Count fold change").units[0]
     assert unit.loading_note == ""
+
+
+def test_one_control_well_is_not_reported_as_zero_of_zero_control_nanowells():
+    """A lone control well is scored leave-one-out against an empty pool: its counts are 0 of 0, which is the absence
+    of a comparison, not a count. The headline, the shape test's line and the exceedance note each said the wrong
+    thing about it — "0 of 0 control nanowells (—)", "too few distinct fold changes", "per-well empirical p-values
+    only" over a column of NaN."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_null_plate(1, 3))
+    unit = res.units[0]
+    head = rx.headline(unit, res.prepared.params)
+    assert "0 of 0 control" not in head and "no control null" in head
+    report = "\n".join(rx._unit_lines(res, unit, res.table.iloc[0]))
+    assert rx.NOT_RUN in report and rx.C_UNDEFINED not in report
+    assert not any("per-well empirical p-values only" in n for n in unit.primary.notes)
+    assert any("no control null" in n for n in unit.primary.notes)

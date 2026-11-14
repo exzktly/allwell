@@ -82,12 +82,13 @@ def _unit_lines(result, unit, r) -> list[str]:
                      f"{_or_text(r)}; spread between wells ρ {_num(r['rho'])}; p {_num(r['exceedance_p'])}, "
                      f"q {_num(r['exceedance_q'])}")
         lines.append(f"    for comparison, {FISHER_LABEL}: p {_num(r['fisher_p_anticonservative'])}")
+    # A permutation that never ran (too few wells for a group test) is said as such, not as an undefined statistic.
     lines.append(f"  {NAME_B}: mean score {_num(r['hc_mean'])} over the {r['treatment']} wells; "
                  + _perm_text(r["hc_p"], r["hc_q"], r["hc_permutations"], r["hc_exhaustive"], r["hc_min_p"],
-                              "not computable"))
+                              NOT_RUN if unit.hc_perm is None else "not computable"))
     lines.append(f"  {NAME_C}: " + (f"mean {_num(r['a2r_mean'])}; " if math.isfinite(r["a2r_mean"]) else "")
                  + _perm_text(r["a2r_p"], r["a2r_q"], r["a2r_permutations"], r["hc_exhaustive"], r["a2r_min_p"],
-                              C_UNDEFINED))
+                              NOT_RUN if unit.a2_perm is None else C_UNDEFINED))
     stat, sp, note = unit.scholz
     capped = note.startswith("p capped")
     p_text = (f"p ≥ {_num(sp)} (scipy caps it)" if capped and math.isfinite(sp) and sp >= 0.25 else
@@ -163,6 +164,8 @@ ASKS = {NAME_A: "more nanowells past the control cutoff than in control (decides
         NAME_C: "any difference in the top of the distribution (Anderson–Darling)"}
 #: The reason an Upper-tail shape statistic is undefined, said in place of a p.
 C_UNDEFINED = "not computable (too few distinct fold changes above the control median)"
+#: A group permutation that was not run: the design has too few wells on a side to test the group at all.
+NOT_RUN = "not run (too few wells to test the group)"
 
 
 def _pct(k: int, n: int) -> str:
@@ -202,9 +205,13 @@ def headline(unit, params, value_label: str = "") -> str:
     kt, nt, kc, nc = counts_of(unit)
     wells = f"{len(unit.treated)} {unit.treatment} vs {len(unit.controls)} control wells"
     on = f" on {_in_sentence(value_label)}" if value_label else ""
+    # Control wells are scored leave-one-out, so one control well is scored against an empty pool: "0 of 0" would
+    # read as a count, and it is the absence of one.
+    against = (f"against {kc} of {nc} control nanowells ({_pct(kc, nc)})" if len(unit.controls) >= 2 else
+               "with no control null to set it against (a single control well has no other control wells to be "
+               "scored against)")
     return (f"{unit.label}: {unit.interpretation}. {kt} of {nt} {unit.treatment} nanowells ({_pct(kt, nt)}) "
-            f"{past(params)} {cutoff_name(params)}{on}, against {kc} of {nc} control nanowells ({_pct(kc, nc)}) · "
-            f"{wells}.")
+            f"{past(params)} {cutoff_name(params)}{on}, {against} · {wells}.")
 
 
 def _floor_note(perm) -> str:

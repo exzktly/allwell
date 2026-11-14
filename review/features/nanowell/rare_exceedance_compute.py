@@ -283,7 +283,11 @@ def fisher(counts: list[WellCount]) -> tuple[float, float]:
 def fallback_test(counts: list[WellCount], percentile: float, group_allowed: bool) -> ExceedanceResult:
     """Per-well empirical p-values, and the pooled Fisher test when group-level inference is allowed at all."""
     result = ExceedanceResult(percentile, EMPIRICAL_LABEL, counts, min_p=_min_p(counts))
-    result.notes.append("too few wells for the beta-binomial regression: per-well empirical p-values only")
+    if sum(1 for c in counts if not c.treated) < 2:
+        # A lone control well's leave-one-out pool is empty: there is no control null and no per-well p either.
+        result.notes.append("fewer than 2 control wells: no control null, so no calibrated result, per well or group")
+    else:
+        result.notes.append("too few wells for the beta-binomial regression: per-well empirical p-values only")
     if group_allowed:
         result.fisher_or, result.fisher_p = fisher(counts)
     return result

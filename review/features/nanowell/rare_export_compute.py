@@ -306,9 +306,13 @@ def caveats(unit, params, value_label: str = "") -> list[str]:
 
 
 def _is_level(value_label: str) -> bool:
-    """Whether *value_label* names a level (a count, a brightness, an area) rather than a change from the Baseline."""
+    """Whether *value_label* names a level (a count, a brightness, an area) rather than a change from the Baseline.
+
+    A growth rate is a change over time with no fold-change form, so it is not one; the caveat's advice ("the
+    fold-change form of the metric") would point at a metric that does not exist."""
     text = value_label.lower()
-    return bool(text) and not any(word in text for word in ("fold change", "change", "robust z", "log₂", "log2"))
+    return bool(text) and not any(word in text for word in ("fold change", "change", "robust z", "log₂", "log2",
+                                                              "growth rate"))
 
 
 def unit_text(result, unit) -> dict:

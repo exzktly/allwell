@@ -432,6 +432,27 @@ def test_from_site_metrics_takes_baseline_and_final_counts_and_flags_unmeasurabl
     assert list(kept["nanowell_id"]) == ["0,0"] and kept["fc"].iloc[0] == 4.5
 
 
+def test_from_site_metrics_reads_occupancy_3_plus_as_a_value_not_a_missing_one():
+    """Occupancy classes are the strings 0, 1, 2 and 3+; a numeric read made every 3+ nanowell NaN, and the analysis
+    then left it out as having no value of the metric — the nanowells with the most cells dropped from a test of the
+    top tail."""
+    m = pd.DataFrame({"well": ["A1"] * 4, "nw_q": [0, 0, 1, 1], "nw_r": [0, 0, 0, 0],
+                      "timepoint": ["t0", "t3", "t0", "t3"], "baseline_timepoint": ["t0"] * 4,
+                      "time_h": [0.0, 72.0, 0.0, 72.0], "n0": [1, 1, 1, 1], "n": [1, 5, 1, 2],
+                      "occupancy_class": ["1", "3+", "1", "2"], "state": ["measured"] * 4,
+                      "fused": [False] * 4, "identity_ok": [True] * 4})
+    t = from_site_metrics(m, {"A1": "control"}, "t3", plate_id="P9", crop_path=lambda w, q, r: "",
+                          value_column="occupancy_class")
+    assert list(t["value"]) == [3.0, 2.0]
+
+
+def test_a_growth_rate_is_not_called_a_level_with_a_fold_change_form():
+    from review.features.nanowell.rare_export_compute import _is_level
+
+    assert not _is_level("Growth rate (per hour, from ln n)")
+    assert _is_level("Cell count")
+
+
 # ── figures ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def test_the_figures_draw_threshold_null_curves_and_named_crop_placeholders():
     from matplotlib.figure import Figure

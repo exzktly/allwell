@@ -22598,7 +22598,11 @@ and the stage-1 rule of naming controls only when they differ would otherwise
 print neither layer. It is two lines — `Mut-drug` / `÷ WT-drug ÷ Vehicle` —
 with the second stage named by its baseline value alone (`rel_tick` is the
 value's label) and spelled out once in the note's first line ("“÷ Vehicle” is
-that bar's ratio at Treatment = Vehicle"): written in full on a third line
+that bar's ratio at Treatment = Vehicle"). Both are written with the fold change's operator,
+which the two stages share: `tick_labels(items, op=)` takes it from `render_bar_items`'s `fc_op` (read off
+*ctx*, or handed over by Batch Export, which passes no ctx) and writes `− WT-drug − Vehicle` under *Subtract*,
+and `_baseline_ratio._notice` words the note as a difference and the bar as a difference of differences of
+means, so the ticks and note agree with the axis label `rr.suffix` writes. Written in full on a third line
 (`÷ (Mut-veh ÷ WT-veh)`) a label was as wide as two bars, so four bars could
 not lie flat at a desk width and the tick fit stood them on end. Each
 denominator is joined by non-breaking spaces (`_term`), so when `tick_fit`

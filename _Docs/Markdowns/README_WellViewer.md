@@ -5156,7 +5156,9 @@ but are not the same number.
 Each bar's label names both layers, on two lines: the bar, then `÷ WT-drug ÷
 Vehicle` — its own control, then the baseline value. `÷ Vehicle` stands for the
 bar's own ratio at Treatment = Vehicle (here `Mut-veh ÷ WT-veh`), which the
-note above the bars says once. When the bars are too narrow for the second line,
+note above the bars says once. Under Fold change = Subtract each stage is a
+difference, and the label, the note and the axis all say so with `−`
+(`− WT-drug − Vehicle`; the bar is a difference of differences of means). When the bars are too narrow for the second line,
 it breaks between the two terms rather than inside a name, and the panels move
 apart to make room for the extra lines. Each bar's p value sits just above its
 own error bar, and the Mean panel's y axis is raised as far as it takes for the

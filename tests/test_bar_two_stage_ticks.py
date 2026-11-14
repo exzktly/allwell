@@ -161,3 +161,38 @@ def test_nothing_is_written_over_the_bars(width_in, height_in, err_kind):
                for ln, c in zip(cap_lines, caps) if c.x0 <= mid <= c.x1]
         assert own and box.y0 >= max(own), "p label written on its cap"
     plt.close(fig)
+
+
+@pytest.mark.parametrize("op, sign, bar_is", [("ratio", "÷", "ratio of means"),
+                                              ("subtract", "−", "difference of differences of means")])
+def test_the_ticks_and_note_name_the_operator_the_axis_names(op, sign, bar_is):
+    """Found in review: under Fold change = *Subtract* the y label said
+    ``− (Treatment = Vehicle)`` while every tick read ``÷ WT Erlotinib ÷ Vehicle``
+    and the note said the bar was a ratio of means — a figure contradicting
+    itself about which arithmetic it drew. Both operators are drawn, so the old
+    implementation (``÷`` whatever the operator) fails the subtract case."""
+    ctx = _ctx()
+    ctx.state.plot.fc_op_ctrl = op
+    fig = _drawn(ctx, 9.0)
+    mean = fig.axes[0]
+    tick = next(t.get_text() for t in mean.get_xticklabels() if t.get_text().startswith("siKRAS Erlotinib"))
+    assert tick.replace("\n", "|") in (
+        f"siKRAS Erlotinib|{sign}{_NB}WT{_NB}Erlotinib {sign}{_NB}Vehicle",
+        f"siKRAS Erlotinib|{sign}{_NB}WT{_NB}Erlotinib|{sign}{_NB}Vehicle"), repr(tick)
+    note = next(t.get_text() for t in mean.texts if t.get_text().startswith("Relative to"))
+    kind = "difference" if op == "subtract" else "ratio"
+    assert f"“{sign} Vehicle” is that bar's {kind} at Treatment = Vehicle." in note.replace("\n", " "), note
+    assert f"the bar is a {bar_is}." in note.replace("\n", " "), note
+    plt.close(fig)
+
+
+def test_a_per_sample_control_tick_names_the_operator():
+    """The stage-1-only tick (per-sample controls, no second stage) names its
+    control with the same sign: ``− WT Erlotinib`` under *Subtract*."""
+    from review.domain.fold_change_pairing import ControlOutcome, tick_labels
+
+    items = [SimpleNamespace(display=d, fc_outcome=ControlOutcome.OK, rel_tick="",
+                             fc_control=ControlRef.for_replicate_set(c))
+             for d, c in (("siKRAS Erlotinib", "WT Erlotinib"), ("siKRAS Vehicle", "WT Vehicle"))]
+    assert tick_labels(items, op="subtract")[0] == "siKRAS Erlotinib\n− WT Erlotinib"
+    assert tick_labels(items)[0] == "siKRAS Erlotinib\n÷ WT Erlotinib"

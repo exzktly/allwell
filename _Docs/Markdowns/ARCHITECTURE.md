@@ -1004,10 +1004,17 @@ it is wider than twice the distance from its centre (its axes') to the nearer
 figure edge, so one wider than its own axes but inside the figure keeps its one
 line, and one that would be cut off — the per-cell Scatter's "… (t=0h–24h,
 2 tps) · highlighting <set>" lost its end at a desk width — is broken onto two
-lines like the phone's fit, but **never made smaller** (`_fit_title(…,
-shrink=False)`): at the desk the title's size is the user's Properties setting,
-and shrinking to fit made every title size look the same on a figure too narrow
-for its title. A fitted title's line break is not part of its name: the plot
+lines like the phone's fit, and **made smaller only when breaking is not
+enough** (`_fit_title(…, shrink=False)` first): at the desk the title's size is
+the user's Properties setting, and shrinking every title to fit made every title
+size look the same on a figure too narrow for its title. A broken title still
+crosses the figure when a line is wider than the room or its second line pushes
+its top past a top margin set for one line (the Bar figure's `top=0.96` at a
+6 in canvas); `_title_overruns` notices that, and the title is then shrunk to
+the room's width and stepped down until its top is inside the figure
+(`_lower_title_into`), because losing the words that say what was plotted is
+worse than a smaller title (`tests/test_desk_titles_stay_inside_the_figure.py`).
+A fitted title's line break is not part of its name: the plot
 card names a saved panel from its title with whitespace collapsed. A figure's
 canvas re-fits on every `resize_event` (`_refit_on_resize`, attached by
 `apply_export_style_to_current`) — which is how a plot drawn at the desk gets the

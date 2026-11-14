@@ -2130,6 +2130,15 @@ def fit_clipped_titles(fig) -> None:
     them. A title that reaches the figure's edge without crossing it, or is
     wider than its own axes but inside the figure, is left exactly as its
     renderer wrote it.
+
+    Breaking is not always enough, and a fit that leaves the title clipped has
+    not fitted it: the second line grows the title *upward* past a figure
+    whose top margin was set for one line (the Bar figure's, at a 6 in
+    canvas, put its first line 12 px above the figure), and a single word can
+    be wider than the room. Such a title is shrunk as well — to the room's
+    width, then step by step until its top is inside the figure — which is the
+    one case where the user's title size gives way, because the alternative
+    is losing the words that say what was plotted.
     """
     renderer = _renderer_of(fig)
     width = fig.bbox.width
@@ -2149,6 +2158,25 @@ def fit_clipped_titles(fig) -> None:
             line, title.get_fontproperties(), ismath=False)[0] for line in lines)
         if measured > room:
             _fit_title(title, room * _LABEL_FILL, renderer, shrink=False)
+            if _title_overruns(title, room, renderer):
+                _fit_title(title, room * _LABEL_FILL, renderer, shrink=True)
+                _lower_title_into(title, renderer)
+
+
+def _title_overruns(title, room: float, renderer) -> bool:
+    """Whether a broken *title* still crosses its figure: a line wider than *room*, or its top above the figure."""
+    widest = max(renderer.get_text_width_height_descent(line, title.get_fontproperties(), ismath=False)[0]
+                 for line in title.get_text().split("\n"))
+    return widest > room or title.get_window_extent(renderer).y1 > title.figure.bbox.height
+
+
+def _lower_title_into(title, renderer) -> None:
+    """Shrink *title* until its top is inside its figure (at most twelve 5 % steps), re-stamping the fit."""
+    for _ in range(12):
+        if title.get_window_extent(renderer).y1 <= title.figure.bbox.height:
+            break
+        title.set_fontsize(title.get_fontsize() * 0.95)
+    setattr(title, _FITTED, (title.get_text(), float(title.get_fontsize())))
 
 
 def _fit_labels_to_phone(fig) -> None:

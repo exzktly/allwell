@@ -321,9 +321,11 @@ def _draw_column_shapes(ctx, ax_mean, ax_frac, wells, colors, xlabels, target_t,
                 vals = vals[np.isfinite(vals)]
 
             xi = xs[i] if i < len(xs) else i
-            if vals.size < 3:
+            if vals.size < 3 or (shape != "histogram" and np.ptp(vals) == 0):
+                # No shape for it — too few values for either, or a violin of values with no spread (a KDE of one
+                # repeated value is singular and raised): every value as a dot, not only the first.
                 if vals.size:
-                    ax_mean.scatter([xi], [vals[0]], c=color, s=20, zorder=4)
+                    ax_mean.scatter(np.full(vals.size, float(xi)), vals, c=color, s=20, zorder=4)
                 continue
             # Every cell's median when the shape is drawn from a sample.
             median = cells.median(spec) if cells.sampled else float(np.median(vals))

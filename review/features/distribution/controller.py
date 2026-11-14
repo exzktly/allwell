@@ -635,6 +635,8 @@ HISTOGRAM_PER_GROUP = "Histogram (per group)"
 PER_GROUP_MODES = ("Violin (per group)", HISTOGRAM_PER_GROUP)
 #: The gid of the per-group histogram's bars and of its note.
 HISTOGRAM_GID, HISTOGRAM_NOTE_GID = "distribution-histogram", "distribution-histogram-note"
+#: The gid of a group's dots, drawn in place of a histogram for a group of too few values.
+HISTOGRAM_DOTS_GID = "distribution-histogram-dots"
 
 
 def _render_column_histograms(ax, groups, bins: int, log_y: bool, exact, rng) -> None:
@@ -666,6 +668,10 @@ def _render_column_histograms(ax, groups, bins: int, log_y: bool, exact, rng) ->
             for patch in ax.barh(bottoms, widths, height=heights, left=lefts, align="edge", color=color, alpha=0.55,
                                  linewidth=0):
                 patch.set_gid(HISTOGRAM_GID)
+        elif hist.as_dots(i) and finite[i].size:
+            # Too few values for a histogram: its values as dots, as every histogram renderer draws them, and the
+            # note counts the group — a median tick alone looked like a column with nothing to show.
+            ax.scatter(np.full(finite[i].size, i + 1.0), finite[i], color=color, s=16, zorder=3, gid=HISTOGRAM_DOTS_GID)
         if ns[i]:
             e = exact[i] if exact else None
             median = e.median if e is not None else float(np.median(finite[i]))

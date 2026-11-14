@@ -169,3 +169,33 @@ def test_every_per_cell_site_names_the_histogram(tmp_path):
     assert renderer._per_cell_mode_name(ctx) == "Display ▾ Show: Histogram"
     scope = cell_scope(ctx, timepoints=(6.0,))
     assert "histogram overlay is drawing them" in str(scope)
+
+
+def _dots(ax, x):
+    """Every dot drawn at column *x*, sorted by value."""
+    return sorted(float(y) for c in ax.collections for (cx, y) in c.get_offsets() if abs(cx - x) < 1e-9)
+
+
+def test_a_column_of_two_different_values_draws_both_not_only_the_first(tmp_path):
+    """A column too small for a histogram drew ``vals[0]`` alone, so of 2.0 and 3.0 the 3.0 was never on the figure;
+    the test above used two equal values, which the first-value dot also passes."""
+    ctx = _ctx(tmp_path, {"A01": A, "A02": [2.0, 3.0]}, "gfp_mean_intensity")
+    fig, ax = _draw(ctx, ["A01", "A02"], bins=4)
+    try:
+        assert _dots(ax, 1.0) == [2.0, 3.0]
+    finally:
+        plt.close(fig)
+
+
+def test_a_violin_column_of_identical_values_is_drawn_as_its_dots(tmp_path):
+    """A violin of four equal values is a KDE of a singular sample, which raised ``LinAlgError`` out of the whole Bar
+    figure; the column is drawn as its four dots and the other column keeps its violin."""
+    ctx = _ctx(tmp_path, {"A01": B, "A02": [2.0, 2.0, 2.0, 2.0]}, "gfp_mean_intensity")
+    fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
+    try:
+        renderer.draw_violin(ctx, ax_mean, ax_frac, wells=["A01", "A02"], colors=["#4488cc", "#cc8844"],
+                             xlabels=["A01", "A02"], target_t=6.0, tp_str="6", threshold=0.0)
+        assert _dots(ax_mean, 1.0) == [2.0, 2.0, 2.0, 2.0]
+        assert len(ax_mean.collections) >= 2                    # A01's violin fill and A02's dots
+    finally:
+        plt.close(fig)

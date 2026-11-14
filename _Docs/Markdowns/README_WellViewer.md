@@ -5332,7 +5332,8 @@ per-cell distribution, or a **histogram** of it.
     numbers, one bin per value when the range fits; with **Properties → Y log**
     on, the bins are log-spaced and the note counts any values ≤ 0 that a log
     axis cannot place. A column with fewer than three cells is drawn as its
-    values. Under a fold change the bins are of the scaled values.
+    values — every one of them — and so is a violin's column whose cells all
+    hold one value. Under a fold change the bins are of the scaled values.
   - **Significance** (On / Off) — draw pairwise significance brackets from the
     comparisons the [Statistics](#statistics) tab has run. A bracket appears
     over the two bars its comparison was computed from, whether those bars are
@@ -6008,7 +6009,8 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
   tab's bin edges (**Bins**; log-spaced under **log y**) and one width scale, so
   widths compare across groups; a note at the top right states the bin count and
   what the widest bar means. A group drawn from a sample is binned over every
-  value, as the tab's other histograms are.
+  value, as the tab's other histograms are. A group of fewer than three values
+  has no histogram and is drawn as its values, which the note counts.
 - **No error band** — this tab draws the whole population per group rather than
   reducing it to a mean, so there is no spread for a band to describe and no
   SEM/SD control on its controls row. The SEM/SD choice itself is app-wide: set
@@ -6967,8 +6969,11 @@ the sentence names it.
   median (or mean, for a metric averaged per well), since a slot shared by many wells is too narrow for readable
   dots. **Beeswarm** always draws dots — a crowded slot draws what fits and writes "+N" under it for the rest —
   **Violin** always draws violins, and **Histogram** always draws each well as a vertical histogram mirrored
-  about its slot, with the same median tick. Single nanowells can be clicked only where dots are drawn; a window
-  (below) reaches them anyway, and the footer says when violins or histograms stand in for dots.
+  about its slot, with the same median tick. A well no shape can be drawn for — a violin of nanowells all holding
+  the same value (every nanowell one cell, at a single-cell-seeded start), or a histogram of fewer than three
+  values — is drawn as its dots instead, and the footer counts how many. Single nanowells can be clicked only where
+  dots are drawn; a window (below) reaches them anyway, and the footer says when violins or histograms stand in for
+  dots.
 - **Bins** sets the histograms' bin count (2–200, default 30). Every well's bars sum to 1, and every well in the
   figure — across all its panels, which share one y axis — is binned on one set of edges and measured against one
   width scale, so widths compare across wells. A cell count bins on whole numbers, one bin per value when the

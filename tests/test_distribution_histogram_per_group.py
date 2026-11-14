@@ -121,3 +121,14 @@ def test_the_tab_offers_it_and_draws_it(qtbot, mini_dataset):
     assert patches
     notes = [t.get_text() for ax in fig.axes for t in ax.texts if t.get_gid() == C.HISTOGRAM_NOTE_GID]
     assert len(notes) == 1 and notes[0].startswith("40 bins ·"), notes      # the tab's Bins, default 40
+
+
+def test_a_group_of_fewer_than_three_values_is_drawn_as_its_dots_and_the_note_counts_it(ctx):
+    """``column_histogram`` gives a group of fewer than three values no bars and says the renderer draws its values
+    as dots; this tab drew a median tick alone. Group C's two values are both drawn, at its column, and the note
+    says one group is drawn as dots."""
+    ax = _render(ctx, [("A", "#4488cc", np.array(A)), ("C", "#cc8844", np.array([1.0, 3.0]))], 4)
+    dots = sorted(float(y) for c in ax.collections if c.get_gid() == C.HISTOGRAM_DOTS_GID
+                  for (x, y) in c.get_offsets() if x == 2.0)
+    assert dots == [1.0, 3.0]
+    assert _note(ax) == ["4 bins · widest bar = 75% of a group · 1 group of fewer than 3 values drawn as dots"]

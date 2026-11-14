@@ -385,6 +385,52 @@ def _values_at(frame: pd.DataFrame, values: pd.Series, timepoint: str) -> int:
     return int(values.notna().sum())
 
 
+def baseline_nothing_left_text(frame: pd.DataFrame, column: str, baseline_window: int, *, timepoint: str = "") -> str:
+    """The sentence a figure shows instead of an empty plot when the **baseline's** window (:func:`rebase`) leaves no
+    fold change of the values *frame* holds, or ``""`` when it leaves some (or is off, or *column* is no fold change,
+    or there was nothing to rebase). *frame* is taken before the baseline's window; *timepoint*, when given, is the one
+    timepoint the figure draws.
+
+    :func:`nothing_left_text` cannot say this: it is measured on the frame the baseline's window has already emptied,
+    where there is nothing to average, so it stays silent and the figure is drawn with every value excluded and no
+    reason. The baseline's window is always trailing — it ends at the baseline timepoint and reaches back, never
+    forward, since a later timepoint may already carry the treatment — so a baseline too near the start of its well
+    can never have a complete one. Said with the reason most fold changes went under, the baseline timepoint(s), and
+    the longest baseline window that would leave a value."""
+    baseline_window = clamp_window(baseline_window)
+    value = base_value(column)
+    if not baseline_window or value is None or column not in frame or not len(frame):
+        return ""
+    if not _values_at(frame, pd.to_numeric(frame[column], errors="coerce"), timepoint):
+        return ""
+    blank = pd.Series("", index=frame.index, dtype=object)
+    rebased, why = rebase(frame, column, blank, baseline_window)
+    if _values_at(rebased, pd.to_numeric(rebased[column], errors="coerce"), timepoint):
+        return ""
+    drawn = why if not timepoint else why[frame["timepoint"].astype(str).eq(str(timepoint))]
+    counts = drawn[drawn != ""].value_counts()
+    reason = str(counts.index[0]) if len(counts) else BASE_GAP_REASON
+    bases = sorted({str(t) for t in frame.get(f"_base_tp_{value}", pd.Series(dtype=object)).dropna()})
+    named = ", ".join(bases) if bases else "the baseline timepoint"
+    where = f" at {timepoint}" if timepoint else ""
+    if reason == BASE_EARLY_REASON:
+        before = baseline_order(frame, column)
+        most = int(np.nanmax(before.to_numpy(dtype=float))) + 1 if before is not None and before.notna().any() else 1
+        because = (f"the baseline's window ends at the baseline ({named}) and reaches back {_timepoints(baseline_window - 1)}, "
+                   f"but no nanowell's well has that many before its baseline. The baseline's window never reaches "
+                   "forward, since a later timepoint may already carry the treatment, so it is not centred even when "
+                   "the moving average is")
+        fix = (f" Set Baseline average to {most} or less, or choose a later Baseline." if most >= 2 else
+               " Set Baseline average to 1 (off), or choose a later Baseline.")
+    else:
+        because = ("every baseline window holds a timepoint with no value" if reason == BASE_GAP_REASON else
+                   "every baseline window holds a timepoint whose nanowells are not joinable to the others"
+                   if reason == BASE_IDENTITY_REASON else f"every fold change went under \u201c{reason}\u201d")
+        fix = " Set Baseline average to 1 (off), or choose another Baseline."
+    return (f"Baseline average over {baseline_window} timepoints: no fold change is left to draw{where} — "
+            f"{because}.{fix}")
+
+
 def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoint: str = "",
                       baseline_window: int = 0, centred: bool = False) -> str:
     """The sentence a figure shows instead of an empty plot when the moving average over *window* leaves none of

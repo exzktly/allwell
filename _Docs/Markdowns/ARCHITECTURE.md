@@ -13317,10 +13317,17 @@ value needs to be at least *h + 1* after the baseline; `nothing_left_text` words
 `_WHY_NOTHING_CENTRED` rather than the trailing window's sentences, which would name the wrong count. An empty plot over such data read
 as a dataset with no values, so `moving_compute.nothing_left_text` names it instead: the reason most values went
 under, the longest shorter window that would leave something (and how many values), then `describe`'s sentence.
-`distribution_model` sets it as `DistributionModel.empty` (and in its notes, which the Statistics report carries)
-when no swarm holds a value, and `draw_view` draws it with `render_message` (gid `nw-moving-empty`) in place of the
-beeswarm; Trajectories does the same when no line is left (`controller._moving_left_nothing`). It is said only when
-the values were there before the average, so a figure emptied by something else keeps its own message.
+`distribution_model` sets it as `DistributionModel.empty` when no swarm holds a value, and `draw_view` draws it with
+`render_message` (gid `nw-moving-empty`) in place of the beeswarm — and in place of the Statistics view's report too
+(`controller._compose_statistics`), which would otherwise list every sample as `n = 0` and every pair as not computed
+with no reason; Trajectories does the same when no line is left (`controller._moving_left_nothing`), and the Rare
+responders test before asking its worker (`_rare_controller.compose`). It is said only when the values were there
+before the average, so a figure emptied by something else keeps its own message. **The baseline's own window is
+checked first** (`moving_compute.baseline_nothing_left_text`, on the frame before `rebase`): a baseline window
+longer than the timepoints at and before the baseline can never be complete, so every fold change is undefined and
+`nothing_left_text`, measured after it, finds nothing to average and says nothing. The sentence names the baseline
+timepoint, says the baseline's window is trailing even under a centred moving average, and gives the longest
+baseline window that would fit.
 
 A ratio over a baseline that is constant per nanowell averages the same whichever is divided first.
 `log2_count_fc` is averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not

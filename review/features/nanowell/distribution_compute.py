@@ -373,6 +373,7 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     model = DistributionModel(metric, column, label, axis, metric in INTEGER_METRICS, [], control=control,
                               baseline=baseline, responding_above=responding_above, decoration=decoration)
+    before_baseline_window = frame
     if metric not in PER_NANOWELL:
         frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving)
     if cohort and metric not in PER_NANOWELL:
@@ -390,10 +391,12 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     else:
         _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels)
     if averaged_over is not None and not any(len(s.values) for s in model.swarms()):
-        model.empty = moving_compute.nothing_left_text(averaged_over, column, moving,
-                                                       timepoint=model.timepoint if axis == WELLS else "",
-                                                       baseline_window=baseline_moving,
-                                                       centred=moving_centred)
+        drawn_at = model.timepoint if axis == WELLS else ""
+        # The baseline's window first: when it emptied everything, the moving average had nothing to average.
+        model.empty = (moving_compute.baseline_nothing_left_text(before_baseline_window, column, baseline_moving,
+                                                                 timepoint=drawn_at)
+                       or moving_compute.nothing_left_text(averaged_over, column, moving, timepoint=drawn_at,
+                                                           baseline_window=baseline_moving, centred=moving_centred))
         if model.empty:
             model.alerts.append(model.empty)
     _notes(model, metric, time_source)

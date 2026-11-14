@@ -1231,6 +1231,9 @@ def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channe
                                channel=channel, axis=WELLS, groups=groups, timepoint=timepoint,
                                time_source=data.time_source, baseline=baseline, cohort=cohort, moving=moving,
                                baseline_moving=baseline_moving, moving_centred=moving_centred, sizes=sizes)
+    if model.empty:            # the window left nothing to compare: say why, as Distribution does, not "n = 0"
+        render_message(fig, model.empty, gid="nw-moving-empty")
+        return None
     model.well_names = dict(names)
     result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control, cache=stats_cache)
     render_statistics(fig, result, note=" ".join(filter(None, [control_not_drawn(result, control, hidden), note])))
@@ -1257,6 +1260,9 @@ def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels
     rows = metrics[metrics["well"].isin(list(wells))]
     if column not in rows:
         return ""
+    said = mvc.baseline_nothing_left_text(rows, column, baseline_moving)
+    if said:
+        return said
     rows, _reasons = mvc.rebase(rows, column, pd.Series("", index=rows.index, dtype=object), baseline_moving)
     return mvc.nothing_left_text(rows, column, moving, baseline_window=baseline_moving, centred=centred)
 

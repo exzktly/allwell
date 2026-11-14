@@ -825,3 +825,70 @@ def test_a_design_too_small_for_the_deciding_test_cannot_be_decided_rather_than_
                                 "design has 2). With fewer, it gives each well's own p only (Details).")
     null = rr.analyse(_small_plate(spiked=False, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]
     assert null.interpretation == rr.NOT_DETECTED
+
+
+# ── What the design cannot see (rare_design_compute) ───────────────────────────────────────────────────────────
+def _value_table(wells):
+    rows = [{"plate_id": "p", "well_id": w, "condition": c, "nanowell_id": str(i), "value": float(v)}
+            for w, c, values in wells for i, v in enumerate(values)]
+    return pd.DataFrame(rows)
+
+
+def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
+    """Responders lower on a fold change with a few dead control nanowells (fc = 0, 3 %, more than the 1 % tail):
+    the cutoff lands on 0 and nothing can be strictly below it, so every count is 0. That is a test that could not
+    count, not a finding of none — while 40 % of the treatment's nanowells died."""
+    rng = np.random.default_rng(0)
+
+    def well(p_dead, n=200):
+        v = rng.lognormal(0.7, 0.3, n)
+        v[rng.random(n) < p_dead] = 0.0
+        return v
+
+    wells = [(f"C{i}", "ctrl", well(0.03)) for i in range(4)] + [(f"T{i}", "drug", well(0.40)) for i in range(4)]
+    res = rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
+                     value_label="Count fold change")
+    unit = res.units[0]
+    assert sum(c.k for c in unit.primary.counts) == 0
+    assert unit.interpretation == rr.UNDECIDED
+    assert "sits on a tie" in unit.tie_note
+    from review.features.nanowell.rare_export_compute import caveats
+    assert unit.tie_note in caveats(unit, res.prepared.params, "Count fold change")
+
+
+def test_a_continuous_cutoff_is_not_called_a_tie():
+    rng = np.random.default_rng(0)
+    wells = [(f"C{i}", "ctrl", rng.lognormal(0.7, 0.3, 200)) for i in range(4)] + \
+            [(f"T{i}", "drug", rng.lognormal(0.7, 0.3, 200)) for i in range(4)]
+    unit = rr.analyse(_value_table(wells), RareParams(control="ctrl"), value_label="Count fold change").units[0]
+    assert unit.tie_note == ""
+    assert unit.interpretation == rr.NOT_DETECTED
+
+
+def _seeded(seed, lam_ctrl, lam_drug):
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(8):
+        lam, cond = (lam_ctrl, "ctrl") if i < 4 else (lam_drug, "drug")
+        n0 = rng.poisson(lam, 300)
+        n0 = n0[n0 > 0][:250]
+        nt = np.array([rng.poisson(3, k).sum() for k in n0])     # the same growth in both conditions
+        rows += [("p", f"W{i}", cond, str(j), a, b, b / a) for j, (a, b) in enumerate(zip(n0, nt))]
+    return pd.DataFrame(rows, columns=["plate_id", "well_id", "condition", "nanowell_id", "n0", "nt", "value"])
+
+
+def test_seeding_that_differs_between_the_sides_is_said_beside_the_verdict():
+    """The page tests its Metric with no grouping by starting cells. A treatment seeded more sparsely than its
+    control (1.2 against 3.5 cells), with identical growth, puts more nanowells in the fold change's top tail by
+    chance: the unstratified test calls it detected, and the figure must say why that is not to be trusted."""
+    res = rr.analyse(_seeded(0, 3.5, 1.2), RareParams(control="ctrl"), value_label="Count fold change")
+    unit = res.units[0]
+    assert unit.interpretation == rr.DETECTED            # the verdict stands; the caveat is what reaches the reader
+    assert unit.loading_note.startswith("Control and treatment nanowells started with different numbers of cells")
+    from review.features.nanowell.rare_export_compute import caveats
+    assert unit.loading_note in caveats(unit, res.prepared.params, "Count fold change")
+
+
+def test_equal_seeding_says_nothing_about_it():
+    unit = rr.analyse(_seeded(0, 2.0, 2.0), RareParams(control="ctrl"), value_label="Count fold change").units[0]
+    assert unit.loading_note == ""

@@ -31,9 +31,10 @@ import numpy as np
 import pandas as pd
 
 from review.features.nanowell import rare_ad_compute as ad
+from review.features.nanowell import rare_design_compute as design
 from review.features.nanowell import rare_exceedance_compute as ex
 from review.features.nanowell import rare_hc_compute as hc
-from review.features.nanowell.rare_data_compute import Prepared, RareParams, exclusion_counts, prepare
+from review.features.nanowell.rare_data_compute import ALL, Prepared, RareParams, exclusion_counts, prepare
 from review.features.nanowell.rare_null_compute import (
     Permutation, Well, empirical_p, permutation_test, pool, wells_from,
 )
@@ -77,6 +78,10 @@ class Unit:
     #: +1, or -1 when the analysed values are negated to read the bottom tail (``Prepared.sign``): a figure or sentence
     #: shows ``sign * value`` and ``sign * threshold``.
     sign: int = 1
+    #: What the design cannot see, said beside the verdict (``rare_design_compute``): the cutoff on a tie, and
+    #: control and treatment seeded with different numbers of cells. ``""`` when it does not apply.
+    tie_note: str = ""
+    loading_note: str = ""
 
     @property
     def label(self) -> str:
@@ -132,6 +137,8 @@ def _run_unit(plate, treatment, controls, treated, params: RareParams) -> Unit:
                         f"{params.min_wells_per_condition} of each")
     full = pool(controls)
     unit.thresholds = ex.threshold_of(full, params.percentile, params.fixed_threshold)
+    unit.tie_note = design.cutoff_on_tie(full, pool(treated), unit.thresholds, params.percentile,
+                                         params.fixed_threshold)
     percentiles = [params.percentile] if params.fixed_threshold is not None else params.sensitivity_percentiles()
     for q in percentiles:
         unit.exceedance[q] = ex.exceedance_test(controls, treated, q, params.fixed_threshold,
@@ -201,6 +208,8 @@ def interpret(unit: Unit, fdr: float) -> str:
     past = sum(c.k for c in unit.primary.counts) if unit.exceedance else 0
     if past and not np.isfinite(unit.primary.p):
         return UNDECIDED                    # nanowells past the cutoff, and no group p to weigh them: not a "no"
+    if not past and unit.tie_note:
+        return UNDECIDED                    # a cutoff on a tie: nothing could be counted, which is not a "no"
     return NOT_DETECTED
 
 
@@ -312,8 +321,12 @@ def analyse(data, params: RareParams | None = None, *, validate: bool = False,
     params = prepared.params
     wells = wells_from(prepared.kept)
     units = [_run_unit(*spec, params) for spec in _units(wells, params)]
+    unstratified = list(prepared.strata) == [ALL]
     for u in units:
         u.sign = prepared.sign
+        if unstratified:
+            u.loading_note = design.loading_differs(prepared.kept, [w.key for w in u.controls],
+                                                    [w.key for w in u.treated])
     _bh(units, "exceedance", [u.primary.p for u in units])
     _bh(units, "hc", [_p(u.hc_perm) for u in units])
     _bh(units, "ad", [_p(u.a2_perm) for u in units])

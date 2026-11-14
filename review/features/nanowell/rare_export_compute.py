@@ -294,6 +294,7 @@ def caveats(unit, params, value_label: str = "") -> list[str]:
     if unseen:
         out.append(f"{NAME_B} cannot see the {unseen} most extreme {unit.treatment} nanowell(s) (it leaves out "
                    "p ≤ 1/n), so it says nothing about them.")
+    out += [note for note in (getattr(unit, "tie_note", ""), getattr(unit, "loading_note", "")) if note]
     return out
 
 

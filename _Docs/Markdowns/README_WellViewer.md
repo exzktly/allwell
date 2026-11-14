@@ -7608,7 +7608,9 @@ plot, a cell in the Cell Browser or a row in Review CSV makes that cell the
 every page: click the name to come back to it here, or ✕ to let it go.
 **Show in Segmentation** — from the chip, the Scatter cell popup or the Cell
 Browser — opens the cell's field zoomed in so the cell fills about 40% of the
-view, centred. Segmentation outlines the focused cell in yellow, twice as thick
+view, centred — or as near as a large field allows: the view zooms no further
+than a field about 8,000 pixels across, so a very small cell in a large field
+fills less of it. Segmentation outlines the focused cell in yellow, twice as thick
 as the red round the other cells, whenever its field is on screen, and the
 Scatter plot rings its point. If the field opens but the cell is not in its
 segmentation, the status line says so. Opening another dataset clears it.

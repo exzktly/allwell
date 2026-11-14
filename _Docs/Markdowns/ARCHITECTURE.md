@@ -7391,7 +7391,14 @@ field in a 1000 px canvas is about one screen pixel per image pixel — and
 returns whether it found the cell; when it did not, the jump says so on the
 status line instead of showing an unmarked field. The zoom buttons step from
 whatever zoom is shown to the next stop in their direction (`next_zoom_step`),
-going up by half again past the last stop. The per-cell Scatter files each
+going up by half again past the last stop. Every zoom is held below
+`zoom_ceiling` by `render_review_image_display`, the one place each route to a
+zoom passes through: the renderer scales the whole field into one pixmap rather
+than only the part in view, so the zoom's cost is the scaled field's size, and
+40× of a 2048 px field in a 1000 px canvas would be a 32,000 px square (4 GB)
+built on the GUI thread. The ceiling keeps the scaled field's longest side
+within `_MAX_PIXMAP_SIDE` (8192 px), and the jump to a cell computes its pan for
+the zoom actually drawn (`tests/test_review_image_zoom_ceiling.py`). The per-cell Scatter files each
 redraw's points through `_cell_rings.store_interaction_points`, which resolves
 every drawn point to its cell in one narrow read per well (`plotted_cells_for`;
 points carry the row's index *label*, so rows are looked up by label), rings the

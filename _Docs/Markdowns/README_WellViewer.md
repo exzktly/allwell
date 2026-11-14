@@ -2012,7 +2012,10 @@ start the wait over. If it runs out during the upload, a batched run stops its
 upload and a single run finishes sending first; what reached the cluster is kept
 for the next attempt. When it runs out the job is cancelled and the run stops with
 `no node was granted within 30 min, this host's Max queue wait — cancelled job
-…`; raise the setting for a busy cluster, or set it to **0**
+…`. If the host is not answering at that moment, the cancel cannot reach it either,
+and the message says so instead — `could not cancel job 4123 (the host did not
+answer); it may still be queued — cancel it with `scancel 4123` on the host` —
+since the job may still be waiting in the queue. Raise the setting for a busy cluster, or set it to **0**
 (no limit), which never gives up. A run that has started on its node is never cut
 short by it, however long it runs. It applies when the scheduler command is an
 `srun` command. It also bounds *Request a node* (below), and a run that is

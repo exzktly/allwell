@@ -239,7 +239,7 @@ class ReviewApp(QWidget):
         self._features = build_feature_registry()
         self._app_state = AppState()
         attach_feature_state(self._app_state, self._features)
-        self._event_bus = EventBus()
+        self._event_bus = EventBus(self)
         # One ``name -> object`` attribute store shared by the widget registry
         # and the runtime namespaces (A8 T6): a handle registered as
         # ``_<feature>_<name>`` stays reachable through both ``ctx.widgets`` and

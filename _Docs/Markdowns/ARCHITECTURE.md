@@ -168,7 +168,10 @@ shell. `ui/phone_shell.py` is the Qt half — `PhoneShell`, owned by `AllWellApp
 and imports no pane: `AllWellApp._build_phone_shell` hands it a `PhoneHandles`
 naming every widget it rearranges and the callables it drives (the mode, the
 navigator, the band, the run dashboards, the status text, a relayout),
-so a pane that moves a widget changes one line there. What a pane's own widgets
+so a pane that moves a widget changes one line there. Every walk of the application's
+widgets in it goes through `all_live_widgets`, which drops anything `QApplication.allWidgets()`
+returns that is not a live `QWidget` — a stale wrapper whose address a new widget reused
+(`tests/test_phone_shell_walks_live_widgets.py`). What a pane's own widgets
 become is the pane's: Analyze's phone view wraps its run log, and the feature
 registry says which Review pages a phone does not offer (`FeatureDescriptor.on_phone`,
 read through `FeatureRegistry.hidden_on_phone` into `phone_hidden_sections`;
@@ -7361,6 +7364,11 @@ catalogue of exactly five cross-cutting signals — `channel_changed`,
 payloads are the relevant *state object*, never `app`. The catalogue and its
 contract are documented in the module docstring. The bus is **load-bearing**:
 every signal has a real emitter and a real subscriber.
+The window owns it (`EventBus(self)` in `ReviewApp.__init__`): subscribers
+connect closures over `ctx`, which Qt holds on the C++ side where Python's
+collector cannot see them, so a bus with no parent kept every closed window
+alive through its own subscribers; parented, it is deleted with the window and
+releases them (`tests/test_a_closed_review_app_is_freed.py`).
 `test_architecture_contracts.py` asserts the roster it may hold, and — the
 other direction, which a frozen roster cannot give — that every name on it is
 *mentioned* somewhere outside `event_bus.py` and outside the tests. That is a

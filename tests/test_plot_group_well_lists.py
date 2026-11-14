@@ -136,3 +136,41 @@ def test_a_well_the_dataset_no_longer_has_is_dropped_from_both():
     ctx = _ctx(wells=["A01"], rsets=[_Rset("g", ["A01", "GONE"])])
     assert _wells_of(ctx) == ["A01"]
     assert [n for n, _w, _r in plot_group_well_lists(ctx)] == ["g"]
+
+
+# ── pool=False: the Distribution tab's "Pool replicates" off ────────────────
+
+
+def test_unpooled_splits_each_visible_set_into_its_wells():
+    """Each set's loaded wells become members of their own, in set order, with
+    no set attached (each stands for itself and colours as a well); the hidden
+    set stays out and the solo well stays in — the same wells as pooled."""
+    ctx = _ctx(
+        wells=["A01", "A02", "A03", "B01", "B02"],
+        rsets=[_Rset("g", ["A02", "A01", "A03"]),
+               _Rset("hidden", ["B01"], hidden=True)],
+        solo=["B02"],
+    )
+    got = plot_group_well_lists(ctx, pool=False)
+    assert got == [("A02", ["A02"], None), ("A01", ["A01"], None),
+                   ("A03", ["A03"], None), ("B02", ["B02"], None)]
+    pooled = sorted(w for _n, ws, _r in plot_group_well_lists(ctx) for w in ws)
+    assert sorted(w for _n, ws, _r in got for w in ws) == pooled
+
+
+def test_unpooled_draws_a_well_in_two_sets_once():
+    ctx = _ctx(wells=["A01", "A02", "A03"],
+               rsets=[_Rset("g1", ["A01", "A02"]), _Rset("g2", ["A02", "A03"])])
+    assert [n for n, _w, _r in plot_group_well_lists(ctx, pool=False)] == ["A01", "A02", "A03"]
+
+
+def test_unpooled_frames_hold_one_well_each():
+    """Pooled, the set is one frame of every well's rows; unpooled, one frame per well."""
+    ctx = _ctx(wells=["A01", "A02"], rsets=[_Rset("g", ["A01", "A02"])])
+    assert [(n, len(df)) for n, _c, df in iter_plot_groups(ctx)] == [("g", 6)]
+    assert [(n, len(df)) for n, _c, df in iter_plot_groups(ctx, pool=False)] == [("A01", 3), ("A02", 3)]
+
+
+def test_unpooled_changes_nothing_without_sets():
+    ctx = _ctx(wells=["A01", "A02", "B01"], selected=["A01", "B01"])
+    assert plot_group_well_lists(ctx, pool=False) == plot_group_well_lists(ctx)

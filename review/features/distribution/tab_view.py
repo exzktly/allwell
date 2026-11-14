@@ -117,6 +117,22 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     log_y_cb.stateChanged.connect(_on_log_y_changed)
     ctrl.add_scope("", log_y_cb)
 
+    # With replicate sets on the plate, a well click shows its whole set and the
+    # figure pools the set's wells into one series. Unticked, each of those
+    # wells is drawn as its own series instead — same wells, one curve each.
+    # Disabled while no set is active (``controller.sync_pool_checkbox``).
+    pool_cb = reg.register("_distribution_pool_cb", QCheckBox("Pool replicates", ctrl))
+    pool_cb.setChecked(bool(ctx.state.distribution.pool_replicates))
+    pool_cb.setToolTip(
+        "On: each replicate set is one series of its wells' pooled values.\n"
+        "Off: each well of a replicate set is drawn as its own series.")
+
+    def _on_pool_changed(state: int) -> None:
+        ctx.state.distribution.pool_replicates = bool(state)
+        _on_changed(ctx)
+    pool_cb.stateChanged.connect(_on_pool_changed)
+    ctrl.add_scope("", pool_cb)
+
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
         ctx, ctrl,
         card_key="_distribution_card",

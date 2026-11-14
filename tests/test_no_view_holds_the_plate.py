@@ -176,7 +176,7 @@ def test_a_pooled_group_is_not_held_twice(monkeypatch):
     reads = _Reads()
     monkeypatch.setattr(data_loading, "get_rows", reads.get_rows)
     monkeypatch.setattr(data_loading, "plot_group_well_lists",
-                        lambda ctx, fallback_to_all=True: [("G", ["A01", "A02", "A03"], None)])
+                        lambda ctx, fallback_to_all=True, pool=True: [("G", ["A01", "A02", "A03"], None)])
     monkeypatch.setattr("review.domain.selections_model.color_for_wells", lambda names: "#000000")
     ctx = SimpleNamespace(state=SimpleNamespace(selection=SimpleNamespace(selections=[])))
     for _name, _colour, pooled in data_loading.iter_plot_groups(ctx):
@@ -222,7 +222,7 @@ def test_the_distribution_export_writes_what_the_string_version_wrote(tmp_path, 
 
     values = {"A01": np.array([1.0, -0.0, 123456.789012345, 1e-7, -3.25]), "G2": np.array([0.1234565, 7.0])}
     monkeypatch.setattr(data_loading, "iter_plot_groups",
-                        lambda ctx: iter((name, "#000", pd.DataFrame()) for name in values))
+                        lambda ctx, pool=True: iter((name, "#000", pd.DataFrame()) for name in values))
     monkeypatch.setattr(data_loading, "_all_fluor_values_filtered", lambda df, **kw: values[next(it)])
     it = iter(values)
     out = tmp_path / "dist.csv"

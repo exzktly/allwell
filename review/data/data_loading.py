@@ -1673,7 +1673,7 @@ def parse_well_token(token: str) -> tuple[int, int] | None:
 
 # ── Plot-group iteration ─────────────────────────────────────────────────────
 
-def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, list[str], Any]]:
+def plot_group_well_lists(ctx, fallback_to_all: bool = True, *, pool: bool = True) -> list[tuple[str, list[str], Any]]:
     """The wells each plotted group is drawn from: ``[(name, [well, …], rset)]``.
 
     **Which wells a plot is about is decided here and nowhere else.** It is not
@@ -1695,6 +1695,12 @@ def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, 
     Well *tokens* are what this returns, which the pooled frames cannot give
     back: a pooled frame's ``well`` column is parsed from the image filename and
     need not equal the token the app keys wells by.
+
+    ``pool=False`` keeps the same wells and splits every replicate set into one
+    entry per loaded well, in set order and each well once (``rset`` ``None``,
+    since each now stands for itself) — the Distribution tab's *Pool
+    replicates* off. Which wells are plotted is unchanged; only how they are
+    grouped is.
     """
     from review.domain.plot_members import plot_replicate_sets
 
@@ -1704,9 +1710,16 @@ def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, 
 
     out: list[tuple[str, list[str], Any]] = []
     if rep_sets:
+        seen: set[str] = set()
         for rset in rep_sets:
             wells = [w for w in rset.wells if w in well_paths]
             if not wells:
+                continue
+            if not pool:
+                for w in wells:
+                    if w not in seen:
+                        seen.add(w)
+                        out.append((w, [w], None))
                 continue
             # A solo well arrives from the seam as a set of one; it is still a
             # well standing for itself, which is what ``None`` says here.
@@ -1725,7 +1738,7 @@ def plot_group_well_lists(ctx, fallback_to_all: bool = True) -> list[tuple[str, 
     return out
 
 
-def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, str, pd.DataFrame]]:
+def iter_plot_groups(ctx, fallback_to_all: bool = True, *, pool: bool = True) -> Iterator[tuple[str, str, pd.DataFrame]]:
     """Yield ``(name, color, df)`` for each replicate set or selected well.
 
     When replicate sets are defined, one entry per replicate set with rows
@@ -1741,9 +1754,10 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
     Scatter renderers (locked by test_iter_plot_groups_ctx).
 
     Which wells each group holds comes from :func:`plot_group_well_lists`; only
-    the pooling and the colours are this function's own.
+    the pooling and the colours are this function's own. ``pool`` is passed
+    through to it.
     """
-    for name, wells, rset in plot_group_well_lists(ctx, fallback_to_all):
+    for name, wells, rset in plot_group_well_lists(ctx, fallback_to_all, pool=pool):
         frames = [get_rows(ctx, w) for w in wells]
         pooled = pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
         # Released before the yield: the consumer holds the pooled copy while it

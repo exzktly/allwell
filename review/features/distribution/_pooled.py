@@ -59,6 +59,12 @@ class ExactStats:
     hist: Callable[[np.ndarray], np.ndarray]
 
 
+def pool_replicates(ctx) -> bool:
+    """The tab's *Pool replicates* toggle: ``True`` draws a replicate set as one series, ``False`` one per well."""
+    dist = getattr(ctx.state, "distribution", None)
+    return bool(getattr(dist, "pool_replicates", True))
+
+
 def _columns(val_col: str, fluor_gates, ratios) -> set[str] | None:
     """What ``_all_fluor_values_filtered`` reads beyond the identity and verdict columns."""
     inputs = value_inputs(val_col, ratios)
@@ -77,7 +83,7 @@ def collect_distribution(ctx, *, val_col: str, fluor_gates, ratios, tp_filter, d
     closes *pool* once the figure is drawn — :class:`ExactStats` reads it.
     ``None`` sends the caller down its whole-selection path unchanged.
     """
-    plan = plot_group_well_lists(ctx, False)
+    plan = plot_group_well_lists(ctx, False, pool=pool_replicates(ctx))
     if cells_upper_bound(ctx, [w for _name, wells, _rset in plan for w in wells]) <= DIST_MAX_VALUES:
         return None
     want = _columns(val_col, fluor_gates, ratios)

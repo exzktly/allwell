@@ -181,7 +181,7 @@ def test_a_well_with_nothing_to_contribute_is_not_reread(ctx, monkeypatch):
 def test_an_integer_column_is_written_with_six_decimals(tmp_path, monkeypatch):
     from review.features.export import service as svc
 
-    monkeypatch.setattr(data_loading, "iter_plot_groups", lambda ctx: iter([("A01", "#000", pd.DataFrame())]))
+    monkeypatch.setattr(data_loading, "iter_plot_groups", lambda ctx, pool=True: iter([("A01", "#000", pd.DataFrame())]))
     monkeypatch.setattr(data_loading, "_all_fluor_values_filtered", lambda df, **kw: np.array([12, 3]))
     out = tmp_path / "dist.csv"
     monkeypatch.setattr(svc, "ask_save_csv", lambda *a, **k: str(out))

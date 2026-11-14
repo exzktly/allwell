@@ -6019,7 +6019,17 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 - **Controls** — **Mode** (*Histogram*, *Histogram + KDE*, *KDE only*, *CDF*,
   *Violin (per group)*, or *Histogram (per group)*); **Layout** (*Overlay* all
   wells, or *Faceted (one per group)*); **Bins** count; **log x** / **log y**
-  toggles; the timepoint picker; the channel-wide threshold reference line.
+  toggles; **Pool replicates**; the timepoint picker; the channel-wide
+  threshold reference line.
+- **Pool replicates** — with replicate groups defined, clicking a well on the
+  plate shows its whole group. Ticked (the default), each group is drawn as one
+  series of all its wells' cells. Unticked, every well of the shown groups is
+  drawn as its own series, named and coloured as that well, so one replicate can
+  be read beside the others instead of merged into them. The same wells are
+  plotted either way; only how they are grouped changes, and **Save plot
+  data…** writes the grouping the figure shows. The box is greyed out while no
+  group is defined, since every series is already one well. It also applies
+  under *Observations: Nanowells*.
 - **Histogram (per group)** lays the groups out side by side as *Violin (per
   group)* does, each drawn as a vertical histogram mirrored about its column
   with a tick at its median. Every group's bars sum to 1, all groups share the

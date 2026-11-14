@@ -19,9 +19,12 @@ class DistributionState:
     """Distribution feature-local display state.
 
     ``bins`` — number of histogram bins. ``log_x`` / ``log_y`` — put the
-    respective axis on a log scale.
+    respective axis on a log scale. ``pool_replicates`` — with replicate sets
+    active, draw each set as one series of its wells' pooled values (on) or
+    each of its wells as its own series (off); no effect without sets.
     """
 
     bins: int = 40
     log_x: bool = False
     log_y: bool = False
+    pool_replicates: bool = True

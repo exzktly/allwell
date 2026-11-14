@@ -11311,6 +11311,11 @@ Scholz–Stephens line (its p shown as *≥ 0.25* where scipy caps it); each tre
 warnings (a stratum with too few control nanowells to resolve the percentile, a pool too small for HC, a plate
 effect that could not be estimated). Its first line counts the nanowells kept and left out.
 
+The two supporting tests run independently. When **Higher Criticism** cannot be computed — a well with fewer than
+ten nanowells leaves it no rank to look at, so the supporting line reads *Higher Criticism not computable* — the
+**shape test** still runs and reports its own p, and the caveat on the lowest possible p is said for whichever of
+the two has one.
+
 **Review flagged crops.** A statistic can be fooled by an imaging artefact: a doublet counted as two cells,
 debris counted as a cell, a segmentation that split one cell into several. Every nanowell the verdict is counted
 from is therefore shown for review by eye. **Review flagged crops** opens the crops pop-out on **Show: Flagged

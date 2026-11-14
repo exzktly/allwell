@@ -1221,6 +1221,7 @@ def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channe
     if sc.test_spec(stats_test)["kind"] == "rare":
         return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note, hidden=hidden,
                           moving_on=mvc.is_on(moving), cohort=cohort, unit_set=stats_unit != sc.WELLS,
+                          column=metric_column(metric, channel), value_label=_label(metric, channel, data, sizes),
                           **(rare or {"store": None, "request": None}))
     # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds,
@@ -2930,6 +2931,14 @@ def set_stats_test(ctx, test: str) -> None:
             st.control, st.control_guessed = guess, guess
             _call(ctx, "_nw_refresh_controls")
     _set(ctx, "stats_test", test)
+
+
+def set_rare_direction(ctx, direction: str) -> None:
+    """Which tail of the Metric the Rare responders test looks in (``NanowellState.rare_direction``)."""
+    from review.features.nanowell.state import RARE_DIRECTIONS
+
+    if direction in RARE_DIRECTIONS:
+        _set(ctx, "rare_direction", direction)
 
 
 def set_cohort(ctx, on: bool) -> None:

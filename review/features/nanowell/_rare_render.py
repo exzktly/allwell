@@ -82,15 +82,17 @@ def _strata(unit) -> list:
     return sorted({s for w in unit.controls + unit.treated for s in w.values})
 
 
-def _pooled(group, stratum, log_axis: bool) -> tuple[np.ndarray, np.ndarray] | None:
-    """The pooled ECDF of *group* in *stratum*; with *log_axis*, its x as log₂ of the value (a value of 0 left out).
+def _pooled(group, stratum, log_axis: bool, sign: int = 1) -> tuple[np.ndarray, np.ndarray] | None:
+    """The pooled ECDF of *group* in *stratum*, of the original values (``sign`` times the analysed ones, so a
+    bottom-tail analysis is drawn as the values were measured); with *log_axis*, its x as log₂ of the value (a value
+    of 0 left out).
 
     The log is taken here, on a linear axis, rather than by ``set_xscale("log")``: the page's style pass sets each
     axis's scale from the Properties panel after the draw, which put a "(log)" label over a linear axis."""
     parts = [w.values[stratum] for w in group if stratum in w.values]
     if not parts:
         return None
-    x, y = _ecdf(np.concatenate(parts))
+    x, y = _ecdf(sign * np.concatenate(parts))
     if not log_axis:
         return x, y
     keep = x > 0
@@ -105,23 +107,50 @@ def _x(value: float, log_axis: bool) -> float:
     return value
 
 
+def _is_ratio(value_label: str) -> bool:
+    return "fold change" in value_label.lower()
+
+
 def _x_label(value_label: str, log_axis: bool) -> str:
-    return "fold change (final ÷ start), log scale — a fold change of 0 is left out" if log_axis else value_label
+    if not log_axis:
+        return value_label
+    return f"{value_label}, log scale" + (" — 0 is left out" if _is_ratio(value_label) else "")
 
 
-def _fold_ticks(ax, log_axis: bool) -> None:
-    """On the log axis, ticks at whole powers of two labelled as the fold changes they are (``2×``, ``4×``), not as
-    their logarithms."""
+def _fold_ticks(ax, log_axis: bool, value_label: str = "fold change") -> None:
+    """On the log axis, ticks at whole powers of two labelled as the values they are — ``2×``, ``4×`` for a fold
+    change, the plain number otherwise — not as their logarithms."""
     if not log_axis:
         return
     from matplotlib.ticker import FuncFormatter, MaxNLocator
 
+    suffix = "×" if _is_ratio(value_label) else ""
     ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=6))
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _pos: f"{2 ** v:g}×"))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _pos: f"{2 ** v:g}{suffix}"))
+
+
+def log_axis_for(result) -> bool:
+    """Whether the first panel's x is logarithmic: only when every value drawn is positive (a fold change, a count,
+    a brightness), never for a robust z or a log metric, which can be negative."""
+    if result.prepared.params.normalize:
+        return False
+    values = result.prepared.kept["fc"].to_numpy(dtype=float)
+    values = values[np.isfinite(values)]
+    return bool(len(values)) and bool((values > 0).all() or (_is_ratio(result.prepared.value_label)
+                                                              and (values >= 0).all()))
 
 
 def _stratum_name(stratum: str) -> str:
+    from review.features.nanowell.rare_data_compute import ALL
+
+    if str(stratum) == ALL:
+        return "all nanowells"
     return f"{stratum} cell at start" if str(stratum) == "1" else f"{stratum} cells at start"
+
+
+def _cut_x(unit, stratum, log_axis: bool) -> float:
+    """The cutoff of *stratum* on the panel's x, as the original value (``unit.sign`` times the analysed one)."""
+    return _x(unit.sign * unit.thresholds[stratum], log_axis) if stratum in unit.thresholds else math.nan
 
 
 def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) -> None:
@@ -130,64 +159,91 @@ def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) 
     treated_colour = _well_colour(unit.treated[0].key) if unit.treated else ink
     for group, colour, gid, label in ((unit.controls, muted, "rare-ecdf-control", "control"),
                                       (unit.treated, treated_colour, "rare-ecdf-treatment", unit.treatment)):
-        xy = _pooled(group, stratum, log_axis)
+        xy = _pooled(group, stratum, log_axis, unit.sign)
         if xy is not None:
             ax.step(*xy, where="post", color=colour, label=label, linewidth=1.2)[0].set_gid(f"{gid}:{stratum}")
-    if stratum in unit.thresholds and np.isfinite(_x(unit.thresholds[stratum], log_axis)):
-        ax.axvline(_x(unit.thresholds[stratum], log_axis), color=ink, linestyle="--", linewidth=1).set_gid(
+    if np.isfinite(_cut_x(unit, stratum, log_axis)):
+        ax.axvline(_cut_x(unit, stratum, log_axis), color=ink, linestyle="--", linewidth=1).set_gid(
             f"rare-threshold:{stratum}")
-    _fold_ticks(ax, log_axis)
+    _fold_ticks(ax, log_axis, value_label)
     _title(ax, _stratum_name(stratum))
     ax.set_xlabel(_x_label(value_label, log_axis))
     ax.set_ylim(0, 1.01)
 
 
+def _ecdf_colours(unit, stratum, strata, i, publication, muted):
+    """``(treatment, control, pair or None)`` colours of one stratum's curves. Stratified, both take the stratum's
+    occupancy shade (paired for publication), told apart by solid and dotted; unstratified, the treatment curve
+    takes its first well's plate colour and the control curve the secondary ink, as the other panels draw them."""
+    from review.features.nanowell.rare_data_compute import ALL
+
+    if strata == [ALL]:
+        return (_well_colour(unit.treated[0].key) if unit.treated else muted), muted, None
+    pair = _stratum_shades(len(strata))[i]
+    colour = pair[1] if publication else pair[0]
+    return colour, colour, pair
+
+
 def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
-    """Every stratum on one axes: control dotted, treatment solid, one colour per stratum, each threshold dashed."""
+    """Every stratum on one axes (one, unstratified): control dotted, treatment solid, the cutoff dashed, of the values
+    as measured (``unit.sign`` undoes a bottom-tail analysis's negation)."""
+    from review.features.nanowell.rare_data_compute import ALL
+
     strata = _strata(unit)
     publication = _is_publication(ax)
-    for stratum, pair in zip(strata, _stratum_shades(len(strata))):
-        colour = pair[1] if publication else pair[0]
-        for group, style, gid in ((unit.controls, ":", "rare-ecdf-control"),
-                                  (unit.treated, "-", "rare-ecdf-treatment")):
-            xy = _pooled(group, stratum, log_axis)
+    _ground, ink, muted = _inks(ax)
+    for i, stratum in enumerate(strata):
+        treated_c, control_c, pair = _ecdf_colours(unit, stratum, strata, i, publication, muted)
+        for group, style, gid, colour in ((unit.controls, ":", "rare-ecdf-control", control_c),
+                                          (unit.treated, "-", "rare-ecdf-treatment", treated_c)):
+            xy = _pooled(group, stratum, log_axis, unit.sign)
             if xy is not None:
-                line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1,
-                               label=_stratum_name(stratum) if style == "-" else None)[0]
-                _paired(line, pair).set_gid(f"{gid}:{stratum}")
-        if stratum in unit.thresholds and np.isfinite(_x(unit.thresholds[stratum], log_axis)):
-            _paired(ax.axvline(_x(unit.thresholds[stratum], log_axis), color=colour, linestyle="--", linewidth=0.8),
-                    pair).set_gid(f"rare-threshold:{stratum}")
+                line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1)[0]
+                line.set_gid(f"{gid}:{stratum}")
+                if pair is not None:
+                    _paired(line, pair)
+                elif colour == muted:
+                    _ink(line, muted=True)
+        cut = _cut_x(unit, stratum, log_axis)
+        if np.isfinite(cut):
+            line = ax.axvline(cut, color=control_c if pair is not None else ink, linestyle="--", linewidth=0.8)
+            line.set_gid(f"rare-threshold:{stratum}")
+            _paired(line, pair) if pair is not None else _ink(line)
     ax.set_xlabel(_x_label(value_label, log_axis))
     ax.set_ylabel("share of nanowells at or below")
-    _fold_ticks(ax, log_axis)
+    _fold_ticks(ax, log_axis, value_label)
     ax.set_ylim(0, 1.01)
     _label_strata(ax, unit, strata, log_axis, publication)
-    _title(ax, f"How far nanowells grew, by starting cells\nsolid: {unit.treatment} · dotted: control")
+    by = "" if strata == [ALL] else ", by starting cells"
+    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\nsolid: {unit.treatment} · dotted: control")
 
 
 def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:
     """Label the lines on the panel itself rather than in a key: each stratum's treatment curve where it crosses its
     own height (staggered, since every cumulative curve ends at the same top right corner, where labels at the ends
-    would pile up), with a dot in the stratum's shade; and the dashed line as the control cutoff."""
-    _ground, ink, _muted = _inks(ax)
-    for i, (stratum, pair) in enumerate(zip(strata, _stratum_shades(len(strata)))):
-        xy = _pooled(unit.treated, stratum, log_axis)
+    would pile up), with a dot in the stratum's shade — unstratified, the treatment curve named by its group — and
+    the dashed line as the control cutoff."""
+    from review.features.nanowell.rare_data_compute import ALL
+
+    _ground, ink, muted = _inks(ax)
+    for i, stratum in enumerate(strata):
+        xy = _pooled(unit.treated, stratum, log_axis, unit.sign)
         if xy is None or not len(xy[0]):
             continue
+        treated_c, _control_c, pair = _ecdf_colours(unit, stratum, strata, i, publication, muted)
         level = 0.78 - 0.56 * i / (len(strata) - 1) if len(strata) > 1 else 0.5   # spread over the panel's height
         x = float(xy[0][min(int(np.searchsorted(xy[1], level)), len(xy[0]) - 1)])
-        dot = ax.scatter([x], [level], s=14, color=pair[1] if publication else pair[0], zorder=5,
-                         gid=f"rare-ecdf-dot:{stratum}")
-        _paired(dot, ((pair[0], pair[0]), (pair[1], pair[1])))
-        _ink(ax.annotate(_stratum_name(stratum), (x, level), textcoords="offset points", xytext=(6, 0), va="center",
+        dot = ax.scatter([x], [level], s=14, color=treated_c, zorder=5, gid=f"rare-ecdf-dot:{stratum}")
+        if pair is not None:
+            _paired(dot, ((pair[0], pair[0]), (pair[1], pair[1])))
+        name = unit.treatment if stratum == ALL else _stratum_name(stratum)
+        _ink(ax.annotate(name, (x, level), textcoords="offset points", xytext=(6, 0), va="center",
                          fontsize=_TITLE_PT * 0.75, color=ink, gid=f"rare-ecdf-label:{stratum}"))
-    cuts = [_x(unit.thresholds[s], log_axis) for s in strata if s in unit.thresholds]
-    cuts = [c for c in cuts if np.isfinite(c)]
+    cuts = [c for c in (_cut_x(unit, s, log_axis) for s in strata) if np.isfinite(c)]
     if cuts:
         # At the foot of the dashed line, clear of the stratum labels, which sit at mid-height.
-        _ink(ax.annotate("control cutoff", (max(cuts), 0.02), textcoords="offset points", xytext=(-3, 0),
-                         rotation=90, ha="right", va="bottom", fontsize=_TITLE_PT * 0.7, color=ink,
+        _ink(ax.annotate("control cutoff", (max(cuts) if unit.sign > 0 else min(cuts), 0.02), textcoords="offset points",
+                         xytext=(-3, 0), rotation=90, ha="right", va="bottom", fontsize=_TITLE_PT * 0.7, color=ink,
                          gid="rare-cutoff-label"))
 
 
@@ -385,7 +441,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
         text += tail
     text_in = len(text) * step_in + 2 * _TEXT_PAD_IN
     band_in = max(row_min, (height - _TOP_IN - text_in - sum(head_in)) / max(1, len(units) * per_unit))
-    log_axis = not result.prepared.params.normalize
+    log_axis = log_axis_for(result)
     left, gap = 0.75 / width, 0.85 / width
     panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
     axes_h = band_in - _ROW_PAD_IN

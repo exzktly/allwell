@@ -79,11 +79,12 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     # The figure leads with the answer in counts; under the panels the deciding test, the supporting ones and the
     # caveats; the full report is in Details, under the figure.
     assert [t.replace("\n", " ") for t in _texts(page, "nw-rare-unit")] == [
-        "drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its top 1%), "
-        "against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells."]
+        "drug: rare responders detected. 8 of 120 drug nanowells (6.7%) rose above the control cutoff (its top 1%) on "
+        "cell count, against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells."]
     figure = " ".join(_texts(page, "nw-rare-line"))
     assert "Deciding: exceedance test p = 0.00072." in figure
-    assert "Higher Criticism p = 0.1 (the lowest possible with these wells)" in figure
+    # Unstratified, the control pool is larger than a well, so the spikes fall where HC+ does not look: said so.
+    assert "Higher Criticism cannot see the 8 most extreme drug nanowell(s)" in figure
     assert "⚠ With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1" in figure
     assert rc.DETAILS_POINTER in figure and "anti-conservative" not in figure
     assert page.widgets.get("_nw_stats_flagged_btn").isEnabled()
@@ -301,3 +302,51 @@ def test_the_control_combo_is_captioned_control_for_this_test_and_vs_for_the_oth
     assert caption.text() == tab_view.CONTROL_CAPTION
     _choose(page, "_nw_stats_test_cb", "welch")
     assert caption.text() == tab_view.VS_CAPTION
+
+
+
+def test_the_page_s_metric_and_direction_drive_the_test(page, qtbot):
+    """User decision: the value is the page's Metric — the band's Metric control, not a fixed count fold change — and
+    the band's direction chooses the tail; both re-run the test. Cell count is a level, so the figure warns that
+    nanowells which started higher can be past the cutoff without responding; its fold change compares each with its
+    own Baseline and carries no such warning."""
+    st = _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    direction = page.widgets.get("_nw_rare_direction_cb")
+    assert direction.isVisibleTo(page.window) and direction.currentData() == "higher"
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
+    head = _texts(page, "nw-rare-unit")[0].replace("\n", " ")
+    assert " on cell count, " in head
+    # The values tested are the Metric's own: a spiked nanowell's cell count is 30 × its starting cells (30, 60 or 90);
+    # its count fold change is 30 whatever it started with. A test fed the fold change whatever the Metric would
+    # flag 30s here.
+    counts = sorted({row["fc"] for row in st.rare_flagged})
+    assert set(counts) <= {30.0, 60.0, 90.0} and max(counts) > 30.0, counts
+    assert any(t.startswith("⚠ Cell count is a level, not a change from the Baseline") for t in _texts(page, "nw-rare-line"))
+
+    _choose(page, "_nw_metric_cb", "count_fc")
+    qtbot.waitUntil(lambda: " on count fold change" in " ".join(_texts(page, "nw-rare-unit")).replace("\n", " "),
+                    timeout=30000)
+    assert not any("is a level" in t for t in _texts(page, "nw-rare-line"))
+    qtbot.waitUntil(lambda: {row["fc"] for row in st.rare_flagged} == {30.0}, timeout=30000)
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders detected.")
+
+    _choose(page, "_nw_rare_direction_cb", "lower")
+    assert st.rare_direction == "lower"
+    qtbot.waitUntil(lambda: "fell below the control cutoff (its bottom 1%)" in
+                    " ".join(_texts(page, "nw-rare-unit")).replace("\n", " "), timeout=30000)
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders not detected.")
+    _choose(page, "_nw_stats_test_cb", "welch")
+    assert not direction.isVisibleTo(page.window)
+
+
+def test_the_direction_is_saved_with_the_page_and_a_bad_one_is_not_restored():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.rare_direction = "lower"
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.rare_direction == "lower"
+    again.apply_config({"rare_direction": "sideways"})
+    assert again.rare_direction == "higher"

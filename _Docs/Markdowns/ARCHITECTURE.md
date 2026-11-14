@@ -13888,12 +13888,17 @@ validate=...)`, and the Statistics view's *Rare responders* test runs it (below)
 unit: every p-value it reports is calibrated against the spread between replicate control wells, never against
 nanowells treated as independent. The modules, in the order the analysis runs them:
 
-* `rare_data_compute` — the per-nanowell table (`REQUIRED`: plate, well, condition, nanowell id, `n0`, `nt`; optional
-  times, `qc_*` flag columns and `crop_path`; `from_site_metrics` builds it from `series_compute.site_metrics`),
-  `FC = nt / n0` and `rate = log2(FC) / Δt` (NaN, not zero, when undefined), exclusions with their reasons (`n0 = 0`,
-  no final count, every QC flag), the loading strata (`n0 = 1, 2, 3, ≥4` by default), the optional per-well robust
-  normalisation (off by default, because it removes a real shift of the bulk), and the per-well summary.
-  `RareParams` holds every choice and `as_log()` writes it out.
+* `rare_data_compute` — the per-nanowell table (`REQUIRED`: plate, well, condition, nanowell id; then a `value` — the
+  page's Metric at the Timepoint, `from_site_metrics(value_column=)` — or `n0` and `nt`, whose `FC = nt / n0` is
+  then the value; optional times, `qc_*` flag columns and `crop_path`; `from_site_metrics` builds it from
+  `series_compute.site_metrics`), `rate = log2(FC) / Δt` for counts (NaN, not zero, when undefined), exclusions with
+  their reasons (no value of the metric, or for counts `n0 = 0` and no final count; every QC flag), **no strata by
+  default** (`strata_edges=None`: one stratum `ALL`; a fold-change metric already measures each nanowell against its
+  own Baseline, and fixed starting-cell strata could be empty on a plate seeded outside them; explicit edges still
+  group a count table by `n0`), the **direction** (`direction="lower"` negates the analysed value, `Prepared.sign`,
+  so every one-sided test reads the bottom tail unchanged, and `Unit.sign` lets the figure and the sentences show the
+  values as measured), the optional per-well robust normalisation (off by default, because it removes a real shift
+  of the bulk), and the per-well summary. `RareParams` holds every choice and `as_log()` writes it out.
 * `rare_null_compute` — wells as units (`Well`: values by stratum), leave-one-well-out control pools, `empirical_p`
   (`(1 + #{null ≥ x}) / (n + 1)`), and `permutation_test`, which relabels whole wells, keeps each plate's treatment
   count, enumerates every labeling up to `max_permutations` and samples distinct ones above it with the fixed seed,
@@ -13927,8 +13932,10 @@ refuses, since it compares no samples). `controller._compose_statistics` hands t
 (`statistics_view.control_choices` lists groups for this test on either unit, and the unit combo is hidden, since
 it never applies — a greyed control reads as one to unlock),
 resolves the timepoint as the view's samples do (the latest the drawn wells have when none is named), builds the
-per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — the count fold
-change at that timepoint, whatever the Metric — and keys the result on a hash of that table and the parameters,
+per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — **the page's Metric**
+at that timepoint (`controller.metric_column`, labelled by `controller._label`), in the band's direction
+(`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*) — and keys the
+result on a hash of that table, the parameters and the Metric's label,
 so a key cannot return a result computed for other numbers. A key not in `NanowellState.rare_results` is computed
 by `analyse` on a worker through `controller._fetch` (kind `rare_results`; a failure is stored as its sentence),
 the figure saying what is tested against what meanwhile (`rc.computing_text`). The *vs* combo is captioned

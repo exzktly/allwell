@@ -17,6 +17,14 @@ from review.features.nanowell.distribution_style_compute import (AUTO, BINS_DEFA
 from review.domain.nanowell_rim_focus import RimFocusRule
 from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
+
+#: The Rare responders test's directions (``NanowellState.rare_direction``).
+RARE_DIRECTIONS = ("higher", "lower")
+
+
+def _one_of(value, allowed, default):
+    """*value* when it is one of *allowed*, else *default*: how a saved choice is read back."""
+    return value if value in allowed else default
 from review.features.nanowell.statistics_compute import UNITS as STATS_UNITS
 from review.features.nanowell.crop_cache_compute import CropCache, TimepointCropCache
 from review.features.nanowell.subset_compute import Subset
@@ -245,6 +253,11 @@ class NanowellState:
     stats_unit: str = "nanowells"
     #: The Statistics view's test (``statistics_compute.TEST_KEYS``).
     stats_test: str = "welch"
+    #: The Rare responders test's direction: "higher" looks for responders in the top tail of the Metric, "lower"
+    #: in the bottom tail (cell death, a loss of signal). Saved with the page.
+    rare_direction: str = "higher"
+    #: The value label of the Rare responders result drawn (the Metric it ran on), for the flagged-crops pop-out.
+    rare_value_label: str = ""
     #: The QC view's *Wells* (:data:`QC_WELLS`).
     qc_wells: str = "needing"
     # ── computed from the dataset (never persisted) ─────────────────────────
@@ -437,7 +450,8 @@ class NanowellState:
                 "layers": self.layers.to_config(),
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
-                "stats_unit": self.stats_unit, "stats_test": self.stats_test, "qc_wells": self.qc_wells,
+                "stats_unit": self.stats_unit, "stats_test": self.stats_test, "rare_direction": self.rare_direction,
+                "qc_wells": self.qc_wells,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -467,6 +481,7 @@ class NanowellState:
         unit, test = config.get("stats_unit"), config.get("stats_test")
         self.stats_unit = unit if unit in STATS_UNITS else fresh.stats_unit
         self.stats_test = test if test in STATS_TESTS else fresh.stats_test
+        self.rare_direction = _one_of(config.get("rare_direction"), RARE_DIRECTIONS, fresh.rare_direction)
         self.qc_wells = config.get("qc_wells") if config.get("qc_wells") in QC_WELLS else fresh.qc_wells
         self.subset = _subset_from(config)
         self.saved_subsets = saved_from_config(config.get("saved_subsets"))

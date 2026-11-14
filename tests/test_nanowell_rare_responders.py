@@ -58,7 +58,7 @@ def test_exclusions_are_logged_with_their_reasons_and_strata_follow_n0():
                       "n0": [0, 1, 2, 3, 7, 2], "nt": [5, 4, 8, 3, 14, np.nan], "t0_h": 0, "t_h": 48,
                       "qc_debris": [False, False, True, False, False, False],
                       "qc_focus": ["", "", "", "", "", "blurred"]})
-    p = prepare(t)
+    p = prepare(t, RareParams(strata_edges=(1, 2, 3, 4)))      # strata only when asked for
     reasons = dict(zip(p.exclusions["nanowell_id"], p.exclusions["reason"]))
     assert reasons == {"a": N0_ZERO, "c": "QC: debris", "f": "final count missing; QC: focus (blurred)"}
     assert list(p.kept["nanowell_id"]) == ["b", "d", "e"]
@@ -66,7 +66,7 @@ def test_exclusions_are_logged_with_their_reasons_and_strata_follow_n0():
     assert list(p.kept["fc"]) == [4.0, 1.0, 2.0]
     assert p.kept["rate"].tolist() == pytest.approx([2 / 48, 0.0, 1 / 48])
     row = p.wells.iloc[0]
-    assert (row["n_recorded"], row["n_kept"], row["n_excluded"], row["median_fc"]) == (6, 3, 3, 2.0)
+    assert (row["n_recorded"], row["n_kept"], row["n_excluded"], row["median_value"]) == (6, 3, 3, 2.0)
     assert (row["n0_1"], row["n0_2"], row["n0_3"], row["n0_≥4"]) == (1, 0, 1, 1)
 
 
@@ -466,7 +466,8 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
     from ui.theme import WELL_COLORS_TUPLE, Colors, CPub
     from widgets.plot_card import repaint_theme_pairs
 
-    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)))
+    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)),
+                     RareParams(strata_edges=(1, 2, 3, 4)))
     unit = res.units[0]
     strata = rd._strata(unit)
     assert len(strata) == 4                                    # n0 1…5: strata 1, 2, 3 and 4 and over
@@ -515,7 +516,8 @@ def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
 
     from review.features.nanowell import _rare_render as rd
 
-    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)))
+    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)),
+                     RareParams(strata_edges=(1, 2, 3, 4)))
     lines = ["drug: 2 vs 3 control wells — supports rare-responder enrichment", "A exceedance: p 0.001"]
     for size, stacked in (((4.06, 7.32), True), ((14.5, 7.0), False)):
         fig = Figure(figsize=size)
@@ -571,10 +573,10 @@ def test_a_plate_with_no_responders_flags_nothing_and_says_the_test_could_not_ru
     assert len(res.responders) == 0 and unit.interpretation == rr.NOT_DETECTED
     assert any(len(unit.hc[w.key].candidates) for w in unit.treated)      # the candidates exist; they are not flagged
     text = rx.unit_text(res, unit)
-    assert text["headline"] == ("drug: rare responders not detected. 0 of 120 drug nanowells (0.0%) grew past the "
-                                "control cutoff (its top 1%), against 0 of 180 control nanowells (0.0%) · 2 drug vs "
-                                "3 control wells.")
-    assert text["lines"][0] == "Deciding: exceedance test not tested — no nanowell in any well grew past the cutoff."
+    assert text["headline"] == ("drug: rare responders not detected. 0 of 120 drug nanowells (0.0%) rose above the "
+                                "control cutoff (its top 1%) on fold change (Nt / N0), against 0 of 180 control "
+                                "nanowells (0.0%) · 2 drug vs 3 control wells.")
+    assert text["lines"][0] == "Deciding: exceedance test not tested — no nanowell in any well was past the cutoff."
 
 
 def test_the_spiked_plate_leads_with_counts_and_names_every_limit_of_the_design():
@@ -584,18 +586,21 @@ def test_the_spiked_plate_leads_with_counts_and_names_every_limit_of_the_design(
     unit = res.units[0]
     assert sorted(res.responders["nanowell_id"].astype(int)) == sorted([5, 17, 33, 48] * 2)
     text = rx.unit_text(res, unit)
-    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past "
-                                       "the control cutoff (its top 1%), against 0 of 180 control nanowells (0.0%)")
+    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) rose above "
+                                       "the control cutoff (its top 1%) on fold change (Nt / N0), against 0 of 180 "
+                                       "control nanowells (0.0%)")
     assert text["lines"] == [
         "Deciding: exceedance test p = 0.00072.",
-        "Supporting, not deciding: Higher Criticism p = 0.1 (the lowest possible with these wells) · shape test "
+        # Unstratified, the control pool (180) is larger than a well (60), so every spiked nanowell falls at p ≤ 1/n,
+        # where HC+ does not look: its p is 0.9, and the third caveat says why.
+        "Supporting, not deciding: Higher Criticism p = 0.9 · shape test "
         "not computable (too few distinct fold changes above the control median)."]
     assert text["caveats"] == [
         "With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1, so they can "
         "neither confirm nor rule out anything here.",
-        "No control nanowell grew past the cutoff, so the spread between wells could not be estimated: the "
+        "No control nanowell was past the cutoff, so the spread between wells could not be estimated: the "
         "exceedance test's p treats nanowells as independent and overstates the evidence (on wells alone, p ≥ 0.1).",
-        "Higher Criticism cannot see the 2 most extreme drug nanowell(s) (it leaves out p ≤ 1/n), so it says nothing "
+        "Higher Criticism cannot see the 8 most extreme drug nanowell(s) (it leaves out p ≤ 1/n), so it says nothing "
         "about them."]
 
 
@@ -647,14 +652,14 @@ def test_the_figure_draws_counts_and_fold_changes_not_p_values_and_logarithms():
     rd.render_rare_page(fig, res)
     fig.canvas.draw()
     ecdf, exceed, hc_ax = [ax for ax in fig.axes if ax.axison][:3]
-    assert ecdf.get_title().startswith("How far nanowells grew, by starting cells")
+    assert ecdf.get_title() == "Fold change (Nt / N0)\nsolid: drug · dotted: control"      # no strata by default
     ticks = [t.get_text() for t in ecdf.get_xticklabels() if t.get_text()]
     assert {"2×", "4×", "8×"} <= set(ticks) and all(t.endswith("×") for t in ticks)      # fold changes, not log₂
     counts = sorted(t.get_text() for t in exceed.texts if t.get_gid() == "rare-exceed-count")
     assert counts == ["0/60", "0/60", "0/60", "4/60", "4/60"]
     assert not any(t.get_text().startswith("p=") for t in exceed.texts)
     assert exceed.get_ylim()[0] == 0
-    assert hc_ax.get_title().startswith("Higher Criticism: p = 0.1 (lowest possible)")
+    assert hc_ax.get_title().startswith("Higher Criticism: p = 0.9\n")
     heads = [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-rare-unit"]
     assert heads and heads[0].startswith("drug: rare responders detected. 8 of 120")
     lines = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
@@ -688,3 +693,45 @@ def test_a_short_figure_cuts_its_text_between_sentences_and_keeps_the_caveats_fi
             drawn = " ".join(line.strip() for line in lines[:-1])
         for sentence in drawn.split("⚠ ")[1:]:                      # every caveat drawn is drawn whole
             assert sentence.split("Supporting")[0].rstrip().endswith("."), (size, sentence)
+
+
+
+def test_the_value_is_the_page_s_metric_with_no_strata_and_direction_reads_either_tail():
+    """User decision: the page's Metric drives the test (a ``value`` column), nanowells are not stratified, and a
+    direction chooses the tail. A bottom-tail plate (four nanowells per drug well dropping to a tenth of anything in
+    control) is found looking lower and missed looking higher; the figure draws the values as measured."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+    from review.features.nanowell import rare_export_compute as rx
+    from review.features.nanowell.rare_data_compute import ALL
+
+    rng = np.random.default_rng(5)
+    rows = []
+    for well in ("A01", "A02", "A03", "B01", "B02"):
+        # Drug wells' ordinary nanowells sit inside the control's range (never below its bottom 1%), so exactly the
+        # four dropped ones are past the cutoff.
+        value = rng.uniform(100.0, 200.0, 60) if well < "B" else rng.uniform(150.0, 200.0, 60)
+        if well.startswith("B"):
+            value[[5, 17, 33, 48]] = 9.0
+        rows += [{"plate_id": "P", "well_id": well, "condition": "ctrl" if well < "B" else "drug",
+                  "nanowell_id": str(i), "value": float(value[i]), "crop_path": ""} for i in range(60)]
+    table = pd.DataFrame(rows)
+    lower = rr.analyse(table, rr.RareParams(control="ctrl", direction="lower"), value_label="GFP brightness")
+    higher = rr.analyse(table, rr.RareParams(control="ctrl"), value_label="GFP brightness")
+    assert lower.prepared.strata == [ALL] and lower.prepared.sign == -1
+    assert lower.units[0].interpretation == rr.DETECTED and higher.units[0].interpretation == rr.NOT_DETECTED
+    assert sorted(lower.responders["nanowell_id"].astype(int)) == sorted([5, 17, 33, 48] * 2)
+    assert (lower.responders["fc"] == 9.0).all()                         # flagged at the value as measured
+    text = rx.unit_text(lower, lower.units[0])
+    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) fell below "
+                                       "the control cutoff (its bottom 1%) on GFP brightness")
+    assert any(c.startswith("GFP brightness is a level, not a change from the Baseline: nanowells that started "
+                            "lower") for c in text["caveats"])
+    fig = Figure(figsize=(14.5, 7.0))
+    rd.render_rare_page(fig, lower)
+    ecdf = [ax for ax in fig.axes if ax.axison][0]
+    cut = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-threshold:{ALL}")
+    assert 2 ** cut.get_xdata()[0] > 90                               # the cutoff drawn at a measured brightness
+    drawn = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-ecdf-treatment:{ALL}")
+    assert 2 ** min(drawn.get_xdata()) == pytest.approx(9.0)          # the low responders, as measured

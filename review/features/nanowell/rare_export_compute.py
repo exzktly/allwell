@@ -48,7 +48,7 @@ def _or_text(r) -> str:
     if not math.isfinite(r["exceedance_or"]) and not math.isinf(r["exceedance_or"]):
         return "not estimable"
     if math.isinf(r["exceedance_or"]):
-        return (f"unbounded — no control nanowell grew past the cutoff (95% interval {_num(r['exceedance_or_ci_low'])} "
+        return (f"unbounded — no control nanowell was past the cutoff (95% interval {_num(r['exceedance_or_ci_low'])} "
                 "to ∞)")
     return (f"{_num(r['exceedance_or'])} (95% interval {_num(r['exceedance_or_ci_low'])} to "
             f"{_num(r['exceedance_or_ci_high'])})")
@@ -70,12 +70,12 @@ def _unit_lines(result, unit, r) -> list[str]:
     if not r["group_inference"]:
         lines.append(f"  not tested as a group: {r['refusal']}")
     if kt + kc == 0:
-        lines.append(f"  {NAME_A}: not tested — no nanowell in any well grew past the cutoff "
-                     f"(the control's {r['percentile']:g}th percentile per starting cell count).")
+        lines.append(f"  {NAME_A}: not tested — no nanowell in any well was past the cutoff "
+                     f"(the control's {r['percentile']:g}th percentile).")
     else:
         method = "beta-binomial regression" if r["exceedance_method"].startswith("beta-binomial") else r["exceedance_method"]
         lines.append(f"  {NAME_A} at the control's {r['percentile']:g}th percentile ({method}): {kt} of {nt} "
-                     f"{r['treatment']} vs {kc} of {nc} control nanowells past the cutoff; odds of growing past it "
+                     f"{r['treatment']} vs {kc} of {nc} control nanowells past the cutoff; odds of being past it "
                      f"{_or_text(r)}; spread between wells ρ {_num(r['rho'])}; p {_num(r['exceedance_p'])}, "
                      f"q {_num(r['exceedance_q'])}")
         lines.append(f"    for comparison, {FISHER_LABEL}: p {_num(r['fisher_p_anticonservative'])}")
@@ -174,19 +174,34 @@ def counts_of(unit) -> tuple[int, int, int, int]:
 
 
 def cutoff_name(params) -> str:
-    """How the cutoff is named: the control percentile it was set at, or the fixed value the user gave."""
+    """How the cutoff is named: the control percentile it was set at (its top or its bottom, by the direction), or
+    the fixed value the user gave."""
     if params.fixed_threshold is not None:
         return f"the fixed cutoff ({params.fixed_threshold:g})"
-    return f"the control cutoff (its top {100 - params.percentile:g}%)"
+    end = "bottom" if params.direction == "lower" else "top"
+    return f"the control cutoff (its {end} {100 - params.percentile:g}%)"
 
 
-def headline(unit, params) -> str:
-    """The answer for *unit*, first and in counts: the verdict, then how many nanowells of each condition grew past
-    the cutoff, and the wells behind them. Every number is a count a reader can check against the panels."""
+def past(params) -> str:
+    """How a nanowell beyond the cutoff is said to be, in the direction looked for."""
+    return "fell below" if params.direction == "lower" else "rose above"
+
+
+def _in_sentence(label: str) -> str:
+    """*label* as it reads mid-sentence: its first letter lowered, unless it starts an acronym (``GFP brightness``)."""
+    return label[:1].lower() + label[1:] if label[1:2].islower() else label
+
+
+def headline(unit, params, value_label: str = "") -> str:
+    """The answer for *unit*, first and in counts: the verdict, then how many nanowells of each condition were past
+    the cutoff on the value tested, and the wells behind them. Every number is a count a reader can check against the
+    panels."""
     kt, nt, kc, nc = counts_of(unit)
     wells = f"{len(unit.treated)} {unit.treatment} vs {len(unit.controls)} control wells"
-    return (f"{unit.label}: {unit.interpretation}. {kt} of {nt} {unit.treatment} nanowells ({_pct(kt, nt)}) grew past "
-            f"{cutoff_name(params)}, against {kc} of {nc} control nanowells ({_pct(kc, nc)}) · {wells}.")
+    on = f" on {_in_sentence(value_label)}" if value_label else ""
+    return (f"{unit.label}: {unit.interpretation}. {kt} of {nt} {unit.treatment} nanowells ({_pct(kt, nt)}) "
+            f"{past(params)} {cutoff_name(params)}{on}, against {kc} of {nc} control nanowells ({_pct(kc, nc)}) · "
+            f"{wells}.")
 
 
 def _floor_note(perm) -> str:
@@ -202,7 +217,7 @@ def deciding_line(unit, n_units: int, params) -> str:
     if not unit.group_allowed:
         return f"Deciding: {NAME_A.lower()} not run — {unit.refusal}."
     if kt + kc == 0:
-        return f"Deciding: {NAME_A.lower()} not tested — no nanowell in any well grew past the cutoff."
+        return f"Deciding: {NAME_A.lower()} not tested — no nanowell in any well was past the cutoff."
     if not math.isfinite(a.p):
         return f"Deciding: {NAME_A.lower()} has no group p — {'; '.join(a.notes) or 'too few wells for the regression'}."
     q = unit.q.get("exceedance", math.nan)
@@ -235,7 +250,7 @@ def supporting_line(unit, params) -> str:
     return line
 
 
-def caveats(unit, params) -> list[str]:
+def caveats(unit, params, value_label: str = "") -> list[str]:
     """What undermines the verdict, each in one sentence — said beside it, never left in Details: a permutation floor
     that keeps the supporting tests from ever reaching significance, an exceedance regression that could not estimate
     the spread between wells, and nanowells Higher Criticism cannot see."""
@@ -256,27 +271,37 @@ def caveats(unit, params) -> list[str]:
     if a.method == BB_LABEL and math.isfinite(a.p) and kc == 0 and kt > 0:
         exact = (f" (on wells alone, p ≥ {_num(perm.min_p)})" if perm is not None and perm.exhaustive
                  and math.isfinite(perm.min_p) else "")
-        out.append("No control nanowell grew past the cutoff, so the spread between wells could not be estimated: "
+        out.append("No control nanowell was past the cutoff, so the spread between wells could not be estimated: "
                    f"the {NAME_A.lower()}'s p treats nanowells as independent and overstates the evidence" + exact + ".")
     full = pool(unit.controls)
     unseen = 0
     for w in unit.treated:
         ps = hc.p_values(w, full)[0]
         unseen += int(np.sum(ps <= 1.0 / len(ps))) if len(ps) else 0
+    if _is_level(value_label) and not params.normalize:
+        out.append(f"{value_label[:1].upper() + value_label[1:]} is a level, not a change from the Baseline: nanowells "
+                   f"that started {'higher' if params.direction != 'lower' else 'lower'} can be past the cutoff "
+                   "without responding. The fold-change form of the metric compares each with its own Baseline.")
     if unseen:
         out.append(f"{NAME_B} cannot see the {unseen} most extreme {unit.treatment} nanowell(s) (it leaves out "
                    "p ≤ 1/n), so it says nothing about them.")
     return out
 
 
+def _is_level(value_label: str) -> bool:
+    """Whether *value_label* names a level (a count, a brightness, an area) rather than a change from the Baseline."""
+    text = value_label.lower()
+    return bool(text) and not any(word in text for word in ("fold change", "change", "robust z", "log₂", "log2"))
+
+
 def unit_text(result, unit) -> dict:
     """Everything the figure says about *unit*: ``headline``, ``lines`` (the deciding test, then the supporting
     ones) and ``caveats``."""
     params = result.prepared.params
-    return {"headline": headline(unit, params),
+    return {"headline": headline(unit, params, result.prepared.value_label),
             "lines": [line for line in (deciding_line(unit, len(result.units), params), supporting_line(unit, params))
                       if line],
-            "caveats": caveats(unit, params)}
+            "caveats": caveats(unit, params, result.prepared.value_label)}
 
 
 def verdict_lines(result, units=None) -> list[str]:

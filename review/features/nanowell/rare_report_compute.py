@@ -71,6 +71,9 @@ class Unit:
     q: dict = field(default_factory=dict)                # "exceedance" / "hc" / "ad" -> BH q
     interpretation: str = ""
     thresholds: dict = field(default_factory=dict)       # stratum -> primary threshold (from all control wells)
+    #: +1, or -1 when the analysed values are negated to read the bottom tail (``Prepared.sign``): a figure or sentence
+    #: shows ``sign * value`` and ``sign * threshold``.
+    sign: int = 1
 
     @property
     def label(self) -> str:
@@ -294,12 +297,15 @@ def parameter_log(prepared: Prepared, units: list[Unit]) -> dict:
             "notes": list(prepared.notes)}
 
 
-def analyse(data, params: RareParams | None = None, *, validate: bool = False) -> RareResult:
+def analyse(data, params: RareParams | None = None, *, validate: bool = False,
+            value_label: str = "") -> RareResult:
     """Run the rare-responder analysis on a per-nanowell table (or a ``Prepared`` one); see the module docstring."""
-    prepared = data if isinstance(data, Prepared) else prepare(data, params)
+    prepared = data if isinstance(data, Prepared) else prepare(data, params, value_label=value_label)
     params = prepared.params
     wells = wells_from(prepared.kept)
     units = [_run_unit(*spec, params) for spec in _units(wells, params)]
+    for u in units:
+        u.sign = prepared.sign
     _bh(units, "exceedance", [u.primary.p for u in units])
     _bh(units, "hc", [_p(u.hc_perm) for u in units])
     _bh(units, "ad", [_p(u.a2_perm) for u in units])

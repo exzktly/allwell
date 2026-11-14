@@ -57,9 +57,17 @@ def _on_screen(ctx, nucleus_id):
 
 
 def test_the_cell_fills_a_good_part_of_the_canvas_and_sits_in_its_middle(app, qtbot):
+    from review.features.image_browser.review_image.renderer import _MAX_PIXMAP_SIDE
+
     ctx = _show(app, qtbot, 1)
     extent, (cx, cy), (w, h) = _on_screen(ctx, 1)
-    assert extent == pytest.approx(0.4 * min(w, h), rel=0.05)      # 16 px drawn ~270 px across, not ~32
+    # The jump aims the cell at 40% of the canvas, but the renderer scales the whole field into one
+    # pixmap, so the zoom is capped where that pixmap's longest side reaches _MAX_PIXMAP_SIDE: on this
+    # 1024 px field that is 8 screen px per image px, and the 16 px nucleus is drawn 128 px across —
+    # zoomed in on (it was ~32 at the old fixed 3x), without the gigabyte pixmap 40% would need here.
+    aimed = 0.4 * min(w, h)
+    capped = 16 * _MAX_PIXMAP_SIDE / 1024
+    assert extent == pytest.approx(min(aimed, capped), rel=0.05)
     assert abs(cx - w / 2) < 0.05 * w and abs(cy - h / 2) < 0.05 * h
 
 

@@ -156,9 +156,12 @@ def occupied_nanowells_by_well(ctx, wells) -> dict[str, int]:
     return out
 
 
-def observation_groups(ctx) -> list[tuple[str, tuple[str, ...], str]]:
+def observation_groups(ctx, *, pool: bool = True) -> list[tuple[str, tuple[str, ...], str]]:
     """``(legend label, wells, colour)`` per plotted member: the replicate sets when any are active, else each
-    selected well — the members every plot draws, in their order (as ``scatter.collect.scatter_groups``)."""
+    selected well — the members every plot draws, in their order (as ``scatter.collect.scatter_groups``).
+
+    ``pool=False`` splits the active replicate sets into their loaded wells, one member each, in set order and
+    each well once — the same wells, drawn one per well (the Distribution tab's *Pool replicates* off)."""
     from review.domain.plot_members import plot_replicate_sets
     from review.domain.plot_order import apply_order
     from review.domain.selections_model import (
@@ -170,6 +173,9 @@ def observation_groups(ctx) -> list[tuple[str, tuple[str, ...], str]]:
     rsets = plot_replicate_sets(ctx)
     if rsets:
         rsets = apply_order(rsets, list(ctx.state.plot.line_order_rsets or []), key=lambda r: getattr(r, "name", ""))
+        if not pool:
+            wells = list(dict.fromkeys(w for r in rsets for w in r.wells if w in paths))
+            return [(well_display_label(ctx, w), (w,), color_for_well(w)) for w in wells]
         return [(replicate_display_label(ctx, r), tuple(w for w in r.wells if w in paths),
                  color_for_replicate_set(r, ctx.state.selection.selections)) for r in rsets]
     selected = sorted((w for w in ctx.state.selection.selected_wells if w in paths), key=parse_rc)

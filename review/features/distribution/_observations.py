@@ -25,7 +25,9 @@ def nanowell_groups(ctx, tp_filter) -> tuple[list, str, str] | None:
 
     if effective_observations(ctx, LEAF) != NANOWELLS:
         return None
-    members = observation_groups(ctx)
+    from review.features.distribution._pooled import pool_replicates
+
+    members = observation_groups(ctx, pool=pool_replicates(ctx))
     wells = [w for _l, ws, _c in members for w in ws]
     table = nanowell_table_for(ctx, wells)
     if table is None:

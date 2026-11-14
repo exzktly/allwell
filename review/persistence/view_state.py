@@ -431,6 +431,7 @@ def _snapshot_distribution(ctx) -> dict:
         out["bins"] = int(_dist.bins)
         out["log_x"] = bool(_dist.log_x)
         out["log_y"] = bool(_dist.log_y)
+        out["pool_replicates"] = bool(getattr(_dist, "pool_replicates", True))
     return out
 
 
@@ -1168,6 +1169,15 @@ def _apply_distribution(ctx, state: dict) -> None:
     if "layout" in state:
         _set_combo_if_valid(ctx, "_distribution_layout_cb", str(state["layout"]))
     _dist = ctx.state.feature_slice("distribution")
+    if "pool_replicates" in state:
+        if _dist is not None:
+            _dist.pool_replicates = bool(state["pool_replicates"])
+        cb = ctx.widgets.get_or_none("_distribution_pool_cb")
+        if cb is not None:
+            try:
+                cb.setChecked(bool(state["pool_replicates"]))
+            except Exception:
+                swallowed()  # was: pass (silent except)
     if "bins" in state:
         try:
             bins = int(state["bins"])
@@ -1493,6 +1503,13 @@ def _reset_distribution(app) -> None:
         _dist.bins = 40
         _dist.log_x = False
         _dist.log_y = False
+        _dist.pool_replicates = True
+    cb = getattr(app, "_distribution_pool_cb", None)
+    if cb is not None:
+        try:
+            cb.setChecked(True)
+        except Exception:
+            swallowed()  # was: pass (silent except)
     cb = getattr(app, "_distribution_log_x_cb", None)
     if cb is not None:
         try:

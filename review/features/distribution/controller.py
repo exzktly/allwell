@@ -15,8 +15,8 @@ from collections.abc import Iterable, Sequence
 import numpy as np
 
 from review.data.data_loading import _all_fluor_values_filtered, iter_plot_groups
-from review.features.distribution._pooled import collect_distribution, exact_range, sampled_note
-from core.safe import swallowed
+from review.features.distribution._pooled import collect_distribution, exact_range, pool_replicates, sampled_note
+from core.safe import swallow, swallowed
 from review.core.plot_style import (
     apply_export_style_to_current, figure_prefs, relayout, style_legend,
 )
@@ -331,6 +331,29 @@ def _sync_distribution_tp_to_focus(ctx) -> None:
             cb.blockSignals(blocked)
 
 
+def sync_pool_checkbox(ctx) -> None:
+    """Reflect *Pool replicates* onto its checkbox, enabled only while a replicate set is active.
+
+    Without a set every member is already one well, so the toggle has nothing to split; a solo well (a set of one
+    standing for itself) does not count.
+    """
+    cb = ctx.widgets.get_or_none("_distribution_pool_cb")
+    if cb is None:
+        return
+    from review.domain.plot_members import plot_replicate_sets
+
+    with swallow():
+        has_sets = any(not getattr(r, "solo", False) for r in plot_replicate_sets(ctx))
+        on = pool_replicates(ctx)
+        if cb.isChecked() != on:
+            blocked = cb.blockSignals(True)
+            try:
+                cb.setChecked(on)
+            finally:
+                cb.blockSignals(blocked)
+        cb.setEnabled(has_sets)
+
+
 def redraw_distribution(ctx) -> None:
     """Redraw the Distribution tab. A8 teardown: takes ``ctx`` — widgets via
     ``ctx.widgets``, state via ``ctx.state``, and every shared render leaf
@@ -374,6 +397,7 @@ def redraw_distribution(ctx) -> None:
     set_distribution_axis_log(ctx, "y", log_y)
     _sync_log_checkbox(ctx, "_distribution_log_x_cb", log_x)
     _sync_log_checkbox(ctx, "_distribution_log_y_cb", log_y)
+    sync_pool_checkbox(ctx)
     layout_cb = ctx.widgets.get_or_none("_distribution_layout_var")
     layout_choice = layout_cb.currentText() if layout_cb is not None else "Overlay"
 
@@ -429,7 +453,7 @@ def _member_wells(ctx) -> list[str]:
     """Every well the cells figure draws from: each plotted member's wells."""
     from review.data.data_loading import plot_group_well_lists
 
-    return [w for _name, wells, _rset in plot_group_well_lists(ctx, False) for w in wells]
+    return [w for _name, wells, _rset in plot_group_well_lists(ctx, False, pool=pool_replicates(ctx)) for w in wells]
 
 
 def _collect_cells(ctx, val_col, fluor_gates, ratios, tp_filter) -> tuple:
@@ -444,7 +468,7 @@ def _collect_cells(ctx, val_col, fluor_gates, ratios, tp_filter) -> tuple:
     if pooled is not None:
         return pooled
     groups: list[tuple[str, str, np.ndarray]] = []
-    for name, color, df in iter_plot_groups(ctx, fallback_to_all=False):
+    for name, color, df in iter_plot_groups(ctx, fallback_to_all=False, pool=pool_replicates(ctx)):
         vals = _all_fluor_values_filtered(
             df, val_col=val_col,
             fluor_gates=fluor_gates,

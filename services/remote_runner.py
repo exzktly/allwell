@@ -54,6 +54,7 @@ from services.remote_config import (
 from services.remote_conda import _conda_env_selector, _conda_run_prefix_for, cellpose_env_selector, describe_env
 from services import run_journal
 from util.aw_safe import swallow, swallowed
+from util.settings_digest import registration_identity
 # The run record and the line vocabulary every stage of a remote run shares.
 from services.remote_run_state import (
     LocalInputMode,
@@ -1042,7 +1043,7 @@ class RemoteRunner:
         remote_script = f"{getattr(self, '_code_dir', '') or self.host.remote_project_dir}/process_microscopy.py"
         out = [*_conda_run_prefix_for(self.env_selector), "python", remote_script]
         i = 2  # skip the interpreter + script slots
-        named_registration = False   # whether a person named a folder to take the located timepoints from
+        named_registration = ""   # the folder a person named to take the located timepoints from, if any
         # Suppress the remote completeness check unconditionally; the client
         # runs it after the fetch instead (see verify_and_cleanup). A record
         # written remotely would describe the wrong tree — an incremental run's
@@ -1081,7 +1082,8 @@ class RemoteRunner:
                 # registration from (`services.remote_registration` sends its records and names them below).
                 i += 1
             elif arg in ("--incremental_prior_dir", "--nanowell_registration_from"):
-                named_registration = named_registration or arg == "--nanowell_registration_from"
+                if arg == "--nanowell_registration_from" and i + 1 < len(local_argv):
+                    named_registration = local_argv[i + 1]
                 i += 2
             else:
                 out.append(arg)
@@ -1094,6 +1096,8 @@ class RemoteRunner:
             out += ["--nanowell_registration_from", registration]
             if not named_registration:      # this computer's output folder, carried: reused where it fits only
                 out.append("--nanowell_registration_carried")
+            else:                           # keyed by the named folder, as here, not by the host's copy of it
+                out += ["--nanowell_registration_identity", registration_identity(named_registration)]
         # Batched mode stages one batch at a time, so the empty-well blank is
         # not in most batches' input. It is uploaded once to its own directory
         # and named here, which is what lets every batch build the same

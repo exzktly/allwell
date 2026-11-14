@@ -180,6 +180,40 @@ def test_one_treatment_well_refuses_group_inference():
     assert any("group-level inference needs at least 2" in w for w in res.warnings)
 
 
+def test_a_plate_covariate_at_its_bound_does_not_make_the_treatment_odds_ratio_unbounded():
+    """A plate on which no well exceeds the threshold drives its own plate coefficient to the bound; the treatment
+    coefficient is finite and estimable from the other plate. The fit reported "an estimate reached its bound" for
+    any coefficient, so the odds ratio was printed as ∞ beside a finite interval. Only the treatment coefficient
+    reaching its bound makes the odds ratio unbounded."""
+    rows = [ex.WellCount(f"A:c{i}", "A", "control", False, k, 20_000, {}, {}) for i, k in enumerate([3, 2, 4])]
+    rows += [ex.WellCount(f"A:t{i}", "A", "drug", True, k, 20_000, {}, {}) for i, k in enumerate([6, 5])]
+    rows += [ex.WellCount(f"B:c{i}", "B", "control", False, 0, 20_000, {}, {}) for i in range(3)]
+    rows += [ex.WellCount(f"B:t{i}", "B", "drug", True, 0, 20_000, {}, {}) for i in range(2)]
+    r = ex.beta_binomial_test(rows, 99.0)
+    assert math.isfinite(r.odds_ratio)
+    assert r.odds_ratio == pytest.approx(math.exp(r.beta1))
+    assert 1.0 < r.odds_ratio < 4.0 and r.ci[0] < r.odds_ratio < r.ci[1]
+    assert not any("complete separation" in note for note in r.notes)
+
+
+def test_one_control_well_gives_no_calibrated_result_and_does_not_promise_one():
+    """With one control well its leave-one-out pool is empty, so the control null is empty and every treatment
+    well's empirical p is undefined. The verdict said "per-well empirical results only" over a table of NaN — a
+    result promised and not computed (CLAUDE.md §7 #3). It now says there is no calibrated result and why; with no
+    control well at all, the resolution warning no longer calls it "a single control well (0 nanowells)"."""
+    res = rr.analyse(_null_plate(1, 3))
+    unit = res.units[0]
+    treated = res.per_well[res.per_well["role"] == "treatment"]
+    for column in ("exceed_empirical_p", "hc_empirical_p", "a2r_empirical_p"):
+        assert treated[column].isna().all(), column       # nothing per-well was computed
+    assert "per-well empirical results" not in unit.interpretation
+    assert "at least 2 control wells" in unit.interpretation
+    assert unit.interpretation == rr.NO_CONTROL_NULL
+    from review.features.nanowell import rare_hc_compute as hcc
+    assert "single control well" not in hcc.resolution_warning(0, {}, 300)
+    assert "no control well" in hcc.resolution_warning(0, {}, 300)
+
+
 def test_every_sensitivity_percentile_is_reported():
     res = rr.analyse(plate(responders=10), RareParams(percentile=99.0))
     assert sorted(res.sensitivity["percentile"]) == [95.0, 99.0, 99.9]
@@ -527,3 +561,34 @@ def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
         labels = [t for t in exceed.texts if t.get_text().startswith("p=")]
         assert labels, size
         assert all(t.get_window_extent(renderer).y1 <= box.y1 for t in labels), size   # inside, under the title
+
+
+def _null_plate(n_ctrl, n_treat, n=300, seed=11):
+    """Control and treatment wells drawn from one distribution: nothing in it is a rare responder."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_ctrl + n_treat):
+        n0 = rng.integers(1, 6, n)
+        nt = rng.poisson(n0 * np.exp(rng.normal(1.5, 0.5, n)))
+        rows += [("p", f"W{i}", "control" if i < n_ctrl else "drug", f"{j},0", n0[j], nt[j]) for j in range(n)]
+    return pd.DataFrame(rows, columns=["plate_id", "well_id", "condition", "nanowell_id", "n0", "nt"])
+
+
+def test_hc_candidates_are_flagged_only_in_a_well_whose_hc_result_is_significant():
+    """HC+ always finds an i* <= alpha0 * n, so every well has candidates, under the null too (about 5 % of a well).
+    Listing them as "flagged by the rare-responder tests" under a treatment whose HC is not significant put some
+    sixty null nanowells in front of the reviewer. HC candidates are flagged only under a treatment whose HC q is
+    below the analysis's level; above-threshold nanowells stay flagged, being a plain description. The gate is the
+    group's q: a per-well empirical p cannot go below 1/(controls + 1), so a per-well gate would flag nothing on the
+    second plate here, whose HC is significant."""
+    res = rr.analyse(_null_plate(4, 4), RareParams())
+    assert all(v.startswith(rr.NO_EVIDENCE) for v in res.table["interpretation"])
+    treated = res.per_well[res.per_well["role"] == "treatment"]
+    assert (treated["hc_candidates"] > 0).all()              # every null well has HC candidates to flag
+    flagged = res.responders
+    assert int(flagged["hc_candidate"].sum()) == 0           # none is flagged as one
+    assert flagged["above_threshold"].all()                  # what is left is above the threshold, and says so
+    spiked = rr.analyse(plate(n_ctrl=8, n_treat=4, n=300, responders=12, seed=3))
+    assert spiked.table["hc_q"].iloc[0] < 0.05                # HC significant: its candidates are flagged
+    only_hc = spiked.responders["hc_candidate"] & ~spiked.responders["above_threshold"]
+    assert only_hc.any()

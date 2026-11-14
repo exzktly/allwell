@@ -872,10 +872,7 @@ class GrantedNode:
                     self._log(f"[remote] granted node: WARN {exc} — job {self.job_id} is still waiting in the queue "
                               f"as far as this app knows; looking again every {HOLD_POLL_S} s.\n")
                 if queue_wait and self._clock() - began > queue_wait:
-                    self.release("it waited out this host's Max queue wait")
-                    raise HoldQueueWaitSpent(
-                        f"no node was granted within {queue_wait // 60} min, this host's Max queue wait — "
-                        f"cancelled job {self.job_id}.") from None
+                    raise self._queue_wait_spent(queue_wait, self.job_id) from None
                 self._nap(HOLD_POLL_S)
                 continue
             if unanswered:
@@ -892,10 +889,7 @@ class GrantedNode:
             if state.phase == "ended":
                 raise HoldError(f"the node was not granted: {state.ended_reason}.")
             if queue_wait and self._clock() - began > queue_wait:
-                self.release("it waited out this host's Max queue wait")
-                raise HoldQueueWaitSpent(
-                    f"no node was granted within {queue_wait // 60} min, this host's Max queue wait — "
-                    f"cancelled job {state.job_id}.")
+                raise self._queue_wait_spent(queue_wait, state.job_id)
             self._nap(HOLD_POLL_S)
 
     # ── release ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -911,9 +905,21 @@ class GrantedNode:
         if heartbeat is not None:
             heartbeat.stop()
 
-    def release(self, reason: str) -> None:
+    def _queue_wait_spent(self, queue_wait: int, job: str) -> HoldQueueWaitSpent:
+        """Release the request that waited out the Max queue wait, and the error saying so — "cancelled" only when the
+        host confirmed the cancel. ``job`` is read before :meth:`release` clears ``job_id``; when the cancel did not
+        reach the host the job may still be queued, and this app no longer holds it, so the message names it."""
+        cancelled = self.release("it waited out this host's Max queue wait")
+        spent = f"no node was granted within {queue_wait // 60} min, this host's Max queue wait — "
+        if cancelled:
+            return HoldQueueWaitSpent(f"{spent}cancelled job {job}.")
+        return HoldQueueWaitSpent(
+            f"{spent}could not cancel job {job} (the host did not answer); it may still be queued — cancel it with "
+            f"`scancel {job}` on the host.")
+
+    def release(self, reason: str) -> bool:
         """Give the node back: stop beating, ask the script to end, cancel the job. Idempotent. A request being
-        waited on in another thread is told to stop."""
+        waited on in another thread is told to stop. True only when the host said it cancelled the job."""
         self._cancelled.set()
         self.stop_beating()
         try:
@@ -921,7 +927,7 @@ class GrantedNode:
         except Exception as exc:
             self._log(f"[remote] granted node: WARN could not reach the host to release it ({exc}); it releases "
                       "itself within two minutes of the app's last heartbeat.\n")
-            return
+            return False
         out = result.stdout or ""
         if "AW_MOVED" in out:
             self._log("[remote] granted node: the node on this host is no longer the one this window asked for — "
@@ -934,6 +940,7 @@ class GrantedNode:
             self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
                       "releases itself within two minutes of the app's last heartbeat.\n")
         self.owned, self.job_id = False, ""
+        return "AW_SCANCELLED" in out
 
 
 # ── running on the granted node ──────────────────────────────────────────────────────────────────────────────────

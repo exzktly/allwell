@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
 from util.dir_scan import files_in
+from util.image_exts import is_run_input_member
 from util.well_token import canonical_well_label, is_well_archive
 from pipeline.input_layout import PLANNER_MAX_FOLDERS, NonZipInput, ZIP_LOOSE_FOLDER_REMEDY, non_zip_input
 
@@ -279,19 +280,23 @@ def plan_input_layout(raw: Path) -> InputPlan:
     in_sub = raw / "in"
     try:
         has_in = in_sub.is_dir()
-        # Well folders at the selected root count only when there is no
-        # ``in/``: beside one, the pipeline never looked at the root's folders.
-        found = non_zip_input(raw, [], max_folders=PLANNER_MAX_FOLDERS)
+        if has_in:
+            # Beside ``in/`` the pipeline reads ``in/`` only, so the root's other folders (``out/``, the original
+            # export kept beside ``in/``) decide nothing and are not walked: their size must not refuse a plate
+            # whose ``in/`` is fine. Images loose at the root itself are still refused, as a run would skip them.
+            loose = sorted(p.name for p in files_in(raw) if is_run_input_member(p.name))
+        else:
+            found = non_zip_input(raw, [], max_folders=PLANNER_MAX_FOLDERS)
     except OSError as exc:
         return _unreadable_plan(raw, exc)
+    if has_in:
+        if loose:
+            return _needs_zipping_plan(NonZipInput(loose, [], []), f"{raw.name}/")
+        return _plan_grouped_root(in_sub, raw / "out", named_in=False)
     if found.too_large:
         return _too_large_plan(f"{raw.name}/" if raw.name else str(raw))
-    # Likewise any other folder of images at the root: beside ``in/`` the root also holds ``out/``.
-    if found.loose or ((found.stranded or found.nested) and not has_in):
-        return _needs_zipping_plan(found if not has_in else found._replace(stranded=[], nested=[]),
-                                   f"{raw.name}/")
-    if has_in:
-        return _plan_grouped_root(in_sub, raw / "out", named_in=False)
+    if found.refused:
+        return _needs_zipping_plan(found, f"{raw.name}/")
     return InputPlan(
         NO_INPUT, None, None, 0,
         "No in/ folder of per-well zips found in the selected directory.",

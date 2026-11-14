@@ -55,6 +55,7 @@ from review.domain.selections_model import (
     replicate_display_label as _replicate_display_label,
 )
 from review.domain.bar_colors import mono_bar_color as _mono_bar_color
+from review.domain.fold_change import parse_fc_op_ctrl as _parse_fc_op_ctrl
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -717,6 +718,8 @@ class BarBatchExportPanel(BatchExportPanel):
             # reason: ctx=None here, and a batch figure laid out differently
             # from the tab it mirrors is a different figure of the same data.
             bar_geometry=bar_geometry_settings(self._ctx),
+            # The fold change's operator, for the ``÷`` / ``−`` under each bar, for the same reason.
+            fc_op=_parse_fc_op_ctrl(self._ctx),
         )
         # Room for the cluster header rows. ``apply_ax_style`` above set the
         # standard 6 pt title pad, which the on-tab renderer raises past its

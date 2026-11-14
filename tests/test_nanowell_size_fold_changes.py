@@ -107,7 +107,7 @@ def test_the_page_offers_them_by_the_user_s_labels_and_greys_nothing_it_needs():
 
     for column in scc.FC_COLUMNS:
         assert column in METRIC_KEYS and column in BASELINE_METRICS
-        assert well_statistic(column) == "mean"
+        assert well_statistic(column) == "median"            # a fold change, like count_fc (review Nov 14, S2)
     assert metric_label("size_1_fc", sizes=RULE) == "T cells count fold change"
     assert metric_label("size_ratio_fc", sizes=RULE) == "T cells : DCs ratio fold change"
 
@@ -184,3 +184,19 @@ def test_the_export_names_each_size_fold_change_s_own_baseline_timepoint(tmp_pat
     assert site["baseline_timepoint"] == "0h"                       # the count exists at 0h
     assert site["size_ratio_fc_baseline_timepoint"] == "24h"        # the ratio first exists at 24h (no DC at 0h)
     assert site["size_1_fc_baseline_timepoint"] == "0h"
+
+
+def test_a_fold_change_is_summarised_per_well_as_count_fc_is_by_the_median():
+    """A well's value of a size-class fold change is the median of its nanowells' ratios, as for ``count_fc``. A mean
+    of ratios is asymmetric (0.5x and 2x average 1.25x) and is carried by the nanowells that started from one cell;
+    and a class holding every cell has, per nanowell, exactly ``count_fc``'s value, so the two must give the well the
+    same number. The values are chosen so the mean (3.125) and the median (1.0) differ."""
+    from review.features.nanowell.summary_compute import well_statistic, well_value
+
+    ratios = [0.5, 1.0, 1.0, 10.0]
+    assert well_value(ratios, "count_fc") == 1.0
+    for column in scc.FC_COLUMNS:
+        assert well_value(ratios, column) == well_value(ratios, "count_fc") == 1.0
+    for column in scc.COLUMNS:                               # the counts, ratio and share stay the mean
+        assert well_statistic(column) == "mean"
+        assert well_value(ratios, column) == 3.125

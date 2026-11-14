@@ -113,7 +113,9 @@ def resolution_warning(n_control_wells: int, pooled: dict, n: int) -> str:
     if n_control_wells == 2:
         return ("with two control wells, each control well's leave-one-out pool is the single other control well: "
                 "the control null of HC cannot resolve p-values at the 1/n scale")
-    if n_control_wells <= 1:
+    if n_control_wells == 0:
+        return "there is no control well: HC has no control null to compare against"
+    if n_control_wells == 1:
         return (f"the control pool is a single control well ({size} nanowells): its p-values cannot resolve the 1/n "
                 f"scale of a {n}-nanowell well, so HC is poorly calibrated")
     if size + 1 < RESOLUTION_FACTOR * n:

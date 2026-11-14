@@ -438,3 +438,40 @@ def test_the_page_opens_from_the_rail_and_its_buttons_reach_the_real_pages(viewe
     QApplication.processEvents()
     from review.features.home.controller import _subtabs
     assert nb.currentName() == "Home" and _subtabs(ctx).tabText(_subtabs(ctx).currentIndex()) == "Cell Gating"
+
+
+def test_a_set_gone_since_the_page_refreshed_is_named_not_the_build(ctx, monkeypatch):
+    """``browse`` answers ``False`` for a population that is no longer there; the
+    page must not say the build has no Cell Browser, and must refresh its list."""
+    from review.core.cell_sets import add_set
+    from review.features.saved_cells import controller
+
+    said, refreshed = [], []
+    monkeypatch.setattr(ctx.features, "query", lambda key, *a, default=None, **k: False)
+    monkeypatch.setattr(ctx.notify, "set_status", said.append)
+    add_set(ctx, _CELLS, source="lasso", name="Rounded")
+    page = _page(ctx)
+    monkeypatch.setattr(controller, "refresh", lambda c: refreshed.append(c))
+    page.view_set.click()
+    assert said == ["“Rounded” no longer exists — the list has been refreshed."]
+    assert refreshed == [ctx]
+
+
+def test_the_browse_service_tells_no_page_from_no_source(monkeypatch):
+    """The service's own answers, which the page's message rests on: ``None`` for
+    no Cell Browser page, ``False`` for a source its Source menu does not hold."""
+    from types import SimpleNamespace
+
+    from review.features.image_browser.cell_browser import _browse
+
+    class _Combo:
+        def findData(self, data):
+            return -1
+
+    ctx = SimpleNamespace(runtime=SimpleNamespace(cell_browser=SimpleNamespace(source_cb=_Combo())))
+    monkeypatch.setattr(_browse, "show_image_browser_subtab", lambda c, name: False)
+    assert _browse.browse(ctx, "set:Gone") is None
+    monkeypatch.setattr(_browse, "show_image_browser_subtab", lambda c, name: True)
+    assert _browse.browse(ctx, "set:Gone") is False
+    ctx.runtime.cell_browser.source_cb = None
+    assert _browse.browse(ctx, "set:Gone") is None

@@ -871,6 +871,12 @@ def render_review_image_display(ctx, *, pan_only: bool = False) -> None:
     cw = max(1, vp.width())
     ch = max(1, vp.height())
     fit = min(cw / max(iw, 1), ch / max(ih, 1))
+    # The whole field is scaled into one pixmap, so the zoom is held to what a
+    # pixmap can hold here -- every route to a zoom (a jump to a cell, the
+    # buttons, a restored view) passes through this one place.
+    ceiling = zoom_ceiling(iw, ih, fit)
+    if float(ri.zoom) > ceiling:
+        ri.zoom = ceiling
     scale = max(0.05, fit * max(0.1, float(ri.zoom)))
     nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
 
@@ -1500,6 +1506,22 @@ _CELL_VIEW_SHARE = 0.4
 #: The furthest a jump zooms in, as a multiple of the fit-to-window view: a
 #: cell a few pixels across is not blown up to fill the screen.
 _MAX_CELL_ZOOM = 40.0
+#: The longest side, in pixels, the scaled field may reach. The renderer scales
+#: the whole field into one pixmap rather than only the part in view, so the
+#: pixmap's size is the zoom's real cost: at 40x a 2048 px field in a 1000 px
+#: canvas is a 32,000 px square, 4 GB built on the GUI thread. 8192 px a side is
+#: 256 MB at most and still several screen pixels to an image pixel.
+_MAX_PIXMAP_SIDE = 8192
+
+
+def zoom_ceiling(iw: int, ih: int, fit: float) -> float:
+    """The largest zoom (a multiple of *fit*) the renderer will draw an *iw* x *ih* field at.
+
+    :data:`_MAX_CELL_ZOOM`, lowered so the scaled field's longest side stays
+    within :data:`_MAX_PIXMAP_SIDE`; never below 1, the fit view itself.
+    """
+    side = max(1, int(iw), int(ih)) * max(float(fit), 1e-9)
+    return float(max(1.0, min(_MAX_CELL_ZOOM, _MAX_PIXMAP_SIDE / side)))
 
 
 def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float | None = None) -> bool:
@@ -1557,7 +1579,7 @@ def zoom_review_image_to_selected_nucleus(ctx, zoom: float | None = None) -> boo
     if zoom is None:
         extent = max(int(xs.max() - xs.min()) + 1, int(ys.max() - ys.min()) + 1)
         zoom = cell_zoom(extent, fit, min(cw, ch))
-    ri.zoom = float(max(1.0, zoom))
+    ri.zoom = float(min(zoom_ceiling(iw, ih, fit), max(1.0, zoom)))
     scale = max(0.05, fit * max(0.1, float(ri.zoom)))
     nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
     # The renderer derives the scrollbar value as
@@ -1589,7 +1611,8 @@ def next_zoom_step(cur: float, direction: int) -> float:
     A jump to a cell zooms past the last stop (:func:`cell_zoom`), so a press
     from there goes to the next stop the right way — snapping to the nearest
     stop first made "zoom in" from 12x land on 4x — and zooming further in
-    past the stops goes up by half again, to :data:`_MAX_CELL_ZOOM`.
+    past the stops goes up by half again, to :data:`_MAX_CELL_ZOOM` -- which the
+    renderer lowers to :func:`zoom_ceiling` for a field too large to scale that far.
     """
     if direction > 0:
         above = [z for z in _ZOOM_STEPS if z > cur + 1e-9]

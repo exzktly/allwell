@@ -82,6 +82,7 @@ def render_bar_items(
     bar_color: str | None = None,
     value_labels: tuple[bool, str] | None = None,
     bar_geometry=None,
+    fc_op: str | None = None,
     ctx=None,
 ) -> None:
     """Draw mean / fraction / events-above-threshold bar panels.
@@ -112,7 +113,12 @@ def render_bar_items(
     # otherwise a redundant bold label renders atop the Mean panel, overlapping
     # the figure title.
     drop_redundant_cluster_keys(items)
-    xlabels = _tick_labels(items)
+    # The denominators' sign (``÷`` / ``−``): the fold change's own operator, read off
+    # *ctx* unless the caller (Batch Export passes ``ctx=None``) hands it over.
+    if fc_op is None:
+        from review.domain.fold_change import parse_fc_op_ctrl
+        fc_op = parse_fc_op_ctrl(ctx) if ctx is not None else "ratio"
+    xlabels = _tick_labels(items, op=fc_op)
     keys = [item.key for item in items]
     _bar_debug(
         f"render_bar_items use_groups={use_groups} n={n} keys={keys!r} xlabels={xlabels!r}"

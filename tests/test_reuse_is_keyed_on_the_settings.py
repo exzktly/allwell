@@ -120,6 +120,7 @@ OTHER = {
     "nanowell_scan": "bottom-right-column-serpentine",
     "nanowell_overlap_percent": 25.0,
     "nanowell_pixel_size_um": 1.3,
+    "nanowell_registration_from": "/data/an_earlier_run",
 }
 
 

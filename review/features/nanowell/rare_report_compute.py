@@ -44,6 +44,10 @@ SUPPORTS = "supports rare-responder enrichment"
 SHAPE_ONLY = "general upper-tail shape difference only (AD) — not evidence of rare responders"
 NO_EVIDENCE = "no evidence of rare-responder enrichment"
 INSUFFICIENT = "replication insufficient — per-well empirical results only"
+#: The verdict with fewer than two control wells: a control well's leave-one-out pool is then empty, so there is no
+#: control null and no per-well empirical p either — promising "per-well empirical results" over a table of NaN would
+#: present a result that was never computed.
+NO_CONTROL_NULL = "replication insufficient — no calibrated result: a control null needs at least 2 control wells"
 
 
 @dataclass
@@ -178,7 +182,7 @@ def _bh(units: list[Unit], key: str, ps: list[float]) -> None:
 
 def interpret(unit: Unit, fdr: float) -> str:
     if not unit.group_allowed:
-        return INSUFFICIENT
+        return NO_CONTROL_NULL if len(unit.controls) < 2 else INSUFFICIENT
     sig = {k: np.isfinite(v) and v < fdr for k, v in unit.q.items()}
     if sig.get("exceedance") or sig.get("hc"):
         which = [name for name, k in (("exceedance", "exceedance"), ("HC", "hc")) if sig.get(k)]
@@ -250,13 +254,24 @@ def _per_well(units: list[Unit]) -> pd.DataFrame:
 
 
 def responders(units: list[Unit], prepared: Prepared) -> pd.DataFrame:
-    """Every treatment-well nanowell above the primary threshold or at or below its well's HC p-value threshold."""
+    """Every treatment-well nanowell above the primary threshold, and — for a treatment whose HC test is significant
+    (its BH-adjusted q below ``params.fdr``, as :func:`interpret` reads it) — every nanowell at or below its well's
+    HC p-value threshold.
+
+    HC+ always finds an i* <= alpha0 * n, so every well has candidates, null wells included (about 5 % of a well).
+    Under a treatment whose HC is not significant those candidates are noise, and listing them as flagged would put
+    them in front of the reviewer as findings. The gate is the group's q, not the well's empirical p: with k control
+    wells the leave-one-out p cannot go below 1/(k + 1), so a per-well gate at 0.05 would flag no HC candidate on
+    any plate with fewer than 19 control wells."""
     kept = prepared.kept.set_index(["well_key", "nanowell_id"])
+    alpha = prepared.params.fdr
     rows = []
     for unit in units:
         thr = unit.thresholds
+        hc_q = unit.q.get("hc", math.nan)
+        significant = bool(np.isfinite(hc_q) and hc_q < alpha)
         for w in unit.treated:
-            hc_ids = {nid: p for nid, _s, p in unit.hc[w.key].candidates}
+            hc_ids = {nid: p for nid, _s, p in unit.hc[w.key].candidates} if significant else {}
             for s, values in w.values.items():
                 for nid, v in zip(w.ids[s], values):
                     above = s in thr and v > thr[s]

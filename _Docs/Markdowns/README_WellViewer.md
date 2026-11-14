@@ -6536,7 +6536,8 @@ plots over time and its crops (and **Pop out** shows it large), and then each vi
 - **Position**, **Statistics** and **Largest & smallest** summarise many nanowells, so it is shown in the site detail.
 
 A well that is not selected on the plate, an address the well's table does not hold, or text that is not an address
-is said on the status line, and nothing is selected. The box is not shown on the **QC**, **Statistics** and
+is said on the status line, and nothing is selected. An address the well's table does not hold still moves the page to
+its well, so the nanowell selected before is let go and the site detail closes; the other two change nothing. The box is not shown on the **QC**, **Statistics** and
 **Position** views, whose figures draw no single nanowell (one row per well, a test's table, each ring's summary).
 
 **Each view shows only the controls it uses.** A control with no role on a view is not on its band: the **QC** and

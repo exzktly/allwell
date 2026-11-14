@@ -14086,7 +14086,7 @@ draws its own line over the thin ones in its selection colour (`renderer._draw_s
 `TRAJECTORY_SELECTED_GID`, from `render_trajectories(selected=)`), the Array view zooms onto it — the request is
 `NanowellState.array_goto`, which `controller._after_array_draw` spends once the view is drawn in that well
 (`_centre_array_goto`, the same `_centre_array_on` region a double-click sets) and draws again there — and Identity
-focuses it as below. A nanowell the table does not hold selects nothing; that, a well not drawn and text that is no
+focuses it as below. A nanowell the table does not hold selects nothing and lets go of the nanowell selected before (`selected_sites` is emptied, so the detail and pop-out do not go on showing a nanowell of a well the page has left); that, a well not drawn and text that is no
 address are each said on the status line, and on the Identity view an unreadable text is also handed to
 `set_identity_focus` so its figure says why. Clearing the box clears the Identity focus only.
 `tests/test_nanowell_goto_every_view.py` types into the real box on every view and reads the ring, the line, the

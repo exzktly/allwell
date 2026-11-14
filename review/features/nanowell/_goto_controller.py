@@ -62,7 +62,10 @@ def go_to_nanowell(ctx, text: str) -> None:
                               "detail.")
     else:
         # Not in the well's table: nothing to select. The Identity view still marks where each timepoint puts the
-        # address (it reads the grids, not the table), so the focus is kept for it.
+        # address (it reads the grids, not the table), so the focus is kept for it. The nanowell selected before is
+        # let go: the page has moved to this well and says nothing is selected, and a detail and pop-out still
+        # showing the old one (possibly another well's) would contradict it.
+        st.selected_sites = []
         st.array_goto = None
         ctx.notify.set_status(f"{target.well} has no nanowell {target.address} in its table: nothing to select.")
     nwc._save_soon(ctx)

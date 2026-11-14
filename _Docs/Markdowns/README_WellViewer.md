@@ -5871,7 +5871,10 @@ figure's log axes, not only this tab's; on a plot ticked at decades (most of
 them) picking base 2 re-ticks it at the powers of two. That includes the
 Scatter Plot's log axes, which are drawn as log(value + 1) so a zero stays on
 the axis: the label names the base (`(log₂, +1)`, `(ln, +1)`), and the ticks
-sit at 0 and the powers of that base.
+sit at 0 and the powers of that base. On the Scatter Plot's nanowell points, an
+axis whose values include anything below zero (a shrinking nanowell's log₂ fold
+change, a negative growth rate) is drawn linear instead, since log(value + 1)
+cannot place it, and the footer says how many values made it so.
 
 #### Fold change on a response curve
 

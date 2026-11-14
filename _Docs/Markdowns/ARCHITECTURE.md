@@ -15831,7 +15831,11 @@ The Nanowells page's *Subset* can name such a gate (`nanowell/subset_compute`, *
 page, so it reads the same preferences: `_observations.redraw` takes them from `plot_style.figure_prefs(ctx, fig)`,
 and on the Cells page `_pin_cells_log_axes` pins `scatter_x_log` / `scatter_y_log` (on unless turned off) on the
 axes as `_aw_force_xlog` / `_aw_force_ylog` with `_aw_log_plus1`, labelling each log axis with the transform and its
-base (`_layout.log1p_axis_suffix`) — the rules `gating.render_scatter_points` draws cells by. The Wells page keeps
+base (`_layout.log1p_axis_suffix`) — the rules `gating.render_scatter_points` draws cells by. log(x+1) cannot place
+a value below zero (the transform clips it to zero), and the nanowell metrics include signed ones (`log2_count_fc`,
+`growth_rate`), so `_pin_cells_log_axes` takes the drawn values and leaves an axis linear when any finite one is
+below zero, dropping the log suffix from its label and adding a footer note that counts them
+(`tests/test_nanowell_scatter_log_axis_keeps_negatives.py`). The Wells page keeps
 the shared `x_log` / `y_log`, which the style pass applies. Every point collection is tagged
 `_aw_marker_collection`, so marker size, shape and edge apply (`plot_style._style_marker_collections`). The draw
 stamps the `nanowells` style view (`plot_style.mark_style_view`) and `_observations.drew_nanowells` stamps the cell

@@ -196,6 +196,8 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
             if xy is not None:
                 line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1)[0]
                 line.set_gid(f"{gid}:{stratum}")
+                # Dotted is the control: the title says so, so the page's Line style never restyles it solid.
+                line._aw_linestyle_is_data = True
                 if pair is not None:
                     _paired(line, pair)
                 elif colour == muted:

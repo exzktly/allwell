@@ -358,3 +358,18 @@ def test_the_direction_is_saved_with_the_page_and_a_bad_one_is_not_restored():
     assert again.rare_direction == "lower"
     again.apply_config({"rare_direction": "sideways"})
     assert again.rare_direction == "higher"
+
+
+def test_the_control_curve_is_dotted_on_the_page_as_its_title_says(page, qtbot):
+    """Reported: the left panel's title says "dotted: control", but the control curve on the page was solid and told
+    apart only by its colour. The renderer drew it dotted; the page's style pass then stamped the Properties Line
+    style (solid by default) over every data line. Read off the page's own figure, after that pass."""
+    st = _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    qtbot.waitUntil(lambda: st.rare_footer is not None, timeout=30000)
+    fig = page.widgets.get("_nw_fig")
+    styles = {line.get_gid(): line.get_linestyle() for ax in fig.axes for line in ax.lines
+              if str(line.get_gid()).startswith("rare-ecdf-")}
+    assert styles == {"rare-ecdf-control:all": ":", "rare-ecdf-treatment:all": "-"}
+    assert any("dotted: control" in t.get_text() for ax in fig.axes for t in ax.texts + [ax.title])

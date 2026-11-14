@@ -990,7 +990,10 @@ it, and a folder far too large to be one plate's input. That last one is what
 choosing a home folder or the top of a drive by mistake looks like: Analyze
 stops looking after 10,000 folders, says the folder holds more than one plate's
 input could, and asks for the plate's own folder instead, rather than leaving
-the window frozen while it searches the whole drive.
+the window frozen while it searches the whole drive. A plate folder that
+holds `in/` is never refused this way, however much else sits beside `in/`
+(an `out/` folder, the original export): only `in/` is read, so only `in/` is
+looked through.
 
 A per-well folder **beside its own well's archive** never stops the run: the
 archive is what gets read, and any image in the folder the archive does not

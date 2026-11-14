@@ -8632,8 +8632,13 @@ the folder and asking for the plate's own. A partial walk is refused rather
 than reported, because its lists would describe only the part it reached. The
 pipeline's `refuse_non_zip_input` and remote staging pass no budget and walk
 everything, since they decide what a run reads.
-`tests/test_input_planner_walk_is_bounded.py` holds both halves, and drives the
-refusal through the real `AnalyzeTab`.
+A selected folder that holds `in/` is not walked at all: the pipeline reads
+`in/` only, so the root's other folders (`out/`, an original export kept beside
+`in/`) decide nothing, and their size must not refuse the plate. The planner
+then checks only the root's own files for loose images and plans from `in/`,
+whose walk carries the same budget.
+`tests/test_input_planner_walk_is_bounded.py` holds both halves, the sibling
+case included, and drives the refusal through the real `AnalyzeTab`.
 
 `dir_has_entries` keeps its own listing. It asks whether the folder holds an
 entry of *any* kind, which includes the ones a file/folder split drops because

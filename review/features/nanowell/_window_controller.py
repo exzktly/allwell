@@ -596,7 +596,8 @@ def draw_window_popout(ctx, st, fig) -> None:
         cells=st.crop_cells, numbers=st.crop_metrics, image_channel=image_channel,
         display_range=nwc.display_range(ctx),
         timepoints=columns,
-        metrics=nwc.crop_metrics(st, sites, channel) if st.crop_metrics else None, with_well=True)
+        metrics=nwc.crop_metrics(st, sites, channel) if st.crop_metrics else None, with_well=True,
+        tp_names=nwc.timepoint_names(st))
 
 
 #: What a page's tile or row says at a timepoint whose crops are still being cut.

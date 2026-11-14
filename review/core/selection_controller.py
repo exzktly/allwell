@@ -607,12 +607,50 @@ def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
 
 
 def _toggle_group_deferred(ctx, sid) -> None:
-    """Show or hide group *sid*: the flag and the plate now, the plots after the click debounce."""
+    """Show or hide group *sid*: the flag and the plate now, the plots after the click debounce — and say which,
+    since a click meant to choose a group hides it when it is already shown (:func:`group_toggle_message`)."""
     s = sel_by_id(ctx, sid)
     if s is None:
         return
-    sel_set_hidden(ctx, sid, not bool(s.get("hidden")), light=True)
+    hiding = not bool(s.get("hidden"))
+    sel_set_hidden(ctx, sid, hiding, light=True)
     schedule_plate_rebuild(ctx, invalidate=True)
+    notify = getattr(ctx, "notify", None)
+    if notify is not None:
+        notify.toast(group_toggle_message(str(s.get("name") or "The group"), list(s.get("wells") or []), hiding))
+
+
+def group_toggle_message(name: str, wells: list, hidden: bool) -> str:
+    """What a plate click that toggles a group says: which group, which wells, and how to undo it."""
+    shown = ", ".join(wells[:4]) + ("…" if len(wells) > 4 else "")
+    if hidden:
+        return f"{name} hidden ({shown}): click one of its wells again to show it."
+    return f"{name} shown ({shown})."
+
+
+#: The glyph a hidden group's wells carry on the plate. Dimmed alone, a hidden group read as a faint colour rather
+#: than as a group a click had switched off.
+HIDDEN_GLYPH = "×"
+
+
+def _mark_hidden_wells(ctx, plate, rep_mode: bool, plotted_wells: set) -> None:
+    """Mark the wells of every hidden group (or hidden value of a grouping variable) with :data:`HIDDEN_GLYPH`, and
+    clear the marks this put on wells that are shown again. Only the marks it set are cleared: other pages put their
+    own glyphs on the plate (``plate.setWellMarker``), and they are left alone."""
+    from review.domain.plot_members import plot_replicate_sets_loaded
+    from ui import theme
+
+    paths = ctx.state.dataset.well_paths or {}
+    hidden = set()
+    if rep_mode:
+        hidden = {w for r in plot_replicate_sets_loaded(ctx) or [] for w in r.wells
+                  if w in paths and w not in plotted_wells}
+    marked = getattr(plate, "_aw_hidden_marked", set())
+    for well in marked - hidden:
+        plate.setWellMarker(well, None)
+    for well in hidden - marked:
+        plate.setWellMarker(well, HIDDEN_GLYPH, theme.Colors.text_muted)
+    plate._aw_hidden_marked = hidden
 
 
 def on_sidebar_plate_row_activated(ctx, row: str) -> None:
@@ -1188,6 +1226,7 @@ def refresh_sidebar_map_now(ctx) -> None:
         footer.setAllVisible(not (smfish and not rep_mode))
     plate.clearWellColors()
     plate.setWellColors(colors)
+    _mark_hidden_wells(ctx, plate, rep_mode, plotted_wells)
     # Plotting tabs in rep-mode paint the visible group wells (clicks toggle a
     # group's ``hidden`` flag). The Cell Browser MIRRORS that group set — it must
     # paint the same wells (not the legacy empty plate), so the highlight is
@@ -1235,7 +1274,7 @@ def refresh_sidebar_map_now(ctx) -> None:
             app._line_group_hint.setText(
                 "Click a well to show or hide its value on the plot.")
         elif rep_mode:
-            app._line_group_hint.setText("Click a well to toggle its set's visibility on the plot.")
+            app._line_group_hint.setText("Click a well to show or hide its group on the plot.")
         else:
             app._line_group_hint.setText("")
 

@@ -251,7 +251,7 @@ def test_choosing_gfp_beside_the_strip_cuts_the_crops_from_the_gfp_tiles_and_say
     qtbot.waitUntil(lambda: {int(v) for im in _images(page, "_nw_strip_fig")
                              for v in np.unique(im.get_array())} == {7}, timeout=10000)
     caption = [t.get_text() for t in page.widgets.get("_nw_strip_fig").texts if t.get_gid() == "nw-crop-caption"]
-    assert caption and caption[0].startswith("Crops (GFP image): A01 · q 1, r 0")
+    assert caption and caption[0].startswith("Crops (GFP image): A01 · nanowell 1,0")
     assert extremes_combo.currentData() == array_combo.currentData() == "GFP"      # one setting, every control
     assert page.state.feature_slice("nanowell").image_channel == "GFP"
 

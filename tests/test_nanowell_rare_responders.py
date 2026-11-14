@@ -909,3 +909,22 @@ def test_one_control_well_is_not_reported_as_zero_of_zero_control_nanowells():
     assert rx.NOT_RUN in report and rx.C_UNDEFINED not in report
     assert not any("per-well empirical p-values only" in n for n in unit.primary.notes)
     assert any("no control null" in n for n in unit.primary.notes)
+
+
+def test_under_responders_lower_the_flagged_rows_read_in_the_metric_s_own_sign():
+    """The analysis negates values to read the bottom tail as a top tail. The flagged-nanowell table and the parameter
+    log wrote those negated numbers: a fold change of 0.98 as value -0.98 against a threshold of -1.03, "above" a
+    cutoff it was below. They are written as the user reads them."""
+    rng = np.random.default_rng(2)
+    wells = [(f"C{i}", "ctrl", rng.lognormal(0.7, 0.3, 200)) for i in range(4)]
+    for i in range(4):
+        v = rng.lognormal(0.7, 0.3, 200)
+        v[:12] = 0.2                                     # a few nanowells far below the control's bottom 1 %
+        wells.append((f"T{i}", "drug", v))
+    res = rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
+                     value_label="Count fold change")
+    flagged = res.responders
+    assert len(flagged)
+    assert (flagged["value"] == flagged["fc"]).all()
+    assert (flagged["value"] < flagged["threshold"]).all() and (flagged["threshold"] > 0).all()
+    assert all(t > 0 for t in res.log["units"][0]["thresholds"].values())

@@ -296,8 +296,10 @@ def responders(units: list[Unit], prepared: Prepared) -> pd.DataFrame:
                     src = kept.loc[(w.key, nid)]
                     rows.append({"unit": unit.label, "well_key": w.key, "plate_id": w.plate,
                                  "well_id": src["well_id"], "condition": w.condition, "nanowell_id": nid,
-                                 "stratum": s, "n0": src["n0"], "nt": src["nt"], "fc": src["fc"], "value": v,
-                                 "threshold": thr.get(s, math.nan), "above_threshold": above,
+                                 # value and threshold as the user reads them: un-negated under "lower"
+                                 "stratum": s, "n0": src["n0"], "nt": src["nt"], "fc": src["fc"],
+                                 "value": unit.sign * v, "threshold": unit.sign * thr.get(s, math.nan),
+                                 "above_threshold": above,
                                  "hc_candidate": nid in hc_ids, "hc_p": hc_ids.get(nid, math.nan),
                                  "crop_path": src["crop_path"]})
     return pd.DataFrame(rows)
@@ -310,7 +312,7 @@ def parameter_log(prepared: Prepared, units: list[Unit]) -> dict:
             "exclusions_by_reason": exclusion_counts(prepared.exclusions),
             "units": [{"treatment": u.treatment, "plate": u.plate, "control_wells": [w.key for w in u.controls],
                        "treatment_wells": [w.key for w in u.treated],
-                       "thresholds": {s: float(v) for s, v in u.thresholds.items()}} for u in units],
+                       "thresholds": {s: float(u.sign * v) for s, v in u.thresholds.items()}} for u in units],
             "notes": list(prepared.notes)}
 
 

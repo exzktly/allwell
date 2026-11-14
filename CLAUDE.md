@@ -1645,3 +1645,67 @@ page of thirty.
    once in three runs here, in a form the branch never touched, is reported as
    intermittent rather than fixed or blamed.
 
+
+## 7.11 A new path through a page inherits the page's controls
+
+The Rare responders test was added to the Nanowells Statistics view, beside five
+tests that all honoured the page's **Moving average**. It ignored it, for two
+days and three PRs, and the reasoning behind that can be traced exactly —
+because there was none.
+
+- The user's spec (an engine for rare responders) said "FC = Nt / N0" and
+  stratify by starting count. It said nothing about the page's existing
+  controls. The integration request was one line: *"integrate this tool into
+  the statistical tests for the nanowell tab"*.
+- The exclusion first appears **already decided**, inside a file write
+  (`_rare_controller.py`'s docstring and `NOT_APPLIED`). No message before it
+  weighs it. The docstring's one *because* — "the tests stratify nanowells by
+  their starting count" — justifies ignoring the **Metric**; the moving average
+  and the Fixed cohort were added to the same sentence with no reason of their
+  own.
+- The user was **told, not asked**: "Compare, the moving average and Fixed
+  cohort don't apply, and the figure says so." The list of "choices you may
+  want to change" was written before the wiring and did not include it.
+- The next day the user reversed the Metric half (`4804db1`: test the page's
+  Metric, no fixed strata). That removed the only stated premise — the
+  starting-count strata — and the moving-average exclusion **survived its
+  premise** untouched.
+- A review then found the figure tagged "Moving average" over unaveraged
+  values (row S1), took the exclusion as intended design, and removed the tag.
+  The figure became honest; the defect became permanent and better documented.
+
+Each step was locally reasonable, and that is the pattern to recognise.
+
+1. **When a new path joins a page, every control on that page is a
+   requirement until shown otherwise.** A spec written for an engine is silent
+   on the host page's controls because its author was thinking about the
+   engine, not because the controls should be ignored. Enumerate the controls
+   the sibling paths honour (here: `distribution_model`'s `moving`,
+   `baseline_moving`, `moving_centred`, `cohort`) and decide each one. The
+   default is *honour it the way the siblings do*, through the same calls.
+2. **"Does not apply" is a decision, and it is the user's.** Saying it in
+   Details, in the PR body, or in a chat summary is notification, not consent.
+   An exclusion of a user-visible control goes into the question list *before*
+   the code is written, with what each answer would compute. Burying it in a
+   sentence that also lists justified exclusions lends it their justification.
+3. **Write the reason for each exclusion separately, or do not exclude.** One
+   "because" covering three items covers one of them. If you cannot write the
+   specific reason a control cannot apply — the mathematical reason, not
+   "the engine takes raw counts" — the control applies.
+4. **When a premise is reversed, re-derive everything that rested on it.**
+   `4804db1` removed the strata and made the test read the Metric; every
+   consequence of "the values must be raw starting-count fold changes" was then
+   open again. Search the code and docs for the dependent decisions (here:
+   `NOT_APPLIED`, the docstring sentence) in the same change.
+5. **A label that contradicts the behaviour is a fork, not a label bug.** When a
+   figure claims something it did not do, ask which side is wrong before
+   fixing either. Fixing the label is right only if the behaviour is what the
+   user wants; S1 should have been raised as "the tag is wrong, *or* the test
+   is" with the question put to the user. A review row whose fix column is
+   written before that question is asked has already chosen.
+6. **Integration tests should cover the controls, not only the path.** The
+   original page test drove the new test with every control at its default, so
+   nothing could tell a test that honours the moving average from one that
+   ignores it. For each control the sibling paths honour, one test sets it and
+   asserts the new path's output changed the way the siblings' would
+   (`tests/test_nanowell_rare_moving_average.py` is the shape).

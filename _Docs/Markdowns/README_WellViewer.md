@@ -11179,7 +11179,8 @@ share of false discoveries among the results called significant. "Significant" i
 | The exceedance test, after correction | The figure says |
 | --- | --- |
 | q < 0.05 | **rare responders detected** |
-| otherwise, or not testable (no nanowell in any well past the cutoff) | **rare responders not detected** |
+| otherwise, or no nanowell in any well past the cutoff | **rare responders not detected** |
+| no group p (fewer than 3 control or 2 treatment wells for its regression) while nanowells are past the cutoff | **cannot be decided with these wells** — with the wells it needs |
 | Fewer than 2 wells on a side | **too few wells to test the group** |
 
 Higher Criticism (B) and the upper-tail shape test (C) are reported beside the verdict as supporting evidence and
@@ -11196,8 +11197,9 @@ evidence of no effect: read it with the caveats the figure prints under it, and 
 - Higher Criticism, in the HC+ form used here, leaves out nanowells whose p is at or below 1/n — with a control pool
   larger than a well those are exactly the most extreme ones, so it says nothing about them.
 
-The upper-tail shape test is **not computable** when the control pool has no value above its median and below its
-top — whole-number fold changes (2×, 3×, 4×) do this — and it says so rather than reporting 0.
+The upper-tail shape test weighs the control's top value too (its cumulative share is counted out of N + 1, as
+every empirical p here is), so a nanowell beyond everything the controls reach — a rare responder — counts, also
+with whole-number fold changes (2×, 3×, 4×). It is undefined only when the control pool holds a single value.
 
 ### Reading the figure, the report and the crops
 

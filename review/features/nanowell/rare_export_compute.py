@@ -210,6 +210,17 @@ def _floor_note(perm) -> str:
     return " (the lowest possible with these wells)"
 
 
+def needs(unit, params) -> str:
+    """What the deciding test's regression needs that this design lacks, in one sentence."""
+    short = []
+    if len(unit.controls) < params.min_controls_bb:
+        short.append(f"{params.min_controls_bb} control wells (this design has {len(unit.controls)})")
+    if len(unit.treated) < params.min_treated_bb:
+        short.append(f"{params.min_treated_bb} {unit.treatment} wells (this design has {len(unit.treated)})")
+    return (f"it needs at least {' and '.join(short)}." if short
+            else "the regression could not be fitted.")
+
+
 def deciding_line(unit, n_units: int, params) -> str:
     """The exceedance test's result: its p (and q when several groups were tested), or why it has none."""
     kt, _nt, kc, _nc = counts_of(unit)
@@ -219,7 +230,8 @@ def deciding_line(unit, n_units: int, params) -> str:
     if kt + kc == 0:
         return f"Deciding: {NAME_A.lower()} not tested — no nanowell in any well was past the cutoff."
     if not math.isfinite(a.p):
-        return f"Deciding: {NAME_A.lower()} has no group p — {'; '.join(a.notes) or 'too few wells for the regression'}."
+        return (f"Deciding: {NAME_A.lower()} has no group p — {needs(unit, params)} With fewer, it gives each well's "
+                "own p only (Details).")
     q = unit.q.get("exceedance", math.nan)
     corrected = f" (q = {_num(q)} across the {n_units} groups tested)" if n_units > 1 else ""
     return f"Deciding: {NAME_A.lower()} p = {_num(a.p)}{corrected}."

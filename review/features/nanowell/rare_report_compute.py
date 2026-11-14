@@ -46,6 +46,9 @@ from review.features.nanowell.statistics_compute import bh_adjust
 DETECTED = "rare responders detected"
 NOT_DETECTED = "rare responders not detected"
 INSUFFICIENT = "too few wells to test the group"
+#: The deciding test could not give a group p (too few wells for its regression) while nanowells were past the
+#: cutoff: the design cannot decide, which is not the same as having found nothing.
+UNDECIDED = "cannot be decided with these wells"
 
 
 @dataclass
@@ -193,7 +196,12 @@ def interpret(unit: Unit, fdr: float) -> str:
     the verdict (``rare_export_compute.caveats``), not folded into it."""
     if not unit.group_allowed:
         return INSUFFICIENT
-    return DETECTED if significant(unit, "exceedance", fdr) else NOT_DETECTED
+    if significant(unit, "exceedance", fdr):
+        return DETECTED
+    past = sum(c.k for c in unit.primary.counts) if unit.exceedance else 0
+    if past and not np.isfinite(unit.primary.p):
+        return UNDECIDED                    # nanowells past the cutoff, and no group p to weigh them: not a "no"
+    return NOT_DETECTED
 
 
 def _finite_mean(values) -> float:

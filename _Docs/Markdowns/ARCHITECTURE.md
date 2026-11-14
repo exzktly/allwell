@@ -13913,8 +13913,10 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when
   the pool cannot resolve the `1/n` scale (two or fewer control wells, or a pool under three times a well's size).
 * `rare_ad_compute` (Test C) — the one-sided, upper-tail-weighted Anderson–Darling `A²_R` per stratum, combined by
-  nanowell share over the strata where it is defined; NaN — not computable, never 0 — when the control pool has no
-  value above its median and below its top (whole-number fold changes do this). The Scholz–Stephens k-sample test
+  nanowell share over the strata where it is defined, summed over the control values at or above the median with
+  `F0 = #{control ≤ u} / (N + 1)`, so the pool's top value carries weight and mass beyond every control counts (with
+  `/ N` it counted nothing, and whole-number fold changes left nothing to sum); NaN — undefined, never 0 — only for a
+  pool of one value. The Scholz–Stephens k-sample test
   is reported as uncalibrated description only.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
@@ -13944,8 +13946,10 @@ it asks for "the control group". **Choosing the test with no control preselects 
 (`controller.set_stats_test` → `rc.guess_control`: exactly one group whose name has a word of `CONTROL_WORDS`;
 two or none and nothing is guessed), recorded in `NanowellState.control_guessed` — never saved, cleared when the user
 chooses a control (`set_control`) — and the figure's first line says so (`render_rare_page(lead=)`, never cut). **The verdict is decided by the
-exceedance test alone** (`rare_report_compute.interpret`: `DETECTED` when its q is below the FDR, `NOT_DETECTED`
-otherwise or when no nanowell passed the cutoff, `INSUFFICIENT` without two wells a side); Higher Criticism and
+exceedance test alone** (`rare_report_compute.interpret`: `DETECTED` when its q is below the FDR; `UNDECIDED` when
+it has no group p — too few wells for its regression, said by `rare_export_compute.needs` — while nanowells are past
+the cutoff, since a test that did not run is not a negative; `NOT_DETECTED` otherwise or when no nanowell passed the
+cutoff; `INSUFFICIENT` without two wells a side); Higher Criticism and
 the upper-tail shape test are supporting evidence that never changes it, so the verdict is not given two
 uncorrected chances. **Every sentence the figure says is built once, from the result's fields,** in
 `rare_export_compute`: `headline` (the verdict, then the counts past the cutoff in each condition and the wells

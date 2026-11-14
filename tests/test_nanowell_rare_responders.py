@@ -593,8 +593,8 @@ def test_the_spiked_plate_leads_with_counts_and_names_every_limit_of_the_design(
         "Deciding: exceedance test p = 0.00072.",
         # Unstratified, the control pool (180) is larger than a well (60), so every spiked nanowell falls at p ≤ 1/n,
         # where HC+ does not look: its p is 0.9, and the third caveat says why.
-        "Supporting, not deciding: Higher Criticism p = 0.9 · shape test "
-        "not computable (too few distinct fold changes above the control median)."]
+        "Supporting, not deciding: Higher Criticism p = 0.9 · shape test p = 0.1 (the lowest possible with these "
+        "wells)."]
     assert text["caveats"] == [
         "With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1, so they can "
         "neither confirm nor rule out anything here.",
@@ -616,17 +616,22 @@ def test_higher_criticism_s_blind_spot_is_named_where_it_hides_the_responders():
             "nothing about them.") in rx.caveats(unit, res.prepared.params)
 
 
-def test_the_upper_tail_shape_statistic_is_undefined_not_zero_when_it_has_nothing_to_measure():
-    """With whole-number fold changes the control pool has no value above its median and below its top, so the
-    statistic's integral runs over nothing: that is not a measured zero (CLAUDE.md §7), and it was reported as
-    A²_R = 0 with p = 1."""
+def test_the_upper_tail_shape_test_sees_mass_beyond_the_control_maximum():
+    """With whole-number fold changes (2×, 3×, 4×) the control pool had no value above its median and below its top,
+    and the top carried no weight (1 − F0 = 0 there), so the statistic summed over nothing and a nanowell beyond
+    every control counted for nothing. F0 = #/(N + 1) gives the top weight: the 30-fold spikes now count, and the
+    test runs on the 2 + 2 design too. A pool of one value has no tail and stays undefined, not zero (CLAUDE.md §7)."""
     from review.features.nanowell import rare_ad_compute as ad
 
-    assert math.isnan(ad.a2r_stratum(np.array([2.0, 4.0, 60.0]), np.array([2.0, 3.0, 4.0, 4.0])))
-    assert ad.a2r_stratum(np.array([9.0, 9.0]), np.array([1.0, 2.0, 3.0, 4.0, 5.0])) > 0   # a real tail still counts
-    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
-    assert math.isnan(res.units[0].a2_perm.p)
-    assert math.isnan(res.table["a2r_mean"].iloc[0])
+    ref = np.array([2.0, 3.0, 4.0, 4.0])
+    assert ad.a2r_stratum(np.array([2.0, 4.0, 60.0]), ref) > ad.a2r_stratum(np.array([2.0, 3.0, 4.0]), ref) >= 0
+    assert math.isnan(ad.a2r_stratum(np.array([9.0]), np.array([3.0, 3.0, 3.0])))
+    spiked = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl")).units[0]
+    null = rr.analyse(_small_plate(spiked=False), rr.RareParams(control="ctrl")).units[0]
+    assert spiked.a2_perm.p == pytest.approx(spiked.a2_perm.min_p)        # the strongest the design allows
+    assert null.a2_perm.p > 0.5
+    two = rr.analyse(_small_plate(spiked=True, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]
+    assert np.isfinite(two.a2_perm.p)
 
 
 def test_a_relabeling_whose_statistic_is_undefined_does_not_make_p_smaller():
@@ -735,3 +740,22 @@ def test_the_value_is_the_page_s_metric_with_no_strata_and_direction_reads_eithe
     assert 2 ** cut.get_xdata()[0] > 90                               # the cutoff drawn at a measured brightness
     drawn = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-ecdf-treatment:{ALL}")
     assert 2 ** min(drawn.get_xdata()) == pytest.approx(9.0)          # the low responders, as measured
+
+
+
+def test_a_design_too_small_for_the_deciding_test_cannot_be_decided_rather_than_not_detected():
+    """Reported: two control and two treatment wells. The beta-binomial regression needs three control wells, so the
+    deciding test has no group p — and the verdict read "not detected" beside 8 of 120 drug nanowells past the cutoff
+    against 0 of 120 in control. That is a test that did not run, shown as a negative (CLAUDE.md §7). It says it cannot
+    be decided, and why; with nothing past the cutoff in any well, "not detected" is still true and still said."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    spiked = rr.analyse(_small_plate(spiked=True, n_ctrl=2), rr.RareParams(control="ctrl"))
+    unit = spiked.units[0]
+    assert unit.interpretation == rr.UNDECIDED
+    text = rx.unit_text(spiked, unit)
+    assert text["headline"].startswith("drug: cannot be decided with these wells. 8 of 120 drug nanowells (6.7%)")
+    assert text["lines"][0] == ("Deciding: exceedance test has no group p — it needs at least 3 control wells (this "
+                                "design has 2). With fewer, it gives each well's own p only (Details).")
+    null = rr.analyse(_small_plate(spiked=False, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]
+    assert null.interpretation == rr.NOT_DETECTED

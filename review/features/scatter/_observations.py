@@ -180,23 +180,40 @@ def _selected_hours(ctx, page: str):
     return hours if selections else None
 
 
-def _pin_cells_log_axes(ax, prefs) -> tuple[str, str]:
-    """Give the Cells page's axes the figure's own log state and return the two axis-label suffixes.
+def _pin_cells_log_axes(ax, prefs, values=None) -> tuple[str, str, list[str]]:
+    """Give the Cells page's axes the figure's own log state; return the two axis-label suffixes and any notes.
 
     The same rules as the per-cell scatter draws by (``gating.render_scatter_points``), because it is the same
     figure and the same Properties toggles: ``scatter_x_log`` / ``scatter_y_log`` (on unless turned off), drawn as
     log(x+1) so an empty nanowell's zero stays on the axis, in the base the panel names. Pinned on the axes so the
     style pass applies these rather than the shared ``x_log`` / ``y_log`` other figures use.
+
+    log(x+1) cannot place a value below zero: the transform clips it to zero, so a shrinking nanowell's
+    ``log2_count_fc`` or a negative growth rate would land on the zero line with nothing saying so, and a gate
+    drawn over that corner would store a bound that leaves those nanowells out. *values* is ``{"x": array,
+    "y": array}`` of what is drawn; an axis whose finite values include anything below zero is drawn linear
+    instead, and a note says why.
     """
+    import numpy as np
+
     from review.core.plot_style import apply_axis_log_scale, log_base_value
     from review.features.scatter._layout import scatter_log_suffix
 
-    x_log = bool(prefs.get("scatter_x_log", True))
-    y_log = bool(prefs.get("scatter_y_log", True))
-    ax._aw_force_xlog, ax._aw_force_ylog, ax._aw_log_plus1 = x_log, y_log, True
-    apply_axis_log_scale(ax, "x", x_log, log_base_value(prefs.get("x_log_base", "10")))
-    apply_axis_log_scale(ax, "y", y_log, log_base_value(prefs.get("y_log_base", "10")))
-    return scatter_log_suffix(prefs, "x"), scatter_log_suffix(prefs, "y")
+    on = {w: bool(prefs.get(f"scatter_{w}_log", True)) for w in ("x", "y")}
+    notes: list[str] = []
+    for which in ("x", "y"):
+        vals = np.asarray((values or {}).get(which, ()), dtype=float)
+        vals = vals[np.isfinite(vals)]
+        negative = int((vals < 0).sum()) if vals.size else 0
+        if on[which] and negative:
+            on[which] = False
+            notes.append(f"{which.upper()} axis drawn linear, not log(x+1): {negative} value(s) below 0, which "
+                         "a log(x+1) axis cannot place.")
+    ax._aw_force_xlog, ax._aw_force_ylog, ax._aw_log_plus1 = on["x"], on["y"], True
+    apply_axis_log_scale(ax, "x", on["x"], log_base_value(prefs.get("x_log_base", "10")))
+    apply_axis_log_scale(ax, "y", on["y"], log_base_value(prefs.get("y_log_base", "10")))
+    suffix = {w: scatter_log_suffix({**prefs, f"scatter_{w}_log": on[w]}, w) for w in ("x", "y")}
+    return suffix["x"], suffix["y"], notes
 
 
 def redraw(ctx, page: str) -> None:
@@ -244,8 +261,13 @@ def redraw(ctx, page: str) -> None:
             # Marker size, shape and edge are the panel's (``plot_style._style_marker_collections``).
             coll._aw_marker_collection = True
     x_suffix = y_suffix = ""
+    log_notes: list[str] = []
     if page == "cells":
-        x_suffix, y_suffix = _pin_cells_log_axes(ax, prefs)
+        import numpy as np
+
+        drawn_values = {w: np.concatenate([np.asarray(getattr(s, w), dtype=float) for s in drawn.series] or
+                                          [np.empty(0)]) for w in ("x", "y")}
+        x_suffix, y_suffix, log_notes = _pin_cells_log_axes(ax, prefs, drawn_values)
     ax.set_xlabel(drawn.x_label + x_suffix)
     ax.set_ylabel(drawn.y_label + y_suffix)
     from review.domain.observation import well_statistic
@@ -260,7 +282,7 @@ def redraw(ctx, page: str) -> None:
         _paint_nanowell_gates(ctx, ax, drawn, x_key, y_key, muted)
         # Each point names its nanowell, so a click shows it on the Nanowells page (``callbacks``).
         ctx.runtime.scatter.interaction_cache["points"] = click_points(drawn)
-    lines = [drawn.footer, *drawn.notes]
+    lines = [drawn.footer, *drawn.notes, *log_notes]
     if page == "cells" and table.subset and ctx.state.cell_gating.scatter_gates:
         lines.append(f"Gate percentages are of the nanowells drawn: those in the Subset ({table.subset}).")
     footer = "\n".join(lines)

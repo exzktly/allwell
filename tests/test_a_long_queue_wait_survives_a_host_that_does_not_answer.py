@@ -129,3 +129,39 @@ def test_a_host_that_never_answers_still_ends_at_the_max_queue_wait(cluster, mad
     with pytest.raises(HoldQueueWaitSpent):
         node.request()
     assert sum(sleep.naps) >= 60
+
+
+def test_the_max_queue_wait_message_names_the_job_it_cancelled(cluster, made):
+    """Only the state reads go unanswered here, so the cancel reaches the host: the message names the job. It used to
+    read ``cancelled job .``, because ``release`` clears the id before the message read it."""
+    sleep = Script(cluster, [_set(cluster, down=True)])
+    node, _, _ = _node(cluster, made, sleep, queue_wait_timeout_min=1)
+    with pytest.raises(HoldQueueWaitSpent) as raised:
+        node.request()
+    assert cluster.scancels(), "the cancel reached the host"
+    assert str(raised.value).endswith("cancelled job 4001.")
+
+
+class DownCluster(Cluster):
+    """The stand-in host, every control script to which goes unanswered while :attr:`down` is set — the cancel too."""
+
+    down = False
+
+    def _ssh_script(self, script: str, *, check: bool, timeout_s: float = 60):
+        if self.down:
+            return subprocess.CompletedProcess(["ssh"], 124, "", _NO_ANSWER)
+        return super()._ssh_script(script, check=check, timeout_s=timeout_s)
+
+
+def test_a_cancel_the_host_did_not_answer_is_not_reported_as_done(tmp_path, made):
+    """When the host answers nothing, the job is still queued and this app no longer holds it: the message must not
+    say it was cancelled, and must name the job so it can be cancelled by hand."""
+    cluster = DownCluster(tmp_path)
+    sleep = Script(cluster, [_set(cluster, down=True)])
+    node, _, _ = _node(cluster, made, sleep, queue_wait_timeout_min=1)
+    with pytest.raises(HoldQueueWaitSpent) as raised:
+        node.request()
+    assert cluster.scancels() == []
+    text = str(raised.value)
+    assert "cancelled job" not in text
+    assert "could not cancel job 4001" in text and "scancel 4001" in text

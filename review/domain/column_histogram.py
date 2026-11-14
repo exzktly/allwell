@@ -17,8 +17,9 @@ integers, so no bin splits a value: one bin per value while the range fits in th
 
 **What is not drawn, and says so.** Non-finite values are dropped before anything is counted. A sample with fewer
 than :data:`MIN_VALUES` finite values gets no histogram (``probs`` is ``None``) and does not set the width scale —
-one cell would otherwise be probability 1 and squash every real column to a sliver; the renderer draws its values as
-dots. On a log axis a value ≤ 0 has no place, so it stays in the sample's denominator, is counted in ``off_axis``, and
+one cell would otherwise be probability 1 and squash every real column to a sliver; every renderer draws its values
+as dots instead (:meth:`ColumnHistograms.as_dots`), so they stay on the figure and clickable, and
+:meth:`ColumnHistograms.note` counts them. On a log axis a value ≤ 0 has no place, so it stays in the sample's denominator, is counted in ``off_axis``, and
 the sample's bars sum to less than 1; :meth:`ColumnHistograms.note` states how many.
 """
 
@@ -102,6 +103,10 @@ class ColumnHistograms:
     def drawn(self, i: int) -> bool:
         return self.probs[i] is not None and math.isfinite(self.p_max) and self.p_max > 0
 
+    def as_dots(self, i: int) -> bool:
+        """Whether sample *i* has values but no histogram (fewer than :data:`MIN_VALUES`): drawn as its dots."""
+        return self.probs[i] is None and self.n[i] > 0
+
     def half_widths(self, i: int, half: float) -> np.ndarray:
         """Each bin's half-width for sample *i* in a slot of half-width *half*: its probability over the figure's
         largest, times *half*."""
@@ -118,11 +123,15 @@ class ColumnHistograms:
         heights = np.diff(self.edges)[keep]
         return bottoms, heights, float(x) - w[keep], 2.0 * w[keep]
 
-    def note(self, unit: str = "column") -> str:
-        """``"30 bins · widest bar = 23% of a column"``: what a bar's width means, for the figure. ``""`` when nothing
-        is drawn. On a log axis, how many values ≤ 0 could not be placed."""
+    def note(self, unit: str = "column", *, say_dots: bool = True) -> str:
+        """``"30 bins · widest bar = 23% of a column"``: what a bar's width means, for the figure. On a log axis, how
+        many values ≤ 0 could not be placed; with *say_dots*, how many samples are drawn as dots for too few values
+        (a renderer that says so in a footer of its own passes ``False``). ``""`` when nothing is drawn."""
+        dots = sum(self.as_dots(i) for i in range(len(self.probs)))
+        dots_text = (f"{dots:,} {unit}{'s' if dots != 1 else ''} of fewer than {MIN_VALUES} values drawn as dots"
+                     if dots and say_dots else "")
         if not any(self.drawn(i) for i in range(len(self.probs))):
-            return ""
+            return dots_text
         count = f"{self.bins} bin{'s' if self.bins != 1 else ''}"
         if self.one_per_value:
             count += " (one per value)"
@@ -132,6 +141,8 @@ class ColumnHistograms:
         off = sum(self.off_axis)
         if off:
             text += f" · {off:,} value{'s' if off != 1 else ''} ≤ 0 not on the log axis"
+        if dots_text:
+            text += f" · {dots_text}"
         return text
 
 

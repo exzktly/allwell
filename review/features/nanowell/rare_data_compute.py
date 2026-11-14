@@ -37,6 +37,8 @@ from dataclasses import asdict, dataclass, field
 import numpy as np
 import pandas as pd
 
+from review.features.nanowell.views_compute import _OCCUPANCY_VALUE
+
 #: Columns every per-nanowell table carries; it also carries ``value``, or ``n0`` and ``nt`` (:func:`validate_table`).
 REQUIRED = ("plate_id", "well_id", "condition", "nanowell_id")
 #: The stratum every nanowell is in when the analysis is not stratified.
@@ -349,7 +351,11 @@ def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: 
     if value_column is not None:
         if value_column not in final.columns:
             raise ValueError(f"the page's metrics have no column {value_column!r} to test")
-        out["value"] = pd.to_numeric(final[value_column], errors="coerce").to_numpy()
+        raw = final[value_column]
+        if value_column == "occupancy_class":
+            # "3+" is a value, not a missing one: read through the same map the Distribution and Extremes views use.
+            raw = raw.astype(str).map(_OCCUPANCY_VALUE)
+        out["value"] = pd.to_numeric(raw, errors="coerce").to_numpy()
     state = final["state"].astype(str).to_numpy()
     out["qc_state"] = np.where(np.isin(state, ["measured", "empty"]), "", state)
     for column, flag in SITE_QC_FLAGS.items():

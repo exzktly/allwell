@@ -194,7 +194,7 @@ def apply_relative_to(ctx, collector, items: list) -> list:
         out[i] = replace(out[i], interaction_p_bh=p_bh)
     slice_.rel_applied = True
     slice_.rel_notice = _notice(out, name, label, within_names, log=log,
-                                per_fov=bool(req.per_fov_spread))
+                                per_fov=bool(req.per_fov_spread), op=op)
     return out
 
 
@@ -245,19 +245,25 @@ def _blank(item, stage1, outcome: str, detail: str, base_key: str = ""):
 
 
 def _notice(items, name: str, label: str, within: str, *, log: bool,
-            per_fov: bool) -> str:
-    """The figure's note: the rule, what was tested, and every bar left out."""
+            per_fov: bool, op: str = "ratio") -> str:
+    """The figure's note: the rule, what was tested, and every bar left out.
+
+    Worded by the operator: under *Subtract* each stage is a difference, so the
+    tick reads ``− Vehicle`` and the bar is a difference of differences."""
     head = f"Relative to {name} = {label}" + (f" within each {within}" if within else "")
+    subtract = op == "subtract"
+    sign, kind = ("\u2212", "difference") if subtract else ("\u00f7", "ratio")
     # The tick names the second stage by its value alone (``÷ Vehicle``); the
     # whole ratio it divides by is said once, here.
     lines = [head + ". Reference conditions are the dotted line. Under each bar, "
-             f"“÷ {label}” is that bar's ratio at {name} = {label}."]
+             f"“{sign} {label}” is that bar's {kind} at {name} = {label}."]
     labels = sorted({it.interaction_label for it in items if it.interaction_label})
     if labels:
         estimate = ("ratio of geometric means" if log else "difference of means")
         lines.append(
             f"p: {'; '.join(labels)}, Mean panel, BH-adjusted across bars. "
-            f"The test's estimate is a {estimate}; the bar is a ratio of means.")
+            f"The test's estimate is a {estimate}; the bar is a "
+            f"{'difference of differences of means' if subtract else 'ratio of means'}.")
     if per_fov:
         lines.append("Replicates are FOVs (FOV mode is on), so a well counts "
                      "several times — the df reflect fields, not wells.")

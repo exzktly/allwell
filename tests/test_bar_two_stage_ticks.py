@@ -113,9 +113,31 @@ def test_the_ticks_lie_flat_apart_and_clear_of_the_panel_below(width_in):
     plt.close(fig)
 
 
+@pytest.mark.parametrize("width_in", [9.0, 6.0])
+def test_one_line_names_stood_on_end_stay_clear_of_the_panel_below(width_in):
+    """Found in review: the room for the ticks was decided by looking for a line
+    break in the renderer's text, before the tick fit ran — so nine plain names
+    with fold change off, which the fit stands on end, ran 26 px into the panel
+    below under the fixed margins. Measured after the fit now; deciding on the
+    text alone (the old rule) fails this."""
+    ctx = _ctx(relative=False)
+    ctx.state.plot.fc_vs_control_on = False
+    fig = _drawn(ctx, width_in)
+    renderer = fig.canvas.get_renderer()
+    for upper, lower in zip(fig.axes, fig.axes[1:]):
+        labels = [t for t in upper.get_xticklabels() if t.get_text()]
+        assert len(labels) == 9 and all("\n" not in t.get_text() for t in labels)
+        bottom = min(t.get_window_extent(renderer).y0 for t in labels)
+        below = lower.title.get_window_extent(renderer)
+        assert bottom >= below.y1 - 1.5, f"ticks reach {bottom:.0f}, the next title's top is {below.y1:.0f}"
+    plt.close(fig)
+
+
 def test_one_line_ticks_get_the_fixed_margins_back():
     """Tight layout only while a tick runs to more lines than the margins hold;
-    a later redraw with one-line ticks returns to the bar figure's own margins."""
+    a later redraw with one-line ticks that lie flat returns to the bar
+    figure's own margins. (Four of the nine sets are drawn: all nine are
+    slanted past eight bars, and slanted names need the room too.)"""
     from review.features.barplot import renderer as R
 
     ctx = _ctx()
@@ -123,7 +145,11 @@ def test_one_line_ticks_get_the_fixed_margins_back():
     assert fig._aw_tight_layout and fig.get_layout_engine() is not None
     ctx.state.plot.fc_vs_control_on = False
     ctx.state.feature_slice("bar").rel_variable_id = ""
+    for sel in ctx.state.selection.selections[4:]:
+        sel["hidden"] = True
     _drawn(ctx, 9.0)
+    labels = [t for t in fig.axes[0].get_xticklabels() if t.get_text()]
+    assert len(labels) == 4 and {t.get_rotation() for t in labels} == {0.0}
     assert not fig._aw_tight_layout and fig.get_layout_engine() is None
     sp = fig.subplotpars
     assert {k: round(getattr(sp, k), 6) for k in R.BAR_FIGURE_MARGINS} == R.BAR_FIGURE_MARGINS
@@ -161,3 +187,38 @@ def test_nothing_is_written_over_the_bars(width_in, height_in, err_kind):
                for ln, c in zip(cap_lines, caps) if c.x0 <= mid <= c.x1]
         assert own and box.y0 >= max(own), "p label written on its cap"
     plt.close(fig)
+
+
+@pytest.mark.parametrize("op, sign, bar_is", [("ratio", "÷", "ratio of means"),
+                                              ("subtract", "−", "difference of differences of means")])
+def test_the_ticks_and_note_name_the_operator_the_axis_names(op, sign, bar_is):
+    """Found in review: under Fold change = *Subtract* the y label said
+    ``− (Treatment = Vehicle)`` while every tick read ``÷ WT Erlotinib ÷ Vehicle``
+    and the note said the bar was a ratio of means — a figure contradicting
+    itself about which arithmetic it drew. Both operators are drawn, so the old
+    implementation (``÷`` whatever the operator) fails the subtract case."""
+    ctx = _ctx()
+    ctx.state.plot.fc_op_ctrl = op
+    fig = _drawn(ctx, 9.0)
+    mean = fig.axes[0]
+    tick = next(t.get_text() for t in mean.get_xticklabels() if t.get_text().startswith("siKRAS Erlotinib"))
+    assert tick.replace("\n", "|") in (
+        f"siKRAS Erlotinib|{sign}{_NB}WT{_NB}Erlotinib {sign}{_NB}Vehicle",
+        f"siKRAS Erlotinib|{sign}{_NB}WT{_NB}Erlotinib|{sign}{_NB}Vehicle"), repr(tick)
+    note = next(t.get_text() for t in mean.texts if t.get_text().startswith("Relative to"))
+    kind = "difference" if op == "subtract" else "ratio"
+    assert f"“{sign} Vehicle” is that bar's {kind} at Treatment = Vehicle." in note.replace("\n", " "), note
+    assert f"the bar is a {bar_is}." in note.replace("\n", " "), note
+    plt.close(fig)
+
+
+def test_a_per_sample_control_tick_names_the_operator():
+    """The stage-1-only tick (per-sample controls, no second stage) names its
+    control with the same sign: ``− WT Erlotinib`` under *Subtract*."""
+    from review.domain.fold_change_pairing import ControlOutcome, tick_labels
+
+    items = [SimpleNamespace(display=d, fc_outcome=ControlOutcome.OK, rel_tick="",
+                             fc_control=ControlRef.for_replicate_set(c))
+             for d, c in (("siKRAS Erlotinib", "WT Erlotinib"), ("siKRAS Vehicle", "WT Vehicle"))]
+    assert tick_labels(items, op="subtract")[0] == "siKRAS Erlotinib\n− WT Erlotinib"
+    assert tick_labels(items)[0] == "siKRAS Erlotinib\n÷ WT Erlotinib"

@@ -265,3 +265,43 @@ def test_the_show_control_and_the_smoothing_slider_redraw_the_page(qtbot, tmp_pa
 
     nwc.set_view(ctx, "trajectories")                            # a view with no beeswarm: neither control shown
     assert not seg.isVisible() and not slider.isVisible()
+
+
+# ── a well no shape can be drawn for ─────────────────────────────────────────
+def _draw_one(tmp_path, per_well, style):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell.renderer import HISTOGRAM_GID, render_distribution
+
+    metrics, data = _plate(tmp_path, per_well)
+    model = dc.distribution_model(metrics, "n", channels=data.channels, groups={"set": sorted(per_well)})
+    fig = Figure(figsize=(8, 6.4))
+    hits = render_distribution(fig, model, style=style)
+    ax = fig.axes[0]
+    shapes = [c for c in ax.collections if c.get_gid() == "nw-density"] + [
+        p for p in ax.patches if p.get_gid() == HISTOGRAM_GID]
+    return fig, hits, shapes
+
+
+def test_under_violin_a_well_of_identical_values_is_drawn_as_its_dots_and_the_footer_says_so(tmp_path):
+    """A violin needs a spread: twelve nanowells all holding one cell (a single-cell-seeded start) have none. That
+    swarm used to be drawn as its median tick alone — no shape, no dots, nothing to click — under a footer saying
+    every well is a violin. It is drawn as dots now, clickable, and the footer counts it. The other timepoint has a
+    spread, so it is a violin, and the dots in the hit map are exactly the flat swarm's twelve."""
+    fig, hits, shapes = _draw_one(tmp_path, {"A01": {"t_c": [1] * 12, "t_a": [1, 2, 3, 2, 4, 5, 1, 2, 3, 6, 2, 1]}},
+                                  "violin")
+    assert len(shapes) == 1                                       # t_a's violin; t_c has no spread
+    assert [len(sites) for _ax, _x, _y, sites in hits.entries] == [12], "the flat swarm drew no clickable dots"
+    assert "1 swarm has too few values or no spread for a violin, and is drawn as its dots." in _footer(fig)
+
+
+def test_under_histogram_a_well_of_fewer_than_three_values_is_drawn_as_its_dots_and_the_footer_says_so(tmp_path):
+    """``column_histogram`` gives a sample of fewer than ``MIN_VALUES`` no bars and its docstring says the renderer
+    draws its values as dots; the renderer drew a median tick only. A01 has two nanowells at t_c: two clickable dots,
+    counted in the footer, and t_a (five values) its bars."""
+    fig, hits, shapes = _draw_one(tmp_path, {"A01": {"t_c": [1, 2], "t_a": [1, 2, 3, 4, 5]}}, "histogram")
+    assert shapes, "t_a drew no bars"
+    assert [len(sites) for _ax, _x, _y, sites in hits.entries] == [2], "the two-value swarm drew no clickable dots"
+    assert "1 swarm has too few values for a histogram, and is drawn as its dots." in _footer(fig)

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from core.safe import swallow
 from review.core.phone_panel_sheet import close_controls_sheets
 from review.features.nanowell import controller as nwc
+from review.features.nanowell._figure_aside import set_aside
 from review.features.nanowell import starting_cells_compute as sc
 from review.features.nanowell import subset_compute as ss
 from ui import theme
@@ -865,8 +866,8 @@ def share_page(editor: SubsetEditor, figure: QWidget, redraw) -> None:
         editor.scroll.updateGeometry()
         if aside != stepped_aside[0]:
             stepped_aside[0] = aside
-            figure.setVisible(not aside)
-            if not aside:
+            # Through the stack's one owner: the site detail may hold it aside too, and only both letting go shows it.
+            if set_aside(figure, "subset", aside):
                 QTimer.singleShot(0, figure, redraw)     # with the figure as context: dropped if the page is deleted
 
     watch = _PlaceOnResize(editor, place)

@@ -637,12 +637,21 @@ def apply_axis_log_scale(ax, which: str, on: bool,
     set_scale("function", functions=(_fwd, _inv))
     from matplotlib.ticker import FixedLocator, FuncFormatter
     mpl_axis = ax.xaxis if which == "x" else ax.yaxis
-    # 0, then every power of the base up to ten million — the reach the decade
-    # ticks always had; matplotlib draws only the ones inside the view.
+    # 0, then the powers of the base up to ten million — the reach the decade
+    # ticks always had; matplotlib draws only the ones inside the view. A base
+    # just above 1 has thousands of powers in that reach (1,621 at 1.01), each
+    # a tick the draw lays out — seconds per redraw, and unreadable — so every
+    # stride-th power is kept, at most _LOG1P_MAX_POWERS of them.
     steps = int(math.floor(math.log(10_000_000) / log_base + 1e-9))
-    powers = [0.0] + [base ** k for k in range(steps + 1)]
+    stride = max(1, math.ceil((steps + 1) / _LOG1P_MAX_POWERS))
+    powers = [0.0] + [base ** k for k in range(0, steps + 1, stride)]
     mpl_axis.set_major_locator(FixedLocator(powers))
     mpl_axis.set_major_formatter(FuncFormatter(_log_tick_text))
+
+
+#: The most powers of the base a log(x+1) axis is ticked at between 1 and ten
+#: million (:func:`apply_axis_log_scale`). Decades give 8, base 2 gives 24.
+_LOG1P_MAX_POWERS = 24
 
 
 def _log_tick_text(value, _pos=None) -> str:
@@ -1308,13 +1317,29 @@ def _apply_figure_legend_prefs(fig, prefs: dict) -> None:
     and ``legends_on`` reads an axes' children only, so the Legend controls did
     nothing to them. Position and colour stay the renderer's: a figure key is
     placed against the whole page, and its ink follows the card theme.
+
+    The size is *relative to the renderer's own*. A figure key is drawn at the
+    size its page laid its panels out around (the Nanowells keys at 7 pt, the
+    room above the panels reserved for that many rows), and it has no axes whose
+    ``_type_scale`` could shrink the preference to fit, so setting the
+    preference's 12 pt outright made a 16-entry key half again wider than its
+    figure. Each text's size is remembered the first time this pass meets it
+    (``_aw_base_pt``) and scaled by the preference over its default: the
+    default leaves the key as drawn, and raising the preference raises the key,
+    title and entries together.
     """
     show_leg = bool(prefs.get("legend_show", True))
-    font_size = float(prefs.get("legend_font_size", 9))
+    default = float(DEFAULT_EXPORT_STYLE_PREFS["legend_font_size"])
+    factor = float(prefs.get("legend_font_size", default)) / default
     for leg in list(getattr(fig, "legends", ()) or ()):
         leg.set_visible(show_leg)
-        for txt in leg.get_texts():
-            txt.set_fontsize(font_size)
+        title = leg.get_title()
+        texts = [*leg.get_texts(), *([title] if title is not None and title.get_text() else [])]
+        for txt in texts:
+            base = getattr(txt, "_aw_base_pt", None)
+            if base is None:
+                base = txt._aw_base_pt = float(txt.get_fontsize())
+            txt.set_fontsize(base * factor)
 
 
 def colour_mapped(fig) -> list:
@@ -1501,7 +1526,12 @@ def _style_x_tick_angle(ax, angle: int) -> None:
     own = getattr(ax, "_aw_own_xtick_angle", None)
     # A typed angle is the user's: ``tick_fit`` may shrink labels that collide
     # at it, but must not stand them on end, which overrode every typed angle
-    # on a crowded axis with 90°.
+    # on a crowded axis with 90°. A typed 0° cannot be told from the default
+    # here: ``x_tick_angle`` is a global preference whose missing value is
+    # filled with 0, and 0 also means "the plot's own angle". Keeping typed
+    # flat labels flat needs an explicit "Auto" setting on the Properties
+    # stepper and a migration of saved zeros, so it is left as a known gap
+    # (declined in the review of the PRs merged 2026-11-07 – 11-14).
     ax.xaxis._aw_angle_typed = angle != 0
     if angle == 0 and own is not None:
         rotation, ha, mode = own
@@ -2105,6 +2135,16 @@ def fit_clipped_titles(fig) -> None:
     them. A title that reaches the figure's edge without crossing it, or is
     wider than its own axes but inside the figure, is left exactly as its
     renderer wrote it.
+
+    Breaking is not always enough, and a fit that leaves the title clipped has
+    not fitted it: the second line grows the title *upward* past a figure
+    whose top margin was set for one line (the Bar figure's, at a 6 in
+    canvas, put its first line 12 px above the figure), and a single word can
+    be wider than the room. Such a title is shrunk as well, only as far as it
+    must be — to the room's width when a line is still too wide, then step by
+    step until its top is inside the figure — which is the one case where the
+    user's title size gives way, because the alternative is losing the words
+    that say what was plotted.
     """
     renderer = _renderer_of(fig)
     width = fig.bbox.width
@@ -2124,6 +2164,27 @@ def fit_clipped_titles(fig) -> None:
             line, title.get_fontproperties(), ismath=False)[0] for line in lines)
         if measured > room:
             _fit_title(title, room * _LABEL_FILL, renderer, shrink=False)
+            if _title_too_wide(title, room, renderer):
+                _fit_title(title, room * _LABEL_FILL, renderer, shrink=True)
+            _lower_title_into(title, renderer)
+
+
+def _title_too_wide(title, room: float, renderer) -> bool:
+    """Whether a broken *title* still has a line wider than *room*."""
+    return max(renderer.get_text_width_height_descent(line, title.get_fontproperties(), ismath=False)[0]
+               for line in title.get_text().split("\n")) > room
+
+
+def _lower_title_into(title, renderer) -> None:
+    """Shrink *title* until its top is inside its figure (at most twelve 5 % steps), re-stamping the fit.
+
+    A title already inside is left at its size, so only as much is taken off
+    as the figure's height demands."""
+    for _ in range(12):
+        if title.get_window_extent(renderer).y1 <= title.figure.bbox.height:
+            break
+        title.set_fontsize(title.get_fontsize() * 0.95)
+    setattr(title, _FITTED, (title.get_text(), float(title.get_fontsize())))
 
 
 def _fit_labels_to_phone(fig) -> None:

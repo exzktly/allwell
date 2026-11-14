@@ -63,3 +63,26 @@ def test_the_note_is_gone_for_label_free_where_the_field_is_hidden(tab):
     tab._nuclear_token_edit.setText("DAPI")
     tab._seg_method_cb.setCurrentIndex(tab._seg_method_cb.findData("cellpose_labelfree"))
     assert not tab._seg_channel_note.isVisibleTo(tab)
+
+
+def test_a_typed_prefix_of_a_listed_channel_stays_what_was_typed(tab, qtbot):
+    """Typing ``DAPI`` where ``DAPI_405`` is listed must leave ``DAPI``: a nuclear stain the list does not hold is the
+    normal case, and Qt's default inline completer used to fill in the listed name, which leaving the field accepted —
+    the run then segmented on a channel nobody typed. ``setText`` never reaches the completer, so this types keys."""
+    from PySide6.QtCore import Qt
+
+    tab._fluor_rows[0][0].setText("DAPI_405")
+    tab._fluor_add_row("GFP")
+    combo = tab._nuclear_token_edit
+    combo.setText("")
+    combo.setFocus()
+    qtbot.keyClicks(combo.lineEdit(), "DAPI")
+    tab._fluor_rows[0][0].setFocus()
+    qtbot.wait(10)
+    assert combo.text() == "DAPI"
+
+    combo.setText("")
+    combo.setFocus()
+    qtbot.keyClicks(combo.lineEdit(), "gfp")
+    qtbot.keyClick(combo.lineEdit(), Qt.Key_Tab)
+    assert combo.text() == "gfp", "a case-insensitive completion turned the typed name into a listed one"

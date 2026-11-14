@@ -180,6 +180,62 @@ def test_one_treatment_well_refuses_group_inference():
     assert any("group-level inference needs at least 2" in w for w in res.warnings)
 
 
+def test_a_plate_covariate_at_its_bound_does_not_make_the_treatment_odds_ratio_unbounded():
+    """A plate on which no well exceeds the threshold drives its own plate coefficient to the bound; the treatment
+    coefficient is finite and estimable from the other plate. The fit reported "an estimate reached its bound" for
+    any coefficient, so the odds ratio was printed as ∞ beside a finite interval. Only the treatment coefficient
+    reaching its bound makes the odds ratio unbounded."""
+    rows = [ex.WellCount(f"A:c{i}", "A", "control", False, k, 20_000, {}, {}) for i, k in enumerate([3, 2, 4])]
+    rows += [ex.WellCount(f"A:t{i}", "A", "drug", True, k, 20_000, {}, {}) for i, k in enumerate([6, 5])]
+    rows += [ex.WellCount(f"B:c{i}", "B", "control", False, 0, 20_000, {}, {}) for i in range(3)]
+    rows += [ex.WellCount(f"B:t{i}", "B", "drug", True, 0, 20_000, {}, {}) for i in range(2)]
+    r = ex.beta_binomial_test(rows, 99.0)
+    assert math.isfinite(r.odds_ratio)
+    assert r.odds_ratio == pytest.approx(math.exp(r.beta1))
+    assert 1.0 < r.odds_ratio < 4.0 and r.ci[0] < r.odds_ratio < r.ci[1]
+    assert not any("complete separation" in note for note in r.notes)
+
+
+def _null_plate(n_ctrl, n_treat, n=300, seed=11):
+    """Control and treatment wells drawn from one distribution: nothing in it is a rare responder."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_ctrl + n_treat):
+        n0 = rng.integers(1, 6, n)
+        nt = rng.poisson(n0 * np.exp(rng.normal(1.5, 0.5, n)))
+        rows += [("p", f"W{i}", "control" if i < n_ctrl else "drug", f"{j},0", n0[j], nt[j]) for j in range(n)]
+    return pd.DataFrame(rows, columns=["plate_id", "well_id", "condition", "nanowell_id", "n0", "nt"])
+
+
+def test_on_a_plate_with_no_responders_hc_candidates_alone_are_never_flagged():
+    """Higher Criticism always has a peak, so every null well has candidates. The flagged list is the nanowells past
+    the control cutoff and nothing else: a candidate below the cutoff is never put in front of the reviewer as a
+    finding beside a verdict of none."""
+    res = rr.analyse(_null_plate(4, 4))
+    assert res.units[0].interpretation == rr.NOT_DETECTED
+    flagged = res.responders
+    assert (flagged["above_threshold"]).all()
+    assert len(flagged) < sum(len(res.units[0].hc[w.key].candidates) for w in res.units[0].treated)
+
+
+def test_one_control_well_gives_no_calibrated_result_and_does_not_promise_one():
+    """With one control well its leave-one-out pool is empty, so the control null is empty and every treatment
+    well's empirical p is undefined. The verdict once said "per-well empirical results only" over a table of NaN — a
+    result promised and not computed (CLAUDE.md §7 #3). It says the group cannot be tested and promises nothing per
+    well; with no control well at all, the resolution warning no longer calls it "a single control well (0
+    nanowells)"."""
+    res = rr.analyse(_null_plate(1, 3))
+    unit = res.units[0]
+    treated = res.per_well[res.per_well["role"] == "treatment"]
+    for column in ("exceed_empirical_p", "hc_empirical_p", "a2r_empirical_p"):
+        assert treated[column].isna().all(), column       # nothing per-well was computed
+    assert "per-well" not in unit.interpretation
+    assert unit.interpretation == rr.INSUFFICIENT
+    from review.features.nanowell import rare_hc_compute as hcc
+    assert "single control well" not in hcc.resolution_warning(0, {}, 300)
+    assert "no control well" in hcc.resolution_warning(0, {}, 300)
+
+
 def test_every_sensitivity_percentile_is_reported():
     res = rr.analyse(plate(responders=10), RareParams(percentile=99.0))
     assert sorted(res.sensitivity["percentile"]) == [95.0, 99.0, 99.9]
@@ -374,6 +430,27 @@ def test_from_site_metrics_takes_baseline_and_final_counts_and_flags_unmeasurabl
     assert list(t["t_h"] - t["t0_h"]) == [72.0, 72.0]
     kept = prepare(t).kept
     assert list(kept["nanowell_id"]) == ["0,0"] and kept["fc"].iloc[0] == 4.5
+
+
+def test_from_site_metrics_reads_occupancy_3_plus_as_a_value_not_a_missing_one():
+    """Occupancy classes are the strings 0, 1, 2 and 3+; a numeric read made every 3+ nanowell NaN, and the analysis
+    then left it out as having no value of the metric — the nanowells with the most cells dropped from a test of the
+    top tail."""
+    m = pd.DataFrame({"well": ["A1"] * 4, "nw_q": [0, 0, 1, 1], "nw_r": [0, 0, 0, 0],
+                      "timepoint": ["t0", "t3", "t0", "t3"], "baseline_timepoint": ["t0"] * 4,
+                      "time_h": [0.0, 72.0, 0.0, 72.0], "n0": [1, 1, 1, 1], "n": [1, 5, 1, 2],
+                      "occupancy_class": ["1", "3+", "1", "2"], "state": ["measured"] * 4,
+                      "fused": [False] * 4, "identity_ok": [True] * 4})
+    t = from_site_metrics(m, {"A1": "control"}, "t3", plate_id="P9", crop_path=lambda w, q, r: "",
+                          value_column="occupancy_class")
+    assert list(t["value"]) == [3.0, 2.0]
+
+
+def test_a_growth_rate_is_not_called_a_level_with_a_fold_change_form():
+    from review.features.nanowell.rare_export_compute import _is_level
+
+    assert not _is_level("Growth rate (per hour, from ln n)")
+    assert _is_level("Cell count")
 
 
 # ── figures ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -769,3 +846,106 @@ def test_a_design_too_small_for_the_deciding_test_cannot_be_decided_rather_than_
                                 "design has 2). With fewer, it gives each well's own p only (Details).")
     null = rr.analyse(_small_plate(spiked=False, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]
     assert null.interpretation == rr.NOT_DETECTED
+
+
+# ── What the design cannot see (rare_design_compute) ───────────────────────────────────────────────────────────
+def _value_table(wells):
+    rows = [{"plate_id": "p", "well_id": w, "condition": c, "nanowell_id": str(i), "value": float(v)}
+            for w, c, values in wells for i, v in enumerate(values)]
+    return pd.DataFrame(rows)
+
+
+def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
+    """Responders lower on a fold change with a few dead control nanowells (fc = 0, 3 %, more than the 1 % tail):
+    the cutoff lands on 0 and nothing can be strictly below it, so every count is 0. That is a test that could not
+    count, not a finding of none — while 40 % of the treatment's nanowells died."""
+    rng = np.random.default_rng(0)
+
+    def well(p_dead, n=200):
+        v = rng.lognormal(0.7, 0.3, n)
+        v[rng.random(n) < p_dead] = 0.0
+        return v
+
+    wells = [(f"C{i}", "ctrl", well(0.03)) for i in range(4)] + [(f"T{i}", "drug", well(0.40)) for i in range(4)]
+    res = rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
+                     value_label="Count fold change")
+    unit = res.units[0]
+    assert sum(c.k for c in unit.primary.counts) == 0
+    assert unit.interpretation == rr.UNDECIDED
+    assert "sits on a tie" in unit.tie_note
+    from review.features.nanowell.rare_export_compute import caveats
+    assert unit.tie_note in caveats(unit, res.prepared.params, "Count fold change")
+
+
+def test_a_continuous_cutoff_is_not_called_a_tie():
+    rng = np.random.default_rng(0)
+    wells = [(f"C{i}", "ctrl", rng.lognormal(0.7, 0.3, 200)) for i in range(4)] + \
+            [(f"T{i}", "drug", rng.lognormal(0.7, 0.3, 200)) for i in range(4)]
+    unit = rr.analyse(_value_table(wells), RareParams(control="ctrl"), value_label="Count fold change").units[0]
+    assert unit.tie_note == ""
+    assert unit.interpretation == rr.NOT_DETECTED
+
+
+def _seeded(seed, lam_ctrl, lam_drug):
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(8):
+        lam, cond = (lam_ctrl, "ctrl") if i < 4 else (lam_drug, "drug")
+        n0 = rng.poisson(lam, 300)
+        n0 = n0[n0 > 0][:250]
+        nt = np.array([rng.poisson(3, k).sum() for k in n0])     # the same growth in both conditions
+        rows += [("p", f"W{i}", cond, str(j), a, b, b / a) for j, (a, b) in enumerate(zip(n0, nt))]
+    return pd.DataFrame(rows, columns=["plate_id", "well_id", "condition", "nanowell_id", "n0", "nt", "value"])
+
+
+def test_seeding_that_differs_between_the_sides_is_said_beside_the_verdict():
+    """The page tests its Metric with no grouping by starting cells. A treatment seeded more sparsely than its
+    control (1.2 against 3.5 cells), with identical growth, puts more nanowells in the fold change's top tail by
+    chance: the unstratified test calls it detected, and the figure must say why that is not to be trusted."""
+    res = rr.analyse(_seeded(0, 3.5, 1.2), RareParams(control="ctrl"), value_label="Count fold change")
+    unit = res.units[0]
+    assert unit.interpretation == rr.DETECTED            # the verdict stands; the caveat is what reaches the reader
+    assert unit.loading_note.startswith("Control and treatment nanowells started with different numbers of cells")
+    from review.features.nanowell.rare_export_compute import caveats
+    assert unit.loading_note in caveats(unit, res.prepared.params, "Count fold change")
+
+
+def test_equal_seeding_says_nothing_about_it():
+    unit = rr.analyse(_seeded(0, 2.0, 2.0), RareParams(control="ctrl"), value_label="Count fold change").units[0]
+    assert unit.loading_note == ""
+
+
+def test_one_control_well_is_not_reported_as_zero_of_zero_control_nanowells():
+    """A lone control well is scored leave-one-out against an empty pool: its counts are 0 of 0, which is the absence
+    of a comparison, not a count. The headline, the shape test's line and the exceedance note each said the wrong
+    thing about it — "0 of 0 control nanowells (—)", "too few distinct fold changes", "per-well empirical p-values
+    only" over a column of NaN."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_null_plate(1, 3))
+    unit = res.units[0]
+    head = rx.headline(unit, res.prepared.params)
+    assert "0 of 0 control" not in head and "no control null" in head
+    report = "\n".join(rx._unit_lines(res, unit, res.table.iloc[0]))
+    assert rx.NOT_RUN in report and rx.C_UNDEFINED not in report
+    assert not any("per-well empirical p-values only" in n for n in unit.primary.notes)
+    assert any("no control null" in n for n in unit.primary.notes)
+
+
+def test_under_responders_lower_the_flagged_rows_read_in_the_metric_s_own_sign():
+    """The analysis negates values to read the bottom tail as a top tail. The flagged-nanowell table and the parameter
+    log wrote those negated numbers: a fold change of 0.98 as value -0.98 against a threshold of -1.03, "above" a
+    cutoff it was below. They are written as the user reads them."""
+    rng = np.random.default_rng(2)
+    wells = [(f"C{i}", "ctrl", rng.lognormal(0.7, 0.3, 200)) for i in range(4)]
+    for i in range(4):
+        v = rng.lognormal(0.7, 0.3, 200)
+        v[:12] = 0.2                                     # a few nanowells far below the control's bottom 1 %
+        wells.append((f"T{i}", "drug", v))
+    res = rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
+                     value_label="Count fold change")
+    flagged = res.responders
+    assert len(flagged)
+    assert (flagged["value"] == flagged["fc"]).all()
+    assert (flagged["value"] < flagged["threshold"]).all() and (flagged["threshold"] > 0).all()
+    assert all(t > 0 for t in res.log["units"][0]["thresholds"].values())

@@ -158,3 +158,22 @@ def test_the_editor_s_scroll_area_hooks_nothing_python_onto_its_own_tree(qtbot):
     assert watch.eventFilter(body, QEvent(QEvent.Resize)) is False         # alive: asks again, filters nothing
     shiboken6.delete(scroll)                                                # the area and its content gone
     assert watch.eventFilter(body, QEvent(QEvent.Resize)) is False         # does nothing, touches nothing
+
+
+def test_a_redraw_with_the_editor_open_on_a_sideways_phone_keeps_the_figure_aside(qtbot, page):
+    """The figure stack has two reasons to step aside — the site detail alone on a phone, the Subset editor on a page
+    too short for both — and every redraw re-places the site detail (``redraw_detail`` → ``show_detail(False)`` with
+    no nanowell selected). When that call owned the stack's visibility outright it brought the figure back under the
+    open editor on the first redraw after a condition was applied, the overflow the step-aside exists to prevent."""
+    from review.features.nanowell import controller as nwc
+
+    editor = _open(qtbot, page, SIDEWAYS)
+    figure = page.widgets.get("_nw_card")
+    assert not figure.isVisibleTo(page.window)
+    nwc.redraw(page)
+    qtbot.wait(20)
+    assert not editor.isHidden()
+    assert not figure.isVisibleTo(page.window), "a redraw brought the figure back under the open editor"
+    editor.close_btn.click()
+    qtbot.wait(20)
+    assert figure.isVisibleTo(page.window), "closing the editor did not bring the figure back"

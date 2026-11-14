@@ -299,18 +299,21 @@ def test_the_legend_section_follows_whether_the_plot_draws_a_legend(qtbot, monke
 
 
 def test_the_style_pass_reaches_a_legend_drawn_on_the_figure():
-    """The Nanowells page keys its Distribution, QC and composite views with ``fig.legend``."""
+    """The Nanowells page keys its Distribution, QC and composite views with ``fig.legend``.
+
+    The size reaches it scaled from the size the page drew it at (7 pt here),
+    by the preference over its default — ``test_figure_legend_keeps_its_drawn_size``."""
     from matplotlib.figure import Figure
     from matplotlib.lines import Line2D
 
-    from review.core.plot_style import apply_export_style_prefs, figure_draws_a_legend
+    from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_prefs, figure_draws_a_legend
 
     fig = Figure()
     fig.add_subplot(1, 1, 1).plot([0, 1], [0, 1])
     key = fig.legend(handles=[Line2D([], [], label="responding")], fontsize=7)
     assert figure_draws_a_legend(fig)
     apply_export_style_prefs(fig, {"legend_show": True, "legend_font_size": 13})
-    assert key.get_texts()[0].get_fontsize() == 13
+    assert key.get_texts()[0].get_fontsize() == pytest.approx(7 * 13 / DEFAULT_EXPORT_STYLE_PREFS["legend_font_size"])
     apply_export_style_prefs(fig, {"legend_show": False, "legend_font_size": 13})
     assert not key.get_visible()
 

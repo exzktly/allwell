@@ -33,6 +33,10 @@ _SQUEUE_J = re.compile(r"\bsqueue\b.*?\s-j\b")
 #: ``"<file>::<site>"`` → why that site is right with a step id. ``<site>`` is the enclosing function
 #: (``Class.method`` for a method), or ``<module>:NAME`` for a module-level constant.
 ROSTER: dict[str, str] = {
+    "services/remote_hold.py::GrantedNode._queue_wait_spent":
+        "Cancels nothing itself: it releases through cancel_script and, when the host did not confirm the cancel, "
+        "words a message telling the user to `scancel` the hold job, which is still queued and so has no step. "
+        "tests/test_a_long_queue_wait_survives_a_host_that_does_not_answer.py.",
     "services/remote_hold.py::cancel_script":
         "The one place a granted node is cancelled on purpose (Release, quitting, an abandoned request), behind "
         "`_only_my_job`. tests/test_remote_hold_request.py.",

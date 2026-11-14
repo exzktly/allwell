@@ -823,6 +823,7 @@ def generate_status_message(ctx, cells, n, rendered, unrendered, failed,
     return msg
 
 
+@_load_progress.one_at_a_time
 def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
     """Load images for every cell and lay out the rendered image table.
 
@@ -832,8 +833,7 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
     re-render of the same request, and re-walking a missing well's folders on a
     network drive is what made a click on the zoom percentage hang for minutes.
     """
-    from review.core.ui_helpers import make_overlay_thumb
-    from review.core.ui_helpers import clear_layout
+    from review.core.ui_helpers import clear_layout, make_overlay_thumb
 
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     grid = ctx.runtime.image_table.render_grid

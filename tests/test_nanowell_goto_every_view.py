@@ -133,12 +133,27 @@ def test_a_well_not_drawn_or_an_address_not_in_the_table_is_said_and_selects_not
     _type(ctx, "A02 1,0")                                       # in the dataset, but not selected on the plate
     assert said[-1].startswith("Well A02 is not drawn on this page") and "select it on the plate" in said[-1]
     assert st.selected_sites == [list(TARGET)] and st.well == "B01"
-    _type(ctx, "B01 9,9")
-    assert said[-1] == "B01 has no nanowell 9,9 in its table: nothing to select."
-    assert st.selected_sites == [list(TARGET)]
     _type(ctx, "B3")
     assert said[-1].startswith("'B3' is not a nanowell address")
     assert st.selected_sites == [list(TARGET)]
+
+
+def test_an_address_not_in_the_table_clears_the_previous_selection(page, qtbot, monkeypatch):
+    """Going to an address the target well's table does not have moves the page to that well and says nothing is
+    selected; the nanowell selected before (here in the other well, B01) must not stay in the site detail and the
+    pop-out beside a page that has moved on to A01 — that left the detail naming a nanowell of a well no longer shown,
+    under a status line saying nothing was selected."""
+    ctx = page
+    st = _loaded(qtbot, ctx)
+    nwc.set_view(ctx, "distribution")
+    _type(ctx, "B01 2,0")
+    assert st.selected_sites == [list(TARGET)]
+    said = _statuses(ctx, monkeypatch)
+    _type(ctx, "A01 9,9")
+    assert said[-1] == "A01 has no nanowell 9,9 in its table: nothing to select."
+    assert st.well == "A01"
+    assert st.selected_sites == [], f"the previous selection {st.selected_sites} stayed after going to A01 9,9"
+    assert not ctx.widgets.get("_nw_detail_pane").isVisibleTo(ctx.window)
 
 
 @pytest.mark.parametrize("view", ["qc", "statistics", "position"])

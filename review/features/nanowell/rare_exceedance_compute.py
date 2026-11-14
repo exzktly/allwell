@@ -1,7 +1,8 @@
 """Rare-responder analysis, Test A (primary): how many nanowells of a well exceed the control tail.
 
-**The threshold.** ``T`` is the chosen percentile (99th by default) of the control values, computed **within each
-loading stratum** (``rare_data_compute.assign_strata``). A treatment well is counted against ``T`` from every
+**The threshold.** ``T`` is the chosen percentile (99th by default) of the control values, computed within each
+loading stratum when strata are set (``rare_data_compute.assign_strata``) and over the whole pool otherwise — the
+page's analysis sets none. A treatment well is counted against ``T`` from every
 control well; a control well against ``T`` from every *other* control well (leave-one-out), so a control well's
 count is not lowered by its own nanowells having set the bar. A fixed threshold chosen before running
 (``RareParams.fixed_threshold``) replaces the percentile in every stratum.
@@ -149,7 +150,11 @@ def fit_bb(k, n, X, fixed: dict | None = None) -> BBFit:
         if best is None or res.fun < best.fun:
             best = res
     coef, theta = unpack(best.x)
-    at_bound = bool(np.any(np.abs(best.x[:-1]) >= COEF_BOUND - 1e-3))
+    # Only the treatment coefficient (column 1) at its bound leaves the odds ratio unestimated: a plate covariate
+    # driven to the bound by a plate with no exceedance anywhere does not, and β1 stays finite and estimable from the
+    # other plates. A design without a treatment column (an intercept-only fit) asks about every coefficient.
+    watched = [1] if X.shape[1] > 1 else list(range(X.shape[1]))
+    at_bound = bool(any(j not in fixed and abs(coef[j]) >= COEF_BOUND - 1e-3 for j in watched))
     return BBFit(coef, float(theta), float(-best.fun), at_bound)
 
 
@@ -241,8 +246,8 @@ def beta_binomial_test(counts: list[WellCount], percentile: float, *, ci: bool =
                             f"(reported as {'0' if separated == 'treatment' else '∞'}); the p-value and the "
                             "interval's finite end stand")
     elif full.at_bound:
-        result.notes.append("complete separation: an estimate reached its bound, so the odds ratio is reported as "
-                            f"{'0' if full.coef[1] < 0 else '∞'}")
+        result.notes.append("complete separation: the treatment estimate reached its bound, so the odds ratio is "
+                            f"reported as {'0' if full.coef[1] < 0 else '∞'}")
     if len(names) > 2:
         result.notes.append("covariates: " + ", ".join(names[2:]))
     return result
@@ -279,7 +284,11 @@ def fisher(counts: list[WellCount]) -> tuple[float, float]:
 def fallback_test(counts: list[WellCount], percentile: float, group_allowed: bool) -> ExceedanceResult:
     """Per-well empirical p-values, and the pooled Fisher test when group-level inference is allowed at all."""
     result = ExceedanceResult(percentile, EMPIRICAL_LABEL, counts, min_p=_min_p(counts))
-    result.notes.append("too few wells for the beta-binomial regression: per-well empirical p-values only")
+    if sum(1 for c in counts if not c.treated) < 2:
+        # A lone control well's leave-one-out pool is empty: there is no control null and no per-well p either.
+        result.notes.append("fewer than 2 control wells: no control null, so no calibrated result, per well or group")
+    else:
+        result.notes.append("too few wells for the beta-binomial regression: per-well empirical p-values only")
     if group_allowed:
         result.fisher_or, result.fisher_p = fisher(counts)
     return result

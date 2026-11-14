@@ -28,8 +28,9 @@ cells joined no nanowell of the table, keeps the run's count but has no classes,
 nanowell's classes ever add up to more than its count (a cell table that does not match the count the run wrote),
 every size metric there is undefined with that reason rather than a negative unclassified count.
 
-Each well is summarised by the **mean** over its nanowells (``summary_compute.MEAN_METRICS``): the user's choice,
-and the right reduction for small whole-number counts, whose median jumps between integers.
+Each well's counts, ratio and share are summarised by the **mean** over its nanowells
+(``summary_compute.MEAN_METRICS``): the user's choice, and the right reduction for small whole-number counts, whose
+median jumps between integers. The fold changes (:data:`FC_COLUMNS`) are summarised by the median, as ``count_fc``.
 
 Qt-free.
 """

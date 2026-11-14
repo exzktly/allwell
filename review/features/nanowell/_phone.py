@@ -17,6 +17,7 @@ from collections.abc import Callable
 from PySide6.QtCore import QTimer
 
 from core import phone_layout
+from review.features.nanowell._figure_aside import set_aside
 
 def on_phone() -> bool:
     """Whether phone layout is on."""
@@ -66,7 +67,7 @@ def detail_placement(card, detail, detail_layout, strip_card, *, desk, phone, re
         detail.setVisible(on)
         was_hidden = card.isHidden()
         card.setVisible(not (on and phone))
-        figures.setVisible(not (on and phone))
+        set_aside(figures, "detail", on and phone)   # one owner of the stack's visibility, shared with the Subset editor
         if was_hidden and not card.isHidden():
             # Hidden, the figure was not drawn; it is drawn now that it is back. With the card as the timer's context,
             # Qt drops the call if the page is deleted before it runs.

@@ -121,3 +121,40 @@ def test_the_analyze_pane_says_so_when_pointed_at_one(qtbot, tmp_path, monkeypat
     tab._input_edit.setText(str(root))
     assert tab._layout_lbl.text().startswith("⚠ home/ holds more than 10 folders")
     assert not tab._output_row.isVisibleTo(tab)
+
+
+def _plate_with_in(root, wells=("A01", "B02")):
+    import zipfile
+
+    (root / "in").mkdir(parents=True)
+    (root / "out").mkdir()
+    for well in wells:
+        with zipfile.ZipFile(root / "in" / f"{well}.zip", "w") as z:
+            z.writestr(f"exp_GFP_{well}_f0_t0.tif", b"x")
+    return root
+
+
+def test_a_large_folder_beside_in_does_not_refuse_the_plate(tmp_path, monkeypatch, listed):
+    """The pipeline reads only ``in/`` when the root holds one, so the root's other folders — ``out/``, the original
+    export kept beside ``in/`` — decide nothing. Their size used to: the root's walk ran out of budget and the plate was
+    refused with "Choose the plate's own folder: the one holding in/", which is the folder chosen.
+
+    Wrong implementations this rejects: checking ``too_large`` before ``in/`` is considered (the defect); walking the
+    root's siblings at all (``listed`` would include them)."""
+    monkeypatch.setattr(irs, "PLANNER_MAX_FOLDERS", 10)
+    root = _plate_with_in(tmp_path / "plate")
+    _tree(root / "export", 40)
+    plan = irs.plan_input_layout(root)
+    assert plan.action == irs.GROUPED, plan.message
+    assert irs.resolve_input_output(root)[:2] == (root / "in", root / "out")
+    assert not [p for p in listed if "export" in p.parts], "the planner walked the export beside in/"
+
+
+def test_loose_images_beside_in_are_still_refused(tmp_path, monkeypatch):
+    """Not walking the root's folders must not stop it seeing images at the root itself, which a run would skip."""
+    monkeypatch.setattr(irs, "PLANNER_MAX_FOLDERS", 10)
+    root = _plate_with_in(tmp_path / "plate")
+    (root / "exp_GFP_C03_f0_t0.tif").write_bytes(b"x")
+    plan = irs.plan_input_layout(root)
+    assert plan.action == irs.NEEDS_ZIPPING
+    assert "1 loose image(s)" in plan.message

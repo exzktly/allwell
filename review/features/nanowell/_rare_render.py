@@ -235,7 +235,11 @@ def _shade_shape_test(ax, unit, stratum, log_axis: bool, colour) -> None:
     if log_axis:
         keep = x > 0
         x, f0, fn, excess = np.log2(x[keep]), f0[keep], fn[keep], excess[keep]
-    poly = ax.fill_between(x, f0, fn, where=excess, step="post", color=colour, alpha=0.28, linewidth=0, zorder=1)
+    # A step drawn "post" holds each value up to the next x, and fill_between fills a step only when both its ends
+    # are marked: mark each excess point's next one too, or the last step — mass beyond the controls' top value, the
+    # heaviest the test weighs — is left unshaded.
+    reach = excess | np.r_[False, excess[:-1]]
+    poly = ax.fill_between(x, f0, fn, where=reach, step="post", color=colour, alpha=0.28, linewidth=0, zorder=1)
     poly.set_gid(f"rare-ad-excess:{stratum}")
 
 

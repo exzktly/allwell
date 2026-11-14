@@ -1067,6 +1067,11 @@ def test_the_cumulative_panel_shades_the_shape_test_s_region_and_says_so():
     shaded = [c for c in ax.collections if isinstance(c, PolyCollection) and c.get_gid() == "rare-ad-excess:all"]
     assert len(shaded) == 1
     control = np.concatenate([w.values["all"] for w in unit.controls])
-    left = shaded[0].get_paths()[0].vertices[:, 0].min()
-    assert left >= math.log2(ad.tail_start(control)) - 1e-9          # never below the control median
+    xs = np.concatenate([path.vertices[:, 0] for path in shaded[0].get_paths()])
+    assert xs.min() >= math.log2(ad.tail_start(control)) - 1e-9      # never below the control median
+    # Past every control value is the mass the test weighs most: the shading runs on to the largest treated value,
+    # where the treated curve reaches the top — not stopping one step short of it.
+    treated = np.concatenate([w.values["all"] for w in unit.treated])
+    assert (treated > control.max()).any()
+    assert xs.max() == pytest.approx(math.log2(treated.max()))
     assert ax.get_title().endswith("dashed: exceedance test's cutoff · shaded: what the shape test counts")

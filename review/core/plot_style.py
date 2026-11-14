@@ -1526,7 +1526,12 @@ def _style_x_tick_angle(ax, angle: int) -> None:
     own = getattr(ax, "_aw_own_xtick_angle", None)
     # A typed angle is the user's: ``tick_fit`` may shrink labels that collide
     # at it, but must not stand them on end, which overrode every typed angle
-    # on a crowded axis with 90°.
+    # on a crowded axis with 90°. A typed 0° cannot be told from the default
+    # here: ``x_tick_angle`` is a global preference whose missing value is
+    # filled with 0, and 0 also means "the plot's own angle". Keeping typed
+    # flat labels flat needs an explicit "Auto" setting on the Properties
+    # stepper and a migration of saved zeros, so it is left as a known gap
+    # (REVIEW_NOV14_TRACKER P5, declined).
     ax.xaxis._aw_angle_typed = angle != 0
     if angle == 0 and own is not None:
         rotation, ha, mode = own

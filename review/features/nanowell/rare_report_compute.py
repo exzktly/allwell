@@ -44,6 +44,10 @@ SUPPORTS = "supports rare-responder enrichment"
 SHAPE_ONLY = "general upper-tail shape difference only (AD) — not evidence of rare responders"
 NO_EVIDENCE = "no evidence of rare-responder enrichment"
 INSUFFICIENT = "replication insufficient — per-well empirical results only"
+#: The verdict with fewer than two control wells: a control well's leave-one-out pool is then empty, so there is no
+#: control null and no per-well empirical p either — promising "per-well empirical results" over a table of NaN would
+#: present a result that was never computed.
+NO_CONTROL_NULL = "replication insufficient — no calibrated result: a control null needs at least 2 control wells"
 
 
 @dataclass
@@ -178,7 +182,7 @@ def _bh(units: list[Unit], key: str, ps: list[float]) -> None:
 
 def interpret(unit: Unit, fdr: float) -> str:
     if not unit.group_allowed:
-        return INSUFFICIENT
+        return NO_CONTROL_NULL if len(unit.controls) < 2 else INSUFFICIENT
     sig = {k: np.isfinite(v) and v < fdr for k, v in unit.q.items()}
     if sig.get("exceedance") or sig.get("hc"):
         which = [name for name, k in (("exceedance", "exceedance"), ("HC", "hc")) if sig.get(k)]

@@ -11138,15 +11138,19 @@ variation, and the self-check measures whether it holds its false-positive rate 
 ### Guardrails, multiple testing, and what a result means
 
 **Replication guardrail.** A group, or a control, with fewer than **2 wells** gets no group-level result at all:
-no regression, no Fisher test, no permutation p. The report says *"replication insufficient — per-well empirical
-results only"* and still gives each treatment well's own empirical p. One well per condition cannot separate a
+no regression, no Fisher test, no permutation p. With two or more control wells and one treatment well, the report
+says *"replication insufficient — per-well empirical results only"* and still gives each treatment well's own
+empirical p. With fewer than two control wells there is no control null at all — a lone control well's
+leave-one-out pool is empty — so it says *"replication insufficient — no calibrated result: a control null needs at
+least 2 control wells"*, and the per-well empirical p columns are empty. One well per condition cannot separate a
 treatment from that well's own luck, and the test refuses to pretend otherwise.
 
 **What each design can do.**
 
 | Wells (control + treatment) | Test A | Tests B and C (permutation) |
 | --- | --- | --- |
-| 1 + any, or any + 1 | per-well empirical p only | per-well empirical p only |
+| 0 or 1 + any | no calibrated result | no calibrated result |
+| 2 or more + 1 | per-well empirical p only | per-well empirical p only |
 | 2 + 2 | empirical null; Fisher shown, not used | 6 shufflings, smallest p 0.17 |
 | 3 + 2 | beta-binomial regression | 10 shufflings, smallest p 0.1 |
 | 6 + 3 | beta-binomial regression | 84 shufflings, smallest p 0.012 |

@@ -180,6 +180,24 @@ def test_one_treatment_well_refuses_group_inference():
     assert any("group-level inference needs at least 2" in w for w in res.warnings)
 
 
+def test_one_control_well_gives_no_calibrated_result_and_does_not_promise_one():
+    """With one control well its leave-one-out pool is empty, so the control null is empty and every treatment
+    well's empirical p is undefined. The verdict said "per-well empirical results only" over a table of NaN — a
+    result promised and not computed (CLAUDE.md §7 #3). It now says there is no calibrated result and why; with no
+    control well at all, the resolution warning no longer calls it "a single control well (0 nanowells)"."""
+    res = rr.analyse(_null_plate(1, 3))
+    unit = res.units[0]
+    treated = res.per_well[res.per_well["role"] == "treatment"]
+    for column in ("exceed_empirical_p", "hc_empirical_p", "a2r_empirical_p"):
+        assert treated[column].isna().all(), column       # nothing per-well was computed
+    assert "per-well empirical results" not in unit.interpretation
+    assert "at least 2 control wells" in unit.interpretation
+    assert unit.interpretation == rr.NO_CONTROL_NULL
+    from review.features.nanowell import rare_hc_compute as hcc
+    assert "single control well" not in hcc.resolution_warning(0, {}, 300)
+    assert "no control well" in hcc.resolution_warning(0, {}, 300)
+
+
 def test_every_sensitivity_percentile_is_reported():
     res = rr.analyse(plate(responders=10), RareParams(percentile=99.0))
     assert sorted(res.sensitivity["percentile"]) == [95.0, 99.0, 99.9]

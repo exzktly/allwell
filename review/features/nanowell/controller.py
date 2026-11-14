@@ -1147,7 +1147,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
         return (drawn.hits if drawn is not None else None), drawn
     if filtered is not None:
         note = " ".join(filter(None, [_named(ss.note(filtered), sizes), note]))
-    baseline_moving = mvc.baseline_window_for(moving, baseline_moving, baseline)
+    baseline_moving = mvc.baseline_window_for(moving, baseline_moving, baseline, moving_centred)
     if view == "trajectories":
         marks = {w: timepoint_marks(data, w) for w in wells}
         column = metric_column(metric, channel)
@@ -1209,7 +1209,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
 def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channel, timepoint: str, control: str,
                         baseline: str, cohort: bool, moving: int, baseline_moving: int, moving_centred: bool, sizes,
                         names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare,
-                        hidden: dict | None = None):
+                        hidden: dict | None = None) -> object | None:
     """The Statistics view: the samples compared by *stats_test* — or, for the Rare responders test, the groups
     against the control group by the rare-responder analysis (``_rare_controller.compose``, *rare* carrying the
     page's store of results and its worker request). Returns the result drawn. *hidden* is the groups hidden on the
@@ -1260,10 +1260,11 @@ def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels
     rows = metrics[metrics["well"].isin(list(wells))]
     if column not in rows:
         return ""
-    said = mvc.baseline_nothing_left_text(rows, column, baseline_moving)
+    said = mvc.baseline_nothing_left_text(rows, column, baseline_moving, centred=centred)
     if said:
         return said
-    rows, _reasons = mvc.rebase(rows, column, pd.Series("", index=rows.index, dtype=object), baseline_moving)
+    rows, _reasons = mvc.rebase(rows, column, pd.Series("", index=rows.index, dtype=object), baseline_moving,
+                                centred)
     return mvc.nothing_left_text(rows, column, moving, baseline_window=baseline_moving, centred=centred)
 
 
@@ -2972,13 +2973,26 @@ def set_moving_centred(ctx, centred: bool) -> None:
         ctx.notify.set_status((f"A centred window needs an odd number of timepoints: the moving average is now over "
                       f"{window} timepoints." if window else
                       "A centred window needs at least 3 timepoints: the moving average is off."))
+    base = mvc.clamp_window(st.baseline_moving, centred)        # the baseline's window takes the same kind
+    if base != st.baseline_moving:
+        st.baseline_moving = base
+        ctx.notify.set_status(f"The baseline average is centred too, so it is now over {base} timepoints." if base
+                              else "The baseline average is centred too, and needs at least 3: it is off.")
     _set(ctx, "moving_centred", centred)
 
 
 def set_baseline_moving(ctx, window: int) -> None:
     """The baseline's own window for a fold change, in timepoints; 0 (or 1) keeps the baseline one measured value.
-    Used only while the moving average is on (``moving_compute.baseline_window_for``)."""
-    _set(ctx, "baseline_moving", mvc.clamp_window(window))
+    Used only while the moving average is on (``moving_compute.baseline_window_for``). Centred with it, so odd while
+    the moving average is centred."""
+    st = _state(ctx)
+    centred = bool(getattr(st, "moving_centred", False))
+    clamped = mvc.clamp_window(window, centred)
+    if centred and clamped != mvc.clamp_window(window):
+        ctx.notify.set_status(f"A centred window needs an odd number of timepoints: the baseline average is now over "
+                              f"{clamped} timepoints." if clamped else
+                              "A centred window needs at least 3 timepoints: the baseline average is off.")
+    _set(ctx, "baseline_moving", clamped)
 
 
 def set_metric(ctx, metric: str) -> None:

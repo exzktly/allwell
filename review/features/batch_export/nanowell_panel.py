@@ -557,7 +557,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
             over_time = view in ("distribution", "trajectories")
             moving = _moving_window_for(drawn, settings["moving"]) if over_time else 0
             column = _metric_column(drawn, channel)
-            base_moving = (_baseline_window_for(moving, settings["baseline_moving"], settings["baseline"])
+            base_moving = (_baseline_window_for(moving, settings["baseline_moving"], settings["baseline"],
+                                                settings["moving_centred"])
                            if _base_value(column) is not None else 0)
             table = (_wells_summary(kept, wells, drawn, channels=data.channels, channel=channel,
                                     cohort=settings["cohort"] and over_time, responding_above=cut, moving=moving,

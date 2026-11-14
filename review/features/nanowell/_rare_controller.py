@@ -130,7 +130,7 @@ def windowed(metrics: pd.DataFrame, wells, column: str, *, moving: int, baseline
     ``moving_compute.nothing_left_text`` reads."""
     frame = metrics[metrics["well"].isin(list(wells))]
     blank = pd.Series("", index=frame.index, dtype=object)
-    rebased, reasons = mvc.rebase(frame, column, blank, baseline_moving)
+    rebased, reasons = mvc.rebase(frame, column, blank, baseline_moving, moving_centred)
     averaged, reasons = mvc.apply(rebased, column, reasons, moving, moving_centred)
     return averaged, reasons, rebased
 
@@ -155,7 +155,8 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
         before = metrics[metrics["well"].isin(list(conditions_of(groups)))]
         metrics, why, rebased = windowed(metrics, conditions_of(groups), column, moving=moving,
                                          baseline_moving=baseline_moving, moving_centred=moving_centred)
-        empty = (mvc.baseline_nothing_left_text(before, column, baseline_moving, timepoint=timepoint)
+        empty = (mvc.baseline_nothing_left_text(before, column, baseline_moving, timepoint=timepoint,
+                                                centred=moving_centred)
                  or mvc.nothing_left_text(rebased, column, moving, timepoint=timepoint,
                                           baseline_window=baseline_moving, centred=moving_centred))
         if empty:

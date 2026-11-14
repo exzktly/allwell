@@ -6922,19 +6922,23 @@ the sentence names it.
   baseline timepoint — only the endpoint is averaged — and the footer says so. log₂ count fold changes are
   averaged as logs, which is a geometric mean of the ratios.
 - **Baseline average** (beside *Moving average*, for a fold change) — a number of timepoints, 1 (off) or 2 to 9: the baseline
-  becomes the mean of the nanowell's measured values (its count, confluence, cell fluorescence or fluorescence) at the
-  baseline timepoint and the ones before it, that many in all — never after it, since a later timepoint may
-  already show the treatment. Like the moving average it is used only when every timepoint of its window has a
+  becomes the mean of the nanowell's measured values (its count, confluence, cell fluorescence or fluorescence) over
+  that many timepoints, of the same kind as the *Moving average*: with **Moving average** (trailing), the baseline
+  timepoint and the ones before it; with **Centred average**, the baseline timepoint and as many after it as before
+  it — so 3 or 5 (an odd number; the box steps by two), and with the baseline at the second timepoint a window of 3
+  is the first, second and third timepoints. A centred baseline window takes in timepoints after the baseline, which
+  may already show a treatment applied at the baseline; choose the trailing kind when they must not count. Like the
+  moving average it is used only when every timepoint of its window has a
   value; a nanowell whose baseline window is incomplete has no fold change, counted as "baseline window before
-  the first timepoint", "baseline window has a gap" or "baseline window not joinable". It is greyed, with the
+  the first timepoint", "baseline window after the last timepoint" (centred), "baseline window has a gap" or
+  "baseline window not joinable". It is greyed, with the
   reason in its tooltip, while the *Moving average* is off, for a metric that is not a fold change, and with the
   *Earliest* and *First measurable* baselines — the first has nothing before it, and every timepoint before the
   first measurable one has no value, so no window could ever be complete — choose a timepoint. The footer states
-  the baseline's window. The baseline's window always ends at the baseline and reaches back, even when the *Moving
-  average* is centred: with the baseline at the second timepoint only a window of 2 fits. A window that cannot fit
-  before the baseline leaves no fold change at all, and every view says so in place of the plot ("Baseline average
-  over 3 timepoints: no fold change is left to draw … Set Baseline average to 2 or less, or choose a later
-  Baseline.").
+  the baseline's window. A window that cannot fit around the baseline — trailing and wider than the timepoints up to
+  it, or centred and reaching past the first or last timepoint — leaves no fold change at all, and every view says
+  so in place of the plot ("Baseline average over 5 timepoints, centred: no fold change is left to draw … Set
+  Baseline average to 3 or less, or choose another Baseline.").
 - **Rim focus** (on by default) and its percentage box beside it — leave out a nanowell at any timepoint where its own rim
   was out of focus. Every nanowell run measures each nanowell's rim sharpness (the `focus` column of
   `nanowells/<well>.csv`), so this works on datasets you already have, with no re-run. A nanowell is out of

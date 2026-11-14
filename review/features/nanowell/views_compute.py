@@ -151,7 +151,7 @@ def trajectory_panels(metrics: pd.DataFrame, wells, column: str, *, cohort: bool
         tps = list(order["timepoint"])
         if moving_compute.is_on(moving):
             rows, _reasons = moving_compute.rebase(rows, column, pd.Series("", index=rows.index, dtype=object),
-                                                   baseline_moving)
+                                                   baseline_moving, moving_centred)
         measured = numeric_values(rows, column)
         values, _why = moving_compute.averaged(rows, column, measured, moving, moving_centred)
         complete = (rows.assign(_m=measured.notna().astype(float))

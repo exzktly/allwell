@@ -13271,7 +13271,8 @@ centred, and turning centring on with an even window takes it one down and says 
 that row of the same nanowell (`moving_compute._centred`), so both kinds follow one set of rules — complete or
 nothing, joinable, a fold change's window starting after its baseline — and the only new exclusion is "after the
 last full window" (`LATE_REASON`), for a timepoint with no *t + h* in its well. The baseline's own window
-(`rebase`) is always trailing. The flag is a keyword beside `moving` everywhere the window goes
+(`rebase(centred=)`) takes the same kind: centred, it is the baseline timepoint and the *h* either side of it. The
+flag is a keyword beside `moving` everywhere the window goes
 (`moving_compute.apply` / `averaged` / `describe` / `nothing_left_text`, `distribution_model`, `wells_summary`,
 `trajectory_panels`, `draw_view`), part of `window_compute.settings_key`, saved in the page's view state, and
 written to Batch Export's summary CSV as `moving_average_window` (`trailing` / `centred`). On the band the choice is
@@ -13291,9 +13292,15 @@ on top of that, both in `moving_compute`:
   bound is per nanowell, so under *First measurable* each nanowell's windows start after its own baseline. Measured
   values (`n`, `c`, brightness, fluorescence) have no baseline and no bound (`base_value` returns `None`).
 - **The baseline's own window** (`NanowellState.baseline_moving`, the *Baseline average* spin box beside *Moving
-  average*; `moving_compute.rebase`). With a window of *M* the baseline becomes the trailing mean of the measured
-  value — the count, confluence, brightness or fluorescence, never a fold change — over the baseline timepoint and
-  the *M − 1* before it, never after it (a later timepoint may already carry the treatment). The fold change is then
+  average*; `moving_compute.rebase`). With a window of *M* the baseline becomes the mean of the measured value —
+  the count, confluence, brightness or fluorescence, never a fold change — over a window of the moving average's
+  kind: trailing, the baseline timepoint and the *M − 1* before it; centred (`rebase(centred=True)`, *M* odd, as
+  `baseline_window_for(centred=)` and `controller.set_baseline_moving` keep it, the spin box stepping by two), the
+  baseline timepoint and the *(M − 1) / 2* either side of it, so a centred baseline averages in timepoints after the
+  baseline, which a treatment applied at it may already show — the trailing kind is the one that never does. Too
+  near the end of its well, a centred baseline window is incomplete with `BASE_LATE_REASON`. The endpoint's windows
+  still start after the baseline timepoint itself, so the first endpoint values can share timepoints with a centred
+  baseline window. The fold change is then
   recomputed against that mean with `site_metrics`' own rules (a row's own value missing or not joinable, a ratio
   over a mean at or below zero). It follows the endpoint's rule: complete and joinable or undefined, its shortfalls
   counted as "baseline average: before the well's first timepoint / a gap / not joinable"; a baseline row that is
@@ -13324,10 +13331,10 @@ with no reason; Trajectories does the same when no line is left (`controller._mo
 responders test before asking its worker (`_rare_controller.compose`). It is said only when the values were there
 before the average, so a figure emptied by something else keeps its own message. **The baseline's own window is
 checked first** (`moving_compute.baseline_nothing_left_text`, on the frame before `rebase`): a baseline window
-longer than the timepoints at and before the baseline can never be complete, so every fold change is undefined and
+that cannot fit around the baseline — trailing and wider than the timepoints at and before it, or centred and
+reaching past the well's first or last timepoint — can never be complete, so every fold change is undefined and
 `nothing_left_text`, measured after it, finds nothing to average and says nothing. The sentence names the baseline
-timepoint, says the baseline's window is trailing even under a centred moving average, and gives the longest
-baseline window that would fit.
+timepoint, the side the window runs out on, and the longest baseline window of the same kind that would fit.
 
 A ratio over a baseline that is constant per nanowell averages the same whichever is divided first.
 `log2_count_fc` is averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not

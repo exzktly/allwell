@@ -151,8 +151,9 @@ _MOVING_KIND_TIP = (
     "the window is 3, 5, 7 or 9, and the last timepoints, without a full window after them, have no value. The "
     "Baseline average always looks back only.")
 _BASELINE_MOVING_TIP = (
-    "Baseline average: a fold change's baseline becomes the mean of the nanowell's measured values at the baseline "
-    "timepoint and the ones before it, this many in all — never after it, which may already carry the treatment. "
+    "Baseline average: a fold change's baseline becomes the mean of the nanowell's measured values over this many "
+    "timepoints, of the Moving average's kind — the baseline timepoint and the ones before it, or, centred, the "
+    "baseline timepoint and as many after it as before it (an odd window). "
     "1 is off: the baseline is its one measured value and only the endpoint is averaged. Like the endpoint's window it is "
     "used only when every timepoint of it has a value; the others are counted among the exclusions.")
 #: Why the baseline's window is greyed, when it is.
@@ -265,6 +266,7 @@ def _refresh_moving(spin, kind, st) -> None:
 def _refresh_baseline_moving(spin, st, column: str | None) -> None:
     """The Baseline average spin box: the state's window, enabled only where it reaches the figure, and its tooltip
     naming the reason when it does not."""
+    spin.setSingleStep(2 if st.moving_centred else 1)       # centred with the moving average: odd windows
     spin.setValue(max(st.baseline_moving, 1))
     greyed = baseline_moving_greyed(st, column)
     spin.setEnabled(greyed is None)

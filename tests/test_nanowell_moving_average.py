@@ -579,7 +579,12 @@ def test_the_baseline_s_window_control_is_greyed_until_it_can_reach_the_figure(p
     assert spin.isEnabled() and "\n\n(" not in spin.toolTip()
     spin.setValue(3)
     assert st.baseline_moving == 3
-    assert any("the baseline timepoint and the 2 before it, only where all 3 have one" in t for t in _texts(page))
+    # Two timepoints: a trailing window of 3 cannot fit before t_a, and the figure says so in place of the plot
+    # rather than drawing every well empty under the window's footer.
+    assert any(t.startswith("Baseline average over 3 timepoints: no fold change is left to draw") and
+               "Set Baseline average to 2 or less" in t for t in _texts(page, gid="nw-moving-empty"))
+    spin.setValue(2)
+    assert any("the baseline timepoint and the 1 before it, only where all 2 have one" in t for t in _texts(page))
     nwc.set_metric(page, "n")
     assert not spin.isEnabled() and "Only a fold change has a baseline" in spin.toolTip()
     nwc.set_view(page, "array")

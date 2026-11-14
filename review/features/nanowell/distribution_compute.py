@@ -111,6 +111,7 @@ _REASON_LABELS = {
     moving_compute.BASE_EARLY_REASON: "baseline window before the first timepoint",
     moving_compute.BASE_GAP_REASON: "baseline window has a gap",
     moving_compute.BASE_IDENTITY_REASON: "baseline window not joinable",
+    moving_compute.BASE_LATE_REASON: "baseline window after the last timepoint",
     size_class_compute.NOT_SET: "size classes not set",
     size_class_compute.NOT_READ: "cells not read",
     size_class_compute.NOT_JOINED: "cells not joined",
@@ -316,20 +317,21 @@ def wells_summary(metrics: pd.DataFrame, wells, metric: str, *, channels=(), cha
         first = frame["tp_order"] == 0
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     else:
-        frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving)
+        frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving, moving_centred)
         if cohort:
             frame, reasons, _kept, _sites = fixed_cohort(frame, column, reasons)
         frame, reasons = moving_compute.apply(frame, column, reasons, moving, moving_centred)
     return well_summary(frame, column, channels, reasons=reasons, responding_above=responding_above)
 
 
-def _rebased(frame: pd.DataFrame, column: str, reasons: pd.Series, moving: int, baseline_moving: int):
+def _rebased(frame: pd.DataFrame, column: str, reasons: pd.Series, moving: int, baseline_moving: int,
+             centred: bool = False):
     """The baseline's own window applied (``moving_compute.rebase``) — only while the endpoint's moving average is
     on, since the baseline's window refines it. *baseline_moving* is already what
     ``moving_compute.baseline_window_for`` allows for the figure's baseline."""
     if not moving_compute.is_on(moving):
         return frame, reasons
-    return moving_compute.rebase(frame, column, reasons, baseline_moving)
+    return moving_compute.rebase(frame, column, reasons, baseline_moving, centred)
 
 
 def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), channel: str | None = None,
@@ -373,8 +375,9 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
         frame, reasons = frame[first].assign(timepoint=PER_NANOWELL_LABEL), reasons[first]
     model = DistributionModel(metric, column, label, axis, metric in INTEGER_METRICS, [], control=control,
                               baseline=baseline, responding_above=responding_above, decoration=decoration)
+    before_baseline_window = frame
     if metric not in PER_NANOWELL:
-        frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving)
+        frame, reasons = _rebased(frame, column, reasons, moving, baseline_moving, moving_centred)
     if cohort and metric not in PER_NANOWELL:
         frame, reasons, kept, sites = fixed_cohort(frame, column, reasons)
         model.alerts.append(f"Fixed cohort: only the {kept:,} of {sites:,} nanowells with a value at every timepoint "
@@ -390,10 +393,12 @@ def distribution_model(metrics: pd.DataFrame, metric: str, *, channels=(), chann
     else:
         _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels)
     if averaged_over is not None and not any(len(s.values) for s in model.swarms()):
-        model.empty = moving_compute.nothing_left_text(averaged_over, column, moving,
-                                                       timepoint=model.timepoint if axis == WELLS else "",
-                                                       baseline_window=baseline_moving,
-                                                       centred=moving_centred)
+        drawn_at = model.timepoint if axis == WELLS else ""
+        # The baseline's window first: when it emptied everything, the moving average had nothing to average.
+        model.empty = (moving_compute.baseline_nothing_left_text(before_baseline_window, column, baseline_moving,
+                                                                 timepoint=drawn_at, centred=moving_centred)
+                       or moving_compute.nothing_left_text(averaged_over, column, moving, timepoint=drawn_at,
+                                                           baseline_window=baseline_moving, centred=moving_centred))
         if model.empty:
             model.alerts.append(model.empty)
     _notes(model, metric, time_source)

@@ -13271,7 +13271,8 @@ centred, and turning centring on with an even window takes it one down and says 
 that row of the same nanowell (`moving_compute._centred`), so both kinds follow one set of rules — complete or
 nothing, joinable, a fold change's window starting after its baseline — and the only new exclusion is "after the
 last full window" (`LATE_REASON`), for a timepoint with no *t + h* in its well. The baseline's own window
-(`rebase`) is always trailing. The flag is a keyword beside `moving` everywhere the window goes
+(`rebase(centred=)`) takes the same kind: centred, it is the baseline timepoint and the *h* either side of it. The
+flag is a keyword beside `moving` everywhere the window goes
 (`moving_compute.apply` / `averaged` / `describe` / `nothing_left_text`, `distribution_model`, `wells_summary`,
 `trajectory_panels`, `draw_view`), part of `window_compute.settings_key`, saved in the page's view state, and
 written to Batch Export's summary CSV as `moving_average_window` (`trailing` / `centred`). On the band the choice is
@@ -13291,9 +13292,15 @@ on top of that, both in `moving_compute`:
   bound is per nanowell, so under *First measurable* each nanowell's windows start after its own baseline. Measured
   values (`n`, `c`, brightness, fluorescence) have no baseline and no bound (`base_value` returns `None`).
 - **The baseline's own window** (`NanowellState.baseline_moving`, the *Baseline average* spin box beside *Moving
-  average*; `moving_compute.rebase`). With a window of *M* the baseline becomes the trailing mean of the measured
-  value — the count, confluence, brightness or fluorescence, never a fold change — over the baseline timepoint and
-  the *M − 1* before it, never after it (a later timepoint may already carry the treatment). The fold change is then
+  average*; `moving_compute.rebase`). With a window of *M* the baseline becomes the mean of the measured value —
+  the count, confluence, brightness or fluorescence, never a fold change — over a window of the moving average's
+  kind: trailing, the baseline timepoint and the *M − 1* before it; centred (`rebase(centred=True)`, *M* odd, as
+  `baseline_window_for(centred=)` and `controller.set_baseline_moving` keep it, the spin box stepping by two), the
+  baseline timepoint and the *(M − 1) / 2* either side of it, so a centred baseline averages in timepoints after the
+  baseline, which a treatment applied at it may already show — the trailing kind is the one that never does. Too
+  near the end of its well, a centred baseline window is incomplete with `BASE_LATE_REASON`. The endpoint's windows
+  still start after the baseline timepoint itself, so the first endpoint values can share timepoints with a centred
+  baseline window. The fold change is then
   recomputed against that mean with `site_metrics`' own rules (a row's own value missing or not joinable, a ratio
   over a mean at or below zero). It follows the endpoint's rule: complete and joinable or undefined, its shortfalls
   counted as "baseline average: before the well's first timepoint / a gap / not joinable"; a baseline row that is
@@ -13317,10 +13324,17 @@ value needs to be at least *h + 1* after the baseline; `nothing_left_text` words
 `_WHY_NOTHING_CENTRED` rather than the trailing window's sentences, which would name the wrong count. An empty plot over such data read
 as a dataset with no values, so `moving_compute.nothing_left_text` names it instead: the reason most values went
 under, the longest shorter window that would leave something (and how many values), then `describe`'s sentence.
-`distribution_model` sets it as `DistributionModel.empty` (and in its notes, which the Statistics report carries)
-when no swarm holds a value, and `draw_view` draws it with `render_message` (gid `nw-moving-empty`) in place of the
-beeswarm; Trajectories does the same when no line is left (`controller._moving_left_nothing`). It is said only when
-the values were there before the average, so a figure emptied by something else keeps its own message.
+`distribution_model` sets it as `DistributionModel.empty` when no swarm holds a value, and `draw_view` draws it with
+`render_message` (gid `nw-moving-empty`) in place of the beeswarm — and in place of the Statistics view's report too
+(`controller._compose_statistics`), which would otherwise list every sample as `n = 0` and every pair as not computed
+with no reason; Trajectories does the same when no line is left (`controller._moving_left_nothing`), and the Rare
+responders test before asking its worker (`_rare_controller.compose`). It is said only when the values were there
+before the average, so a figure emptied by something else keeps its own message. **The baseline's own window is
+checked first** (`moving_compute.baseline_nothing_left_text`, on the frame before `rebase`): a baseline window
+that cannot fit around the baseline — trailing and wider than the timepoints at and before it, or centred and
+reaching past the well's first or last timepoint — can never be complete, so every fold change is undefined and
+`nothing_left_text`, measured after it, finds nothing to average and says nothing. The sentence names the baseline
+timepoint, the side the window runs out on, and the longest baseline window of the same kind that would fit.
 
 A ratio over a baseline that is constant per nanowell averages the same whichever is divided first.
 `log2_count_fc` is averaged as logs — the mean of log₂((n + 1) / (n₀ + 1)), a geometric mean of the ratios, not
@@ -13975,7 +13989,12 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
   shown), Benjamini–Hochberg across units for each test, `interpret` (the exceedance test alone decides the verdict;
   HC and AD are supporting evidence), the flagged nanowells — past the control cutoff only — with their crop paths,
-  and the parameter log.
+  and the parameter log. A control with no kept nanowell refuses the analysis with the cause (`_units`): every
+  nanowell excluded, or every one of the control's, each with `rare_data_compute.exclusion_counts` by reason; only
+  a control no row is labelled with is reported as an unknown condition, with the conditions found. Higher
+  Criticism and the shape test are computed independently (`_run_hc`, `_run_ad`, each with its own `_permute`), so
+  an HC undefined for every labeling leaves the shape test's p standing, and `rare_export_compute.caveats` reads
+  each test's own permutation floor rather than HC's for both.
 * `rare_validate_compute` — the self-check: control-versus-control splits for the false-positive share, and
   synthetic responders (2–4× the stratum's control 99th percentile, k = 1, 3, 5, 10, 20 per well) for power.
 * `rare_export_compute` — `report_lines` and `write`, which puts every table, the parameter log and the text report

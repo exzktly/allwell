@@ -111,11 +111,29 @@ class RareResult:
     page_notes: list = field(default_factory=list)   # what the Nanowells page adds under the report (its Details)
 
 
-def _units(wells: dict[str, Well], params: RareParams) -> list[tuple[str, str, list, list]]:
+def _reasons_text(exclusions: pd.DataFrame) -> str:
+    """The exclusions by reason as a clause: ``"no value of the metric at the Timepoint: 180, fused: 3"``."""
+    return ", ".join(f"{reason}: {n:,}" for reason, n in exclusion_counts(exclusions).items())
+
+
+def _units(wells: dict[str, Well], params: RareParams,
+           exclusions: pd.DataFrame | None = None) -> list[tuple[str, str, list, list]]:
+    """``(plate, treatment, control wells, treated wells)`` per unit. A control with no kept nanowell raises, saying
+    why: never labelled in the table at all, or labelled but every nanowell of it excluded — then naming the
+    exclusions by reason (*exclusions*, ``Prepared.exclusions``), since "no such condition" would blame the label for
+    what QC, a missing value or the moving average did."""
     conditions = sorted({w.condition for w in wells.values()})
     if params.control not in conditions:
+        excluded = exclusions if exclusions is not None else pd.DataFrame(columns=["condition", "reason"])
+        if not wells and len(excluded):
+            raise ValueError(f"every one of the {len(excluded):,} nanowells was excluded before testing, so nothing "
+                             f"is left to test ({_reasons_text(excluded)})")
+        mine = excluded[excluded["condition"].astype(str) == str(params.control)]
+        if len(mine):
+            raise ValueError(f"every one of the {len(mine):,} nanowells of the control {params.control!r} was "
+                             f"excluded before testing ({_reasons_text(mine)})")
         raise ValueError(f"no well is labelled with the control condition {params.control!r}; conditions found: "
-                         + ", ".join(conditions))
+                         + (", ".join(conditions) or "none"))
     treatments = [c for c in conditions if c != params.control]
     out = []
     plates = sorted({w.plate for w in wells.values()}) if params.by_plate else ["all"]
@@ -325,7 +343,7 @@ def analyse(data, params: RareParams | None = None, *, validate: bool = False,
     prepared = data if isinstance(data, Prepared) else prepare(data, params, value_label=value_label)
     params = prepared.params
     wells = wells_from(prepared.kept)
-    units = [_run_unit(*spec, params) for spec in _units(wells, params)]
+    units = [_run_unit(*spec, params) for spec in _units(wells, params, prepared.exclusions)]
     unstratified = list(prepared.strata) == [ALL]
     for u in units:
         u.sign = prepared.sign

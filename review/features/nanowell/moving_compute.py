@@ -27,7 +27,8 @@ so a centred window is 3, 5, 7 or 9 (:func:`clamp_window`). It is the trailing w
 so it follows the same rules — complete or nothing, every timepoint joinable, a fold change's window starting after
 its baseline — and a timepoint too near the end of its well for a full window is left out with
 :data:`LATE_REASON`, as one too near the start is with :data:`EARLY_REASON`. The baseline's own window
-(:func:`rebase`) is always trailing: a later timepoint may already carry the treatment.
+(:func:`rebase`) is centred with it: under a centred moving average the baseline is the mean of the baseline timepoint,
+the *h* before it and the *h* after it.
 
 **A fold change's window starts after its baseline.** A fold change is a value over the nanowell's baseline, so a
 window over fold changes may hold only timepoints after the baseline timepoint: one that reaches the baseline would
@@ -37,13 +38,18 @@ out with :data:`BASELINE_REASON`. The baseline is each nanowell's own (``series_
 the first measurable one per measurement, or a named timepoint), so with a later baseline the windows start later.
 
 **The baseline is one measured value unless it has a window of its own.** By default only the endpoint side of a
-fold change is averaged. :func:`rebase` gives the baseline a separate trailing window: the mean of the measured
-value (the count, the confluence, the brightness or the fluorescence — not a fold change) at the baseline timepoint
-and the timepoints before it, never after it, since a later timepoint may already carry the treatment. It follows
-the endpoint's rule: complete or nothing, every timepoint joinable, its shortfalls counted with
-:data:`BASE_EARLY_REASON`, :data:`BASE_GAP_REASON` or :data:`BASE_IDENTITY_REASON`. The Earliest baseline has
-nothing before it, and the First measurable baseline is by definition the first timepoint with a value, so every
-timepoint before it has none: under either a complete window can never exist, and :func:`baseline_window_for` turns
+fold change is averaged. :func:`rebase` gives the baseline a separate window over the measured value (the count,
+the confluence, the brightness or the fluorescence — not a fold change), of the same kind as the moving average:
+under a trailing average, the baseline timepoint and the timepoints before it; under a centred one, the baseline
+timepoint, the *h* before it and the *h* after it (an odd window, as the endpoint's). A centred baseline window
+averages in timepoints after the baseline, which may already carry a treatment applied at it; that is what centring
+means, and the trailing kind is there for a baseline that must not see them. It follows the endpoint's rule:
+complete or nothing, every timepoint joinable, its shortfalls counted with :data:`BASE_EARLY_REASON`,
+:data:`BASE_LATE_REASON` (centred, too near the end), :data:`BASE_GAP_REASON` or :data:`BASE_IDENTITY_REASON`. The
+endpoint's windows still start after the baseline timepoint itself, so under a centred baseline window the first
+endpoint values after the baseline can share timepoints with it. The Earliest baseline has nothing before it, and
+the First measurable baseline is by definition the first timepoint with a value, so every timepoint before it has
+none: under either a complete window can never exist, trailing or centred, and :func:`baseline_window_for` turns
 the baseline's window off there rather than leaving every fold change undefined. Only a named timepoint can have one.
 It is also off whenever the endpoint's moving average is off.
 
@@ -74,8 +80,10 @@ BASELINE_REASON = "moving average: the window does not start after the baseline"
 BASE_EARLY_REASON = "baseline average: the window would start before the well's first timepoint"
 BASE_GAP_REASON = "baseline average: a timepoint in the window has no value"
 BASE_IDENTITY_REASON = "baseline average: a timepoint in the window is not joinable"
+BASE_LATE_REASON = "baseline average: the window would end after the well's last timepoint"
 #: What the endpoint's own reasons become when they describe the baseline's window.
-_BASE_REASONS = {EARLY_REASON: BASE_EARLY_REASON, GAP_REASON: BASE_GAP_REASON, IDENTITY_REASON: BASE_IDENTITY_REASON}
+_BASE_REASONS = {EARLY_REASON: BASE_EARLY_REASON, GAP_REASON: BASE_GAP_REASON, IDENTITY_REASON: BASE_IDENTITY_REASON,
+                 LATE_REASON: BASE_LATE_REASON}
 
 _SITE = ["well", "nw_q", "nw_r"]
 
@@ -102,7 +110,7 @@ def is_on(window) -> bool:
     return clamp_window(window) >= 2
 
 
-def baseline_window_for(window, baseline_window, baseline) -> int:
+def baseline_window_for(window, baseline_window, baseline, centred: bool = False) -> int:
     """The baseline's window a figure uses: *baseline_window* clamped, and 0 when the endpoint's moving average
     (*window*) is off — the baseline's window is a refinement of it, not a control of its own — or when *baseline*
     is the Earliest, which has no timepoint before it to average, or First measurable, whose earlier timepoints are
@@ -110,7 +118,7 @@ def baseline_window_for(window, baseline_window, baseline) -> int:
     change."""
     if not is_on(window) or baseline in (EARLIEST, FIRST_MEASURABLE):
         return 0
-    return clamp_window(baseline_window)
+    return clamp_window(baseline_window, centred)          # centred, as the moving average: an odd window
 
 
 def base_value(column: str) -> str | None:
@@ -148,8 +156,12 @@ def describe(window: int, column: str = "", baseline_window: int = 0, centred: b
     if base_value(column) is None:
         return text
     text += " Each window starts after the baseline, so the baseline's own fold change of 1 is never averaged in."
-    baseline_window = clamp_window(baseline_window)
-    if baseline_window:
+    baseline_window = clamp_window(baseline_window, centred)
+    if baseline_window and centred:
+        h = (baseline_window - 1) // 2
+        text += (f" The baseline is the mean of the nanowell's measured values at the baseline timepoint, the {h} "
+                 f"before it and the {h} after it, only where all {baseline_window} have one.")
+    elif baseline_window:
         text += (f" The baseline is the mean of the nanowell's measured values at the baseline timepoint and the "
                  f"{baseline_window - 1} before it, only where all {baseline_window} have one.")
     else:
@@ -171,7 +183,7 @@ def figure_tag(window: int, column: str = "", baseline: str = "", baseline_windo
     if not window:
         return ""
     text = f"Moving average over {window} timepoints ({'centred' if centred else 'trailing'})"
-    base = clamp_window(baseline_window_for(window, baseline_window, baseline)) if base_value(column) else 0
+    base = baseline_window_for(window, baseline_window, baseline, centred) if base_value(column) else 0
     return text + (f"; baseline over {base}" if base else "")
 
 
@@ -282,7 +294,7 @@ def _centred(frame: pd.DataFrame, values: pd.Series, window: int,
     return (pd.Series(mean, index=frame.index), pd.Series(out_why, index=frame.index, dtype=object))
 
 
-def rebase(frame: pd.DataFrame, column: str, reasons: pd.Series, baseline_window: int,
+def rebase(frame: pd.DataFrame, column: str, reasons: pd.Series, baseline_window: int, centred: bool = False,
            ) -> tuple[pd.DataFrame, pd.Series]:
     """*frame* with the fold change *column* measured from a baseline averaged over *baseline_window* timepoints,
     and *reasons* (``series_compute.exclusion_reason`` for the unchanged column) brought up to date. Unchanged when
@@ -297,13 +309,13 @@ def rebase(frame: pd.DataFrame, column: str, reasons: pd.Series, baseline_window
     :data:`BASE_GAP_REASON`, :data:`BASE_IDENTITY_REASON`), or a mean at zero ("seeded later" / "empty at
     baseline" for a count, as for a single baseline)."""
     value = base_value(column)
-    baseline_window = clamp_window(baseline_window)
+    baseline_window = clamp_window(baseline_window, centred)
     if value is None or not baseline_window or not len(frame):
         return frame, reasons
     measured = pd.to_numeric(frame[value], errors="coerce").astype(float)
     ok = (frame["identity_ok"].fillna(True).astype(bool) if "identity_ok" in frame
           else pd.Series(True, index=frame.index))
-    windowed, why = moving_mean(frame, measured, baseline_window)
+    windowed, why = moving_mean(frame, measured, baseline_window, centred=centred)
     mean = _at_base_row(frame, value, windowed)
     base_why = _at_base_row(frame, value, why.where(why != ""))
     base_measured = _at_base_row(frame, value, measured)
@@ -383,6 +395,59 @@ def _values_at(frame: pd.DataFrame, values: pd.Series, timepoint: str) -> int:
     if timepoint:
         values = values[frame["timepoint"].astype(str).eq(str(timepoint))]
     return int(values.notna().sum())
+
+
+def baseline_nothing_left_text(frame: pd.DataFrame, column: str, baseline_window: int, *, timepoint: str = "",
+                                centred: bool = False) -> str:
+    """The sentence a figure shows instead of an empty plot when the **baseline's** window (:func:`rebase`, of the kind
+    *centred* says) leaves no fold change of the values *frame* holds, or ``""`` when it leaves some (or is off, or
+    *column* is no fold change, or there was nothing to rebase). *frame* is taken before the baseline's window;
+    *timepoint*, when given, is the one timepoint the figure draws.
+
+    :func:`nothing_left_text` cannot say this: it is measured on the frame the baseline's window has already emptied,
+    where there is nothing to average, so it stays silent and the figure is drawn with every value excluded and no
+    reason. Said with the reason most fold changes went under, the baseline timepoint(s), and the longest baseline
+    window of the same kind that would leave a value."""
+    baseline_window = clamp_window(baseline_window, centred)
+    value = base_value(column)
+    if not baseline_window or value is None or column not in frame or not len(frame):
+        return ""
+    if not _values_at(frame, pd.to_numeric(frame[column], errors="coerce"), timepoint):
+        return ""
+    blank = pd.Series("", index=frame.index, dtype=object)
+    rebased, why = rebase(frame, column, blank, baseline_window, centred)
+    if _values_at(rebased, pd.to_numeric(rebased[column], errors="coerce"), timepoint):
+        return ""
+    drawn = why if not timepoint else why[frame["timepoint"].astype(str).eq(str(timepoint))]
+    counts = drawn[drawn != ""].value_counts()
+    reason = str(counts.index[0]) if len(counts) else BASE_GAP_REASON
+    bases = sorted({str(t) for t in frame.get(f"_base_tp_{value}", pd.Series(dtype=object)).dropna()})
+    named = ", ".join(bases) if bases else "the baseline timepoint"
+    where = f" at {timepoint}" if timepoint else ""
+    half = (baseline_window - 1) // 2
+    kind = f"{baseline_window} timepoints, centred" if centred else f"{baseline_window} timepoints"
+    if reason in (BASE_EARLY_REASON, BASE_LATE_REASON) and centred:
+        side = "before" if reason == BASE_EARLY_REASON else "after"
+        because = (f"the baseline's window is centred on the baseline ({named}) and reaches {_timepoints(half)} each "
+                   f"way, but no nanowell's well has {_timepoints(half)} {side} its baseline")
+    elif reason == BASE_EARLY_REASON:
+        because = (f"the baseline's window ends at the baseline ({named}) and reaches back "
+                   f"{_timepoints(baseline_window - 1)}, but no nanowell's well has that many before its baseline")
+    elif reason == BASE_GAP_REASON:
+        because = "every baseline window holds a timepoint with no value"
+    elif reason == BASE_IDENTITY_REASON:
+        because = "every baseline window holds a timepoint whose nanowells are not joinable to the others"
+    else:
+        because = f"every fold change went under “{reason}”"
+    step = 2 if centred else 1
+    for shorter in range(baseline_window - step, 1, -step):
+        kept = rebase(frame, column, blank, shorter, centred)[0]
+        if _values_at(kept, pd.to_numeric(kept[column], errors="coerce"), timepoint):
+            fix = f" Set Baseline average to {shorter} or less, or choose another Baseline."
+            break
+    else:
+        fix = " Set Baseline average to 1 (off), or choose another Baseline."
+    return f"Baseline average over {kind}: no fold change is left to draw{where} — {because}.{fix}"
 
 
 def nothing_left_text(frame: pd.DataFrame, column: str, window: int, *, timepoint: str = "",

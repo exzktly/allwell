@@ -278,15 +278,23 @@ def caveats(unit, params, value_label: str = "") -> list[str]:
     if not unit.group_allowed:
         return out
     kt, _nt, kc, _nc = counts_of(unit)
-    perm = unit.hc_perm
-    if perm is not None and math.isfinite(perm.min_p) and perm.min_p >= params.fdr:
-        out.append(f"With {len(unit.controls)} control and {len(unit.treated)} {unit.treatment} wells, {NAME_B} and the "
-                   f"shape test cannot go below p = {_num(perm.min_p)}, so they can neither confirm nor rule out "
+    # Each supporting test's floor is its own permutation's: Higher Criticism undefined for every labeling (too few
+    # nanowells a well) leaves the shape test's floor standing, and its caveat with it.
+    floored = [(name, perm) for name, perm in ((NAME_B, unit.hc_perm), ("the shape test", unit.a2_perm))
+               if perm is not None and math.isfinite(perm.min_p) and perm.min_p >= params.fdr]
+    wells = f"With {len(unit.controls)} control and {len(unit.treated)} {unit.treatment} wells"
+    if len(floored) == 2:
+        out.append(f"{wells}, {NAME_B} and the shape test cannot go below p = {_num(floored[0][1].min_p)}, so they can "
+                   "neither confirm nor rule out anything here.")
+    elif floored:
+        name, perm = floored[0]
+        out.append(f"{wells}, {name} cannot go below p = {_num(perm.min_p)}, so it can neither confirm nor rule out "
                    "anything here.")
+    # The floor on wells alone is the labelings', the same for either test: whichever ran says it.
+    perm = next((q for q in (unit.hc_perm, unit.a2_perm) if q is not None and math.isfinite(q.min_p)), None)
     a = unit.primary
     if a.method == BB_LABEL and math.isfinite(a.p) and kc == 0 and kt > 0:
-        exact = (f" (on wells alone, p ≥ {_num(perm.min_p)})" if perm is not None and perm.exhaustive
-                 and math.isfinite(perm.min_p) else "")
+        exact = (f" (on wells alone, p ≥ {_num(perm.min_p)})" if perm is not None and perm.exhaustive else "")
         out.append("No control nanowell was past the cutoff, so the spread between wells could not be estimated: "
                    f"the {NAME_A.lower()}'s p treats nanowells as independent and overstates the evidence" + exact + ".")
     full = pool(unit.controls)

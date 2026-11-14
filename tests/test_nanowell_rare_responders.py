@@ -949,3 +949,84 @@ def test_under_responders_lower_the_flagged_rows_read_in_the_metric_s_own_sign()
     assert (flagged["value"] == flagged["fc"]).all()
     assert (flagged["value"] < flagged["threshold"]).all() and (flagged["threshold"] > 0).all()
     assert all(t > 0 for t in res.log["units"][0]["thresholds"].values())
+
+
+# ── A control with nothing left: say what excluded it, never "no such condition" with an empty list ─────────────
+
+def _all_excluded_table(control_value, treated_value):
+    import numpy as np
+
+    rows = []
+    for well, condition in (("A01", "ctrl"), ("A02", "ctrl"), ("B01", "drug"), ("B02", "drug")):
+        value = control_value if condition == "ctrl" else treated_value
+        rows += [{"plate_id": "p", "well_id": well, "condition": condition, "nanowell_id": f"{q},0",
+                  "value": np.nan if value is None else value} for q in range(10)]
+    return pd.DataFrame(rows)
+
+
+def test_every_nanowell_excluded_names_the_exclusions_not_the_control():
+    """Reported: "no well is labelled with control condition 'xxx'; conditions found: " with nothing listed. Every
+    nanowell had been excluded (here: no value of the Metric at the Timepoint), so no well was left to carry a
+    condition, and the message blamed the control's label for what the exclusions did."""
+    from review.features.nanowell.rare_data_compute import VALUE_MISSING
+
+    with pytest.raises(ValueError) as caught:
+        rr.analyse(_all_excluded_table(None, None), rr.RareParams(control="ctrl"))
+    assert str(caught.value) == ("every one of the 40 nanowells was excluded before testing, so nothing is left to "
+                                 f"test ({VALUE_MISSING}: 40)")
+
+
+def test_a_control_whose_every_nanowell_was_excluded_says_so():
+    from review.features.nanowell.rare_data_compute import VALUE_MISSING
+
+    with pytest.raises(ValueError) as caught:
+        rr.analyse(_all_excluded_table(None, 2.0), rr.RareParams(control="ctrl"))
+    assert str(caught.value) == ("every one of the 20 nanowells of the control 'ctrl' was excluded before testing "
+                                 f"({VALUE_MISSING}: 20)")
+
+
+def test_a_control_no_well_is_labelled_with_still_lists_the_conditions():
+    with pytest.raises(ValueError) as caught:
+        rr.analyse(_all_excluded_table(2.0, 2.0), rr.RareParams(control="nope"))
+    assert str(caught.value) == "no well is labelled with the control condition 'nope'; conditions found: ctrl, drug"
+
+
+# ── Higher Criticism refused: the shape test still runs, and still says what limits it ─────────────────────────────
+
+def _hc_refused_result():
+    """Three control and three treatment wells of eight nanowells each: α₀·n = 0.8 < 1, so HC+ has no index to take
+    its maximum over in any well and every labeling's HC is undefined. The treatment wells hold two nanowells far
+    above every control value, so the upper-tail shape test has something to find."""
+    rows = []
+    for well, condition in (("A01", "ctrl"), ("A02", "ctrl"), ("A03", "ctrl"),
+                            ("B01", "drug"), ("B02", "drug"), ("B03", "drug")):
+        values = [1.0 + 0.25 * q + 0.01 * int(well[-1]) for q in range(8)]
+        if condition == "drug":
+            values[:2] = [20.0, 21.0]
+        rows += [{"plate_id": "p", "well_id": well, "condition": condition, "nanowell_id": f"{q},0", "value": v}
+                 for q, v in enumerate(values)]
+    return rr.analyse(pd.DataFrame(rows), rr.RareParams(control="ctrl"))
+
+
+def test_the_shape_test_runs_when_higher_criticism_is_refused():
+    from review.features.nanowell.rare_export_compute import supporting_line
+
+    result = _hc_refused_result()
+    unit = result.units[0]
+    assert all(math.isnan(h.value) for h in unit.hc.values())                  # HC refused in every well
+    assert math.isnan(unit.hc_perm.p)
+    assert unit.a2_perm.p == pytest.approx(0.05) and unit.a2_perm.min_p == pytest.approx(0.05)   # 1 of 20 labelings
+    assert unit.a2_p == {"p:B01": 0.25, "p:B02": 0.25, "p:B03": 0.25}
+    assert supporting_line(unit, result.prepared.params) == (
+        "Supporting, not deciding: Higher Criticism not computable · shape test p = 0.05 (the lowest possible "
+        "with these wells).")
+
+
+def test_the_shape_test_s_floor_is_said_when_higher_criticism_has_none():
+    """The floor caveat was read off HC's permutation alone, so with HC refused it vanished — though the shape test,
+    which did run, cannot go below p = 0.05 with three wells a side and so cannot be significant at an FDR of 0.05."""
+    from review.features.nanowell.rare_export_compute import caveats
+
+    result = _hc_refused_result()
+    assert ("With 3 control and 3 drug wells, the shape test cannot go below p = 0.05, so it can neither confirm "
+            "nor rule out anything here.") in caveats(result.units[0], result.prepared.params)

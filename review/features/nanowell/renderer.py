@@ -484,15 +484,9 @@ def _draw_panel(fig, ax, model, panel, hits, rings, inks, *, ylim=None, spacing:
     lines_used = 0
     for swarm in panel.swarms:
         rows_here = 0
-        shaped = True
-        if density and hist is not None:
-            shaped = _draw_histogram(ax, swarm, hist, ink, fill=model.decoration.inks.get(swarm.group),
-                                     column=model.column)
-        elif density:
-            shaped = _draw_density(ax, swarm, half, ink, fill=model.decoration.inks.get(swarm.group),
-                                   column=model.column, smooth=smooth)
-        as_dots += not shaped
-        if not (density and shaped):        # dots: Beeswarm, Auto's few wells, or a swarm no shape could be drawn for
+        shaped = density and _draw_shape(ax, model, swarm, half, ink, hist=hist, smooth=smooth)
+        as_dots += density and not shaped
+        if not shaped:                      # dots: Beeswarm, Auto's few wells, or a swarm no shape could be drawn for
             layout = _draw_swarm(ax, model, swarm, half, dot_w * spacing, dot_h * spacing, hits, rings, ink)
             hidden += layout.n_hidden
             if layout.n_hidden and not crowded:
@@ -673,6 +667,15 @@ def _draw_density(ax, swarm, half, ink, *, fill: str | None = None, column: str 
         median_tick._aw_no_style_override = True         # a mark of the well's value, not a series
         _ink(median_tick)
     return True
+
+
+def _draw_shape(ax, model, swarm, half, ink, *, hist, smooth: int) -> bool:
+    """*swarm* as the figure's shape — its histogram when *hist* is given, else its violin — or ``False``, drawing
+    nothing, when it has values but no shape can be drawn for them (the caller draws its dots)."""
+    fill = model.decoration.inks.get(swarm.group)
+    if hist is not None:
+        return _draw_histogram(ax, swarm, hist, ink, fill=fill, column=model.column)
+    return _draw_density(ax, swarm, half, ink, fill=fill, column=model.column, smooth=smooth)
 
 
 def _slot_half(model, panel) -> float:

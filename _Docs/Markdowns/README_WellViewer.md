@@ -7219,7 +7219,13 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
      fold change), the share of nanowells at or below it: the treatment group solid in its plate colour and labelled
      on its curve, control dotted, the control cutoff dashed and labelled at its foot. Responders higher show as the
      solid curve matching the dotted one and then stopping short of the top, past the cutoff; responders lower as it
-     rising early, before the cutoff; a whole curve moved sideways is a general shift instead.
+     rising early, before the cutoff; a whole curve moved sideways is a general shift instead. The title says which
+     mark belongs to which test: the dashed cutoff is the **exceedance test's** (the one that decides), and the
+     **shaded** area between the curves is what the **upper-tail shape test** counts — past the control median, on
+     the side the test looks (above it for *Responders higher*, below it for *lower*), wherever the treatment group
+     has more of its nanowells beyond a value than the control does. The shape test scores each treatment well on its
+     own and gives more weight to gaps near the top, so the shading shows where it looks and which way, not its
+     value; its p is in the line under the panels.
   2. **Share of each well's nanowells past the cutoff** — one dot per well with its count (*4/60*): control wells in
      grey, the shaded band the range they span (what chance gives on this plate), treatment wells in their plate
      colours. A treatment dot above the band is the effect.

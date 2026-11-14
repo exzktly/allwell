@@ -39,6 +39,37 @@ from review.features.nanowell.rare_null_compute import Well
 SCHOLZ_LABEL = "k-sample Anderson–Darling (Scholz–Stephens), two-sided — uncalibrated; i.i.d. assumption"
 
 
+def tail_start(ref) -> float:
+    """Where the upper tail ``A²_R`` sums over begins: the control pool's median. One definition for the statistic
+    (:func:`a2r_stratum`) and for the figure that shades it (:func:`drawn_excess`)."""
+    return float(np.median(np.asarray(ref, dtype=float)))
+
+
+def drawn_excess(control, treated, sign: int = 1) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """What the Rare responders figure shades on its cumulative panel as the shape test's region: ``(x, F0, Fn,
+    excess)`` over every distinct value of *control* and *treated* (the values as measured), with ``F0`` / ``Fn`` the
+    plain cumulative shares the panel draws and *excess* true where :func:`a2r_stratum` counts — on the analysed
+    tail's side of the control median, where the treated nanowells have more mass beyond ``x`` than the controls.
+
+    *sign* is the analysis's (``Prepared.sign``): +1 looks above the median for treated mass the controls lack
+    (``F0 > Fn``), −1 — *Responders lower*, analysed as negated values — below it (``Fn > F0``). The statistic itself
+    scores each treatment well against the pooled controls, with a weight that grows towards the top; the shading is of
+    the treated wells pooled, as the panel draws them, so it shows where the test looks and in which direction, not
+    its value."""
+    c = np.sort(np.asarray(control, dtype=float))
+    t = np.sort(np.asarray(treated, dtype=float))
+    if not len(c) or not len(t):
+        empty = np.array([])
+        return empty, empty, empty, empty.astype(bool)
+    x = np.unique(np.concatenate([c, t]))
+    f0 = np.searchsorted(c, x, side="right") / len(c)
+    fn = np.searchsorted(t, x, side="right") / len(t)
+    start = sign * tail_start(sign * c)                  # the analysed values' median, as measured
+    side = x >= start if sign > 0 else x <= start
+    excess = side & ((f0 - fn) * sign > 0)
+    return x, f0, fn, excess
+
+
 def a2r_stratum(x: np.ndarray, ref: np.ndarray) -> float:
     """``A²_R`` of the values *x* against the sorted control values *ref*; NaN when either is empty, and NaN when the
     pool holds a single value (it has no upper tail to compare with — not a measured zero)."""
@@ -52,7 +83,7 @@ def a2r_stratum(x: np.ndarray, ref: np.ndarray) -> float:
         return math.nan
     F0 = np.cumsum(c) / (N + 1)                          # < 1 everywhere: the top value carries weight
     Fn = np.searchsorted(x, u, side="right") / n
-    keep = u >= np.median(ref)
+    keep = u >= tail_start(ref)
     if not keep.any():
         return math.nan
     excess = np.maximum(F0[keep] - Fn[keep], 0.0)

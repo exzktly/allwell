@@ -372,4 +372,7 @@ def test_the_control_curve_is_dotted_on_the_page_as_its_title_says(page, qtbot):
     styles = {line.get_gid(): line.get_linestyle() for ax in fig.axes for line in ax.lines
               if str(line.get_gid()).startswith("rare-ecdf-")}
     assert styles == {"rare-ecdf-control:all": ":", "rare-ecdf-treatment:all": "-"}
+    # The shape test's region is shaded on the same panel, and survives the page's style pass too.
+    assert [c.get_gid() for ax in fig.axes for c in ax.collections if c.get_gid() == "rare-ad-excess:all"] == [
+        "rare-ad-excess:all"]
     assert any("dotted: control" in t.get_text() for ax in fig.axes for t in ax.texts + [ax.title])

@@ -744,7 +744,8 @@ def test_the_figure_draws_counts_and_fold_changes_not_p_values_and_logarithms():
     rd.render_rare_page(fig, res)
     fig.canvas.draw()
     ecdf, exceed, hc_ax = [ax for ax in fig.axes if ax.axison][:3]
-    assert ecdf.get_title() == "Fold change (Nt / N0)\nsolid: drug · dotted: control"      # no strata by default
+    assert ecdf.get_title() == ("Fold change (Nt / N0)\nsolid: drug · dotted: control\n"       # no strata by default
+                                "dashed: exceedance test's cutoff · shaded: what the shape test counts")
     ticks = [t.get_text() for t in ecdf.get_xticklabels() if t.get_text()]
     assert {"2×", "4×", "8×"} <= set(ticks) and all(t.endswith("×") for t in ticks)      # fold changes, not log₂
     counts = sorted(t.get_text() for t in exceed.texts if t.get_gid() == "rare-exceed-count")
@@ -1030,3 +1031,42 @@ def test_the_shape_test_s_floor_is_said_when_higher_criticism_has_none():
     result = _hc_refused_result()
     assert ("With 3 control and 3 drug wells, the shape test cannot go below p = 0.05, so it can neither confirm "
             "nor rule out anything here.") in caveats(result.units[0], result.prepared.params)
+
+
+# ── The shape test's region on the cumulative panel ──────────────────────────────────────────────────────────────
+
+def test_the_shaded_region_is_where_the_shape_test_counts():
+    """Control 1..10 (median 5.5); treated 3, 3, 3, 4..8, 20, 30. Above the median the treated curve runs under the
+    control one from 9 to just under 30. Below the median it runs under it too (at 1 and 2, where the treated sample
+    has no value), and that does not count: the shape test looks only past the control median. A value where the
+    curves meet counts nothing."""
+    control = np.arange(1.0, 11.0)
+    treated = np.array([3, 3, 3, 4, 5, 6, 7, 8, 20, 30], dtype=float)
+    x, f0, fn, excess = ad.drawn_excess(control, treated)
+    assert ad.tail_start(control) == 5.5
+    assert list(x[excess]) == [9.0, 10.0, 20.0]
+    assert list(f0[excess] - fn[excess]) == pytest.approx([0.1, 0.2, 0.1])
+    # Responders lower: the mirror image — below the median, where the treated nanowells hold more of the bottom.
+    x, f0, fn, excess = ad.drawn_excess(-control, -treated, sign=-1)
+    assert list(x[excess]) == [-30.0, -20.0, -10.0]
+    # Identical samples: nothing to shade.
+    assert not ad.drawn_excess(control, control)[3].any()
+
+
+def test_the_cumulative_panel_shades_the_shape_test_s_region_and_says_so():
+    from matplotlib.collections import PolyCollection
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    res = rr.analyse(plate(responders=40, seed=1))
+    fig = Figure(figsize=(6, 4))
+    ax = fig.add_subplot(1, 1, 1)
+    unit = res.units[0]
+    rd.draw_ecdf_strata(ax, unit, res.prepared.value_label, log_axis=True)
+    shaded = [c for c in ax.collections if isinstance(c, PolyCollection) and c.get_gid() == "rare-ad-excess:all"]
+    assert len(shaded) == 1
+    control = np.concatenate([w.values["all"] for w in unit.controls])
+    left = shaded[0].get_paths()[0].vertices[:, 0].min()
+    assert left >= math.log2(ad.tail_start(control)) - 1e-9          # never below the control median
+    assert ax.get_title().endswith("dashed: exceedance test's cutoff · shaded: what the shape test counts")

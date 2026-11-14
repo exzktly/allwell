@@ -13984,7 +13984,11 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   `F0 = #{control ≤ u} / (N + 1)`, so the pool's top value carries weight and mass beyond every control counts (with
   `/ N` it counted nothing, and whole-number fold changes left nothing to sum); NaN — undefined, never 0 — only for a
   pool of one value. The Scholz–Stephens k-sample test
-  is reported as uncalibrated description only.
+  is reported as uncalibrated description only. `tail_start` is the control median the sum starts at, and
+  `drawn_excess` gives the figure the same region over the pooled values as drawn (`_rare_render._shade_shape_test`
+  shades it between the two cumulative curves, gid `rare-ad-excess:<stratum>`, on the analysed tail's side, so
+  *Responders lower* is shaded below the median); the panel's title names the dashed cutoff as the exceedance
+  test's and the shading as the shape test's.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
   shown), Benjamini–Hochberg across units for each test, `interpret` (the exceedance test alone decides the verdict;

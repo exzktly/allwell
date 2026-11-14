@@ -19,6 +19,7 @@ import textwrap
 
 import numpy as np
 
+from review.features.nanowell import rare_ad_compute as ad
 from review.features.nanowell.rare_data_compute import ALL
 from review.features.nanowell.rare_export_compute import unit_text
 from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
@@ -202,6 +203,7 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
                     _paired(line, pair)
                 elif colour == muted:
                     _ink(line, muted=True)
+        _shade_shape_test(ax, unit, stratum, log_axis, treated_c)
         cut = _cut_x(unit, stratum, log_axis)
         if np.isfinite(cut):
             line = ax.axvline(cut, color=control_c if pair is not None else ink, linestyle="--", linewidth=0.8)
@@ -213,7 +215,28 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     ax.set_ylim(0, 1.01)
     _label_strata(ax, unit, strata, log_axis, publication)
     by = "" if strata == [ALL] else ", by starting cells"
-    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\nsolid: {unit.treatment} · dotted: control")
+    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\nsolid: {unit.treatment} · dotted: control\n"
+               f"dashed: exceedance test's cutoff · shaded: what the shape test counts")
+
+
+def _shade_shape_test(ax, unit, stratum, log_axis: bool, colour) -> None:
+    """Shade, between the two cumulative curves, where the upper-tail shape test counts
+    (``rare_ad_compute.drawn_excess``): past the control median, on the side the analysis looks, wherever the treated
+    nanowells have more mass beyond a value than the controls. Nothing when there is no such place."""
+    parts = {side: [w.values[stratum] for w in group if stratum in w.values]
+             for side, group in (("control", unit.controls), ("treated", unit.treated))}
+    if not parts["control"] or not parts["treated"]:
+        return
+    sign = unit.sign
+    x, f0, fn, excess = ad.drawn_excess(sign * np.concatenate(parts["control"]),
+                                        sign * np.concatenate(parts["treated"]), sign)
+    if not excess.any():
+        return
+    if log_axis:
+        keep = x > 0
+        x, f0, fn, excess = np.log2(x[keep]), f0[keep], fn[keep], excess[keep]
+    poly = ax.fill_between(x, f0, fn, where=excess, step="post", color=colour, alpha=0.28, linewidth=0, zorder=1)
+    poly.set_gid(f"rare-ad-excess:{stratum}")
 
 
 def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:

@@ -527,3 +527,34 @@ def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
         labels = [t for t in exceed.texts if t.get_text().startswith("p=")]
         assert labels, size
         assert all(t.get_window_extent(renderer).y1 <= box.y1 for t in labels), size   # inside, under the title
+
+
+def _null_plate(n_ctrl, n_treat, n=300, seed=11):
+    """Control and treatment wells drawn from one distribution: nothing in it is a rare responder."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_ctrl + n_treat):
+        n0 = rng.integers(1, 6, n)
+        nt = rng.poisson(n0 * np.exp(rng.normal(1.5, 0.5, n)))
+        rows += [("p", f"W{i}", "control" if i < n_ctrl else "drug", f"{j},0", n0[j], nt[j]) for j in range(n)]
+    return pd.DataFrame(rows, columns=["plate_id", "well_id", "condition", "nanowell_id", "n0", "nt"])
+
+
+def test_hc_candidates_are_flagged_only_in_a_well_whose_hc_result_is_significant():
+    """HC+ always finds an i* <= alpha0 * n, so every well has candidates, under the null too (about 5 % of a well).
+    Listing them as "flagged by the rare-responder tests" under a treatment whose HC is not significant put some
+    sixty null nanowells in front of the reviewer. HC candidates are flagged only under a treatment whose HC q is
+    below the analysis's level; above-threshold nanowells stay flagged, being a plain description. The gate is the
+    group's q: a per-well empirical p cannot go below 1/(controls + 1), so a per-well gate would flag nothing on the
+    second plate here, whose HC is significant."""
+    res = rr.analyse(_null_plate(4, 4), RareParams())
+    assert all(v.startswith(rr.NO_EVIDENCE) for v in res.table["interpretation"])
+    treated = res.per_well[res.per_well["role"] == "treatment"]
+    assert (treated["hc_candidates"] > 0).all()              # every null well has HC candidates to flag
+    flagged = res.responders
+    assert int(flagged["hc_candidate"].sum()) == 0           # none is flagged as one
+    assert flagged["above_threshold"].all()                  # what is left is above the threshold, and says so
+    spiked = rr.analyse(plate(n_ctrl=8, n_treat=4, n=300, responders=12, seed=3))
+    assert spiked.table["hc_q"].iloc[0] < 0.05                # HC significant: its candidates are flagged
+    only_hc = spiked.responders["hc_candidate"] & ~spiked.responders["above_threshold"]
+    assert only_hc.any()

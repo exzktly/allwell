@@ -244,8 +244,9 @@ def draw_flagged_popout(ctx, st, fig) -> None:
             for i, row in enumerate(shown)]
     columns = nwc.extremes_columns(timepoints, st.timepoint, st.popout_tps)
     wnc._want_crops(ctx, st, sites, sorted(columns, key=lambda tp: tp != st.timepoint))
-    head = (f"{len(flagged):,} nanowell(s) flagged by the rare-responder tests (above the threshold, or at or below "
-            "their well's HC threshold): check each for segmentation errors, doublets and debris.")
+    head = (f"{len(flagged):,} nanowell(s) flagged by the rare-responder tests (above the threshold, or, where HC is "
+            "significant, at or below their well's HC threshold): check each for segmentation errors, doublets and "
+            "debris.")
     st.popout_hits = render_site_rows(
         fig, wc.WindowRows(st.timepoint, "count_fc", timepoints),
         [(f"Flagged {first + 1}–{first + len(shown)} of {len(flagged):,}", rows)],

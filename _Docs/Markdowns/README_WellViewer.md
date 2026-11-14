@@ -7179,7 +7179,8 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   full report, its warnings and notes are in **Details ▸** under the figure, so the panels keep their room
   however much the report says; a window too short for every group's row draws the first ones and names the rest.
   **Review flagged crops** opens the pop-out on the
-  nanowells the tests flagged — above the threshold, or at or below their well's Higher Criticism threshold —
+  nanowells the tests flagged — above the threshold, or, where the Higher Criticism test is significant, at or below
+  their well's HC threshold —
   as rows of crops over time, highest fold change first, so segmentation errors, doublets and debris can be
   ruled out by eye; the pop-out's **Show** switches between them, the selected nanowell and the Distribution
   window.
@@ -11196,8 +11197,11 @@ be estimated). Its first line counts the nanowells kept and excluded.
 **Review flagged crops.** A statistic can be fooled by an imaging artefact: a doublet counted as two cells,
 debris counted as a cell, a segmentation that split one cell into several. Every nanowell the tests flag is
 therefore shown for review by eye. **Review flagged crops** opens the crops pop-out on **Show: Flagged (N)**:
-each treatment-well nanowell above T, or at or below its well's HC threshold, as a row of crops over every
+each treatment-well nanowell above T, or — only for a treatment whose HC test is significant — at or below its
+well's HC threshold, as a row of crops over every
 timepoint, highest fold change first, 24 to a page. Click a row to select that nanowell on the page.
+HC+ finds candidates in every well, null wells included (about 5 % of a well), so where HC is not significant
+its candidates are noise and are not shown as flagged.
 
 If the flagged crops in treatment wells are artefacts, the result is too, however small its p. If the same kinds
 of artefact appear in control wells at the same rate, they are already in the null and the result stands — but

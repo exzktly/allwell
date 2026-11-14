@@ -15842,7 +15842,7 @@ base (`_layout.log1p_axis_suffix`) — the rules `gating.render_scatter_points` 
 a value below zero (the transform clips it to zero), and the nanowell metrics include signed ones (`log2_count_fc`,
 `growth_rate`), so `_pin_cells_log_axes` takes the drawn values and leaves an axis linear when any finite one is
 below zero, dropping the log suffix from its label and adding a footer note that counts them
-(`tests/test_nanowell_scatter_log_axis_keeps_negatives.py`). The Wells page keeps
+(`tests/test_scatter_nanowell_log_axis_keeps_negatives.py`). The Wells page keeps
 the shared `x_log` / `y_log`, which the style pass applies. Every point collection is tagged
 `_aw_marker_collection`, so marker size, shape and edge apply (`plot_style._style_marker_collections`). The draw
 stamps the `nanowells` style view (`plot_style.mark_style_view`) and `_observations.drew_nanowells` stamps the cell

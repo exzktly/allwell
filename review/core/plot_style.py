@@ -1317,13 +1317,29 @@ def _apply_figure_legend_prefs(fig, prefs: dict) -> None:
     and ``legends_on`` reads an axes' children only, so the Legend controls did
     nothing to them. Position and colour stay the renderer's: a figure key is
     placed against the whole page, and its ink follows the card theme.
+
+    The size is *relative to the renderer's own*. A figure key is drawn at the
+    size its page laid its panels out around (the Nanowells keys at 7 pt, the
+    room above the panels reserved for that many rows), and it has no axes whose
+    ``_type_scale`` could shrink the preference to fit, so setting the
+    preference's 12 pt outright made a 16-entry key half again wider than its
+    figure. Each text's size is remembered the first time this pass meets it
+    (``_aw_base_pt``) and scaled by the preference over its default: the
+    default leaves the key as drawn, and raising the preference raises the key,
+    title and entries together.
     """
     show_leg = bool(prefs.get("legend_show", True))
-    font_size = float(prefs.get("legend_font_size", 9))
+    default = float(DEFAULT_EXPORT_STYLE_PREFS["legend_font_size"])
+    factor = float(prefs.get("legend_font_size", default)) / default
     for leg in list(getattr(fig, "legends", ()) or ()):
         leg.set_visible(show_leg)
-        for txt in leg.get_texts():
-            txt.set_fontsize(font_size)
+        title = leg.get_title()
+        texts = [*leg.get_texts(), *([title] if title is not None and title.get_text() else [])]
+        for txt in texts:
+            base = getattr(txt, "_aw_base_pt", None)
+            if base is None:
+                base = txt._aw_base_pt = float(txt.get_fontsize())
+            txt.set_fontsize(base * factor)
 
 
 def colour_mapped(fig) -> list:

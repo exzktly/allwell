@@ -113,9 +113,31 @@ def test_the_ticks_lie_flat_apart_and_clear_of_the_panel_below(width_in):
     plt.close(fig)
 
 
+@pytest.mark.parametrize("width_in", [9.0, 6.0])
+def test_one_line_names_stood_on_end_stay_clear_of_the_panel_below(width_in):
+    """Found in review: the room for the ticks was decided by looking for a line
+    break in the renderer's text, before the tick fit ran — so nine plain names
+    with fold change off, which the fit stands on end, ran 26 px into the panel
+    below under the fixed margins. Measured after the fit now; deciding on the
+    text alone (the old rule) fails this."""
+    ctx = _ctx(relative=False)
+    ctx.state.plot.fc_vs_control_on = False
+    fig = _drawn(ctx, width_in)
+    renderer = fig.canvas.get_renderer()
+    for upper, lower in zip(fig.axes, fig.axes[1:]):
+        labels = [t for t in upper.get_xticklabels() if t.get_text()]
+        assert len(labels) == 9 and all("\n" not in t.get_text() for t in labels)
+        bottom = min(t.get_window_extent(renderer).y0 for t in labels)
+        below = lower.title.get_window_extent(renderer)
+        assert bottom >= below.y1 - 1.5, f"ticks reach {bottom:.0f}, the next title's top is {below.y1:.0f}"
+    plt.close(fig)
+
+
 def test_one_line_ticks_get_the_fixed_margins_back():
     """Tight layout only while a tick runs to more lines than the margins hold;
-    a later redraw with one-line ticks returns to the bar figure's own margins."""
+    a later redraw with one-line ticks that lie flat returns to the bar
+    figure's own margins. (Four of the nine sets are drawn: all nine are
+    slanted past eight bars, and slanted names need the room too.)"""
     from review.features.barplot import renderer as R
 
     ctx = _ctx()
@@ -123,7 +145,11 @@ def test_one_line_ticks_get_the_fixed_margins_back():
     assert fig._aw_tight_layout and fig.get_layout_engine() is not None
     ctx.state.plot.fc_vs_control_on = False
     ctx.state.feature_slice("bar").rel_variable_id = ""
+    for sel in ctx.state.selection.selections[4:]:
+        sel["hidden"] = True
     _drawn(ctx, 9.0)
+    labels = [t for t in fig.axes[0].get_xticklabels() if t.get_text()]
+    assert len(labels) == 4 and {t.get_rotation() for t in labels} == {0.0}
     assert not fig._aw_tight_layout and fig.get_layout_engine() is None
     sp = fig.subplotpars
     assert {k: round(getattr(sp, k), 6) for k in R.BAR_FIGURE_MARGINS} == R.BAR_FIGURE_MARGINS

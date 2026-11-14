@@ -1331,6 +1331,31 @@ def _multiline_ticks(fig) -> bool:
     return any("\n" in label.get_text() for ax in fig.axes for label in ax.get_xticklabels())
 
 
+def _ticks_reach_the_next_panel(fig) -> bool:
+    """Whether any panel's x tick labels, as the style pass left them, reach down to the next panel's title.
+
+    Measured, not inferred from the text: the tick fit stands crowded one-line
+    names on end and wraps others, after the renderer wrote them, so a label
+    with no line break can still run through the panel below.
+    """
+    axes = [ax for ax in fig.axes if ax.get_visible()]
+    if len(axes) < 2:
+        return False
+    fig.draw_without_rendering()
+    canvas = fig.canvas
+    renderer = canvas.get_renderer() if hasattr(canvas, "get_renderer") else fig._get_renderer()
+    for upper, lower in zip(axes, axes[1:]):
+        boxes = [t.get_window_extent(renderer) for t in upper.get_xticklabels()
+                 if t.get_visible() and t.get_text()]
+        if not boxes:
+            continue
+        floor = lower.title.get_window_extent(renderer).y1 if lower.title.get_text() else \
+            lower.get_window_extent(renderer).y1
+        if min(b.y0 for b in boxes) < floor:
+            return True
+    return False
+
+
 def _style_bar_figure(ctx) -> None:
     """The style pass, with the layout the ticks need.
 
@@ -1342,15 +1367,25 @@ def _style_bar_figure(ctx) -> None:
     with multi-line ticks is laid out by the tight engine, which makes the room
     from the text as drawn; one without keeps the fixed margins, set again
     because switching the engine off leaves the axes where it last put them.
+
+    The renderer's text is not the whole answer: the style pass's tick fit
+    stands crowded one-line names on end, or wraps them, after this decision.
+    So a figure styled with the fixed margins is measured afterwards, and
+    styled once more with the tight engine when its ticks reach the next
+    panel's title (:func:`_ticks_reach_the_next_panel`).
     """
     fig = ctx.runtime.barplot.fig
+    canvas = getattr(ctx.runtime.barplot, "canvas", None)
     if fig is not None:
         tight = _multiline_ticks(fig)
         if getattr(fig, "_aw_tight_layout", False) and not tight:
             fig.set_layout_engine(None)
             fig.subplots_adjust(**BAR_FIGURE_MARGINS)
         fig._aw_tight_layout = tight
-    apply_export_style_to_current(ctx, fig, getattr(ctx.runtime.barplot, "canvas", None))
+    apply_export_style_to_current(ctx, fig, canvas)
+    if fig is not None and not fig._aw_tight_layout and _ticks_reach_the_next_panel(fig):
+        fig._aw_tight_layout = True
+        apply_export_style_to_current(ctx, fig, canvas)
 
 
 def redraw_bars(ctx) -> None:

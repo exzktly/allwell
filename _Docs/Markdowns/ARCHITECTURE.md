@@ -22619,7 +22619,12 @@ is laid out by the tight engine while any tick runs to more than one line
 setting `_aw_tight_layout`), since `BAR_FIGURE_MARGINS` leave room for one line
 of ticks above the next panel's title; with one-line ticks it goes back to those
 margins, set again because switching the engine off leaves the axes where it
-last put them. Below about 7.5 in of figure width four such bars still cannot
+last put them. The renderer's text does not settle it alone: the style pass's tick
+fit stands crowded one-line names on end, or wraps them, after that decision, so
+a figure styled under the fixed margins is measured afterwards
+(`_ticks_reach_the_next_panel`, every panel's tick boxes against the next
+panel's title) and styled once more with the tight engine when they reach it —
+nine plain names with fold change off ran 26 px into the panel below before. Below about 7.5 in of figure width four such bars still cannot
 lie flat and are stood on end, clear of the next panel but taking its height.
 On the Mean panel (`_annotations.annotate_relative_to`) each p label is placed a
 few points above its own error bar's cap as drawn — read off the axes

@@ -949,3 +949,43 @@ def test_under_responders_lower_the_flagged_rows_read_in_the_metric_s_own_sign()
     assert (flagged["value"] == flagged["fc"]).all()
     assert (flagged["value"] < flagged["threshold"]).all() and (flagged["threshold"] > 0).all()
     assert all(t > 0 for t in res.log["units"][0]["thresholds"].values())
+
+
+# ── A control with nothing left: say what excluded it, never "no such condition" with an empty list ─────────────
+
+def _all_excluded_table(control_value, treated_value):
+    import numpy as np
+
+    rows = []
+    for well, condition in (("A01", "ctrl"), ("A02", "ctrl"), ("B01", "drug"), ("B02", "drug")):
+        value = control_value if condition == "ctrl" else treated_value
+        rows += [{"plate_id": "p", "well_id": well, "condition": condition, "nanowell_id": f"{q},0",
+                  "value": np.nan if value is None else value} for q in range(10)]
+    return pd.DataFrame(rows)
+
+
+def test_every_nanowell_excluded_names_the_exclusions_not_the_control():
+    """Reported: "no well is labelled with control condition 'xxx'; conditions found: " with nothing listed. Every
+    nanowell had been excluded (here: no value of the Metric at the Timepoint), so no well was left to carry a
+    condition, and the message blamed the control's label for what the exclusions did."""
+    from review.features.nanowell.rare_data_compute import VALUE_MISSING
+
+    with pytest.raises(ValueError) as caught:
+        rr.analyse(_all_excluded_table(None, None), rr.RareParams(control="ctrl"))
+    assert str(caught.value) == ("every one of the 40 nanowells was excluded before testing, so nothing is left to "
+                                 f"test ({VALUE_MISSING}: 40)")
+
+
+def test_a_control_whose_every_nanowell_was_excluded_says_so():
+    from review.features.nanowell.rare_data_compute import VALUE_MISSING
+
+    with pytest.raises(ValueError) as caught:
+        rr.analyse(_all_excluded_table(None, 2.0), rr.RareParams(control="ctrl"))
+    assert str(caught.value) == ("every one of the 20 nanowells of the control 'ctrl' was excluded before testing "
+                                 f"({VALUE_MISSING}: 20)")
+
+
+def test_a_control_no_well_is_labelled_with_still_lists_the_conditions():
+    with pytest.raises(ValueError) as caught:
+        rr.analyse(_all_excluded_table(2.0, 2.0), rr.RareParams(control="nope"))
+    assert str(caught.value) == "no well is labelled with the control condition 'nope'; conditions found: ctrl, drug"

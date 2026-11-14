@@ -7492,7 +7492,11 @@ about 0.13 s, so a plate of millions of cells takes seconds when the page opens.
 actions are `cell_sets` calls; *View in Cell Browser* is the Cell Browser
 sub-leaf's `cell_browser.browse` service (`cell_browser/_browse.py`, which sets
 the gallery's Source menu the way the user would — `set:<name>`, or `gates`
-narrowed to one gate — so the sidebar says what the gallery holds); *Manage on
+narrowed to one gate — so the sidebar says what the gallery holds). It answers
+`None` when there is no Cell Browser page and `False` when the page is there but
+the population is not — a set deleted or renamed, a gate removed since the page
+last refreshed — and the page says which: a build without the Cell Browser, or
+"“name” no longer exists", refreshing its list; *Manage on
 Cell Gating* is Cell Gating's `cell_gating.show` service. Gates are not edited
 here — they are drawn on the Scatter and applied on Cell Gating — so the page
 holds no second copy of those controls. A gate's axes are named by

@@ -13404,7 +13404,7 @@ figure rather than only in the page's Details field because a saved, exported or
 the figure first), for every view but Identity, joined with ` · ` to `controller.moving_tag` — the moving average's
 short phrase (`moving_compute.figure_tag`: `Moving average over 3 timepoints (trailing)`, `; baseline over N` for a
 fold change's own baseline window) on `MOVING_VIEWS` (Distribution, Trajectories, Statistics) for a metric with values
-over time, `""` otherwise — and `""` on Statistics under a rare-responder test (`statistics_compute.test_spec(...)["kind"] == "rare"`), which reads raw Nt/N0 whatever the window says — so a figure of averaged values says so on the same line with or without a subset (the
+over time, `""` otherwise — every Statistics test included, the Rare responders test among them, since it tests the averaged values (`_rare_controller.windowed`) — so a figure of averaged values says so on the same line with or without a subset (the
 footer keeps `moving_compute.describe`'s full sentence; Statistics writes no footer sentence of it, which is why the
 tag is on the figure). The Distribution window's rows pop-out puts the same tag in its title; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
 Nanowells mode passes `subset_label` from its run settings, and the Scatter Plot's nanowell scatter reads it through
@@ -13997,7 +13997,19 @@ per-nanowell table from the already-Subset metrics with `rare_data_compute.from_
 at that timepoint (`controller.metric_column`, labelled by `controller._label`), in the band's direction
 (`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*) — and keys the
 result on a hash of that table, the parameters and the Metric's label,
-so a key cannot return a result computed for other numbers. A key not in `NanowellState.rare_results` is computed
+so a key cannot return a result computed for other numbers. **With the moving average on**, `_compose_statistics`
+passes `moving`, `baseline_moving` (already `moving_compute.baseline_window_for`'s) and `moving_centred` (0 for a
+`PER_NANOWELL` metric), and `rc.windowed` replaces the Metric's column before the table is built with the same two
+calls `distribution_compute` makes for every other test — `moving_compute.rebase` (the baseline's window), then
+`moving_compute.apply` (the endpoint's) — so the values tested are the averaged values the sample tests compare. The
+window's reason for each value it left out reaches the table as `rare_data_compute.VALUE_REASON` through
+`from_site_metrics(value_reasons=)`, and `qc_reasons` excludes the nanowell under that reason instead of
+`VALUE_MISSING`, so the report's `exclusions_by_reason` counts it as `moving_compute.EARLY_REASON` and its siblings,
+never as a value of 0. A window that leaves no value at the timepoint draws `moving_compute.nothing_left_text` (gid
+`nw-moving-empty`) and asks the worker for nothing. The averaged values are in the hashed table, so raw and each
+window key apart (`tests/test_nanowell_rare_moving_average.py`). Details says the values are averages
+(`rc.VALUE_NOTE_MOVING`, then `moving_compute.describe`'s sentence); `rc.NOT_APPLIED` names only the Fixed cohort,
+which this test does not apply, and only while it is ticked. A key not in `NanowellState.rare_results` is computed
 by `analyse` on a worker through `controller._fetch` (kind `rare_results`; a failure is stored as its sentence),
 the figure saying what is tested against what meanwhile (`rc.computing_text`). The *vs* combo is captioned
 **Control** while this test is chosen (`tab_view._label_control`; *vs* for the sample tests), as every message about

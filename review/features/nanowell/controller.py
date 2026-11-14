@@ -1091,14 +1091,12 @@ MOVING_VIEWS = ("distribution", "trajectories", "statistics")
 
 
 def moving_tag(view: str, *, metric: str = "", channel=None, moving: int = 0, baseline_moving: int = 0,
-               moving_centred: bool = False, baseline: str = "", stats_test: str = "", **_rest) -> str:
+               moving_centred: bool = False, baseline: str = "", **_rest) -> str:
     """What *view*'s figure says on its subset line when it is drawn from moving averages
-    (``moving_compute.figure_tag``); ``""`` for a view or metric (one value per nanowell) the window does not apply to,
-    and for the Statistics view under a rare-responder test, which reads raw Nt/N0 whatever the window says
-    (``_rare_controller.NOT_APPLIED`` says so in Details)."""
+    (``moving_compute.figure_tag``); ``""`` for a view or metric (one value per nanowell) the window does not apply to.
+    Every Statistics test, the Rare responders test included (``_rare_controller.windowed``), tests the averaged
+    values, so each carries it."""
     if view not in MOVING_VIEWS or metric in PER_NANOWELL:
-        return ""
-    if view == "statistics" and stats_test and sc.test_spec(stats_test)["kind"] == "rare":
         return ""
     return mvc.figure_tag(moving, metric_column(metric, channel) if metric in METRICS else "", baseline,
                           baseline_moving, moving_centred)
@@ -1221,8 +1219,11 @@ def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channe
         note = " ".join(filter(None, [f"Selected without a nanowell table, so not compared: "
                                       f"{', '.join(tableless)}.", note]))
     if sc.test_spec(stats_test)["kind"] == "rare":
+        # The moving average as every other test takes it; a metric with one value per nanowell has none.
+        averaged = metric not in PER_NANOWELL
         return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note, hidden=hidden,
-                          moving_on=mvc.is_on(moving), cohort=cohort, unit_set=stats_unit != sc.WELLS,
+                          moving=moving if averaged else 0, baseline_moving=baseline_moving if averaged else 0,
+                          moving_centred=moving_centred, cohort=cohort, unit_set=stats_unit != sc.WELLS,
                           column=metric_column(metric, channel), value_label=_label(metric, channel, data, sizes),
                           **(rare or {"store": None, "request": None}))
     # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).

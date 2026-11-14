@@ -180,6 +180,22 @@ def test_one_treatment_well_refuses_group_inference():
     assert any("group-level inference needs at least 2" in w for w in res.warnings)
 
 
+def test_a_plate_covariate_at_its_bound_does_not_make_the_treatment_odds_ratio_unbounded():
+    """A plate on which no well exceeds the threshold drives its own plate coefficient to the bound; the treatment
+    coefficient is finite and estimable from the other plate. The fit reported "an estimate reached its bound" for
+    any coefficient, so the odds ratio was printed as ∞ beside a finite interval. Only the treatment coefficient
+    reaching its bound makes the odds ratio unbounded."""
+    rows = [ex.WellCount(f"A:c{i}", "A", "control", False, k, 20_000, {}, {}) for i, k in enumerate([3, 2, 4])]
+    rows += [ex.WellCount(f"A:t{i}", "A", "drug", True, k, 20_000, {}, {}) for i, k in enumerate([6, 5])]
+    rows += [ex.WellCount(f"B:c{i}", "B", "control", False, 0, 20_000, {}, {}) for i in range(3)]
+    rows += [ex.WellCount(f"B:t{i}", "B", "drug", True, 0, 20_000, {}, {}) for i in range(2)]
+    r = ex.beta_binomial_test(rows, 99.0)
+    assert math.isfinite(r.odds_ratio)
+    assert r.odds_ratio == pytest.approx(math.exp(r.beta1))
+    assert 1.0 < r.odds_ratio < 4.0 and r.ci[0] < r.odds_ratio < r.ci[1]
+    assert not any("complete separation" in note for note in r.notes)
+
+
 def test_one_control_well_gives_no_calibrated_result_and_does_not_promise_one():
     """With one control well its leave-one-out pool is empty, so the control null is empty and every treatment
     well's empirical p is undefined. The verdict said "per-well empirical results only" over a table of NaN — a

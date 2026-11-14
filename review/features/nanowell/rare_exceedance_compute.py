@@ -149,7 +149,11 @@ def fit_bb(k, n, X, fixed: dict | None = None) -> BBFit:
         if best is None or res.fun < best.fun:
             best = res
     coef, theta = unpack(best.x)
-    at_bound = bool(np.any(np.abs(best.x[:-1]) >= COEF_BOUND - 1e-3))
+    # Only the treatment coefficient (column 1) at its bound leaves the odds ratio unestimated: a plate covariate
+    # driven to the bound by a plate with no exceedance anywhere does not, and β1 stays finite and estimable from the
+    # other plates. A design without a treatment column (an intercept-only fit) asks about every coefficient.
+    watched = [1] if X.shape[1] > 1 else list(range(X.shape[1]))
+    at_bound = bool(any(j not in fixed and abs(coef[j]) >= COEF_BOUND - 1e-3 for j in watched))
     return BBFit(coef, float(theta), float(-best.fun), at_bound)
 
 
@@ -241,8 +245,8 @@ def beta_binomial_test(counts: list[WellCount], percentile: float, *, ci: bool =
                             f"(reported as {'0' if separated == 'treatment' else '∞'}); the p-value and the "
                             "interval's finite end stand")
     elif full.at_bound:
-        result.notes.append("complete separation: an estimate reached its bound, so the odds ratio is reported as "
-                            f"{'0' if full.coef[1] < 0 else '∞'}")
+        result.notes.append("complete separation: the treatment estimate reached its bound, so the odds ratio is "
+                            f"reported as {'0' if full.coef[1] < 0 else '∞'}")
     if len(names) > 2:
         result.notes.append("covariates: " + ", ".join(names[2:]))
     return result

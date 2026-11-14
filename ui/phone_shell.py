@@ -57,6 +57,18 @@ from ui import phone_window, theme
 from widgets import form_registry
 from widgets.control_band import ControlBand
 
+
+def all_live_widgets() -> list:
+    """``QApplication.allWidgets()``, without anything that is not a live ``QWidget``.
+
+    ``allWidgets`` hands back C++ pointers, and the binding maps each to whatever Python wrapper already sits at
+    that address. A wrapper Python still holds for an object Qt has freed — a ``QStandardItem`` of a combo's model,
+    seen on the CI runner — can share its address with a widget allocated later and come back here in the widget's
+    place: with no ``parentWidget`` (an ``AttributeError`` out of the whole phone switch), or as a widget wrapper whose
+    object is gone. Every walk of the application's widgets in this module goes through here, so none touches one
+    (CLAUDE.md §7.10 #7)."""
+    return [w for w in QApplication.allWidgets() if isinstance(w, QWidget) and shiboken6.isValid(w)]
+
 _LOG = logging.getLogger(__name__)
 
 #: The smallest window phone layout allows: a phone held upright, after the
@@ -282,7 +294,7 @@ def explicit_fonts() -> dict:
     first and put back afterwards (scaled) by :func:`rescale_widgets`.
     """
     out = {}
-    for w in QApplication.allWidgets():
+    for w in all_live_widgets():
         try:
             if w.testAttribute(Qt.WA_SetFont):
                 out[w] = QFont(w.font())
@@ -303,7 +315,7 @@ def remember_code_min_heights() -> None:
     earlier record of the code's survives a restyle made inside phone layout
     (a text-size change). :func:`restore_code_min_heights` puts them back.
     """
-    for w in QApplication.allWidgets():
+    for w in all_live_widgets():
         try:
             if w.property(_QSS_MIN_H):
                 continue
@@ -319,7 +331,7 @@ def remember_code_min_heights() -> None:
 def restore_code_min_heights() -> None:
     """After a restyle: give back the minimum heights a stylesheet rule took
     and has now let go of (see :func:`remember_code_min_heights`)."""
-    for w in QApplication.allWidgets():
+    for w in all_live_widgets():
         try:
             h = w.property(_P_CODE_MIN_H)
             if h is None or w.property(_QSS_MIN_H):
@@ -391,7 +403,7 @@ def rescale_widgets(prev: float, new: float, widgets=None, fonts=None) -> int:
     re-sets a sheet on ``StyleChange`` re-fires ``StyleChange`` (why PlotCard
     reverted ``install_qss_refresh``).
     """
-    snapshot = list(widgets if widgets is not None else QApplication.allWidgets())
+    snapshot = list(widgets if widgets is not None else all_live_widgets())
     owners = []
     for w in snapshot:
         try:
@@ -671,7 +683,7 @@ def grab_every_scroll_area(on: bool) -> int:
     or stop every one that does. Returns how many viewports it changed."""
     from PySide6.QtWidgets import QAbstractScrollArea
     n = 0
-    for w in list(QApplication.allWidgets()):
+    for w in all_live_widgets():
         try:
             if not isinstance(w, QAbstractScrollArea):
                 continue
@@ -970,8 +982,6 @@ _SWEEP_MS = 300
 _P_WATCHED = "_awPhoneWatched"
 #: Dynamic property marking a widget a sweep has already looked at.
 _P_SEEN = "_awPhoneSeen"
-
-
 class PhoneShell(QObject):
     """Owns phone layout's controls and drives the switch both ways."""
 
@@ -1469,7 +1479,7 @@ class PhoneShell(QObject):
         if app is not None and self._focus_hooked:
             app.focusWindowChanged.disconnect(self._on_focus_window)
             self._focus_hooked = False
-        for w in list(QApplication.allWidgets()):
+        for w in all_live_widgets():
             try:
                 if w.property(_P_WATCHED):
                     w.removeEventFilter(self._filter)
@@ -1617,10 +1627,8 @@ class PhoneShell(QObject):
                 theme.set_touch_unit(unit)
                 if app is not None:
                     app.setStyleSheet(theme.qss())
-                rescale_widgets(prev, factor, [w for w in QApplication.allWidgets()
-                                               if w is not overlay
-                                               and w.parentWidget() is not overlay],
-                                fonts)
+                rescale_widgets(prev, factor, [w for w in all_live_widgets()
+                                               if w is not overlay and w.parentWidget() is not overlay], fonts)
                 # Once the pass is done, so it saw every widget as the new
                 # stylesheet left it.
                 restore_code_min_heights()

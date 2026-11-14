@@ -168,7 +168,10 @@ shell. `ui/phone_shell.py` is the Qt half — `PhoneShell`, owned by `AllWellApp
 and imports no pane: `AllWellApp._build_phone_shell` hands it a `PhoneHandles`
 naming every widget it rearranges and the callables it drives (the mode, the
 navigator, the band, the run dashboards, the status text, a relayout),
-so a pane that moves a widget changes one line there. What a pane's own widgets
+so a pane that moves a widget changes one line there. Every walk of the application's
+widgets in it goes through `all_live_widgets`, which drops anything `QApplication.allWidgets()`
+returns that is not a live `QWidget` — a stale wrapper whose address a new widget reused
+(`tests/test_phone_shell_walks_live_widgets.py`). What a pane's own widgets
 become is the pane's: Analyze's phone view wraps its run log, and the feature
 registry says which Review pages a phone does not offer (`FeatureDescriptor.on_phone`,
 read through `FeatureRegistry.hidden_on_phone` into `phone_hidden_sections`;

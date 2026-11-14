@@ -1010,9 +1010,9 @@ the user's Properties setting, and shrinking every title to fit made every title
 size look the same on a figure too narrow for its title. A broken title still
 crosses the figure when a line is wider than the room or its second line pushes
 its top past a top margin set for one line (the Bar figure's `top=0.96` at a
-6 in canvas); `_title_overruns` notices that, and the title is then shrunk to
-the room's width and stepped down until its top is inside the figure
-(`_lower_title_into`), because losing the words that say what was plotted is
+6 in canvas). Such a title is shrunk only as far as it must be: to the room's
+width when a line is still too wide (`_title_too_wide`), then stepped down until
+its top is inside the figure (`_lower_title_into`), because losing the words that say what was plotted is
 worse than a smaller title (`tests/test_desk_titles_stay_inside_the_figure.py`).
 A fitted title's line break is not part of its name: the plot
 card names a saved panel from its title with whitespace collapsed. A figure's

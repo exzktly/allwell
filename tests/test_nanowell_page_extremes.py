@@ -178,8 +178,8 @@ def test_the_view_draws_the_ranked_rows_at_the_latest_timepoint_with_their_crops
     assert page.widgets.get("_nw_tp_cb").currentData() == "t_d"          # the well's latest
     assert page.widgets.get("_nw_tp_cb").currentText() == "10 h"         # named by its hours, as on Plotting
     # Six ranked for the default five a block: three each, the largest first and the smallest first.
-    assert _row_labels(page) == ["#1  nanowell 0,0\n4×", "#2  nanowell 4,0\n3×", "#3  nanowell 2,0\n2×",
-                                 "#1  nanowell 1,0\n0.5×", "#2  nanowell 3,0\n1×", "#3  nanowell 5,0\n1.5×"]
+    assert _row_labels(page) == ["#1  0,0\n4×", "#2  4,0\n3×", "#3  2,0\n2×",
+                                 "#1  1,0\n0.5×", "#2  3,0\n1×", "#3  5,0\n1.5×"]
     assert _texts(page, "nw-extremes-block") == ["Largest 3 · Count fold change at 10 h",
                                                  "Smallest 3 · Count fold change at 10 h"]
     assert _texts(page, "nw-extremes-tp")[:3] == ["0 h", "5 h", "10 h · ranked"]
@@ -208,12 +208,12 @@ def test_the_spin_box_and_the_timepoint_combo_change_what_is_ranked(page, qtbot)
     _choose_extremes(qtbot, page)
     page.widgets.get("_nw_extremes_spin").setValue(2)
     assert page.state.feature_slice("nanowell").extremes_n == 2
-    assert [label.split("\n")[0] for label in _row_labels(page)] == ["#1  nanowell 0,0", "#2  nanowell 4,0",
-                                                                    "#1  nanowell 1,0", "#2  nanowell 3,0"]
+    assert [label.split("\n")[0] for label in _row_labels(page)] == ["#1  0,0", "#2  4,0",
+                                                                    "#1  1,0", "#2  3,0"]
     tp_cb = page.widgets.get("_nw_tp_cb")
     tp_cb.setCurrentIndex(tp_cb.findData("t_a"))
-    assert [label.split("\n")[0] for label in _row_labels(page)] == ["#1  nanowell 2,0", "#2  nanowell 0,0",
-                                                                    "#1  nanowell 1,0", "#2  nanowell 3,0"]
+    assert [label.split("\n")[0] for label in _row_labels(page)] == ["#1  2,0", "#2  0,0",
+                                                                    "#1  1,0", "#2  3,0"]
 
 
 def test_choosing_cell_count_ranks_its_fold_change_not_the_count(page, qtbot):
@@ -221,7 +221,7 @@ def test_choosing_cell_count_ranks_its_fold_change_not_the_count(page, qtbot):
     metric_cb = page.widgets.get("_nw_metric_cb")
     metric_cb.setCurrentIndex([metric_cb.itemData(i) for i in range(metric_cb.count())].index("n"))
     # Ranked by n itself, q6 (5 cells, seeded later) would be second; it has no fold change and is not ranked.
-    assert [label.split("\n")[0] for label in _row_labels(page)][:2] == ["#1  nanowell 0,0", "#2  nanowell 4,0"]
+    assert [label.split("\n")[0] for label in _row_labels(page)][:2] == ["#1  0,0", "#2  4,0"]
     growth = [metric_cb.itemData(i) for i in range(metric_cb.count())].index("growth_rate")
     assert not metric_cb.model().item(growth).isEnabled()                   # no fold change over time
 
@@ -245,7 +245,7 @@ def test_another_well_is_ranked_among_its_own_nanowells(page, qtbot):
     well_cb = page.widgets.get("_nw_well_cb")
     well_cb.setCurrentIndex([well_cb.itemText(i) for i in range(well_cb.count())].index("B01"))
     qtbot.waitUntil(lambda: not any(t == "Cutting…" for t in _texts(page, "nw-extremes-missing")), timeout=10000)
-    assert _row_labels(page) == ["#1  nanowell 0,0\n3×", "#1  nanowell 1,0\n1×"]
+    assert _row_labels(page) == ["#1  0,0\n3×", "#1  1,0\n1×"]
 
 
 def test_a_crop_read_that_failed_says_why_in_its_panels(page, qtbot, monkeypatch):

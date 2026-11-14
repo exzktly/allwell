@@ -19,6 +19,8 @@ import textwrap
 
 import numpy as np
 
+from review.features.nanowell.rare_data_compute import ALL
+from review.features.nanowell.rare_export_compute import unit_text
 from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
 
 #: Crops drawn at most per figure; the rest are counted in its title.
@@ -141,8 +143,6 @@ def log_axis_for(result) -> bool:
 
 
 def _stratum_name(stratum: str) -> str:
-    from review.features.nanowell.rare_data_compute import ALL
-
     if str(stratum) == ALL:
         return "all nanowells"
     return f"{stratum} cell at start" if str(stratum) == "1" else f"{stratum} cells at start"
@@ -175,8 +175,6 @@ def _ecdf_colours(unit, stratum, strata, i, publication, muted):
     """``(treatment, control, pair or None)`` colours of one stratum's curves. Stratified, both take the stratum's
     occupancy shade (paired for publication), told apart by solid and dotted; unstratified, the treatment curve
     takes its first well's plate colour and the control curve the secondary ink, as the other panels draw them."""
-    from review.features.nanowell.rare_data_compute import ALL
-
     if strata == [ALL]:
         return (_well_colour(unit.treated[0].key) if unit.treated else muted), muted, None
     pair = _stratum_shades(len(strata))[i]
@@ -187,8 +185,6 @@ def _ecdf_colours(unit, stratum, strata, i, publication, muted):
 def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     """Every stratum on one axes (one, unstratified): control dotted, treatment solid, the cutoff dashed, of the values
     as measured (``unit.sign`` undoes a bottom-tail analysis's negation)."""
-    from review.features.nanowell.rare_data_compute import ALL
-
     strata = _strata(unit)
     publication = _is_publication(ax)
     _ground, ink, muted = _inks(ax)
@@ -223,8 +219,6 @@ def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:
     own height (staggered, since every cumulative curve ends at the same top right corner, where labels at the ends
     would pile up), with a dot in the stratum's shade — unstratified, the treatment curve named by its group — and
     the dashed line as the control cutoff."""
-    from review.features.nanowell.rare_data_compute import ALL
-
     _ground, ink, muted = _inks(ax)
     for i, stratum in enumerate(strata):
         xy = _pooled(unit.treated, stratum, log_axis, unit.sign)
@@ -392,8 +386,6 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
     or a short window never squeezes the panels below legibility. A figure narrower than :data:`STACK_BELOW_IN` (a
     phone's) stacks each treatment's three panels in a column, each at least :data:`STACKED_ROW_MIN_IN` tall:
     side by side at that width each panel was about an inch across, its axis labels run into its neighbours."""
-    from review.features.nanowell.rare_export_compute import unit_text
-
     fig.clear()
     width, height = max(fig.get_figwidth(), 1.0), max(fig.get_figheight(), 1.0)
     stacked = width < STACK_BELOW_IN

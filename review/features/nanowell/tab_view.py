@@ -25,6 +25,7 @@ from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell import controller as nwc
+from review.features.nanowell import statistics_compute as stats_compute
 from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
     BASELINE_METRICS, METRICS, PER_NANOWELL, format_cut,
@@ -734,9 +735,7 @@ VS_CAPTION = "vs"
 
 
 def sc_test_is_rare(st) -> bool:
-    from review.features.nanowell import statistics_compute as sc
-
-    return sc.test_spec(st.stats_test)["kind"] == "rare"
+    return stats_compute.test_spec(st.stats_test)["kind"] == "rare"
 
 
 def _label_control(group, st, stats_view: bool) -> None:

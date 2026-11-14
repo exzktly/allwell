@@ -1525,7 +1525,9 @@ class _ExtremesDrawing:
     def row_label(self, bx: float, y_crop_top: float, row) -> None:
         self.text(bx + _EXT_LABELS_W - 0.08, y_crop_top - self.layout.side / 2,
                   (f"#{row.rank}  {row.site[0]} " if self.with_well else f"#{row.rank}  ")
-                  + f"nanowell {row.site[1]},{row.site[2]}\n{self.value_text(row.value)}",
+                  # The address alone, as the Array view writes it: "nanowell" made the label wider than its column
+                  # (it ran off the figure's left edge); the montage's title and caption say what the rows are.
+                  + f"{row.site[1]},{row.site[2]}\n{self.value_text(row.value)}",
                   color=self.ink, ha="right", va="center", fontsize=_EXT_LABEL_PT, gid="nw-extremes-row")
 
     def crop(self, x0: float, y_crop_top: float, site_crops, tp: str):

@@ -115,12 +115,14 @@ def test_review_flagged_crops_shows_them_in_the_pop_out(page, qtbot):
     fig = page.widgets.get("_nw_popout_fig")
     texts = [t.get_text() for t in fig.texts] + [t.get_text() for ax in fig.axes for t in ax.texts]
     assert any("Rare responders · flagged nanowells" in t for t in texts)
-    # Its columns name each timepoint as the band does (by its hours), and each row names its nanowell as the Array
-    # view draws the address, never "q 5, r 0", which beside a statistics report reads as a q-value.
+    # Its columns name each timepoint as the band does (by its hours), and each row names its nanowell by its address
+    # as the Array view draws it, never "q 5, r 0", which beside a statistics report reads as a q-value.
     heads = [t.get_text() for t in fig.texts if t.get_gid() == "nw-extremes-tp"]
     assert [h.split(" ·")[0] for h in heads[:2]] == ["0 h", "5 h"]
     rows = [t.get_text().split("\n")[0] for t in fig.texts if t.get_gid() == "nw-extremes-row"]
-    assert rows and all(" nanowell " in r and " q " not in r for r in rows), rows
+    import re
+
+    assert rows and all(re.fullmatch(r"#\d+  B0[12] \d+,\d+", r) for r in rows), rows      # never "q 5, r 0"
     # Each drawn row is a flagged nanowell, so a click on it selects that nanowell.
     assert set(st.popout_hits.values()) <= {row["site"] for row in st.rare_flagged}
     assert st.popout_hits

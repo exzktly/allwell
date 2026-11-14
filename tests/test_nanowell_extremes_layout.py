@@ -117,7 +117,7 @@ def test_each_crop_is_captioned_with_its_nanowell_s_metrics_at_that_timepoint(pa
     st = page.state.feature_slice("nanowell")
     nwc.set_extremes_timepoints(page, ["t_d"])                                # one column: crops large enough
     first = next(t for t in page.widgets.get("_nw_fig").texts if t.get_gid() == "nw-extremes-row")
-    assert first.get_text().startswith("#1  nanowell 0,0")
+    assert first.get_text().startswith("#1  0,0")
     row = site_series(st.metrics, "A01", 0, 0).set_index("timepoint").loc["t_d"].to_dict()
     expected = crop_metric_lines({**row, "timepoint": "t_d"}, nwc.match_channel("gfp", st.data.channels))
     fig = page.widgets.get("_nw_fig")

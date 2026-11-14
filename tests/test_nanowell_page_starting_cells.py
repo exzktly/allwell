@@ -199,9 +199,9 @@ def test_extremes_ranks_only_the_nanowells_in_the_filter(page):
     page.widgets.get("_nw_extremes_spin").setValue(1)
     rows = lambda: [t.get_text().split("\n")[0] for t in page.widgets.get("_nw_fig").texts  # noqa: E731
                     if t.get_gid() == "nw-extremes-row"]
-    assert rows() == ["#1  nanowell 0,0", "#1  nanowell 1,0"]
+    assert rows() == ["#1  0,0", "#1  1,0"]
     _choose(page, "single")
-    assert rows() == ["#1  nanowell 0,0", "#1  nanowell 2,0"]
+    assert rows() == ["#1  0,0", "#1  2,0"]
     assert any(t.startswith("Starting cells 1 (count at the earliest timepoint): 3 of 8 nanowells kept")
                for t in _texts(page))
 

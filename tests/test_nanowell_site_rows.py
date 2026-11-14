@@ -64,8 +64,8 @@ def test_extremes_is_drawn_exactly_as_it_was_before_the_montage_was_generalised(
     assert _structure(fig) == EXPECTED_STRUCTURE
 
 
-# The rows name a nanowell `nanowell 1,0` (not `q 1, r 0`); every part's position is unchanged by that rename.
-EXPECTED_STRUCTURE = "8a4f8f4773746c2f0a37cdca697cc14136b1cc30fd5abac9f58bcf818c30b580"
+# The rows name a nanowell by its address (`1,0`, not `q 1, r 0`); every part's position is unchanged by that rename.
+EXPECTED_STRUCTURE = "dbe1eb87b624bb6316a6e243bbfb15f4d642db875546d7c9e9626d2175821e86"
 
 
 def _row_labels(fig) -> list:
@@ -82,10 +82,10 @@ def test_rows_from_several_wells_name_their_well_and_extremes_rows_do_not():
     fig = Figure(figsize=(12.0, 7.0))
     renderer.render_site_rows(fig, model, [("Window", rows)], crops, label="Count fold change", empty="", title="t",
                               head="h", with_well=True)
-    assert _row_labels(fig) == ["#1  A01 nanowell 1,0", "#2  B02 nanowell 1,0"]
+    assert _row_labels(fig) == ["#1  A01 1,0", "#2  B02 1,0"]
     fig = Figure(figsize=(12.0, 7.0))
     renderer.render_extremes(fig, _extremes_fixture()[0], _extremes_fixture()[1], label="Count fold change")
-    assert _row_labels(fig) == ["#1  nanowell 1,0", "#2  nanowell 2,-1", "#1  nanowell 0,0", "#2  nanowell -1,2"]
+    assert _row_labels(fig) == ["#1  1,0", "#2  2,-1", "#1  0,0", "#2  -1,2"]
 
 
 def test_a_window_s_rows_write_a_cell_count_as_a_number_and_a_fold_change_with_its_times_sign():
@@ -103,8 +103,8 @@ def test_a_window_s_rows_write_a_cell_count_as_a_number_and_a_fold_change_with_i
         return [t.get_text() for t in fig.texts + [t for ax in fig.axes for t in ax.texts]
                 if t.get_gid() in ("nw-extremes-row", "nw-extremes-value")]
 
-    assert drawn("n") == ["#1  A01 nanowell 1,0\n3", "2", "3"]
-    assert drawn("count_fc") == ["#1  A01 nanowell 1,0\n3×", "2×", "3×"]
+    assert drawn("n") == ["#1  A01 1,0\n3", "2", "3"]
+    assert drawn("count_fc") == ["#1  A01 1,0\n3×", "2×", "3×"]
     assert drawn("brightness_fc_GFP")[1] == "2×" and drawn("log2_count_fc")[1] == "+2"
 
 

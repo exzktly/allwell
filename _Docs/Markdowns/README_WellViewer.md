@@ -7199,8 +7199,8 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   doublets and debris can be
   ruled out by eye; it is greyed out, with the reason on it, before a result and when nothing grew past the cutoff.
   The pop-out's **Show** switches between them, the selected nanowell and the Distribution window. Its columns name
-  each timepoint as the band does (by its hours, *5 h*), and each row names its nanowell as the Array view writes
-  its address — *B01 nanowell 5,0* — as the page's crop pop-outs, Extremes and the selected-nanowell panel all do.
+  each timepoint as the band does (by its hours, *5 h*), and each row names its nanowell by its address as the Array
+  view writes it — *B01 5,0* — with the selected-nanowell panel and the crop captions writing *B01 · nanowell 5,0*.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
   a QC picture and a full-resolution montage each did. Its **Well**, **Timepoint** and **Positions** are on the
   band's first row; its viewing row holds how the picture is drawn — **Image** and **Layers** — then **Set

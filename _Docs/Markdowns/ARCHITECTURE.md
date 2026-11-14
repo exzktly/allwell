@@ -13678,9 +13678,10 @@ on screen (`tests/test_nanowell_window_popout.py`). `render_site_rows` is the on
 Extremes draws its two blocks through it (`render_extremes` supplies the blocks, title and sentences; its figure is pinned
 by `tests/test_nanowell_site_rows.py`), the window draws one, with `with_well` naming each row's well and the model's own
 `format` writing a value (`WindowRows.format`: a fold change with `×`, any other metric as the bare number).
-**Names on the montage.** A row (and the selected-nanowell panel, its crops and the crop pop-out) names a nanowell
-through `renderer.site_name` — `A01 · nanowell 1,0`, the address as the Array view draws it and **Go to nanowell**
-takes it; `q 1, r 0` beside a statistics report read as a q-value. `render_site_rows(tp_names=)` names each column
+**Names on the montage.** The selected-nanowell panel, its crops and the crop pop-out name a nanowell through
+`renderer.site_name` — `A01 · nanowell 1,0`, the address as the Array view draws it and **Go to nanowell** takes it;
+`q 1, r 0` beside a statistics report read as a q-value. A montage row writes the address alone (`#1  A01 1,0`):
+its label column has no room for the word, which ran it off the figure's left edge (`tests/test_every_page_renders.py`). `render_site_rows(tp_names=)` names each column
 as the band's Timepoint control does (`controller.timepoint_names` → `summary_compute.timepoint_short`: `5 h`, or the
 label when the time is unknown); Extremes, the Distribution window and the Rare responders pop-out all pass it.
 **Use as Subset** (`_window_controller.use_window_as_subset`, `subset_compute.WINDOW`) turns a window into a Subset

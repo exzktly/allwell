@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell import size_class_compute as scc
-from review.features.nanowell.summary_compute import well_statistic
+from review.features.nanowell.summary_compute import timepoint_short, well_statistic
 from review.domain import nanowell_rim_focus as rfc
 from review.domain.size_classes import SizeClassRule, classify_rows
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
@@ -54,7 +54,7 @@ from review.features.nanowell.renderer import (
     redraw_selection_rings, render_position, render_site_detail, render_trajectories, stamp_subset,
 )
 from review.features.nanowell.state import (
-    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
+    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, RARE_DIRECTIONS, ArrayLayers, COLOURINGS, POSITIONS,
 )
 from review.features.nanowell.series_compute import (crop_metric_lines, long_format, metric_kinds, rim_focus_text,
                                                      site_metrics, site_series)
@@ -311,8 +311,6 @@ def page_groups(ctx) -> dict:
 
 def timepoint_names(st) -> dict:
     """``timepoint -> how the band names it`` (``5 h``, or its label when its time is unknown), for column headers."""
-    from review.features.nanowell.summary_compute import timepoint_short
-
     times = st.data.times_h if st is not None and st.data is not None else {}
     return {str(tp): timepoint_short(str(tp), times.get(tp)) for tp in (st.data.timepoints() if st.data else [])}
 
@@ -2935,8 +2933,6 @@ def set_stats_test(ctx, test: str) -> None:
 
 def set_rare_direction(ctx, direction: str) -> None:
     """Which tail of the Metric the Rare responders test looks in (``NanowellState.rare_direction``)."""
-    from review.features.nanowell.state import RARE_DIRECTIONS
-
     if direction in RARE_DIRECTIONS:
         _set(ctx, "rare_direction", direction)
 

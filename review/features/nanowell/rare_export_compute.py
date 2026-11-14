@@ -27,7 +27,10 @@ from pathlib import Path
 
 import numpy as np
 
-from review.features.nanowell.rare_exceedance_compute import FISHER_LABEL
+from review.features.nanowell import rare_hc_compute as hc
+from review.features.nanowell.rare_exceedance_compute import BB_LABEL, FISHER_LABEL
+from review.features.nanowell.rare_null_compute import pool
+from review.features.nanowell.rare_report_compute import significant
 from review.features.nanowell.rare_ad_compute import SCHOLZ_LABEL
 from util.json_write import write_json_atomic
 
@@ -248,8 +251,6 @@ def _support_part(name: str, perm, undefined: str) -> str:
 def supporting_line(unit, params) -> str:
     """Higher Criticism and the upper-tail shape test, which never change the verdict, and — when either finds what
     the exceedance test did not — what that disagreement usually means."""
-    from review.features.nanowell.rare_report_compute import significant
-
     if not unit.group_allowed:
         return ""
     line = (f"Supporting, not deciding: {_support_part(NAME_B, unit.hc_perm, 'not computable')} · "
@@ -266,10 +267,6 @@ def caveats(unit, params, value_label: str = "") -> list[str]:
     """What undermines the verdict, each in one sentence — said beside it, never left in Details: a permutation floor
     that keeps the supporting tests from ever reaching significance, an exceedance regression that could not estimate
     the spread between wells, and nanowells Higher Criticism cannot see."""
-    from review.features.nanowell import rare_hc_compute as hc
-    from review.features.nanowell.rare_exceedance_compute import BB_LABEL
-    from review.features.nanowell.rare_null_compute import pool
-
     out = []
     if not unit.group_allowed:
         return out

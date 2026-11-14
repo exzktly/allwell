@@ -1,7 +1,8 @@
 """Rare-responder analysis, Test A (primary): how many nanowells of a well exceed the control tail.
 
-**The threshold.** ``T`` is the chosen percentile (99th by default) of the control values, computed **within each
-loading stratum** (``rare_data_compute.assign_strata``). A treatment well is counted against ``T`` from every
+**The threshold.** ``T`` is the chosen percentile (99th by default) of the control values, computed within each
+loading stratum when strata are set (``rare_data_compute.assign_strata``) and over the whole pool otherwise — the
+page's analysis sets none. A treatment well is counted against ``T`` from every
 control well; a control well against ``T`` from every *other* control well (leave-one-out), so a control well's
 count is not lowered by its own nanowells having set the bar. A fixed threshold chosen before running
 (``RareParams.fixed_threshold``) replaces the percentile in every stratum.

@@ -1808,6 +1808,7 @@ review/
 │   │                 rare_exceedance_compute.py, rare_hc_compute.py,
 │   │                 rare_ad_compute.py, rare_report_compute.py,
 │   │                 rare_validate_compute.py, rare_export_compute.py,
+│   │                 rare_design_compute.py,
 │   │                 _rare_render.py, _rare_controller.py ← the
 │   │                 rare-responder analysis and the Statistics view's
 │   │                 Rare responders test that runs it
@@ -13970,7 +13971,13 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 * `rare_validate_compute` — the self-check: control-versus-control splits for the false-positive share, and
   synthetic responders (2–4× the stratum's control 99th percentile, k = 1, 3, 5, 10, 20 per well) for power.
 * `rare_export_compute` — `report_lines` and `write`, which puts every table, the parameter log and the text report
-  in a folder.
+  in a folder. `rare_responders.csv` and the parameter log write values and cutoffs in the metric's own sign, even
+  though the analysis negates them under *Responders lower*.
+* `rare_design_compute` — what the design cannot see, measured on the data and said as caveats beside the verdict:
+  `cutoff_on_tie` (the control cutoff sits on a tie wider than the tail and the treatment holds significantly more
+  nanowells on it, one-sided Fisher p < 0.01 — a floored metric under *Responders lower*), which also makes
+  `interpret` answer `UNDECIDED` when nothing is past the cutoff; and `loading_differs` (an unstratified analysis whose
+  sides' starting-cell classes differ, chi-square p < 0.01), which leaves the verdict alone.
 
 **On the page**, the Statistics view's *Test* roster carries `rare` (kind `"rare"`, which `statistics_compute.compare`
 refuses, since it compares no samples). `controller._compose_statistics` hands that kind to
@@ -13992,7 +13999,8 @@ two or none and nothing is guessed), recorded in `NanowellState.control_guessed`
 chooses a control (`set_control`) — and the figure's first line says so (`render_rare_page(lead=)`, never cut). **The verdict is decided by the
 exceedance test alone** (`rare_report_compute.interpret`: `DETECTED` when its q is below the FDR; `UNDECIDED` when
 it has no group p — too few wells for its regression, said by `rare_export_compute.needs` — while nanowells are past
-the cutoff, since a test that did not run is not a negative; `NOT_DETECTED` otherwise or when no nanowell passed the
+the cutoff, since a test that did not run is not a negative, and likewise when nothing is past a cutoff that sits on
+a tie hiding the treatment (`rare_design_compute.cutoff_on_tie`); `NOT_DETECTED` otherwise or when no nanowell passed the
 cutoff; `INSUFFICIENT` without two wells a side); Higher Criticism and
 the upper-tail shape test are supporting evidence that never changes it, so the verdict is not given two
 uncorrected chances. **Every sentence the figure says is built once, from the result's fields,** in

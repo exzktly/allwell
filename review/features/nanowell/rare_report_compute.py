@@ -7,16 +7,19 @@
   beta-binomial regression and permutations kept within each plate), or one per (plate, treatment) against that
   plate's controls (``by_plate=True``).
 * **Guardrail.** A unit with fewer than ``min_wells_per_condition`` (2) wells on either side gets **no group-level
-  inference** — no regression, no Fisher test, no permutation p — and says that replication is insufficient; its
-  wells' per-well empirical results are still reported.
+  inference** — no regression, no Fisher test, no permutation p — and says the group cannot be tested. With two or
+  more control wells each treatment well's own empirical p is still reported; with fewer there is no control null,
+  and none is.
 * **Per unit**: Test A (``rare_exceedance_compute``) at the primary percentile and at each sensitivity percentile,
   all of them shown, none chosen after the fact; Test B (``rare_hc_compute``) and Test C (``rare_ad_compute``),
   each with a per-well empirical p against the control wells' leave-one-out values and a whole-well permutation p.
 * **Multiple testing**: Benjamini–Hochberg across every unit, separately for each test's group p-values.
-* **Interpretation** (:func:`interpret`): enrichment of rare responders is supported when the exceedance test or HC
-  is significant after correction; a significant AD alone is a general difference in the upper tail's shape.
-* **Responders** (:func:`responders`): every nanowell above the primary threshold or at or below its well's HC
-  threshold, with its crop path, for review by eye.
+* **Interpretation** (:func:`interpret`): the exceedance test alone decides — "detected" when it is significant
+  after correction, "cannot be decided" when it has no group p while nanowells are past the cutoff or when the
+  cutoff sits on a tie that hides the treatment (``rare_design_compute``), "not detected" otherwise. HC and AD are
+  supporting evidence and never change the verdict.
+* **Responders** (:func:`responders`): every treatment nanowell past the control cutoff, with its crop path, for
+  review by eye; ``hc_candidate`` says whether it is also an HC candidate, which alone never flags a nanowell.
 * **Parameter log**: every parameter, the strata, the exclusions by reason, the seed.
 
 Qt-free and matplotlib-free.

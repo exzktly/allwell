@@ -1,7 +1,7 @@
 """Rare-responder analysis, Test B: Higher Criticism, threshold-free and sensitive to a sparse excess.
 
 **Per-nanowell p-values.** Each nanowell of the well under test gets a one-sided p-value from the control pool of
-its own loading stratum, ``p_i = (1 + #{control >= x_i}) / (N_control + 1)`` (:func:`p_values`). A treatment well is
+its own loading stratum (the whole pool when no strata are set, as on the page), ``p_i = (1 + #{control >= x_i}) / (N_control + 1)`` (:func:`p_values`). A treatment well is
 scored against every control well; a control well, for its null, against every *other* control well. A nanowell in
 a stratum the pool has no value in gets no p-value, and is counted in :attr:`HC.unscored`.
 

@@ -11209,6 +11209,7 @@ share of false discoveries among the results called significant. "Significant" i
 | q < 0.05 | **rare responders detected** |
 | otherwise, or no nanowell in any well past the cutoff | **rare responders not detected** |
 | no group p (fewer than 3 control or 2 treatment wells for its regression) while nanowells are past the cutoff | **cannot be decided with these wells** — with the wells it needs |
+| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** |
 | Fewer than 2 wells on a side | **too few wells to test the group** |
 
 Higher Criticism (B) and the upper-tail shape test (C) are reported beside the verdict as supporting evidence and
@@ -11223,7 +11224,14 @@ evidence of no effect: read it with the caveats the figure prints under it, and 
   bound) and its p behaves as if nanowells were independent, which overstates the evidence — with the smallest p a
   test on whole wells could give;
 - Higher Criticism, in the HC+ form used here, leaves out nanowells whose p is at or below 1/n — with a control pool
-  larger than a well those are exactly the most extreme ones, so it says nothing about them.
+  larger than a well those are exactly the most extreme ones, so it says nothing about them;
+- the control cutoff sits on a tie: more control nanowells share one value than the tail holds (a fold change of 0
+  under *Responders lower*, when a few control nanowells died), and the treatment holds significantly more nanowells
+  at it. A nanowell has to be strictly past the cutoff to count, so those cannot be seen; with none past it, the
+  verdict is *cannot be decided* rather than *not detected*;
+- control and treatment nanowells started with different numbers of cells. Nanowells seeded with fewer cells reach
+  extreme fold changes more easily, so a difference in seeding alone can look like rare responders; the verdict is
+  left as it is, and this says why it may not be one.
 
 The upper-tail shape test weighs the control's top value too (its cumulative share is counted out of N + 1, as
 every empirical p here is), so a nanowell beyond everything the controls reach — a rare responder — counts, also

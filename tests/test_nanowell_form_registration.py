@@ -87,7 +87,7 @@ def test_the_remote_argv_drops_the_folder_and_the_run_address_is_keyed_on_it():
     assert "--nanowell_registration_from" not in remote and "/local/run1/out" not in remote
     assert remote[remote.index("--nanowell_cell_diameter_um") + 1] == "11.0"    # the flag after it survives
     # The named folder decides every address and position the run reports, so a run naming another folder, or
-    # none, must get its own run directory rather than reuse this one's (REVIEW_NOV14_TRACKER A1). The local path
+    # none, must get its own run directory rather than reuse this one's. The local path
     # itself never reaches the host; the digest is what tells the runs apart.
     without = [a for a in local if a not in ("--nanowell_registration_from", "/local/run1/out")]
     elsewhere = [a if a != "/local/run1/out" else "/local/run2/out" for a in local]

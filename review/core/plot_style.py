@@ -1531,7 +1531,7 @@ def _style_x_tick_angle(ax, angle: int) -> None:
     # filled with 0, and 0 also means "the plot's own angle". Keeping typed
     # flat labels flat needs an explicit "Auto" setting on the Properties
     # stepper and a migration of saved zeros, so it is left as a known gap
-    # (REVIEW_NOV14_TRACKER P5, declined).
+    # (declined in the review of the PRs merged 2026-11-07 – 11-14).
     ax.xaxis._aw_angle_typed = angle != 0
     if angle == 0 and own is not None:
         rotation, ha, mode = own

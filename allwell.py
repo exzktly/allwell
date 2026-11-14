@@ -50,6 +50,7 @@ from ui import help_topics
 from ui import theme as theme_v2
 from core.log_view import append_entry, entries_text, log_formatter
 from core.panes import pane_index, pane_mode
+from core import gui_busy as _gui_busy
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
@@ -2017,7 +2018,10 @@ class AllWellApp(QMainWindow):
                 swallowed(f"loading {dataset_path} into Review failed",
                           level=logging.WARNING)
 
-        QTimer.singleShot(delay_ms, _load)
+        # A timer still fires inside GUI-thread work that pumps the event loop
+        # (an Image Table Generate drawing its progress bar), and a load there
+        # would reset the dataset under the work: it waits for the work to end.
+        QTimer.singleShot(delay_ms, lambda: _gui_busy.after_busy("review_dataset_load", _load))
 
     def _open_dataset_in_review(self, dataset_path: Path) -> None:
         """Load a dataset root into Review and switch to it (from Datasets)."""

@@ -301,6 +301,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_statistics.py": "The Nanowells page's Statistics view: wells or groups compared by t-test, Mann-Whitney, KS or Dunnett",
     "test_nanowell_rare_responders.py": "the rare-responder analysis: QC, exceedance / HC / AD calibrated over wells, self-check",
     "test_nanowell_rare_responders_page.py": "the Rare responders test on the real Statistics view, its report and flagged crops",
+    "test_nanowell_rare_moving_average.py": "the Rare responders test tests moving averages, excluding what the window leaves",
     "test_nanowell_subset.py": "The Nanowells page's *Subset*: any number of conditions — starting cells, a metric at a …",
     "test_nanowell_moving_average_is_said.py": "A figure of moving averages says so on its subset line, through the page's controls",
     "test_nanowell_subset_scatter_gates.py": "The Nanowells page's *Subset* can name a gate drawn on the Scatter Plot's …",

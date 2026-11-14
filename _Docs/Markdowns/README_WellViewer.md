@@ -7186,10 +7186,11 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   every group again; *vs* keeps the control you chose meanwhile. Every other group drawn is tested against the
   control. The value is the page's **Metric** at the **Timepoint** — a fold-change metric compares each nanowell
   with its own **Baseline** — with no grouping by starting cells, and **Responders higher / lower** (beside the Test)
-  chooses the tail the tests look in. **Subset**, Cell Gating and the rim focus rule apply; the moving average
-  and the Fixed cohort do not, and the report says so (the figure carries no moving-average tag under this test,
-  since its values are not averaged); *Compare* is hidden while this test is chosen, since it never
-  applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
+  chooses the tail the tests look in. **Subset**, Cell Gating, the rim focus rule and the **Moving average** apply:
+  with the moving average on, each nanowell's value is its moving average at the Timepoint, taken exactly as the
+  other tests on this view take it, and the figure carries the *Moving average over N timepoints* tag. The Fixed
+  cohort does not apply, and the report says so when it is ticked; *Compare* is hidden while this test is chosen,
+  since it never applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
   report. A group or control with fewer than two wells is not tested as a group, and the figure says so.
 
   **Reading the figure.** For each treatment group, the answer comes first, in bold, in counts: for example *drug:
@@ -10999,8 +11000,21 @@ in the report — when:
   **identity check** could not confirm it is the same nanowell over time.
 
 The page's **Subset**, **Cell Gating** and the **rim-focus rule** have already been applied to the counts. The
-**moving average** and **Fixed cohort** do not apply: Details says so when they are on, and the figure carries no
-"Moving average" tag under this test, because none of its values is averaged.
+**Fixed cohort** does not apply, and Details says so when it is ticked.
+
+**With the moving average on**, the value each nanowell is tested on is its **moving average** of the Metric at the
+Timepoint — the same window, kind (trailing or centred) and **Baseline average** as the Distribution view and the
+other Statistics tests use — and the figure's top-left line says *Moving average over N timepoints*. Details says
+the values are moving averages and states the window. A nanowell the window leaves without a value — before its
+well's first full window, after its last one (centred), with a gap or an unconfirmed identity inside the window, or
+a fold change whose window would reach the baseline — is **excluded**, and counted in the report under that reason
+(for example *moving average: before the first full window*); it is never tested as a zero. When the window leaves
+no value at the Timepoint at all, the figure says why in place of a result, as the other views do.
+
+Averaging narrows each nanowell's spread over time, so it moves the **control cutoff** as well as the treatment
+values: the cutoff, the counts past it and every p-value are computed on the averaged values. A result with the
+moving average and one without it are therefore **different tests** of different quantities, not the same test
+made less noisy — compare like with like, and report which one you ran (the figure's tag and Details say).
 
 **Per-well normalisation** — dividing out each well's bulk (the median and spread of its central 80 %) — is
 available in the analysis and **off** by default. It removes a plate-position effect, but it also removes a real

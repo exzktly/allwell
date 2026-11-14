@@ -60,6 +60,10 @@ NT_MISSING = "final count missing"
 BELOW_STRATA = "N0 below the lowest loading stratum"
 NORMALISATION_UNDEFINED = "well cannot be normalised (MAD of its central 80% is 0)"
 VALUE_MISSING = "no value of the metric at the Timepoint"
+#: An optional text column of a table with a ``value``: why that value is undefined when the caller knows better than
+#: "missing" — the moving average's reason for a window it could not complete (``moving_compute.EARLY_REASON`` …).
+#: A row with text there is excluded with that text instead of :data:`VALUE_MISSING`.
+VALUE_REASON = "value_reason"
 
 
 @dataclass(frozen=True)
@@ -174,7 +178,12 @@ def qc_reasons(table: pd.DataFrame, params: RareParams) -> pd.Series:
         reasons[mask] = np.where(reasons[mask] == "", text, reasons[mask] + "; " + text)
 
     if "value" in table.columns:
-        add(pd.to_numeric(table["value"], errors="coerce").isna(), VALUE_MISSING)
+        missing = pd.to_numeric(table["value"], errors="coerce").isna()
+        said = (table[VALUE_REASON].fillna("").astype(str) if VALUE_REASON in table.columns
+                else pd.Series("", index=table.index, dtype=object))
+        add(missing & said.eq(""), VALUE_MISSING)
+        for text in sorted(set(said[missing & said.ne("")])):
+            add(missing & said.eq(text), text)
     else:
         n0 = pd.to_numeric(table["n0"], errors="coerce")
         nt = pd.to_numeric(table["nt"], errors="coerce")
@@ -325,7 +334,8 @@ SITE_QC_FLAGS = {"fused": "qc_fused", "partially_visible": "qc_edge", "count_dis
 
 
 def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: str, *, plate_id: str = "plate",
-                      crop_path=None, value_column: str | None = None) -> pd.DataFrame:
+                      crop_path=None, value_column: str | None = None,
+                      value_reasons: pd.Series | None = None) -> pd.DataFrame:
     """A per-nanowell table for :func:`prepare` from the Nanowells page's metrics (``series_compute.site_metrics``).
 
     One row per nanowell of every well *conditions* names (``{well: condition}``): ``n0`` is the count at the
@@ -333,7 +343,9 @@ def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: 
     timepoint carries its state as ``qc_state``; a fused, partly visible or count-disagreeing site, or one whose
     identity check failed, carries that flag — so each is excluded with its reason rather than read as a count.
     *crop_path* is ``crop_path(well, q, r) -> str`` or ``None`` (no crop paths). *value_column* names the page's Metric
-    column: its value at *final_timepoint* is the ``value`` the analysis tests (``None``: the count fold change)."""
+    column: its value at *final_timepoint* is the ``value`` the analysis tests (``None``: the count fold change).
+    *value_reasons*, on *metrics*' index, says why a value is undefined where the caller knows (the moving average's
+    reasons): written as :data:`VALUE_REASON`, so the nanowell is excluded with that reason."""
     final = metrics[(metrics["timepoint"] == final_timepoint) & metrics["well"].isin(list(conditions))].copy()
     if final.empty:
         raise ValueError(f"no nanowell of the named wells has a row at timepoint {final_timepoint!r}")
@@ -356,6 +368,8 @@ def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: 
             # "3+" is a value, not a missing one: read through the same map the Distribution and Extremes views use.
             raw = raw.astype(str).map(_OCCUPANCY_VALUE)
         out["value"] = pd.to_numeric(raw, errors="coerce").to_numpy()
+        if value_reasons is not None:
+            out[VALUE_REASON] = value_reasons.reindex(final.index).fillna("").astype(str).to_numpy()
     state = final["state"].astype(str).to_numpy()
     out["qc_state"] = np.where(np.isin(state, ["measured", "empty"]), "", state)
     for column, flag in SITE_QC_FLAGS.items():

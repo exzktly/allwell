@@ -74,11 +74,13 @@ def test_a_metric_with_one_value_per_nanowell_is_not_averaged_and_does_not_say_i
     assert _stamp(page) == []
 
 
-def test_the_rare_responder_test_does_not_claim_the_moving_average_it_ignores():
-    """The Rare responders test reads raw Nt/N0 whatever the moving-average control says, so its figure must not be
-    stamped "Moving average over N timepoints" — a tag over values that were not averaged says the opposite of what
-    was drawn. The pairwise tests on the same view do use the averaged values, and keep the tag."""
+def test_the_rare_responder_test_claims_the_moving_average_it_tests():
+    """The Rare responders test tests each nanowell's moving average at the Timepoint while the moving average is on
+    (``_rare_controller.windowed``), as the pairwise tests on the same view do, so its figure carries the same tag —
+    and none with the average off. (Its tag was withheld while the test read raw values whatever the window said.)"""
     kwargs = dict(metric="n", moving=3, baseline_moving=2, baseline="tp:t_a")
-    assert nwc.moving_tag("statistics", stats_test="rare", **kwargs) == ""
-    assert nwc.moving_tag("statistics", stats_test="welch", **kwargs).startswith("Moving average over 3 timepoints")
-    assert nwc.moving_tag("distribution", stats_test="rare", **kwargs).startswith("Moving average over 3")
+    rare = nwc.moving_tag("statistics", stats_test="rare", **kwargs)
+    assert rare == "Moving average over 3 timepoints (trailing)"
+    assert rare == nwc.moving_tag("statistics", stats_test="welch", **kwargs)
+    assert nwc.moving_tag("statistics", stats_test="rare", **{**kwargs, "moving": 0}) == ""
+    assert nwc.moving_tag("statistics", stats_test="rare", **{**kwargs, "metric": "occupancy_class"}) == ""

@@ -35,7 +35,11 @@ LOG_METRICS = frozenset({"log2_count_fc"})
 #: ratio and share, which the user asked to average, and whose small whole-number counts give a median that jumps
 #: between integers. ``well_summary``'s ``median`` column then holds that mean — one shape for every caller, as
 #: ``review.domain.observation.well_medians`` does for a share — and ``statistic`` names which it is.
-MEAN_METRICS = frozenset(size_class_compute.ALL_COLUMNS)
+#: The size classes' **fold changes** (``size_class_compute.FC_COLUMNS``) are not in it: they are continuous ratios,
+#: summarised by the median as ``count_fc`` is. A mean of ratios is asymmetric (0.5x and 2x average 1.25x) and is
+#: carried by the nanowells that started from one cell, and a class holding every cell has exactly ``count_fc``'s
+#: value per nanowell, so the two must reduce to the same well value.
+MEAN_METRICS = frozenset(size_class_compute.COLUMNS)
 
 
 def names_its_hours(timepoint: str, hours: float) -> bool:

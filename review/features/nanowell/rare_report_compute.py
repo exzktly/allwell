@@ -7,16 +7,19 @@
   beta-binomial regression and permutations kept within each plate), or one per (plate, treatment) against that
   plate's controls (``by_plate=True``).
 * **Guardrail.** A unit with fewer than ``min_wells_per_condition`` (2) wells on either side gets **no group-level
-  inference** — no regression, no Fisher test, no permutation p — and says that replication is insufficient; its
-  wells' per-well empirical results are still reported.
+  inference** — no regression, no Fisher test, no permutation p — and says the group cannot be tested. With two or
+  more control wells each treatment well's own empirical p is still reported; with fewer there is no control null,
+  and none is.
 * **Per unit**: Test A (``rare_exceedance_compute``) at the primary percentile and at each sensitivity percentile,
   all of them shown, none chosen after the fact; Test B (``rare_hc_compute``) and Test C (``rare_ad_compute``),
   each with a per-well empirical p against the control wells' leave-one-out values and a whole-well permutation p.
 * **Multiple testing**: Benjamini–Hochberg across every unit, separately for each test's group p-values.
-* **Interpretation** (:func:`interpret`): enrichment of rare responders is supported when the exceedance test or HC
-  is significant after correction; a significant AD alone is a general difference in the upper tail's shape.
-* **Responders** (:func:`responders`): every nanowell above the primary threshold or at or below its well's HC
-  threshold, with its crop path, for review by eye.
+* **Interpretation** (:func:`interpret`): the exceedance test alone decides — "detected" when it is significant
+  after correction, "cannot be decided" when it has no group p while nanowells are past the cutoff or when the
+  cutoff sits on a tie that hides the treatment (``rare_design_compute``), "not detected" otherwise. HC and AD are
+  supporting evidence and never change the verdict.
+* **Responders** (:func:`responders`): every treatment nanowell past the control cutoff, with its crop path, for
+  review by eye; ``hc_candidate`` says whether it is also an HC candidate, which alone never flags a nanowell.
 * **Parameter log**: every parameter, the strata, the exclusions by reason, the seed.
 
 Qt-free and matplotlib-free.
@@ -31,9 +34,10 @@ import numpy as np
 import pandas as pd
 
 from review.features.nanowell import rare_ad_compute as ad
+from review.features.nanowell import rare_design_compute as design
 from review.features.nanowell import rare_exceedance_compute as ex
 from review.features.nanowell import rare_hc_compute as hc
-from review.features.nanowell.rare_data_compute import Prepared, RareParams, exclusion_counts, prepare
+from review.features.nanowell.rare_data_compute import ALL, Prepared, RareParams, exclusion_counts, prepare
 from review.features.nanowell.rare_null_compute import (
     Permutation, Well, empirical_p, permutation_test, pool, wells_from,
 )
@@ -77,6 +81,10 @@ class Unit:
     #: +1, or -1 when the analysed values are negated to read the bottom tail (``Prepared.sign``): a figure or sentence
     #: shows ``sign * value`` and ``sign * threshold``.
     sign: int = 1
+    #: What the design cannot see, said beside the verdict (``rare_design_compute``): the cutoff on a tie, and
+    #: control and treatment seeded with different numbers of cells. ``""`` when it does not apply.
+    tie_note: str = ""
+    loading_note: str = ""
 
     @property
     def label(self) -> str:
@@ -132,6 +140,8 @@ def _run_unit(plate, treatment, controls, treated, params: RareParams) -> Unit:
                         f"{params.min_wells_per_condition} of each")
     full = pool(controls)
     unit.thresholds = ex.threshold_of(full, params.percentile, params.fixed_threshold)
+    unit.tie_note = design.cutoff_on_tie(full, pool(treated), unit.thresholds, params.percentile,
+                                         params.fixed_threshold)
     percentiles = [params.percentile] if params.fixed_threshold is not None else params.sensitivity_percentiles()
     for q in percentiles:
         unit.exceedance[q] = ex.exceedance_test(controls, treated, q, params.fixed_threshold,
@@ -201,6 +211,8 @@ def interpret(unit: Unit, fdr: float) -> str:
     past = sum(c.k for c in unit.primary.counts) if unit.exceedance else 0
     if past and not np.isfinite(unit.primary.p):
         return UNDECIDED                    # nanowells past the cutoff, and no group p to weigh them: not a "no"
+    if not past and unit.tie_note:
+        return UNDECIDED                    # a cutoff on a tie: nothing could be counted, which is not a "no"
     return NOT_DETECTED
 
 
@@ -287,8 +299,10 @@ def responders(units: list[Unit], prepared: Prepared) -> pd.DataFrame:
                     src = kept.loc[(w.key, nid)]
                     rows.append({"unit": unit.label, "well_key": w.key, "plate_id": w.plate,
                                  "well_id": src["well_id"], "condition": w.condition, "nanowell_id": nid,
-                                 "stratum": s, "n0": src["n0"], "nt": src["nt"], "fc": src["fc"], "value": v,
-                                 "threshold": thr.get(s, math.nan), "above_threshold": above,
+                                 # value and threshold as the user reads them: un-negated under "lower"
+                                 "stratum": s, "n0": src["n0"], "nt": src["nt"], "fc": src["fc"],
+                                 "value": unit.sign * v, "threshold": unit.sign * thr.get(s, math.nan),
+                                 "above_threshold": above,
                                  "hc_candidate": nid in hc_ids, "hc_p": hc_ids.get(nid, math.nan),
                                  "crop_path": src["crop_path"]})
     return pd.DataFrame(rows)
@@ -301,7 +315,7 @@ def parameter_log(prepared: Prepared, units: list[Unit]) -> dict:
             "exclusions_by_reason": exclusion_counts(prepared.exclusions),
             "units": [{"treatment": u.treatment, "plate": u.plate, "control_wells": [w.key for w in u.controls],
                        "treatment_wells": [w.key for w in u.treated],
-                       "thresholds": {s: float(v) for s, v in u.thresholds.items()}} for u in units],
+                       "thresholds": {s: float(u.sign * v) for s, v in u.thresholds.items()}} for u in units],
             "notes": list(prepared.notes)}
 
 
@@ -312,8 +326,12 @@ def analyse(data, params: RareParams | None = None, *, validate: bool = False,
     params = prepared.params
     wells = wells_from(prepared.kept)
     units = [_run_unit(*spec, params) for spec in _units(wells, params)]
+    unstratified = list(prepared.strata) == [ALL]
     for u in units:
         u.sign = prepared.sign
+        if unstratified:
+            u.loading_note = design.loading_differs(prepared.kept, [w.key for w in u.controls],
+                                                    [w.key for w in u.treated])
     _bh(units, "exceedance", [u.primary.p for u in units])
     _bh(units, "hc", [_p(u.hc_perm) for u in units])
     _bh(units, "ad", [_p(u.a2_perm) for u in units])

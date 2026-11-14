@@ -513,13 +513,22 @@ def summary_text(controls: PerMemberControls) -> str:
     return f"Per-sample control ({resolved}/{len(visible)})"
 
 
-def _term(name: str) -> str:
-    """``÷ name`` as one unbreakable piece of text (non-breaking spaces)."""
-    return "\u00f7\u00a0" + str(name).replace(" ", "\u00a0")
+#: The sign a tick writes before a denominator, by the fold change's operator: a
+#: bar under *Subtract* is a difference, and a "÷" under it would say otherwise.
+_OP_SIGN = {"ratio": "\u00f7", "subtract": "\u2212"}
 
 
-def tick_labels(items) -> list[str]:
+def _term(name: str, op: str = "ratio") -> str:
+    """``÷ name`` (``− name`` under *Subtract*) as one unbreakable piece of text (non-breaking spaces)."""
+    return _OP_SIGN.get(op, _OP_SIGN["ratio"]) + "\u00a0" + str(name).replace(" ", "\u00a0")
+
+
+def tick_labels(items, *, op: str = "ratio") -> list[str]:
     """The x-tick text for each bar, naming its control when they differ.
+
+    *op* is the vs-control operator (``"ratio"`` / ``"subtract"``), which both
+    stages share: each denominator is written ``÷ name`` under a ratio and
+    ``− name`` under a subtraction, matching the axis label.
 
     Under one global control the axis title already says which one and every
     bar shares it, so a per-bar line would repeat it n times. Under per-sample
@@ -575,7 +584,7 @@ def tick_labels(items) -> list[str]:
             # tick fit that must wrap the label breaks between the two terms
             # (``÷ WT Erlotinib`` / ``÷ Vehicle``), never inside a name.
             name = getattr(item.fc_control, "display_name", "")
-            out.append(f"{item.display}\n{_term(name)} {_term(rel_tick)}")
+            out.append(f"{item.display}\n{_term(name, op)} {_term(rel_tick, op)}")
             continue
         if not outcome:
             out.append(item.display)
@@ -590,7 +599,8 @@ def tick_labels(items) -> list[str]:
             out.append(f"{item.display}\n(ctrl)")
         else:
             name = getattr(item.fc_control, "display_name", "")
-            out.append(f"{item.display}\n\u00f7 {name}" if name else item.display)
+            sign = _OP_SIGN.get(op, _OP_SIGN["ratio"])
+            out.append(f"{item.display}\n{sign} {name}" if name else item.display)
     return out
 
 

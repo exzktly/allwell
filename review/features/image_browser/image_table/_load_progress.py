@@ -11,7 +11,9 @@ Two choices keep it from being noise or a hazard:
 * it **repaints without dispatching user input** (``QEventLoop.ExcludeUserInputEvents``), at most every
   :data:`PUMP_EVERY_S`. A click handled mid-Generate would run against a table halfway rebuilt — the reason
   ``ui_helpers._pump`` gives the dataset load the same treatment — and pumping per cell would cost more than the
-  cells.
+  cells. Excluding user input does not exclude timers or queued signals, so a Generate runs inside
+  ``core.gui_busy.busy``: a Generate asked for meanwhile, and the shell's deferred dataset load, wait for it to end
+  (:func:`one_at_a_time`, ``AllWellApp._load_in_review_later``).
 """
 
 from __future__ import annotations
@@ -91,6 +93,39 @@ def _pump_paint_only() -> None:
     from PySide6.QtWidgets import QApplication
 
     QApplication.processEvents(QEventLoop.ExcludeUserInputEvents)
+
+
+#: The ``core.gui_busy`` key a Generate asked for mid-Generate waits under.
+_GENERATE_KEY = "image_table_generate"
+
+
+def one_at_a_time(generate):
+    """Wrap ``image_table_generate`` so a Generate never starts inside another.
+
+    The bar's pump still delivers timers and queued signals, so a Generate can be
+    asked for while one is drawing (a phone refit timer is one route). The ask
+    waits until the busy work ends (``core.gui_busy``), and any number of asks
+    run as one Generate, re-walking missing folders when any of them asked to.
+    """
+    import functools
+
+    from core import gui_busy
+
+    @functools.wraps(generate)
+    def guarded(ctx, *, retry_missing: bool = False) -> None:
+        if gui_busy.is_busy():
+            waiting = gui_busy.pending(_GENERATE_KEY)
+            retry = bool(retry_missing) or bool(getattr(waiting, "retry_missing", False))
+
+            def _later() -> None:
+                guarded(ctx, retry_missing=retry)
+            _later.retry_missing = retry  # type: ignore[attr-defined]
+            gui_busy.after_busy(_GENERATE_KEY, _later)
+            return
+        with gui_busy.busy():
+            guarded.unguarded(ctx, retry_missing=retry_missing)
+    guarded.unguarded = generate  # type: ignore[attr-defined]   # the body itself, read per call
+    return guarded
 
 
 def begin(ctx) -> LoadProgress:

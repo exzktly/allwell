@@ -93,7 +93,11 @@ def test_identical_values_make_one_padded_bin():
 def test_nothing_to_draw_gives_no_scale_and_no_note():
     h = ch.column_histograms([[], [1.0]], 10)
     assert math.isnan(h.p_max)
-    assert h.note() == ""
+    # No bars and no scale; the one value is drawn as a dot, and only that is said (a renderer that counts the dots
+    # in a footer of its own asks for no note at all).
+    assert (h.as_dots(0), h.as_dots(1)) == (False, True)
+    assert h.note() == "1 column of fewer than 3 values drawn as dots"
+    assert h.note(say_dots=False) == ""
     assert h.bars(0, 0.0, 0.4)[0].size == 0
 
 

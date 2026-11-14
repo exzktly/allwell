@@ -400,7 +400,9 @@ being analysed, covering the same tiles the acquisition record lists. When it do
 well and timepoint that does not fit. A folder analysed before located results were kept has none, so it is refused
 the same way — re-analyse that plate once without the field to give it one. The log says, per well, how many
 timepoints were taken and from where, and each taken timepoint's grid record names the folder (`located_from`,
-`registration.reused_from`). Left blank, a plate re-run into the folder it was analysed into reuses that folder's own
+`registration.reused_from`). Results are kept per folder: a later run into the same output folder that names another
+Reuse registration folder, or leaves the field blank, analyses every well again rather than keeping results located
+from a folder it did not name. Left blank, a plate re-run into the folder it was analysed into reuses that folder's own
 tile registration only where it was made from exactly the same images and settings, and locates the rest. Run
 refuses to start when the folder is not a nanowell run's output folder. On a **remote host** the same happens:
 before the run starts, each well's located timepoints from this folder (and its grid record and cell masks) are sent
@@ -990,7 +992,10 @@ it, and a folder far too large to be one plate's input. That last one is what
 choosing a home folder or the top of a drive by mistake looks like: Analyze
 stops looking after 10,000 folders, says the folder holds more than one plate's
 input could, and asks for the plate's own folder instead, rather than leaving
-the window frozen while it searches the whole drive.
+the window frozen while it searches the whole drive. A plate folder that
+holds `in/` is never refused this way, however much else sits beside `in/`
+(an `out/` folder, the original export): only `in/` is read, so only `in/` is
+looked through.
 
 A per-well folder **beside its own well's archive** never stops the run: the
 archive is what gets read, and any image in the folder the archive does not
@@ -1154,7 +1159,7 @@ Any string  preserved as-is and sorted lexicographically
 The **Method**, with a one-line note under it saying when to use it (it turns
 red, and says what is missing, while the method cannot run); the
 **Segmentation channel** — the channel name the method segments, also
-quantified like any other. It is a dropdown of the channels listed under Channels above that can also be typed in: pick a listed channel, or type one the list does not hold (usually a nuclear stain), and a line under the field says which of the two it is. The **Cytoplasm channel** of StarDist + watershed works the same way. The field is hidden for **Label-free**, since that
+quantified like any other. It is a dropdown of the channels listed under Channels above that can also be typed in: pick a listed channel, or type one the list does not hold (usually a nuclear stain) — what you type is kept exactly, even when it is the start of a listed name, so `DAPI` stays `DAPI` beside a listed `DAPI_405` — and a line under the field says which of the two it is. The **Cytoplasm channel** of StarDist + watershed works the same way. The field is hidden for **Label-free**, since that
 segments the channel marked Phase; then only the chosen method's own settings.
 
 Scrolling the mouse wheel over a dropdown or number box scrolls the page, not the value (a dropdown never takes the wheel while closed; a number box takes it once you have clicked into it) — so a long form such as this one can be scrolled with the pointer anywhere on it.
@@ -2012,7 +2017,10 @@ start the wait over. If it runs out during the upload, a batched run stops its
 upload and a single run finishes sending first; what reached the cluster is kept
 for the next attempt. When it runs out the job is cancelled and the run stops with
 `no node was granted within 30 min, this host's Max queue wait — cancelled job
-…`; raise the setting for a busy cluster, or set it to **0**
+…`. If the host is not answering at that moment, the cancel cannot reach it either,
+and the message says so instead — `could not cancel job 4123 (the host did not
+answer); it may still be queued — cancel it with `scancel 4123` on the host` —
+since the job may still be waiting in the queue. Raise the setting for a busy cluster, or set it to **0**
 (no limit), which never gives up. A run that has started on its node is never cut
 short by it, however long it runs. It applies when the scheduler command is an
 `srun` command. It also bounds *Request a node* (below), and a run that is
@@ -5151,7 +5159,9 @@ but are not the same number.
 Each bar's label names both layers, on two lines: the bar, then `÷ WT-drug ÷
 Vehicle` — its own control, then the baseline value. `÷ Vehicle` stands for the
 bar's own ratio at Treatment = Vehicle (here `Mut-veh ÷ WT-veh`), which the
-note above the bars says once. When the bars are too narrow for the second line,
+note above the bars says once. Under Fold change = Subtract each stage is a
+difference, and the label, the note and the axis all say so with `−`
+(`− WT-drug − Vehicle`; the bar is a difference of differences of means). When the bars are too narrow for the second line,
 it breaks between the two terms rather than inside a name, and the panels move
 apart to make room for the extra lines. Each bar's p value sits just above its
 own error bar, and the Mean panel's y axis is raised as far as it takes for the
@@ -5335,7 +5345,8 @@ per-cell distribution, or a **histogram** of it.
     numbers, one bin per value when the range fits; with **Properties → Y log**
     on, the bins are log-spaced and the note counts any values ≤ 0 that a log
     axis cannot place. A column with fewer than three cells is drawn as its
-    values. Under a fold change the bins are of the scaled values.
+    values — every one of them — and so is a violin's column whose cells all
+    hold one value. Under a fold change the bins are of the scaled values.
   - **Significance** (On / Off) — draw pairwise significance brackets from the
     comparisons the [Statistics](#statistics) tab has run. A bracket appears
     over the two bars its comparison was computed from, whether those bars are
@@ -5865,7 +5876,11 @@ figure's log axes, not only this tab's; on a plot ticked at decades (most of
 them) picking base 2 re-ticks it at the powers of two. That includes the
 Scatter Plot's log axes, which are drawn as log(value + 1) so a zero stays on
 the axis: the label names the base (`(log₂, +1)`, `(ln, +1)`), and the ticks
-sit at 0 and the powers of that base.
+sit at 0 and the powers of that base (every second, third… power for a base so close
+to 1 that marking each would crowd the axis). On the Scatter Plot's nanowell points, an
+axis whose values include anything below zero (a shrinking nanowell's log₂ fold
+change, a negative growth rate) is drawn linear instead, since log(value + 1)
+cannot place it, and the footer says how many values made it so.
 
 #### Fold change on a response curve
 
@@ -6008,10 +6023,12 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 - **Histogram (per group)** lays the groups out side by side as *Violin (per
   group)* does, each drawn as a vertical histogram mirrored about its column
   with a tick at its median. Every group's bars sum to 1, all groups share the
-  tab's bin edges (**Bins**; log-spaced under **log y**) and one width scale, so
+  tab's bin edges (**Bins**; log-spaced under **log y**, where a value ≤ 0 has
+  no place and is left off and counted in the note) and one width scale, so
   widths compare across groups; a note at the top right states the bin count and
   what the widest bar means. A group drawn from a sample is binned over every
-  value, as the tab's other histograms are.
+  value, as the tab's other histograms are. A group of fewer than three values
+  has no histogram and is drawn as its values, which the note counts.
 - **No error band** — this tab draws the whole population per group rather than
   reducing it to a mean, so there is no spread for a band to describe and no
   SEM/SD control on its controls row. The SEM/SD choice itself is app-wide: set
@@ -6539,7 +6556,8 @@ plots over time and its crops (and **Pop out** shows it large), and then each vi
 - **Position**, **Statistics** and **Largest & smallest** summarise many nanowells, so it is shown in the site detail.
 
 A well that is not selected on the plate, an address the well's table does not hold, or text that is not an address
-is said on the status line, and nothing is selected. The box is not shown on the **QC**, **Statistics** and
+is said on the status line, and nothing is selected. An address the well's table does not hold still moves the page to
+its well, so the nanowell selected before is let go and the site detail closes; the other two change nothing. The box is not shown on the **QC**, **Statistics** and
 **Position** views, whose figures draw no single nanowell (one row per well, a test's table, each ring's summary).
 
 **Each view shows only the controls it uses.** A control with no role on a view is not on its band: the **QC** and
@@ -6656,7 +6674,8 @@ use them.
   *DCs count fold change* and *T cells : DCs ratio fold change*. Each is the value at a timepoint divided by the
   same nanowell's value at the baseline. A class with no cell at baseline has no count fold change, and a ratio
   of zero at baseline has no ratio fold change. The footer counts each such nanowell with that reason, as it does
-  for *Count fold change*. Like the five above, each well's value is the mean over its nanowells, and the Moving
+  for *Count fold change*. Unlike the five above, and like *Count fold change*, each well's value is the median over
+  its nanowells: a mean of ratios is pulled up by the nanowells that started from one cell. The Moving
   average and its baseline window apply to them as to the other fold changes. The export writes them as
   `size_1_fc`, `size_2_fc` and `size_ratio_fc`. Each has its own baseline timepoint column
   (`size_1_fc_baseline_timepoint`, …). Under *First measurable* the ratio's baseline is the first timepoint at
@@ -6969,8 +6988,11 @@ the sentence names it.
   median (or mean, for a metric averaged per well), since a slot shared by many wells is too narrow for readable
   dots. **Beeswarm** always draws dots — a crowded slot draws what fits and writes "+N" under it for the rest —
   **Violin** always draws violins, and **Histogram** always draws each well as a vertical histogram mirrored
-  about its slot, with the same median tick. Single nanowells can be clicked only where dots are drawn; a window
-  (below) reaches them anyway, and the footer says when violins or histograms stand in for dots.
+  about its slot, with the same median tick. A well no shape can be drawn for — a violin of nanowells all holding
+  the same value (every nanowell one cell, at a single-cell-seeded start), or a histogram of fewer than three
+  values — is drawn as its dots instead, and the footer counts how many. Single nanowells can be clicked only where
+  dots are drawn; a window (below) reaches them anyway, and the footer says when violins or histograms stand in for
+  dots.
 - **Bins** sets the histograms' bin count (2–200, default 30). Every well's bars sum to 1, and every well in the
   figure — across all its panels, which share one y axis — is binned on one set of edges and measured against one
   width scale, so widths compare across wells. A cell count bins on whole numbers, one bin per value when the
@@ -7165,7 +7187,8 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   control. The value is the page's **Metric** at the **Timepoint** — a fold-change metric compares each nanowell
   with its own **Baseline** — with no grouping by starting cells, and **Responders higher / lower** (beside the Test)
   chooses the tail the tests look in. **Subset**, Cell Gating and the rim focus rule apply; the moving average
-  and the Fixed cohort do not, and the report says so; *Compare* is hidden while this test is chosen, since it never
+  and the Fixed cohort do not, and the report says so (the figure carries no moving-average tag under this test,
+  since its values are not averaged); *Compare* is hidden while this test is chosen, since it never
   applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
   report. A group or control with fewer than two wells is not tested as a group, and the figure says so.
 
@@ -7643,7 +7666,9 @@ plot, a cell in the Cell Browser or a row in Review CSV makes that cell the
 every page: click the name to come back to it here, or ✕ to let it go.
 **Show in Segmentation** — from the chip, the Scatter cell popup or the Cell
 Browser — opens the cell's field zoomed in so the cell fills about 40% of the
-view, centred. Segmentation outlines the focused cell in yellow, twice as thick
+view, centred — or as near as a large field allows: the view zooms no further
+than a field about 8,000 pixels across, so a very small cell in a large field
+fills less of it. Segmentation outlines the focused cell in yellow, twice as thick
 as the red round the other cells, whenever its field is on screen, and the
 Scatter plot rings its point. If the field opens but the cell is not in its
 segmentation, the status line says so. Opening another dataset clears it.
@@ -10974,7 +10999,8 @@ in the report — when:
   **identity check** could not confirm it is the same nanowell over time.
 
 The page's **Subset**, **Cell Gating** and the **rim-focus rule** have already been applied to the counts. The
-**moving average** and **Fixed cohort** do not apply, and the figure says so when they are on.
+**moving average** and **Fixed cohort** do not apply: Details says so when they are on, and the figure carries no
+"Moving average" tag under this test, because none of its values is averaged.
 
 **Per-well normalisation** — dividing out each well's bulk (the median and spread of its central 80 %) — is
 available in the analysis and **off** by default. It removes a plate-position effect, but it also removes a real
@@ -11157,15 +11183,17 @@ variation, and the self-check measures whether it holds its false-positive rate 
 ### Guardrails, multiple testing, and what a result means
 
 **Replication guardrail.** A group, or a control, with fewer than **2 wells** gets no group-level result at all:
-no regression, no Fisher test, no permutation p. The figure says *"too few wells to test the group"* and the
-report still gives each treatment well's own empirical p. One well per condition cannot separate a
+no regression, no Fisher test, no permutation p. The figure says *"too few wells to test the group"*. With two or
+more control wells the report still gives each treatment well's own empirical p; with fewer, a lone control well's
+leave-one-out pool is empty, so there is no control null and those columns are empty. One well per condition cannot separate a
 treatment from that well's own luck, and the test refuses to pretend otherwise.
 
 **What each design can do.**
 
 | Wells (control + treatment) | Test A | Tests B and C (permutation) |
 | --- | --- | --- |
-| 1 + any, or any + 1 | per-well empirical p only | per-well empirical p only |
+| 0 or 1 + any | no calibrated result | no calibrated result |
+| 2 or more + 1 | per-well empirical p only | per-well empirical p only |
 | 2 + 2 | empirical null; Fisher shown, not used | 6 shufflings, smallest p 0.17 |
 | 3 + 2 | beta-binomial regression | 10 shufflings, smallest p 0.1 |
 | 6 + 3 | beta-binomial regression | 84 shufflings, smallest p 0.012 |
@@ -11181,6 +11209,7 @@ share of false discoveries among the results called significant. "Significant" i
 | q < 0.05 | **rare responders detected** |
 | otherwise, or no nanowell in any well past the cutoff | **rare responders not detected** |
 | no group p (fewer than 3 control or 2 treatment wells for its regression) while nanowells are past the cutoff | **cannot be decided with these wells** — with the wells it needs |
+| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** |
 | Fewer than 2 wells on a side | **too few wells to test the group** |
 
 Higher Criticism (B) and the upper-tail shape test (C) are reported beside the verdict as supporting evidence and
@@ -11195,7 +11224,14 @@ evidence of no effect: read it with the caveats the figure prints under it, and 
   bound) and its p behaves as if nanowells were independent, which overstates the evidence — with the smallest p a
   test on whole wells could give;
 - Higher Criticism, in the HC+ form used here, leaves out nanowells whose p is at or below 1/n — with a control pool
-  larger than a well those are exactly the most extreme ones, so it says nothing about them.
+  larger than a well those are exactly the most extreme ones, so it says nothing about them;
+- the control cutoff sits on a tie: more control nanowells share one value than the tail holds (a fold change of 0
+  under *Responders lower*, when a few control nanowells died), and the treatment holds significantly more nanowells
+  at it. A nanowell has to be strictly past the cutoff to count, so those cannot be seen; with none past it, the
+  verdict is *cannot be decided* rather than *not detected*;
+- control and treatment nanowells started with different numbers of cells. Nanowells seeded with fewer cells reach
+  extreme fold changes more easily, so a difference in seeding alone can look like rare responders; the verdict is
+  left as it is, and this says why it may not be one.
 
 The upper-tail shape test weighs the control's top value too (its cumulative share is counted out of N + 1, as
 every empirical p here is), so a nanowell beyond everything the controls reach — a rare responder — counts, also

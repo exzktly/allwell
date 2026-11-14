@@ -1,7 +1,7 @@
 """Rare-responder analysis, Test B: Higher Criticism, threshold-free and sensitive to a sparse excess.
 
 **Per-nanowell p-values.** Each nanowell of the well under test gets a one-sided p-value from the control pool of
-its own loading stratum, ``p_i = (1 + #{control >= x_i}) / (N_control + 1)`` (:func:`p_values`). A treatment well is
+its own loading stratum (the whole pool when no strata are set, as on the page), ``p_i = (1 + #{control >= x_i}) / (N_control + 1)`` (:func:`p_values`). A treatment well is
 scored against every control well; a control well, for its null, against every *other* control well. A nanowell in
 a stratum the pool has no value in gets no p-value, and is counted in :attr:`HC.unscored`.
 
@@ -113,7 +113,9 @@ def resolution_warning(n_control_wells: int, pooled: dict, n: int) -> str:
     if n_control_wells == 2:
         return ("with two control wells, each control well's leave-one-out pool is the single other control well: "
                 "the control null of HC cannot resolve p-values at the 1/n scale")
-    if n_control_wells <= 1:
+    if n_control_wells == 0:
+        return "there is no control well: HC has no control null to compare against"
+    if n_control_wells == 1:
         return (f"the control pool is a single control well ({size} nanowells): its p-values cannot resolve the 1/n "
                 f"scale of a {n}-nanowell well, so HC is poorly calibrated")
     if size + 1 < RESOLUTION_FACTOR * n:

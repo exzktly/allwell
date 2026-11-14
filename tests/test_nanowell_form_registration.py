@@ -74,7 +74,7 @@ def test_on_a_remote_host_the_run_goes_and_the_log_says_the_records_are_sent(  #
             "to the host, which takes them as they are.", "WARNING") in logged
 
 
-def test_the_remote_argv_drops_the_folder_and_the_run_address_ignores_it():
+def test_the_remote_argv_drops_the_folder_and_the_run_address_is_keyed_on_it():
     from services.remote_config import RemoteHost
     from services.remote_run_id import pipeline_argv_digest
     from services.remote_runner import LocalInputMode, OutputFilter, RemoteRunner
@@ -86,5 +86,9 @@ def test_the_remote_argv_drops_the_folder_and_the_run_address_ignores_it():
         _build_remote_argv(local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP)
     assert "--nanowell_registration_from" not in remote and "/local/run1/out" not in remote
     assert remote[remote.index("--nanowell_cell_diameter_um") + 1] == "11.0"    # the flag after it survives
+    # The named folder decides every address and position the run reports, so a run naming another folder, or
+    # none, must get its own run directory rather than reuse this one's. The local path
+    # itself never reaches the host; the digest is what tells the runs apart.
     without = [a for a in local if a not in ("--nanowell_registration_from", "/local/run1/out")]
-    assert pipeline_argv_digest(local) == pipeline_argv_digest(without)
+    elsewhere = [a if a != "/local/run1/out" else "/local/run2/out" for a in local]
+    assert len({pipeline_argv_digest(local), pipeline_argv_digest(without), pipeline_argv_digest(elsewhere)}) == 3

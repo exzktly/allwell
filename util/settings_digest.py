@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 
 #: Every pipeline option whose value changes the numbers a run produces, and
 #: why it does. The keys are ``process_microscopy.build_parser()`` destinations,
@@ -95,6 +96,13 @@ KEYED_ON: dict[str, str] = {
     "mesh_sigma":                  "the mesh background model's smoothing",
     "flatfield":                   "divides every frame by an illumination field",
     "background_dir":              "the blank the correction is built from",
+    "nanowell_registration_from":  "a folder a person named is taken as it is — every timepoint's tile "
+                                   "positions, lattice, central square and nanowell addresses come from it, "
+                                   "checked only to fit the plate's tiles — so another folder, or none, "
+                                   "gives other addresses and other numbers. Keyed by the folder's identity "
+                                   "(registration_identity), which a remote host is sent in place of the path; "
+                                   "a folder the app carried to a host is reused only where it is exact, and "
+                                   "is not keyed",
     "background_well":             "which well inside it that blank is",
     "background_well_map":         "which blank corrects which well, so a well "
                                    "re-paired to a different blank is corrected "
@@ -170,12 +178,13 @@ NOT_KEYED_ON: dict[str, str] = {
     "only_wells_absent_ok":  "whether a named well absent from one batch's input "
                              "is skipped or refused; it computes nothing",
     "incremental_prior_dir": "where reuse looks, not what is computed",
-    "nanowell_registration_from": "where a nanowell run takes its located timepoints from: an earlier run of "
-                                  "this plate, which the run refuses unless it fits every well, timepoint and "
-                                  "tile — the same positions and addresses this plate was located to, not a "
-                                  "setting of how cells are counted",
-    "nanowell_registration_carried": "marks that folder as one the app carried to a remote host rather than one "
-                                     "a person named; it changes only whether the folder is taken as it is",
+    "nanowell_registration_carried": "marks the registration folder as one the app carried to a remote host "
+                                     "rather than one a person named; it is read by the key of "
+                                     "nanowell_registration_from (a carried folder is not keyed), never keyed "
+                                     "itself",
+    "nanowell_registration_identity": "the identity of the folder a person named, sent to a remote host in place "
+                                      "of its path, which the host cannot read; it stands in for "
+                                      "nanowell_registration_from's value in the key, never keyed beside it",
     "nanowell_hold_dir":     "where a batch holds the wells left to the run's final re-anchoring pass; "
                              "that pass computes what the batch's own pass would have, from more wells",
     "nanowell_reanchor_only": "runs only the re-anchoring over wells already computed under these settings",
@@ -374,6 +383,35 @@ def _canonical_well(value):
 _CANONICAL = {"nanowell_empty_well": _canonical_well}
 
 
+_REGISTRATION_KEY = "nanowell_registration_from"
+
+
+def registration_identity(folder) -> str:
+    """The identity a named Reuse registration folder is keyed by: a hash of its path as typed, with ``~`` expanded
+    and any trailing separator removed, so a folder typed with a trailing slash or backslash is the same folder.
+
+    A hash, not the path: a remote run is sent it as ``--nanowell_registration_identity`` while the host reads the
+    folder from a copy in its own run directory (``services.remote_registration``) — a path that changes with every
+    attempt and so cannot be the key — and the host's key must equal the one this computer computes for the same
+    run. Moving the folder changes it, which costs a recompute, never a wrong reuse."""
+    text = os.path.expanduser(str(folder)).rstrip("/\\") or str(folder)
+    return hashlib.blake2b(text.encode(), digest_size=8).hexdigest()
+
+
+def _registration_value(opts) -> str | None:
+    """The value :data:`KEYED_ON`'s ``nanowell_registration_from`` contributes: the named folder's identity
+    (:func:`registration_identity`, or the one a host was sent), or ``None`` — not keyed — when no folder is named
+    or the folder is one the app carried to a host, which the run reuses only where it is exact."""
+    if opts.get("nanowell_registration_carried"):
+        return None
+    sent = opts.get("nanowell_registration_identity")
+    if sent:
+        return str(sent)
+    folder = opts.get(_REGISTRATION_KEY)
+    return registration_identity(folder) if folder else None
+
+
+
 def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outside_method: bool = False,
             as_spelled: bool = False) -> str:
     """The digest of *keys* in *opts*; with *as_spelled*, the :data:`_CANONICAL` options as typed, which is how the
@@ -396,8 +434,8 @@ def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outsi
             # other settings and be re-run (roll-up review X5); they describe nothing such a run did.
             continue
         try:
-            value = opts[key]
-        except (KeyError, TypeError):
+            value = _registration_value(opts) if key == _REGISTRATION_KEY else opts[key]
+        except (KeyError, TypeError, AttributeError):
             continue
         if value is None:
             continue

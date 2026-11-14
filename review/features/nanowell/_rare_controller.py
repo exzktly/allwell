@@ -4,20 +4,21 @@ analysis (``rare_report_compute``), run on a worker, drawn, and its flagged nano
 **What it tests.** Each group the page draws (a Sample Definitions replicate set, or a well standing alone) other
 than the control chosen under *vs* is a treatment, tested against the control group with the **wells** as the units:
 the calibrated exceedance count, Higher Criticism and the upper-tail Anderson–Darling statistic, with the self-check
-off (it re-runs every test dozens of times). The values are always the count fold change ``Nt / N0`` — the count at
-the page's **Timepoint** over the count at its **Baseline** — whatever the Metric shows, because the tests stratify
-nanowells by their starting count; the Subset, Cell Gating and the rim-focus rule have already been applied to the
-metrics it reads, and a nanowell not measurable at the timepoint is excluded with its state as the reason
+off (it re-runs every test dozens of times). The values are the page's **Metric** at its **Timepoint** — a
+fold-change metric compares each nanowell with its own **Baseline** — with no grouping by starting cells (a
+difference in seeding between the sides is said beside the verdict, ``rare_design_compute``), and *Responders higher
+/ lower* chooses the tail; the Subset, Cell Gating and the rim-focus rule have already been applied to the metrics it
+reads, and a nanowell not measurable at the timepoint is excluded with its state as the reason
 (``rare_data_compute.from_site_metrics``). The Compare unit, the moving average and the Fixed cohort do not apply
-to it, and the figure says so when they are set.
+to it, and Details says so when they are set.
 
 **On a worker, once.** :func:`compose` builds the per-nanowell table on the GUI thread (vectorised, cheap) and keys
 the result on a hash of that table and the parameters — everything the result is computed from, so a key can never
 return a result computed for other numbers. A key not yet in ``NanowellState.rare_results`` is computed on a worker
 through ``controller._fetch`` while the figure says so, and the page redraws when it arrives.
 
-**Review by eye.** The nanowells the drawn result flagged — above the primary threshold, or at or below their well's
-HC threshold — are kept on ``NanowellState.rare_flagged``, and the pop-out's **Show: Flagged** draws them as rows of
+**Review by eye.** The nanowells the drawn result flagged — the treatment nanowells past the control cutoff — are
+kept on ``NanowellState.rare_flagged``, and the pop-out's **Show: Flagged** draws them as rows of
 crops over time, :data:`FLAGGED_PAGE` to a page, through the same crop cutting the Distribution window's rows use.
 
 Reaches ``controller`` the way ``_window_controller`` does, through :func:`_nwc`, because the controller imports this

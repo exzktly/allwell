@@ -416,7 +416,10 @@ def test_a_hidden_pref_really_changes_nothing_on_the_heat_map(
 
 
 @pytest.mark.parametrize("key,value", [
-    ("title_size", 30),
+    # Smaller than the default, not larger: this figure is too narrow for its
+    # title's second line at the default size, so the desk title fit shrinks it
+    # to the room — and would shrink a larger size to that same room.
+    ("title_size", 10),
     ("tick_label_size", 30),
     ("axis_label_size", 30),
     ("tick_length", 15.0),

@@ -58,7 +58,7 @@ def test_exclusions_are_logged_with_their_reasons_and_strata_follow_n0():
                       "n0": [0, 1, 2, 3, 7, 2], "nt": [5, 4, 8, 3, 14, np.nan], "t0_h": 0, "t_h": 48,
                       "qc_debris": [False, False, True, False, False, False],
                       "qc_focus": ["", "", "", "", "", "blurred"]})
-    p = prepare(t)
+    p = prepare(t, RareParams(strata_edges=(1, 2, 3, 4)))      # strata only when asked for
     reasons = dict(zip(p.exclusions["nanowell_id"], p.exclusions["reason"]))
     assert reasons == {"a": N0_ZERO, "c": "QC: debris", "f": "final count missing; QC: focus (blurred)"}
     assert list(p.kept["nanowell_id"]) == ["b", "d", "e"]
@@ -66,7 +66,7 @@ def test_exclusions_are_logged_with_their_reasons_and_strata_follow_n0():
     assert list(p.kept["fc"]) == [4.0, 1.0, 2.0]
     assert p.kept["rate"].tolist() == pytest.approx([2 / 48, 0.0, 1 / 48])
     row = p.wells.iloc[0]
-    assert (row["n_recorded"], row["n_kept"], row["n_excluded"], row["median_fc"]) == (6, 3, 3, 2.0)
+    assert (row["n_recorded"], row["n_kept"], row["n_excluded"], row["median_value"]) == (6, 3, 3, 2.0)
     assert (row["n0_1"], row["n0_2"], row["n0_3"], row["n0_≥4"]) == (1, 0, 1, 1)
 
 
@@ -196,19 +196,41 @@ def test_a_plate_covariate_at_its_bound_does_not_make_the_treatment_odds_ratio_u
     assert not any("complete separation" in note for note in r.notes)
 
 
+def _null_plate(n_ctrl, n_treat, n=300, seed=11):
+    """Control and treatment wells drawn from one distribution: nothing in it is a rare responder."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_ctrl + n_treat):
+        n0 = rng.integers(1, 6, n)
+        nt = rng.poisson(n0 * np.exp(rng.normal(1.5, 0.5, n)))
+        rows += [("p", f"W{i}", "control" if i < n_ctrl else "drug", f"{j},0", n0[j], nt[j]) for j in range(n)]
+    return pd.DataFrame(rows, columns=["plate_id", "well_id", "condition", "nanowell_id", "n0", "nt"])
+
+
+def test_on_a_plate_with_no_responders_hc_candidates_alone_are_never_flagged():
+    """Higher Criticism always has a peak, so every null well has candidates. The flagged list is the nanowells past
+    the control cutoff and nothing else: a candidate below the cutoff is never put in front of the reviewer as a
+    finding beside a verdict of none."""
+    res = rr.analyse(_null_plate(4, 4))
+    assert res.units[0].interpretation == rr.NOT_DETECTED
+    flagged = res.responders
+    assert (flagged["above_threshold"]).all()
+    assert len(flagged) < sum(len(res.units[0].hc[w.key].candidates) for w in res.units[0].treated)
+
+
 def test_one_control_well_gives_no_calibrated_result_and_does_not_promise_one():
     """With one control well its leave-one-out pool is empty, so the control null is empty and every treatment
-    well's empirical p is undefined. The verdict said "per-well empirical results only" over a table of NaN — a
-    result promised and not computed (CLAUDE.md §7 #3). It now says there is no calibrated result and why; with no
-    control well at all, the resolution warning no longer calls it "a single control well (0 nanowells)"."""
+    well's empirical p is undefined. The verdict once said "per-well empirical results only" over a table of NaN — a
+    result promised and not computed (CLAUDE.md §7 #3). It says the group cannot be tested and promises nothing per
+    well; with no control well at all, the resolution warning no longer calls it "a single control well (0
+    nanowells)"."""
     res = rr.analyse(_null_plate(1, 3))
     unit = res.units[0]
     treated = res.per_well[res.per_well["role"] == "treatment"]
     for column in ("exceed_empirical_p", "hc_empirical_p", "a2r_empirical_p"):
         assert treated[column].isna().all(), column       # nothing per-well was computed
-    assert "per-well empirical results" not in unit.interpretation
-    assert "at least 2 control wells" in unit.interpretation
-    assert unit.interpretation == rr.NO_CONTROL_NULL
+    assert "per-well" not in unit.interpretation
+    assert unit.interpretation == rr.INSUFFICIENT
     from review.features.nanowell import rare_hc_compute as hcc
     assert "single control well" not in hcc.resolution_warning(0, {}, 300)
     assert "no control well" in hcc.resolution_warning(0, {}, 300)
@@ -252,7 +274,7 @@ def test_hc_detects_sparse_responders_that_a_mean_shift_test_would_not():
     unit = res.units[0]
     assert unit.hc_perm.p == pytest.approx(unit.hc_perm.min_p) and unit.hc_perm.exhaustive
     assert unit.hc_perm.n_labelings == math.comb(9, 3)
-    assert rr.SUPPORTS in unit.interpretation
+    assert unit.interpretation == rr.DETECTED           # decided by the exceedance test; HC reported beside it
 
 
 # ── permutations ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -317,12 +339,18 @@ def test_bh_runs_across_treatments_for_each_test():
     assert q.min() == pytest.approx(min(2 * lo, hi)) and q.max() == pytest.approx(hi)
 
 
-def test_ad_alone_is_a_shape_difference_not_enrichment():
+def test_the_exceedance_test_alone_decides_the_verdict():
+    """User decision: Test A decides; Higher Criticism and the upper-tail shape test never change the verdict. Each
+    case puts the supporting tests on the other side of the line from the exceedance test, so a rule that let either
+    decide would give a different answer."""
     unit = rr.Unit("all", "drug", [], [], True, True)
-    unit.q = {"exceedance": 0.4, "hc": 0.3, "ad": 0.01}
-    assert rr.interpret(unit, 0.05) == rr.SHAPE_ONLY
-    unit.q = {"exceedance": 0.01, "hc": 0.3, "ad": 0.01}
-    assert rr.interpret(unit, 0.05) == f"{rr.SUPPORTS} (exceedance)"
+    unit.q = {"exceedance": 0.4, "hc": 0.01, "ad": 0.01}
+    assert rr.interpret(unit, 0.05) == rr.NOT_DETECTED
+    unit.q = {"exceedance": 0.01, "hc": 0.9, "ad": 0.9}
+    assert rr.interpret(unit, 0.05) == rr.DETECTED
+    unit.q = {"exceedance": float("nan"), "hc": 0.01, "ad": 0.01}
+    assert rr.interpret(unit, 0.05) == rr.NOT_DETECTED
+    assert rr.interpret(rr.Unit("all", "drug", [], [], False, False), 0.05) == rr.INSUFFICIENT
 
 
 def test_responders_name_the_spiked_nanowells_with_their_crops():
@@ -456,7 +484,8 @@ def test_the_page_figure_keeps_its_panels_legible_however_long_the_text():
         panels = [ax for ax in fig.axes if ax.get_visible() and ax.axison]
         assert panels, size
         heights = [ax.get_position().height * size[1] for ax in panels]
-        assert min(heights) >= rd.ROW_MIN_IN - 1.1, (size, heights)
+        # A row's axes keep at least what ROW_MIN_IN leaves after its title, ticks and labels (1.3 in).
+        assert min(heights) >= rd.ROW_MIN_IN - rd._ROW_PAD_IN - 1e-6 and min(heights) >= 1.25, (size, heights)
         lowest = min(ax.get_position().y0 for ax in panels)
         texts = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
         assert texts and max(t.get_position()[1] for t in texts) < lowest, size
@@ -493,7 +522,8 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
     from ui.theme import WELL_COLORS_TUPLE, Colors, CPub
     from widgets.plot_card import repaint_theme_pairs
 
-    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)))
+    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)),
+                     RareParams(strata_edges=(1, 2, 3, 4)))
     unit = res.units[0]
     strata = rd._strata(unit)
     assert len(strata) == 4                                    # n0 1…5: strata 1, 2, 3 and 4 and over
@@ -512,8 +542,14 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
     assert not set(treatment_lines().values()) & {c.upper() for c in WELL_COLORS_TUPLE}
     repaint_theme_pairs(ecdf, "publication")
     assert treatment_lines() == {s: CPub.occupancy_ramp[i].upper() for i, s in enumerate(strata)}
-    legend = [to_hex(ln.get_color()).upper() for ln in ecdf.get_legend().get_lines()]
-    assert legend == [c.upper() for c in CPub.occupancy_ramp]
+    # The strata are labelled on the panel, each with a dot in its shade, which repaints with the lines.
+    dots = {c.get_gid().split(":", 1)[1]: to_hex(c.get_facecolors()[0]).upper() for c in ecdf.collections
+            if (c.get_gid() or "").startswith("rare-ecdf-dot:")}
+    assert dots == {s: CPub.occupancy_ramp[i].upper() for i, s in enumerate(strata)}
+    labels = {t.get_gid().split(":", 1)[1]: t.get_text() for t in ecdf.texts
+              if (t.get_gid() or "").startswith("rare-ecdf-label:")}
+    assert labels == {s: rd._stratum_name(s) for s in strata} and ecdf.get_legend() is None
+    assert [t.get_text() for t in ecdf.texts if t.get_gid() == "rare-cutoff-label"] == ["control cutoff"]
     threshold = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-threshold:{strata[0]}")
     assert to_hex(threshold.get_color()).upper() == CPub.occupancy_ramp[0].upper()
 
@@ -536,7 +572,8 @@ def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
 
     from review.features.nanowell import _rare_render as rd
 
-    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)))
+    res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)),
+                     RareParams(strata_edges=(1, 2, 3, 4)))
     lines = ["drug: 2 vs 3 control wells — supports rare-responder enrichment", "A exceedance: p 0.001"]
     for size, stacked in (((4.06, 7.32), True), ((14.5, 7.0), False)):
         fig = Figure(figsize=size)
@@ -558,37 +595,233 @@ def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
         renderer = FigureCanvasAgg(fig).get_renderer()
         exceed = panels[1]
         box = exceed.get_window_extent(renderer)
-        labels = [t for t in exceed.texts if t.get_text().startswith("p=")]
+        labels = [t for t in exceed.texts if t.get_gid() == "rare-exceed-count"]
         assert labels, size
         assert all(t.get_window_extent(renderer).y1 <= box.y1 for t in labels), size   # inside, under the title
 
 
-def _null_plate(n_ctrl, n_treat, n=300, seed=11):
-    """Control and treatment wells drawn from one distribution: nothing in it is a rare responder."""
+# ── what the result says, and what the figure draws (tracker RARE_RESPONDERS_UX_TRACKER.md) ──────────────────────
+def _small_plate(*, spiked: bool, n_ctrl: int = 3, n_treat: int = 2, seed: int = 3) -> pd.DataFrame:
+    """Whole-number fold changes (2×, 3×, 4× of 1–3 starting cells), as a real count plate has, on wells named as
+    the plate names them; with *spiked*, nanowells 5, 17, 33 and 48 of each drug well grow 30-fold."""
     rng = np.random.default_rng(seed)
     rows = []
-    for i in range(n_ctrl + n_treat):
-        n0 = rng.integers(1, 6, n)
-        nt = rng.poisson(n0 * np.exp(rng.normal(1.5, 0.5, n)))
-        rows += [("p", f"W{i}", "control" if i < n_ctrl else "drug", f"{j},0", n0[j], nt[j]) for j in range(n)]
-    return pd.DataFrame(rows, columns=["plate_id", "well_id", "condition", "nanowell_id", "n0", "nt"])
+    for well in [f"A{i + 1:02d}" for i in range(n_ctrl)] + [f"B{i + 1:02d}" for i in range(n_treat)]:
+        n0 = rng.integers(1, 4, 60)
+        nt = n0 * rng.integers(2, 5, 60)
+        if spiked and well.startswith("B"):
+            for q in (5, 17, 33, 48):
+                nt[q] = n0[q] * 30
+        rows += [{"plate_id": "P", "well_id": well, "condition": "ctrl" if well.startswith("A") else "drug",
+                  "nanowell_id": str(i), "n0": int(n0[i]), "nt": int(nt[i]), "t0_h": 0.0, "t_h": 5.0,
+                  "crop_path": ""} for i in range(60)]
+    return pd.DataFrame(rows)
 
 
-def test_hc_candidates_are_flagged_only_in_a_well_whose_hc_result_is_significant():
-    """HC+ always finds an i* <= alpha0 * n, so every well has candidates, under the null too (about 5 % of a well).
-    Listing them as "flagged by the rare-responder tests" under a treatment whose HC is not significant put some
-    sixty null nanowells in front of the reviewer. HC candidates are flagged only under a treatment whose HC q is
-    below the analysis's level; above-threshold nanowells stay flagged, being a plain description. The gate is the
-    group's q: a per-well empirical p cannot go below 1/(controls + 1), so a per-well gate would flag nothing on the
-    second plate here, whose HC is significant."""
-    res = rr.analyse(_null_plate(4, 4), RareParams())
-    assert all(v.startswith(rr.NO_EVIDENCE) for v in res.table["interpretation"])
-    treated = res.per_well[res.per_well["role"] == "treatment"]
-    assert (treated["hc_candidates"] > 0).all()              # every null well has HC candidates to flag
-    flagged = res.responders
-    assert int(flagged["hc_candidate"].sum()) == 0           # none is flagged as one
-    assert flagged["above_threshold"].all()                  # what is left is above the threshold, and says so
-    spiked = rr.analyse(plate(n_ctrl=8, n_treat=4, n=300, responders=12, seed=3))
-    assert spiked.table["hc_q"].iloc[0] < 0.05                # HC significant: its candidates are flagged
-    only_hc = spiked.responders["hc_candidate"] & ~spiked.responders["above_threshold"]
-    assert only_hc.any()
+def _deciding(unit) -> str:
+    """The deciding line *unit* should print: its own p, formatted as the figure formats it. The beta-binomial fit is
+    iterative and, on a separated plate, its last digit depends on the platform's numeric libraries (0.00072 here,
+    0.000717 on the CI runner), so tests check the sentence against the result and the value against 0.00072 to 2%."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    assert unit.primary.p == pytest.approx(0.00072, rel=0.02)
+    return f"Deciding: exceedance test p = {rx._num(unit.primary.p)}."
+
+
+def test_a_plate_with_no_responders_flags_nothing_and_says_the_test_could_not_run():
+    """The reported defect: the null plate listed 15 "flagged" nanowells — Higher Criticism's candidates, which every
+    well has — beside a verdict of none. Only nanowells past the cutoff are flagged (user decision), and with none
+    past it in any well the deciding test says it was not run rather than printing dashes."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_small_plate(spiked=False), rr.RareParams(control="ctrl"))
+    unit = res.units[0]
+    assert len(res.responders) == 0 and unit.interpretation == rr.NOT_DETECTED
+    assert any(len(unit.hc[w.key].candidates) for w in unit.treated)      # the candidates exist; they are not flagged
+    text = rx.unit_text(res, unit)
+    assert text["headline"] == ("drug: rare responders not detected. 0 of 120 drug nanowells (0.0%) rose above the "
+                                "control cutoff (its top 1%) on fold change (Nt / N0), against 0 of 180 control "
+                                "nanowells (0.0%) · 2 drug vs 3 control wells.")
+    assert text["lines"][0] == "Deciding: exceedance test not tested — no nanowell in any well was past the cutoff."
+
+
+def test_the_spiked_plate_leads_with_counts_and_names_every_limit_of_the_design():
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    unit = res.units[0]
+    assert sorted(res.responders["nanowell_id"].astype(int)) == sorted([5, 17, 33, 48] * 2)
+    text = rx.unit_text(res, unit)
+    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) rose above "
+                                       "the control cutoff (its top 1%) on fold change (Nt / N0), against 0 of 180 "
+                                       "control nanowells (0.0%)")
+    assert text["lines"] == [
+        _deciding(unit),
+        # Unstratified, the control pool (180) is larger than a well (60), so every spiked nanowell falls at p ≤ 1/n,
+        # where HC+ does not look: its p is 0.9, and the third caveat says why.
+        "Supporting, not deciding: Higher Criticism p = 0.9 · shape test p = 0.1 (the lowest possible with these "
+        "wells)."]
+    assert text["caveats"] == [
+        "With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1, so they can "
+        "neither confirm nor rule out anything here.",
+        "No control nanowell was past the cutoff, so the spread between wells could not be estimated: the "
+        "exceedance test's p treats nanowells as independent and overstates the evidence (on wells alone, p ≥ 0.1).",
+        "Higher Criticism cannot see the 8 most extreme drug nanowell(s) (it leaves out p ≤ 1/n), so it says nothing "
+        "about them."]
+
+
+def test_higher_criticism_s_blind_spot_is_named_where_it_hides_the_responders():
+    """User decision: keep HC+, and warn. With 6 control wells the pool is larger than a well, every spiked nanowell
+    falls at p ≤ 1/n, HC+ leaves them all out (p 0.93) — and the figure says so."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    res = rr.analyse(_small_plate(spiked=True, n_ctrl=6, n_treat=3), rr.RareParams(control="ctrl"))
+    unit = res.units[0]
+    assert unit.interpretation == rr.DETECTED and unit.hc_perm.p > 0.5
+    assert ("Higher Criticism cannot see the 12 most extreme drug nanowell(s) (it leaves out p ≤ 1/n), so it says "
+            "nothing about them.") in rx.caveats(unit, res.prepared.params)
+
+
+def test_the_upper_tail_shape_test_sees_mass_beyond_the_control_maximum():
+    """With whole-number fold changes (2×, 3×, 4×) the control pool had no value above its median and below its top,
+    and the top carried no weight (1 − F0 = 0 there), so the statistic summed over nothing and a nanowell beyond
+    every control counted for nothing. F0 = #/(N + 1) gives the top weight: the 30-fold spikes now count, and the
+    test runs on the 2 + 2 design too. A pool of one value has no tail and stays undefined, not zero (CLAUDE.md §7)."""
+    from review.features.nanowell import rare_ad_compute as ad
+
+    ref = np.array([2.0, 3.0, 4.0, 4.0])
+    assert ad.a2r_stratum(np.array([2.0, 4.0, 60.0]), ref) > ad.a2r_stratum(np.array([2.0, 3.0, 4.0]), ref) >= 0
+    assert math.isnan(ad.a2r_stratum(np.array([9.0]), np.array([3.0, 3.0, 3.0])))
+    spiked = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl")).units[0]
+    null = rr.analyse(_small_plate(spiked=False), rr.RareParams(control="ctrl")).units[0]
+    assert spiked.a2_perm.p == pytest.approx(spiked.a2_perm.min_p)        # the strongest the design allows
+    assert null.a2_perm.p > 0.5
+    two = rr.analyse(_small_plate(spiked=True, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]
+    assert np.isfinite(two.a2_perm.p)
+
+
+def test_a_relabeling_whose_statistic_is_undefined_does_not_make_p_smaller():
+    """Four wells, two treated (C, D): six labelings. The statistic is 2 for C, 0 for D and undefined for A and B, so
+    the observed mean is 1; {A,C} and {B,C} score 2, {A,D} and {B,D} score 0, and {A,B} is undefined. Counting the
+    undefined labeling as smaller gave p = 3/6; it cannot be ruled out as at least as extreme, so p = 4/6."""
+    import review.features.nanowell.rare_null_compute as rn
+
+    wells = [_well(k, [1.0]) for k in "ABCD"]
+    values = {"A": math.nan, "B": math.nan, "C": 2.0, "D": 0.0}
+    perm = rn.permutation_test(wells, {"C", "D"}, lambda well, _pooled: values[well.key], 100, 0)
+    assert perm.n_labelings == 6 and perm.observed == 1.0
+    assert perm.p == pytest.approx(4 / 6)
+
+
+def test_the_figure_draws_counts_and_fold_changes_not_p_values_and_logarithms():
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    fig = Figure(figsize=(14.5, 7.0))
+    rd.render_rare_page(fig, res)
+    fig.canvas.draw()
+    ecdf, exceed, hc_ax = [ax for ax in fig.axes if ax.axison][:3]
+    assert ecdf.get_title() == "Fold change (Nt / N0)\nsolid: drug · dotted: control"      # no strata by default
+    ticks = [t.get_text() for t in ecdf.get_xticklabels() if t.get_text()]
+    assert {"2×", "4×", "8×"} <= set(ticks) and all(t.endswith("×") for t in ticks)      # fold changes, not log₂
+    counts = sorted(t.get_text() for t in exceed.texts if t.get_gid() == "rare-exceed-count")
+    assert counts == ["0/60", "0/60", "0/60", "4/60", "4/60"]
+    assert not any(t.get_text().startswith("p=") for t in exceed.texts)
+    assert exceed.get_ylim()[0] == 0
+    assert hc_ax.get_title().startswith("Higher Criticism: p = 0.9\n")
+    heads = [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-rare-unit"]
+    assert heads and heads[0].startswith("drug: rare responders detected. 8 of 120")
+    lines = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
+    assert lines[0].get_text() == _deciding(res.units[0])
+    assert lines[0].get_position()[1] < min(ax.get_position().y0 for ax in (ecdf, exceed, hc_ax))
+    assert min(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-unit") > max(
+        ax.get_position().y1 for ax in (ecdf, exceed, hc_ax))        # the answer above the panels
+
+
+def test_a_short_figure_cuts_its_text_between_sentences_and_keeps_the_caveats_first():
+    """However short the figure, the deciding test is drawn; then the caveats, before the supporting tests; and what is
+    cut is cut between sentences, with one pointer to Details."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    for size in ((4.06, 7.32), (4.06, 9.0), (4.06, 12.0)):
+        fig = Figure(figsize=size)
+        rd.render_rare_page(fig, res, note="pointer")
+        lines = [t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-line"]
+        assert lines[0] == _deciding(res.units[0]), size
+        joined = " ".join(line.strip() for line in lines)
+        if "Supporting" in joined:
+            assert "⚠" in joined and joined.index("⚠") < joined.index("Supporting"), size
+        if lines[-1].startswith("… "):
+            assert lines[-1].endswith("more, and the full report: Details ▸ under the figure."), size
+            drawn = " ".join(line.strip() for line in lines[:-1])
+        else:
+            assert lines[-1] == "pointer", size
+            drawn = " ".join(line.strip() for line in lines[:-1])
+        for sentence in drawn.split("⚠ ")[1:]:                      # every caveat drawn is drawn whole
+            assert sentence.split("Supporting")[0].rstrip().endswith("."), (size, sentence)
+
+
+
+def test_the_value_is_the_page_s_metric_with_no_strata_and_direction_reads_either_tail():
+    """User decision: the page's Metric drives the test (a ``value`` column), nanowells are not stratified, and a
+    direction chooses the tail. A bottom-tail plate (four nanowells per drug well dropping to a tenth of anything in
+    control) is found looking lower and missed looking higher; the figure draws the values as measured."""
+    from matplotlib.figure import Figure
+
+    from review.features.nanowell import _rare_render as rd
+    from review.features.nanowell import rare_export_compute as rx
+    from review.features.nanowell.rare_data_compute import ALL
+
+    rng = np.random.default_rng(5)
+    rows = []
+    for well in ("A01", "A02", "A03", "B01", "B02"):
+        # Drug wells' ordinary nanowells sit inside the control's range (never below its bottom 1%), so exactly the
+        # four dropped ones are past the cutoff.
+        value = rng.uniform(100.0, 200.0, 60) if well < "B" else rng.uniform(150.0, 200.0, 60)
+        if well.startswith("B"):
+            value[[5, 17, 33, 48]] = 9.0
+        rows += [{"plate_id": "P", "well_id": well, "condition": "ctrl" if well < "B" else "drug",
+                  "nanowell_id": str(i), "value": float(value[i]), "crop_path": ""} for i in range(60)]
+    table = pd.DataFrame(rows)
+    lower = rr.analyse(table, rr.RareParams(control="ctrl", direction="lower"), value_label="GFP brightness")
+    higher = rr.analyse(table, rr.RareParams(control="ctrl"), value_label="GFP brightness")
+    assert lower.prepared.strata == [ALL] and lower.prepared.sign == -1
+    assert lower.units[0].interpretation == rr.DETECTED and higher.units[0].interpretation == rr.NOT_DETECTED
+    assert sorted(lower.responders["nanowell_id"].astype(int)) == sorted([5, 17, 33, 48] * 2)
+    assert (lower.responders["fc"] == 9.0).all()                         # flagged at the value as measured
+    text = rx.unit_text(lower, lower.units[0])
+    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) fell below "
+                                       "the control cutoff (its bottom 1%) on GFP brightness")
+    assert any(c.startswith("GFP brightness is a level, not a change from the Baseline: nanowells that started "
+                            "lower") for c in text["caveats"])
+    fig = Figure(figsize=(14.5, 7.0))
+    rd.render_rare_page(fig, lower)
+    ecdf = [ax for ax in fig.axes if ax.axison][0]
+    cut = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-threshold:{ALL}")
+    assert 2 ** cut.get_xdata()[0] > 90                               # the cutoff drawn at a measured brightness
+    drawn = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-ecdf-treatment:{ALL}")
+    assert 2 ** min(drawn.get_xdata()) == pytest.approx(9.0)          # the low responders, as measured
+
+
+
+def test_a_design_too_small_for_the_deciding_test_cannot_be_decided_rather_than_not_detected():
+    """Reported: two control and two treatment wells. The beta-binomial regression needs three control wells, so the
+    deciding test has no group p — and the verdict read "not detected" beside 8 of 120 drug nanowells past the cutoff
+    against 0 of 120 in control. That is a test that did not run, shown as a negative (CLAUDE.md §7). It says it cannot
+    be decided, and why; with nothing past the cutoff in any well, "not detected" is still true and still said."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    spiked = rr.analyse(_small_plate(spiked=True, n_ctrl=2), rr.RareParams(control="ctrl"))
+    unit = spiked.units[0]
+    assert unit.interpretation == rr.UNDECIDED
+    text = rx.unit_text(spiked, unit)
+    assert text["headline"].startswith("drug: cannot be decided with these wells. 8 of 120 drug nanowells (6.7%)")
+    assert text["lines"][0] == ("Deciding: exceedance test has no group p — it needs at least 3 control wells (this "
+                                "design has 2). With fewer, it gives each well's own p only (Details).")
+    null = rr.analyse(_small_plate(spiked=False, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]
+    assert null.interpretation == rr.NOT_DETECTED

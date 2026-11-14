@@ -58,6 +58,14 @@ def timepoint_phrase(timepoint: str, hours: float | None) -> str:
     return f"{timepoint} · {hours:g} h"
 
 
+def timepoint_short(timepoint: str, hours: float | None) -> str:
+    """*timepoint* as the band's Timepoint control names it: by its hours (``5 h``), or by its label when the time is
+    unknown. For column headers, where the label beside the hours (:func:`timepoint_phrase`) does not fit."""
+    if hours is None or not math.isfinite(hours):
+        return timepoint
+    return f"{hours:g} h"
+
+
 def well_statistic(column: str) -> str:
     """``"mean"`` or ``"median"``: how a well's nanowells are reduced to the well's one value for *column*."""
     return "mean" if column in MEAN_METRICS else "median"

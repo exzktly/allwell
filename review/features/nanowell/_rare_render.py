@@ -19,6 +19,8 @@ import textwrap
 
 import numpy as np
 
+from review.features.nanowell.rare_data_compute import ALL
+from review.features.nanowell.rare_export_compute import unit_text
 from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
 
 #: Crops drawn at most per figure; the rest are counted in its title.
@@ -82,15 +84,17 @@ def _strata(unit) -> list:
     return sorted({s for w in unit.controls + unit.treated for s in w.values})
 
 
-def _pooled(group, stratum, log_axis: bool) -> tuple[np.ndarray, np.ndarray] | None:
-    """The pooled ECDF of *group* in *stratum*; with *log_axis*, its x as log₂ of the value (a value of 0 left out).
+def _pooled(group, stratum, log_axis: bool, sign: int = 1) -> tuple[np.ndarray, np.ndarray] | None:
+    """The pooled ECDF of *group* in *stratum*, of the original values (``sign`` times the analysed ones, so a
+    bottom-tail analysis is drawn as the values were measured); with *log_axis*, its x as log₂ of the value (a value
+    of 0 left out).
 
     The log is taken here, on a linear axis, rather than by ``set_xscale("log")``: the page's style pass sets each
     axis's scale from the Properties panel after the draw, which put a "(log)" label over a linear axis."""
     parts = [w.values[stratum] for w in group if stratum in w.values]
     if not parts:
         return None
-    x, y = _ecdf(np.concatenate(parts))
+    x, y = _ecdf(sign * np.concatenate(parts))
     if not log_axis:
         return x, y
     keep = x > 0
@@ -98,11 +102,55 @@ def _pooled(group, stratum, log_axis: bool) -> tuple[np.ndarray, np.ndarray] | N
 
 
 def _x(value: float, log_axis: bool) -> float:
-    return math.log2(value) if log_axis and value > 0 else value
+    """*value* on the panel's x: its log₂ on the log axis, NaN for a value the log axis cannot place (≤ 0), which is
+    then not drawn rather than drawn at the wrong place."""
+    if log_axis:
+        return math.log2(value) if value > 0 else math.nan
+    return value
+
+
+def _is_ratio(value_label: str) -> bool:
+    return "fold change" in value_label.lower()
 
 
 def _x_label(value_label: str, log_axis: bool) -> str:
-    return f"log₂ {value_label} (FC = 0 not shown)" if log_axis else value_label
+    if not log_axis:
+        return value_label
+    return f"{value_label}, log scale" + (" — 0 is left out" if _is_ratio(value_label) else "")
+
+
+def _fold_ticks(ax, log_axis: bool, value_label: str = "fold change") -> None:
+    """On the log axis, ticks at whole powers of two labelled as the values they are — ``2×``, ``4×`` for a fold
+    change, the plain number otherwise — not as their logarithms."""
+    if not log_axis:
+        return
+    from matplotlib.ticker import FuncFormatter, MaxNLocator
+
+    suffix = "×" if _is_ratio(value_label) else ""
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=6))
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _pos: f"{2 ** v:g}{suffix}"))
+
+
+def log_axis_for(result) -> bool:
+    """Whether the first panel's x is logarithmic: only when every value drawn is positive (a fold change, a count,
+    a brightness), never for a robust z or a log metric, which can be negative."""
+    if result.prepared.params.normalize:
+        return False
+    values = result.prepared.kept["fc"].to_numpy(dtype=float)
+    values = values[np.isfinite(values)]
+    return bool(len(values)) and bool((values > 0).all() or (_is_ratio(result.prepared.value_label)
+                                                              and (values >= 0).all()))
+
+
+def _stratum_name(stratum: str) -> str:
+    if str(stratum) == ALL:
+        return "all nanowells"
+    return f"{stratum} cell at start" if str(stratum) == "1" else f"{stratum} cells at start"
+
+
+def _cut_x(unit, stratum, log_axis: bool) -> float:
+    """The cutoff of *stratum* on the panel's x, as the original value (``unit.sign`` times the analysed one)."""
+    return _x(unit.sign * unit.thresholds[stratum], log_axis) if stratum in unit.thresholds else math.nan
 
 
 def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) -> None:
@@ -111,49 +159,89 @@ def draw_ecdf_stratum(ax, unit, stratum: str, value_label: str, log_axis: bool) 
     treated_colour = _well_colour(unit.treated[0].key) if unit.treated else ink
     for group, colour, gid, label in ((unit.controls, muted, "rare-ecdf-control", "control"),
                                       (unit.treated, treated_colour, "rare-ecdf-treatment", unit.treatment)):
-        xy = _pooled(group, stratum, log_axis)
+        xy = _pooled(group, stratum, log_axis, unit.sign)
         if xy is not None:
             ax.step(*xy, where="post", color=colour, label=label, linewidth=1.2)[0].set_gid(f"{gid}:{stratum}")
-    if stratum in unit.thresholds:
-        ax.axvline(_x(unit.thresholds[stratum], log_axis), color=ink, linestyle="--", linewidth=1).set_gid(
+    if np.isfinite(_cut_x(unit, stratum, log_axis)):
+        ax.axvline(_cut_x(unit, stratum, log_axis), color=ink, linestyle="--", linewidth=1).set_gid(
             f"rare-threshold:{stratum}")
-    _title(ax, f"N0 = {stratum}")
+    _fold_ticks(ax, log_axis, value_label)
+    _title(ax, _stratum_name(stratum))
     ax.set_xlabel(_x_label(value_label, log_axis))
     ax.set_ylim(0, 1.01)
+
+
+def _ecdf_colours(unit, stratum, strata, i, publication, muted):
+    """``(treatment, control, pair or None)`` colours of one stratum's curves. Stratified, both take the stratum's
+    occupancy shade (paired for publication), told apart by solid and dotted; unstratified, the treatment curve
+    takes its first well's plate colour and the control curve the secondary ink, as the other panels draw them."""
+    if strata == [ALL]:
+        return (_well_colour(unit.treated[0].key) if unit.treated else muted), muted, None
+    pair = _stratum_shades(len(strata))[i]
+    colour = pair[1] if publication else pair[0]
+    return colour, colour, pair
 
 
 def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
-    """Every stratum on one axes: control dotted, treatment solid, one colour per stratum, each threshold dashed."""
+    """Every stratum on one axes (one, unstratified): control dotted, treatment solid, the cutoff dashed, of the values
+    as measured (``unit.sign`` undoes a bottom-tail analysis's negation)."""
     strata = _strata(unit)
     publication = _is_publication(ax)
-    legend_pairs = []
-    for stratum, pair in zip(strata, _stratum_shades(len(strata))):
-        colour = pair[1] if publication else pair[0]
-        for group, style, gid in ((unit.controls, ":", "rare-ecdf-control"),
-                                  (unit.treated, "-", "rare-ecdf-treatment")):
-            xy = _pooled(group, stratum, log_axis)
+    _ground, ink, muted = _inks(ax)
+    for i, stratum in enumerate(strata):
+        treated_c, control_c, pair = _ecdf_colours(unit, stratum, strata, i, publication, muted)
+        for group, style, gid, colour in ((unit.controls, ":", "rare-ecdf-control", control_c),
+                                          (unit.treated, "-", "rare-ecdf-treatment", treated_c)):
+            xy = _pooled(group, stratum, log_axis, unit.sign)
             if xy is not None:
-                line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1,
-                               label=f"N0 {stratum}" if style == "-" else None)[0]
-                _paired(line, pair).set_gid(f"{gid}:{stratum}")
-                if style == "-":
-                    legend_pairs.append(pair)
-        if stratum in unit.thresholds:
-            _paired(ax.axvline(_x(unit.thresholds[stratum], log_axis), color=colour, linestyle="--", linewidth=0.8),
-                    pair).set_gid(f"rare-threshold:{stratum}")
+                line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1)[0]
+                line.set_gid(f"{gid}:{stratum}")
+                if pair is not None:
+                    _paired(line, pair)
+                elif colour == muted:
+                    _ink(line, muted=True)
+        cut = _cut_x(unit, stratum, log_axis)
+        if np.isfinite(cut):
+            line = ax.axvline(cut, color=control_c if pair is not None else ink, linestyle="--", linewidth=0.8)
+            line.set_gid(f"rare-threshold:{stratum}")
+            _paired(line, pair) if pair is not None else _ink(line)
     ax.set_xlabel(_x_label(value_label, log_axis))
-    ax.set_ylabel("cumulative fraction")
+    ax.set_ylabel("share of nanowells at or below")
+    _fold_ticks(ax, log_axis, value_label)
     ax.set_ylim(0, 1.01)
-    _ground, ink, _muted = _inks(ax)
-    legend = ax.legend(fontsize=_TITLE_PT * 0.75, frameon=False, loc="lower right", handlelength=1.2)
-    for text in legend.get_texts():
-        _ink(text).set_color(ink)
-    for line, pair in zip(legend.get_lines(), legend_pairs):    # the legend's handles are copies: pair them too
-        _paired(line, pair)
-    _title(ax, "ECDF by N0 (treatment solid, control dotted, T dashed)")
+    _label_strata(ax, unit, strata, log_axis, publication)
+    by = "" if strata == [ALL] else ", by starting cells"
+    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\nsolid: {unit.treatment} · dotted: control")
 
 
-#: Points a dot's p label takes above the dot: its 6 pt offset and one line of its type, with leading.
+def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:
+    """Label the lines on the panel itself rather than in a key: each stratum's treatment curve where it crosses its
+    own height (staggered, since every cumulative curve ends at the same top right corner, where labels at the ends
+    would pile up), with a dot in the stratum's shade — unstratified, the treatment curve named by its group — and
+    the dashed line as the control cutoff."""
+    _ground, ink, muted = _inks(ax)
+    for i, stratum in enumerate(strata):
+        xy = _pooled(unit.treated, stratum, log_axis, unit.sign)
+        if xy is None or not len(xy[0]):
+            continue
+        treated_c, _control_c, pair = _ecdf_colours(unit, stratum, strata, i, publication, muted)
+        level = 0.78 - 0.56 * i / (len(strata) - 1) if len(strata) > 1 else 0.5   # spread over the panel's height
+        x = float(xy[0][min(int(np.searchsorted(xy[1], level)), len(xy[0]) - 1)])
+        dot = ax.scatter([x], [level], s=14, color=treated_c, zorder=5, gid=f"rare-ecdf-dot:{stratum}")
+        if pair is not None:
+            _paired(dot, ((pair[0], pair[0]), (pair[1], pair[1])))
+        name = unit.treatment if stratum == ALL else _stratum_name(stratum)
+        _ink(ax.annotate(name, (x, level), textcoords="offset points", xytext=(6, 0), va="center",
+                         fontsize=_TITLE_PT * 0.75, color=ink, gid=f"rare-ecdf-label:{stratum}"))
+    cuts = [c for c in (_cut_x(unit, s, log_axis) for s in strata) if np.isfinite(c)]
+    if cuts:
+        # At the foot of the dashed line, clear of the stratum labels, which sit at mid-height.
+        _ink(ax.annotate("control cutoff", (max(cuts) if unit.sign > 0 else min(cuts), 0.02), textcoords="offset points",
+                         xytext=(-3, 0), rotation=90, ha="right", va="bottom", fontsize=_TITLE_PT * 0.7, color=ink,
+                         gid="rare-cutoff-label"))
+
+
+#: Points a dot's count label takes above the dot: its 6 pt offset and one line of its type, with leading.
 _P_LABEL_PT = 6 + _TITLE_PT * 0.75 * 1.4
 
 
@@ -173,7 +261,10 @@ def _headroom(ax, labelled) -> None:
 
 
 def draw_exceedance(ax, unit) -> None:
-    """Each well's exceedance rate; control wells (leave-one-out) as the null, treatment wells with their p."""
+    """Each well's share of nanowells past the cutoff, labelled with its count (``4/60``); control wells (each
+    scored leave-one-out) as the band chance gives, treatment wells in their plate colours with an ink outline, so
+    a dark plate colour still shows on the dark card. Each treatment well's own p is in Details: with three control
+    wells its floor is 0.25, and drawn beside a group p of 0.0007 it read as a contradiction."""
     _ground, ink, muted = _inks(ax)
     counts = unit.primary.counts
     controls = [c for c in counts if not c.treated]
@@ -182,37 +273,60 @@ def draw_exceedance(ax, unit) -> None:
     if ctrl_rates.size and np.isfinite(ctrl_rates).any():
         ax.axhspan(np.nanmin(ctrl_rates), np.nanmax(ctrl_rates), color=muted, alpha=0.15).set_gid("rare-null-band")
         ax.axhline(np.nanmean(ctrl_rates), color=muted, linestyle=":", linewidth=1).set_gid("rare-null-mean")
+    from widgets.plot_card import plot_tokens
+
     xs = np.arange(len(counts))
     ax.scatter(xs[:len(controls)], ctrl_rates, color=muted, zorder=3, gid="rare-exceed-control")
+    for x, c in zip(xs, controls):
+        _ink(ax.annotate(f"{c.k}/{c.n}", (x, c.rate * 100), textcoords="offset points", xytext=(0, 6), ha="center",
+                         fontsize=_TITLE_PT * 0.7, color=muted, gid="rare-exceed-count"), muted=True)
+    outline = {mode: plot_tokens(mode)[1] for mode in ("screen", "publication")}
     for i, c in enumerate(treated):
         x, colour = len(controls) + i, _well_colour(c.key)
-        ax.scatter([x], [c.rate * 100], color=colour, zorder=4, gid=f"rare-exceed-treated:{c.key}")
-        if np.isfinite(c.empirical_p):
-            _ink(ax.annotate(f"p={c.empirical_p:.2g}", (x, c.rate * 100), textcoords="offset points",
-                             xytext=(0, 6), ha="center", fontsize=_TITLE_PT * 0.75, color=ink))
+        dot = ax.scatter([x], [c.rate * 100], color=colour, edgecolors=outline[
+            "publication" if _is_publication(ax) else "screen"], linewidths=0.8, zorder=4,
+            gid=f"rare-exceed-treated:{c.key}")
+        _paired(dot, ((colour, outline["screen"]), (colour, outline["publication"])))   # (faces, edges) per ground
+        _ink(ax.annotate(f"{c.k}/{c.n}", (x, c.rate * 100), textcoords="offset points", xytext=(0, 6), ha="center",
+                         fontsize=_TITLE_PT * 0.75, color=ink, gid="rare-exceed-count"))
     ax.set_xticks(xs, [c.key.split(":", 1)[-1] for c in controls + treated], rotation=60,
                   fontsize=_TITLE_PT * 0.75)
-    ax.set_ylabel(f"% above the {unit.primary.percentile:g}th pct.")
-    _headroom(ax, [c.rate * 100 for c in treated if np.isfinite(c.empirical_p)])
-    _title(ax, "Exceedance per well over the control null")
+    ax.set_ylabel("% of the well's nanowells")
+    rates = [c.rate * 100 for c in counts if np.isfinite(c.rate)]
+    ax.set_ylim(0, max(1.0, max(rates, default=0) * 1.05))       # a share is never negative, and an all-zero plate
+    _headroom(ax, rates)                                           # keeps its dots on the floor, not mid-panel
+    _title(ax, "Share of each well's nanowells past the cutoff")
 
 
 def draw_hc(ax, unit) -> None:
-    """The HC curve against i/n: control wells (leave-one-out) in the secondary ink, treatment wells coloured."""
+    """The HC curve over each well's nanowells, most extreme first: control wells (leave-one-out) in the secondary
+    ink, treatment wells in their plate colours, a dot at each curve's peak. A treatment well with no curve (HC
+    undefined for it) is named in the title rather than silently missing."""
     _ground, _ink_colour, muted = _inks(ax)
     for w in unit.controls:
         h = unit.hc[w.key]
         if len(h.curve_x):
             ax.plot(h.curve_x, h.curve_y, color=muted, linewidth=0.8, gid=f"rare-hc-control:{w.key}")
+    missing = []
     for w in unit.treated:
         h, colour = unit.hc[w.key], _well_colour(w.key)
         if len(h.curve_x):
             ax.plot(h.curve_x, h.curve_y, color=colour, linewidth=1.3, gid=f"rare-hc-treated:{w.key}")
             ax.scatter([h.i_star / h.n], [h.value], color=colour, zorder=4, gid=f"rare-hc-istar:{w.key}")
-    ax.set_xlabel("i / n")
-    ax.set_ylabel("HC+")
-    p = unit.hc_perm.p if unit.hc_perm is not None else math.nan
-    _title(ax, f"Higher Criticism (permutation p = {p:.3g})" if np.isfinite(p) else "Higher Criticism (no group p)")
+        else:
+            missing.append(w.key.split(":", 1)[-1])
+    ax.set_xlabel("share of the well's nanowells, most extreme first")
+    ax.set_ylabel("excess score")
+    perm = unit.hc_perm
+    p = perm.p if perm is not None else math.nan
+    if np.isfinite(p):
+        floor = " (lowest possible)" if np.isfinite(perm.min_p) and p <= perm.min_p * (1 + 1e-9) else ""
+        head = f"Higher Criticism: p = {p:.3g}{floor}"
+    else:
+        head = "Higher Criticism: no group p"
+    sub = f"colour: {unit.treatment} wells · grey: control" + (
+        f" · not drawn: {', '.join(missing)}" if missing else "")
+    _title(ax, f"{head}\n{sub}")
 
 
 def render_ecdf(fig, unit, value_label: str, *, log_axis: bool = True) -> None:
@@ -234,14 +348,16 @@ def render_hc(fig, unit) -> None:
     draw_hc(_new_axes(fig, 1)[0], unit)
 
 
-def _wrapped(fig, lines, width_frac: float) -> list[str]:
-    """*lines* wrapped to what fits *width_frac* of the figure's width at the report's monospace size."""
-    chars = max(40, int(fig.get_figwidth() * width_frac * 72 / (_REPORT_PT * 0.62)))
-    return [part for line in lines for part in (textwrap.wrap(line, chars, subsequent_indent="      ") or [""])]
+def _wrapped(fig, lines, width_frac: float, pt: float = None, indent: str = "   ") -> list[str]:
+    """*lines* wrapped to what fits *width_frac* of the figure's width at *pt* (the report's size) in the body face,
+    whose average character is about half its point size wide."""
+    pt = pt or _REPORT_PT
+    chars = max(30, int(fig.get_figwidth() * width_frac * 72 / (pt * 0.52)))
+    return [part for line in lines for part in (textwrap.wrap(line, chars, subsequent_indent=indent) or [""])]
 
 
-#: The height one row of panels needs to be read, in inches: titles, ticks and labels take about 1.1 of it.
-ROW_MIN_IN = 2.4
+#: The height one row of panels needs to be read, in inches: its two-line title, ticks and labels take 1.2 of it.
+ROW_MIN_IN = 2.5
 #: Below this figure width, in inches, a treatment's three panels are stacked in one column rather than laid side by
 #: side: under it each of three panels is less than about 1.25 in across once the y labels and gaps are taken, and
 #: its tick labels run together. A phone's figure is about 4 in wide; a desk window's, 7 in and over.
@@ -249,14 +365,21 @@ STACK_BELOW_IN = 6.5
 #: A stacked panel's least height, in inches: lower than :data:`ROW_MIN_IN` so one treatment's three panels and its
 #: verdict fit a phone's figure (about 7.3 in tall) without running off its bottom.
 STACKED_ROW_MIN_IN = 1.9
-#: Inches: the figure's top margin, and the space a row's x labels and title take beyond its axes.
-_TOP_IN, _ROW_PAD_IN, _TEXT_PAD_IN = 0.15, 1.05, 0.12
+#: Inches: the figure's top margin, the space a row's x labels and two-line title take beyond its axes, the pad
+#: around the text under the panels, and the gap under a headline.
+_TOP_IN, _ROW_PAD_IN, _TEXT_PAD_IN, _HEAD_GAP_IN = 0.12, 1.2, 0.12, 0.1
+#: The headline's size: the figure's largest text, since it is the answer.
+_HEAD_PT = 9.0
 
 
-def render_rare_page(fig, result, lines, *, note: str = "") -> None:
-    """The Statistics view's figure for the rare-responder tests: a row of ECDF / exceedance / HC per treatment, then
-    *lines* — the short verdict per treatment (``rare_export_compute.verdict_lines``), each a text artist with gid
-    ``nw-rare-line`` — and *note*. The full report is not drawn here: the page shows it under the figure (Details).
+def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
+    """The Statistics view's figure for the rare-responder tests. For each treatment, **the answer first**: its headline
+    (``rare_export_compute.headline`` — the verdict and the counts behind it, gid ``nw-rare-unit``) above its row of
+    panels — how far nanowells grew, the share of each well past the cutoff, Higher Criticism. Under the panels, each
+    treatment's deciding and supporting tests and its caveats (``unit_text``; each line gid ``nw-rare-line``, a
+    caveat marked ⚠), then any extra *lines* and *note*. *lead* is drawn before all of it and never cut (a control
+    chosen by its name says so there). The full report is not drawn here: the page shows it under
+    the figure (Details).
 
     **The panels are laid out first, in inches.** Each row gets at least :data:`ROW_MIN_IN`; the text takes only what
     its lines need, and as many treatments are drawn as their rows fit — the rest named in a line — so a long report
@@ -269,40 +392,77 @@ def render_rare_page(fig, result, lines, *, note: str = "") -> None:
     per_unit, cols = (3, 1) if stacked else (1, 3)      # rows of panels per treatment, panels per row
     row_min = STACKED_ROW_MIN_IN if stacked else ROW_MIN_IN
     step_in = _REPORT_PT * _LEADING / 72
-    room = max(1, int((height - _TOP_IN - (len(lines) + 2) * step_in) // (row_min * per_unit)))
-    units = result.units[:min(MAX_UNIT_ROWS, room)]
+    head_step = _HEAD_PT * _LEADING / 72
+    texts = [unit_text(result, u) for u in result.units]
+    heads = [_wrapped(fig, [t["headline"]], 0.96, _HEAD_PT, "") for t in texts]
+    head_in = [len(h) * head_step + _HEAD_GAP_IN for h in heads]
+    # The deciding test, then the caveats — what undermines the verdict — then the supporting tests: when a short figure
+    # cannot hold them all, it is the supporting tests that go to Details first.
+    body = [[t["lines"][0], *[f"⚠ {c}" for c in t["caveats"]], *t["lines"][1:]] for t in texts]
+    room = 0
+    used = _TOP_IN + (len(body[0]) if body else 0) * step_in + 2 * _TEXT_PAD_IN
+    for h in head_in[:MAX_UNIT_ROWS]:
+        if room and used + h + per_unit * row_min > height:
+            break
+        used += h + per_unit * row_min
+        room += 1
+    n_units = max(1, room) if result.units else 0
+    units, heads, head_in = result.units[:n_units], heads[:n_units], head_in[:n_units]
     extra = len(result.units) - len(units)
-    text = _wrapped(fig, [*lines, *([f"{extra} more treatment(s) are not drawn: each is in Details, below the "
-                                     "figure."] if extra else []), *([note] if note else [])], 0.96)
-    # The text takes what the panels leave, never more: lines past it are counted, and Details holds them all.
-    fits = max(1, int((height - _TOP_IN - len(units) * per_unit * row_min - 2 * _TEXT_PAD_IN) // step_in))
-    if len(text) > fits:
-        text = text[:fits - 1] + [f"… {len(text) - fits + 1} more line(s) not drawn: Details ▸ under the figure."]
+    items = [*[line for b in body[:n_units] for line in b], *lines]
+    # Always drawn, whatever else is cut: the first treatment's deciding test, and that some treatments are not drawn.
+    must = _wrapped(fig, [f"{extra} more treatment(s) are not drawn: each is in Details, below the figure."], 0.96) \
+        if extra else []
+    first = _wrapped(fig, list(lead), 0.96)
+    # The text takes what the panels leave, never more. It is cut between sentences, never inside one — a caveat cut
+    # half way reads as a different sentence — and what is left out is counted; Details holds it all.
+    fits = max(1, int((height - _TOP_IN - sum(head_in) - len(units) * per_unit * row_min - 2 * _TEXT_PAD_IN)
+                      // step_in))
+    tail = _wrapped(fig, [note], 0.96) if note else []
+    text, left_out = list(first), 0
+    for i, item in enumerate(items):
+        wrapped = _wrapped(fig, [item], 0.96)
+        if i and (left_out or len(text) + len(wrapped) + len(must) + 1 > fits):
+            left_out += 1
+            continue
+        text += wrapped
+    text += must
+    if left_out:                                   # one pointer to Details, not two
+        text.append(f"… {left_out} more, and the full report: Details ▸ under the figure.")
+    else:
+        text += tail
     text_in = len(text) * step_in + 2 * _TEXT_PAD_IN
-    band_in = max(row_min, (height - _TOP_IN - text_in) / max(1, len(units) * per_unit))
-    log_axis = not result.prepared.params.normalize
+    band_in = max(row_min, (height - _TOP_IN - text_in - sum(head_in)) / max(1, len(units) * per_unit))
+    log_axis = log_axis_for(result)
     left, gap = 0.75 / width, 0.85 / width
     panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
     axes_h = band_in - _ROW_PAD_IN
-    for r, unit in enumerate(units):
+    cursor = height - _TOP_IN
+    probe = None
+    for unit, head, h_in in zip(units, heads, head_in):
+        head_top = cursor
+        cursor -= h_in
         panels = (lambda ax, u=unit: draw_ecdf_strata(ax, u, result.prepared.value_label, log_axis),
                   lambda ax, u=unit: draw_exceedance(ax, u), lambda ax, u=unit: draw_hc(ax, u))
         for c, draw in enumerate(panels):
-            row, col = (r * per_unit + c, 0) if stacked else (r, c)
-            bottom = height - _TOP_IN - (row + 1) * band_in + 0.62      # the x labels sit below the axes
-            ax = fig.add_axes([left + col * (panel_w + gap), bottom / height, panel_w, axes_h / height])
+            row = c if stacked else 0
+            bottom = cursor - (row + 1) * band_in + 0.62      # the x labels sit below the axes
+            ax = fig.add_axes([left + (0 if stacked else c) * (panel_w + gap), bottom / height, panel_w,
+                               axes_h / height])
             _prepare_axes(ax, GRID_TYPE_SCALE)
             draw(ax)
-            if c == 0:
-                _ink(ax.text(0.0, 1.0 + 0.36 / axes_h, unit.label, transform=ax.transAxes, fontsize=_TITLE_PT,
-                             fontweight="bold", color=_inks(ax)[1], gid="nw-rare-unit"))
-    probe = fig.axes[0] if fig.axes else fig.add_axes([0, 0, 0.001, 0.001], frameon=False)
-    if not units:
+            probe = probe or ax
+        cursor -= per_unit * band_in
+        ink = _inks(probe)[1]
+        _ink(fig.text(0.02, head_top / height, "\n".join(head), fontsize=_HEAD_PT, fontweight="bold", va="top",
+                      color=ink, linespacing=_LEADING, gid="nw-rare-unit"))
+    if probe is None:
+        probe = fig.add_axes([0, 0, 0.001, 0.001], frameon=False)
         probe.axis("off")
     ink = _inks(probe)[1]
     y0 = (text_in - _TEXT_PAD_IN) / height
     for i, line in enumerate(text):
-        _ink(fig.text(0.02, y0 - i * step_in / height, line, fontsize=_REPORT_PT, family="monospace", va="top",
+        _ink(fig.text(0.02, y0 - i * step_in / height, line, fontsize=_REPORT_PT, va="top",
                       color=ink, gid="nw-rare-line"))
 
 

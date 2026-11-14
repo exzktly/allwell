@@ -7,9 +7,11 @@ well under test,
 
 (:func:`a2r_stratum`). ``F0(x) − Fn(x) > 0`` means the well has *less* mass at or below ``x`` than the controls —
 more above it — so only an excess of mass in the upper tail counts; a deficit counts nothing, and nothing below the
-control median counts at all. The integral is the sum over the control pool's distinct values ``u`` above its median
-of ``c(u)/N · [max(F0(u) − Fn(u), 0)]² / (1 − F0(u))``; the pool's top value, where ``1 − F0 = 0``, carries no
-weight.
+control median counts at all. The integral is the sum over the control pool's distinct values ``u`` at or above its
+median of ``c(u)/N · [max(F0(u) − Fn(u), 0)]² / (1 − F0(u))``, with ``F0(u) = #{control ≤ u} / (N + 1)`` — the
+``(1 + #) / (N + 1)`` convention of every empirical p here — so ``1 − F0`` never reaches 0 and the pool's **top value
+carries weight**: mass beyond everything the controls reach is exactly a rare responder, and with ``F0 = #/N`` it
+counted nothing. With whole-number fold changes (2×, 3×, 4×) that had left no value to sum over at all.
 
 **Strata combine** by a weighted sum, each stratum's ``A²_R`` weighted by its share of the well's nanowells
 (:func:`a2r`); the per-stratum values are reported beside it.
@@ -38,35 +40,40 @@ SCHOLZ_LABEL = "k-sample Anderson–Darling (Scholz–Stephens), two-sided — u
 
 
 def a2r_stratum(x: np.ndarray, ref: np.ndarray) -> float:
-    """``A²_R`` of the values *x* against the sorted control values *ref*; NaN when either is empty."""
+    """``A²_R`` of the values *x* against the sorted control values *ref*; NaN when either is empty, and NaN when the
+    pool holds a single value (it has no upper tail to compare with — not a measured zero)."""
     x = np.sort(np.asarray(x, dtype=float))
     ref = np.asarray(ref, dtype=float)
     n, N = len(x), len(ref)
     if n == 0 or N == 0:
         return math.nan
     u, c = np.unique(ref, return_counts=True)
-    F0 = np.cumsum(c) / N
+    if len(u) < 2:
+        return math.nan
+    F0 = np.cumsum(c) / (N + 1)                          # < 1 everywhere: the top value carries weight
     Fn = np.searchsorted(x, u, side="right") / n
-    keep = (u > np.median(ref)) & (F0 < 1.0)
+    keep = u >= np.median(ref)
     if not keep.any():
-        return 0.0
+        return math.nan
     excess = np.maximum(F0[keep] - Fn[keep], 0.0)
     return float(n * np.sum((c[keep] / N) * excess ** 2 / (1.0 - F0[keep])))
 
 
 def a2r(well: Well, pooled: dict) -> tuple[float, dict]:
-    """The well's strata-weighted ``A²_R`` and each stratum's own value."""
+    """The well's strata-weighted ``A²_R`` and each stratum's own value. A stratum whose value is undefined
+    (:func:`a2r_stratum`) is reported and left out of the weighting; NaN when no stratum has a value."""
     per, weights = {}, {}
     for s, x in well.values.items():
         ref = pooled.get(s)
         if ref is None or len(ref) == 0:
             continue
         per[s] = a2r_stratum(x, ref)
-        weights[s] = len(x)
+        if np.isfinite(per[s]):
+            weights[s] = len(x)
     total = sum(weights.values())
     if not total:
         return math.nan, per
-    return float(sum(weights[s] / total * per[s] for s in per)), per
+    return float(sum(weights[s] / total * per[s] for s in weights)), per
 
 
 def statistic(well: Well, pooled: dict) -> float:

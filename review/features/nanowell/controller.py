@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 from domain.nanowell_roster import mixed_rules_note
 from review.features.nanowell import cell_gate_compute as cg
 from review.features.nanowell import size_class_compute as scc
-from review.features.nanowell.summary_compute import well_statistic
+from review.features.nanowell.summary_compute import timepoint_short, well_statistic
 from review.domain import nanowell_rim_focus as rfc
 from review.domain.size_classes import SizeClassRule, classify_rows
 from review.features.nanowell.collect import NanowellSchemeError, load_nanowell_data
@@ -54,7 +54,7 @@ from review.features.nanowell.renderer import (
     redraw_selection_rings, render_position, render_site_detail, render_trajectories, stamp_subset,
 )
 from review.features.nanowell.state import (
-    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, ArrayLayers, COLOURINGS, POSITIONS,
+    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, RARE_DIRECTIONS, ArrayLayers, COLOURINGS, POSITIONS,
 )
 from review.features.nanowell.series_compute import (crop_metric_lines, long_format, metric_kinds, rim_focus_text,
                                                      site_metrics, site_series)
@@ -309,6 +309,36 @@ def page_groups(ctx) -> dict:
     return replicate_groups(ctx, have) if have else {}
 
 
+def timepoint_names(st) -> dict:
+    """``timepoint -> how the band names it`` (``5 h``, or its label when its time is unknown), for column headers."""
+    times = st.data.times_h if st is not None and st.data is not None else {}
+    return {str(tp): timepoint_short(str(tp), times.get(tp)) for tp in (st.data.timepoints() if st.data else [])}
+
+
+def hidden_groups(ctx) -> dict:
+    """``group name -> wells`` for the groups hidden on the plate that hold a well this page could draw: the
+    replicate sets (or a variable's values) the user switched off, named as :func:`page_groups` names a group, so a
+    sentence can say which group the page is missing and which wells bring it back. A click on a group's well in
+    the plate toggles it, so a click meant to choose a group can hide it; the page says so rather than going blank."""
+    from review.domain.plot_members import plot_replicate_sets, plot_replicate_sets_loaded
+
+    st = _state(ctx)
+    if st is None or st.data is None:
+        return {}
+    usable = set(st.data.available) - set(st.excluded_wells)
+    shown = {tuple(r.wells) for r in plot_replicate_sets(ctx) or []}
+    sets = [(r, [w for w in r.wells if w in usable]) for r in plot_replicate_sets_loaded(ctx) or []
+            if tuple(r.wells) not in shown]
+    return named_groups(ctx, [(r, members) for r, members in sets if members], [])
+
+
+def hidden_sentence(hidden: dict) -> str:
+    """How to bring back the *hidden* groups (:func:`hidden_groups`), each named with its wells."""
+    named = "; ".join(f"{name} ({', '.join(wells)})" for name, wells in hidden.items())
+    return (f"Hidden on the plate: {named}. A click on a well of a group toggles the whole group: click one of its "
+            "wells to show it again, or All under the plate to show every group.")
+
+
 def excluded_note(ctx) -> str:
     """The sentence every figure on the page carries while wells are excluded from it: which, and where to bring
     them back — a figure drawn short of a selected well says so (CLAUDE.md §7)."""
@@ -404,6 +434,10 @@ def nanowell_empty_reason(ctx) -> EmptyReason | None:
         if chosen:
             return _empty("None of the selected wells' nanowell tables could be used.",
                           " ".join(st.data.problems))
+        hidden = hidden_groups(ctx)
+        if hidden:
+            return _empty("Every group is hidden on the plate." if len(hidden) > 1 else "The group is hidden on the plate.",
+                          hidden_sentence(hidden))
         return _empty("No nanowell wells selected.",
                       "Click wells with nanowell tables on the plate at the left: "
                       + ", ".join(available[:12]) + ("…" if len(available) > 12 else "") + ".")
@@ -785,7 +819,7 @@ def _redraw(ctx) -> None:
         selected=[tuple(s) for s in st.selected_sites],
         responding_above=st.thresholds.get(metric_column(metric, channel)),
         subset=page_subset(ctx, st), subset_label=page_subset_label(st), stats_unit=st.stats_unit, stats_test=st.stats_test, stats_cache=_stats_cache(st),
-        rare=rc.hook(ctx, st), gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
+        rare=rc.hook(ctx, st), hidden=hidden_groups(ctx), gate=st.gate, decoration=decoration_for(ctx, groups) if st.view in DECORATED_VIEWS else None,
         names=_page_names(ctx, st.view, well), swarm_spacing=swarm_spacing_of(ctx),
         dist_style=st.dist_style, violin_smooth=st.violin_smooth, hist_bins=st.hist_bins,
         hist_log=_y_log_drawn(ctx, fig), footer_out=True, **array)
@@ -1076,7 +1110,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
                   baseline_moving: int = 0, moving_centred: bool = False, layers: ArrayLayers | None = None, image=None, image_note: str = "",
                   region=None, subset: ss.Subset = ss.Subset(), identity: dict | None = None,
                   stats_unit: str = sc.NANOWELLS, stats_test: str = "welch",
-                  stats_cache: dict | None = None, rare: dict | None = None, gate=None,
+                  stats_cache: dict | None = None, rare: dict | None = None, hidden: dict | None = None, gate=None,
                   decoration: Decoration | None = None, names: dict | None = None,
                   swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
                   violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False) -> tuple[object, object]:
@@ -1149,7 +1183,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
             fig, metrics, data, groups=groups, metric=metric, channel=channel, timepoint=timepoint, control=control,
             baseline=baseline, cohort=cohort, moving=moving, baseline_moving=baseline_moving,
             moving_centred=moving_centred, sizes=sizes, names=names, tableless=tableless, note=note,
-            stats_unit=stats_unit, stats_test=stats_test, stats_cache=stats_cache, rare=rare)
+            stats_unit=stats_unit, stats_test=stats_test, stats_cache=stats_cache, rare=rare, hidden=hidden)
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds, channel=channel, axis=axis, groups=groups,
                                timepoint=timepoint, control=control, time_source=data.time_source,
                                baseline=baseline, cohort=cohort, responding_above=responding_above,
@@ -1176,16 +1210,20 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
 
 def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channel, timepoint: str, control: str,
                         baseline: str, cohort: bool, moving: int, baseline_moving: int, moving_centred: bool, sizes,
-                        names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare):
+                        names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare,
+                        hidden: dict | None = None):
     """The Statistics view: the samples compared by *stats_test* — or, for the Rare responders test, the groups
     against the control group by the rare-responder analysis (``_rare_controller.compose``, *rare* carrying the
-    page's store of results and its worker request). Returns the result drawn."""
+    page's store of results and its worker request). Returns the result drawn. *hidden* is the groups hidden on the
+    plate (:func:`hidden_groups`): a control chosen under *vs* that is not drawn is named, with how to show it again,
+    rather than the test silently comparing every pair."""
     if tableless:
         note = " ".join(filter(None, [f"Selected without a nanowell table, so not compared: "
                                       f"{', '.join(tableless)}.", note]))
     if sc.test_spec(stats_test)["kind"] == "rare":
-        return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note,
+        return rc.compose(fig, metrics, groups, control=control, timepoint=timepoint, note=note, hidden=hidden,
                           moving_on=mvc.is_on(moving), cohort=cohort, unit_set=stats_unit != sc.WELLS,
+                          column=metric_column(metric, channel), value_label=_label(metric, channel, data, sizes),
                           **(rare or {"store": None, "request": None}))
     # The moving average too: the samples are the dots Distribution draws Along x: Wells (tracker M9).
     model = distribution_model(metrics, metric, channels=data.channels, backgrounds=data.fluor_backgrounds,
@@ -1194,8 +1232,20 @@ def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channe
                                baseline_moving=baseline_moving, moving_centred=moving_centred, sizes=sizes)
     model.well_names = dict(names)
     result = statistics_result(model, groups, unit=stats_unit, test=stats_test, control=control, cache=stats_cache)
-    render_statistics(fig, result, note=note)
+    render_statistics(fig, result, note=" ".join(filter(None, [control_not_drawn(result, control, hidden), note])))
     return result
+
+
+def control_not_drawn(result, control: str, hidden: dict | None) -> str:
+    """The sentence a Statistics result carries when the *control* chosen under *vs* is not among its samples, so
+    every pair was compared instead — naming where it went when it is hidden on the plate; ``""`` otherwise."""
+    if not control or result.control == control or result.undefined:
+        return ""
+    where = next((name for name, wells in (hidden or {}).items() if control == name or control in wells), "")
+    if where:
+        return (f"vs {control} is not drawn: {'it is' if where == control else f'its group {where} is'} hidden on the "
+                f"plate, so every pair is compared instead. {hidden_sentence({where: hidden[where]})}")
+    return f"vs {control} is not drawn, so every pair is compared instead: select it, or choose another under vs."
 
 
 def _moving_left_nothing(metrics, wells, column, moving, baseline_moving, panels, centred=False) -> str:
@@ -2085,7 +2135,7 @@ def _draw_extremes(ctx, st, fig, canvas, *, metric: str, channel: str | None, we
                                       image_channel=image_channel, numbers=st.crop_metrics,
                                       display_range=display_range(ctx),
                                       timepoints=extremes_columns(model.timepoints, model.timepoint, st.extremes_tps),
-                                      metrics=crop_metrics(st, model.sites(), channel))
+                                      metrics=crop_metrics(st, model.sites(), channel), tp_names=timepoint_names(st))
     stamp_subset(fig, _named(page_subset_label(st), sizes))
     apply_export_style_to_current(ctx, fig, canvas)
     canvas.draw_idle()
@@ -2871,9 +2921,24 @@ def set_stats_unit(ctx, unit: str) -> None:
 
 
 def set_stats_test(ctx, test: str) -> None:
-    """The test the Statistics view runs (``statistics_compute.TESTS``)."""
-    if test in sc.TEST_KEYS:
-        _set(ctx, "stats_test", test)
+    """The test the Statistics view runs (``statistics_compute.TESTS``). Choosing the Rare responders test with no
+    control chosen preselects a group named as a control (``_rare_controller.guess_control``) and says so on the
+    figure, rather than opening on a sentence asking for one."""
+    if test not in sc.TEST_KEYS:
+        return
+    st = _state(ctx)
+    if st is not None and not st.control and sc.test_spec(test)["kind"] == "rare":
+        guess = rc.guess_control(list(page_groups(ctx)))
+        if guess:
+            st.control, st.control_guessed = guess, guess
+            _call(ctx, "_nw_refresh_controls")
+    _set(ctx, "stats_test", test)
+
+
+def set_rare_direction(ctx, direction: str) -> None:
+    """Which tail of the Metric the Rare responders test looks in (``NanowellState.rare_direction``)."""
+    if direction in RARE_DIRECTIONS:
+        _set(ctx, "rare_direction", direction)
 
 
 def set_cohort(ctx, on: bool) -> None:
@@ -2926,6 +2991,9 @@ def set_timepoint(ctx, timepoint: str) -> None:
 
 
 def set_control(ctx, control: str) -> None:
+    st = _state(ctx)
+    if st is not None and (control or "") != st.control_guessed:
+        st.control_guessed = ""                         # the user's own choice: no longer a guess
     _set(ctx, "control", control or "")
 
 

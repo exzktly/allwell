@@ -202,7 +202,7 @@ def test_channels_adds_a_row_per_channel_each_on_its_own_scale(page, qtbot, chan
                              (1, 0, f"{channel} · t_c", fluor_scale), (1, 1, f"{channel} · t_a", fluor_scale)]
     assert page.widgets.get("_nw_popout_channels_btn").text() == "Channels: 2"
     title = [t.get_text() for t in page.widgets.get("_nw_popout_fig").texts if t.get_gid() == "nw-crop-grid-title"]
-    assert title == [f"A01 · q 1, r 0 over time · phase image + {channel} image"]
+    assert title == [f"A01 · nanowell 1,0 over time · phase image + {channel} image"]
 
 
 def test_grid_lays_the_panels_out_in_the_shape_chosen(page, qtbot, channel_crops):  # noqa: F811

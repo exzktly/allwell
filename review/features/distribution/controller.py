@@ -639,6 +639,26 @@ HISTOGRAM_GID, HISTOGRAM_NOTE_GID = "distribution-histogram", "distribution-hist
 HISTOGRAM_DOTS_GID = "distribution-histogram-dots"
 
 
+def _column_edges(finite, bins: int, log_y: bool, rng) -> np.ndarray:
+    """The column histograms' shared edges: ``_shared_bin_edges`` over every group, and under *log_y* over the
+    positive values only, so a value ≤ 0 is left off the log axis (and counted by the caller) rather than turning the
+    whole figure's bins linear — the rule ``review.domain.column_histogram.shared_edges`` applies on the other
+    surfaces. With no positive value at all there is nothing to place on a log axis, and the edges stay linear.
+
+    A sampled selection's range (*rng*) is over every value; when its low end is ≤ 0 the lowest edge is the sample's
+    smallest positive value, the nearest bound known without another pass over the pool, so a positive value below
+    it in the unsampled rest is not placed."""
+    if not log_y:
+        return _shared_bin_edges(finite, bins, False, value_range=rng)
+    positive = [arr[arr > 0] for arr in finite]
+    pooled = np.concatenate(positive) if positive else np.empty(0)
+    if pooled.size == 0:
+        return _shared_bin_edges(finite, bins, False, value_range=rng)
+    lo = float(rng[0]) if rng is not None and rng[0] > 0 else float(pooled.min())
+    hi = float(rng[1]) if rng is not None else float(pooled.max())
+    return _shared_bin_edges(positive, bins, True, value_range=(lo, max(hi, lo)))
+
+
 def _render_column_histograms(ax, groups, bins: int, log_y: bool, exact, rng) -> None:
     """Each group's values as a vertical histogram mirrored about its column, beside the others, as the violin is
     laid out: one set of bin edges for every group (the tab's own, ``_shared_bin_edges``, log-spaced under Y log),
@@ -647,7 +667,7 @@ def _render_column_histograms(ax, groups, bins: int, log_y: bool, exact, rng) ->
     from review.domain.column_histogram import histograms_from_counts
 
     finite = [np.asarray(vals, dtype=float)[np.isfinite(np.asarray(vals, dtype=float))] for _, _, vals in groups]
-    edges = _shared_bin_edges(finite, bins, log_y, value_range=rng)
+    edges = _column_edges(finite, bins, log_y, rng)
     log = bool(log_y) and edges.size > 1 and edges[0] > 0     # ``_shared_bin_edges`` spaces logarithmically then
     counts, ns, offs = [], [], []
     for i, arr in enumerate(finite):
@@ -655,7 +675,8 @@ def _render_column_histograms(ax, groups, bins: int, log_y: bool, exact, rng) ->
         if e is not None:
             counts.append(e.hist(edges))
             ns.append(int(e.n))
-            offs.append(0)
+            # Every value ≤ 0 of the group, counted over all of them: [-inf, 0) and [0, the smallest positive float].
+            offs.append(int(e.hist(np.array([-np.inf, 0.0, np.nextafter(0.0, 1.0)])).sum()) if log else 0)
         else:
             counts.append(np.histogram(arr[arr > 0] if log else arr, edges)[0])
             ns.append(int(arr.size))

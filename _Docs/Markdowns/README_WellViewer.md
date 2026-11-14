@@ -6006,7 +6006,8 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 - **Histogram (per group)** lays the groups out side by side as *Violin (per
   group)* does, each drawn as a vertical histogram mirrored about its column
   with a tick at its median. Every group's bars sum to 1, all groups share the
-  tab's bin edges (**Bins**; log-spaced under **log y**) and one width scale, so
+  tab's bin edges (**Bins**; log-spaced under **log y**, where a value ≤ 0 has
+  no place and is left off and counted in the note) and one width scale, so
   widths compare across groups; a note at the top right states the bin count and
   what the widest bar means. A group drawn from a sample is binned over every
   value, as the tab's other histograms are. A group of fewer than three values

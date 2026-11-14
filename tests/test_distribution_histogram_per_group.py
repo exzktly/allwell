@@ -132,3 +132,16 @@ def test_a_group_of_fewer_than_three_values_is_drawn_as_its_dots_and_the_note_co
                   for (x, y) in c.get_offsets() if x == 2.0)
     assert dots == [1.0, 3.0]
     assert _note(ax) == ["4 bins · widest bar = 75% of a group · 1 group of fewer than 3 values drawn as dots"]
+
+
+def test_under_y_log_a_value_at_or_below_zero_is_left_off_and_counted_not_a_reason_to_drop_log(ctx):
+    """One value ≤ 0 in any group used to make the edges linear and drop log altogether, silently: Log Y stayed
+    ticked, the bins were linear, the lowest bar started at -5, and the note counted nothing left off. The shared
+    ``column_histogram`` (Bar Plots, Nanowells) drops such values from a log axis and says how many; so does this tab
+    now. A holds -5 and 0, which have no place on a log axis; every other value is placed on log-spaced bins."""
+    groups = [("A", "#4488cc", np.array([-5.0, 0.0, 1.0, 10.0, 100.0, 1000.0])),
+              ("B", "#cc8844", np.array([2.0, 20.0, 200.0, 300.0]))]
+    ax = _render(ctx, groups, 3, log_y=True)
+    assert ax.get_yscale() == "log"
+    assert sorted({round(p.get_y(), 6) for p in ax.patches if p.get_gid() == C.HISTOGRAM_GID}) == [1.0, 10.0, 100.0]
+    assert _note(ax) == ["3 bins (log-spaced) · widest bar = 50% of a group · 2 values ≤ 0 not on the log axis"]

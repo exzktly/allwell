@@ -24,6 +24,7 @@ import math
 
 import numpy as np
 import pandas as pd
+from scipy.stats import chi2_contingency, fisher_exact
 
 #: Starting-cell classes compared between control and treatment: 1, 2, 3, and 4 or more.
 LOADING_CLASSES = (1, 2, 3, 4)
@@ -43,7 +44,6 @@ def cutoff_on_tie(pooled: dict, treated: dict, thresholds: dict, percentile: flo
     control does (one-sided Fisher exact, p < :data:`TIE_ALPHA`; nanowells pooled, as a trigger for a caveat, not a
     test of the hypothesis): those are the nanowells the test cannot count. A *fixed* threshold is the user's own and
     is never judged."""
-    from scipy.stats import fisher_exact
 
     if fixed is not None:
         return ""
@@ -70,8 +70,6 @@ def cutoff_on_tie(pooled: dict, treated: dict, thresholds: dict, percentile: flo
 def loading_differs(kept: pd.DataFrame, control_keys, treated_keys) -> str:
     """A sentence when the two sides were seeded differently (chi-square on the starting-cell classes); ``""``
     when they were not, or when it cannot be measured."""
-    from scipy.stats import chi2_contingency
-
     n0 = pd.to_numeric(kept.get("n0"), errors="coerce") if "n0" in kept else None
     if n0 is None:
         return ""

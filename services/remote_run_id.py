@@ -138,8 +138,15 @@ def pipeline_argv_digest(
 #: long a run takes, and the two image-storage options, which the local reuse
 #: key leaves out for the reason ``util.settings_digest.NOT_KEYED_ON`` gives —
 #: so the same option change is treated alike on both sides.
+#:
+#: ``--nanowell_registration_from`` is *not* left out: the run takes every located timepoint from the folder it names
+#: as it is, so a run naming another folder, or none, is another configuration and must not land in this one's run
+#: directory and be answered from its finished wells. Its stand-in on the host's argv,
+#: ``--nanowell_registration_identity``, is left out, as the host's own copy of the folder is. Earlier builds left the
+#: folder out; the earlier definitions below are applied with this set, so an attempt such a build recorded with a
+#: folder named is deliberately not found — its address did not say which folder its results came from.
 _DIGEST_SKIP_VALUE = frozenset({
-    "--input_dir", "--output_dir", "--incremental_prior_dir", "--nanowell_registration_from",
+    "--input_dir", "--output_dir", "--incremental_prior_dir", "--nanowell_registration_identity",
     "--workers", "--tf_threads", "--focus_min",
     "--phase_output", "--tophat_dtype",
 })

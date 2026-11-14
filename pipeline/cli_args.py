@@ -560,6 +560,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "tiles the acquisition record lists. Without this flag the output folder's own earlier "
                          "registration is reused when it was made from exactly this run's inputs."))
     p.add_argument("--nanowell_registration_carried", action="store_true", help=argparse.SUPPRESS)
+    # A remote run's host reads the named folder from a copy in its own run directory, so it is sent the folder's
+    # identity to key its results by, the one this computer computes (util.settings_digest.registration_identity).
+    p.add_argument("--nanowell_registration_identity", default=None, help=argparse.SUPPRESS)
     p.add_argument("--nanowell_hold_dir", default=None,
                    help=("One batch of a batched run: leave the end-of-run re-anchoring to the run's final pass "
                          "(--nanowell_reanchor_only) and link into this folder the archive of every well it could "

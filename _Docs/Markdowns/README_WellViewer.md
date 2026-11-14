@@ -400,7 +400,9 @@ being analysed, covering the same tiles the acquisition record lists. When it do
 well and timepoint that does not fit. A folder analysed before located results were kept has none, so it is refused
 the same way — re-analyse that plate once without the field to give it one. The log says, per well, how many
 timepoints were taken and from where, and each taken timepoint's grid record names the folder (`located_from`,
-`registration.reused_from`). Left blank, a plate re-run into the folder it was analysed into reuses that folder's own
+`registration.reused_from`). Results are kept per folder: a later run into the same output folder that names another
+Reuse registration folder, or leaves the field blank, analyses every well again rather than keeping results located
+from a folder it did not name. Left blank, a plate re-run into the folder it was analysed into reuses that folder's own
 tile registration only where it was made from exactly the same images and settings, and locates the rest. Run
 refuses to start when the folder is not a nanowell run's output folder. On a **remote host** the same happens:
 before the run starts, each well's located timepoints from this folder (and its grid record and cell masks) are sent

@@ -12163,9 +12163,14 @@ result did not. What is checked is that the folder fits: `nanowell_task.prepare_
 `refuse_unfitting_folder` before any well starts, and the run exits naming every well whose file is missing or
 unreadable and every timepoint that has no entry or whose kept tiles are not the tiles the acquisition record lists,
 rather than locating some timepoints and taking others. A hit's grid block names the folder (`located_from`, and
-`registration.reused_from`), and the log says per well how many timepoints were taken. The folder is outside
-`util.settings_digest.KEYED_ON` (`NOT_KEYED_ON` says why), the remote run digest
-(`services.remote_run_id._DIGEST_SKIP_VALUE`) and the sidecar's `nanowell.settings` (Merge Plates compares those).
+`registration.reused_from`), and the log says per well how many timepoints were taken. Because what it takes
+changes every address, the folder is in `util.settings_digest.KEYED_ON`: keyed by its identity
+(`registration_identity`, a hash of its path with `~` expanded and a trailing separator dropped, through
+`_registration_value`), so a well made from one folder is not reused by a run naming another or none, and in the remote
+run digest (`services.remote_run_id.pipeline_argv_digest` hashes the flag), so such a run gets its own run directory.
+A folder the app carried to a host (`--nanowell_registration_carried`) is not keyed, since it is reused only where it
+is exact. It stays out of the sidecar's `nanowell.settings` (Merge Plates compares those).
+`tests/test_a_named_registration_folder_is_keyed.py` holds both keys and the host's agreement with this computer's.
 
 **Registration reuse without a named folder** (`nanowell_run.registration_key`, `stored_placement`, `Placement`).
 Re-run in place, a well reuses its output folder's own earlier tile registration, under a key. Every grid block that
@@ -12192,7 +12197,10 @@ folder — and its located timepoints (`<well>_located.npz`) from the Reuse regi
 local folder's flag and appends `--nanowell_registration_from <run_dir>/reg` instead; when nobody named a folder it
 also appends `--nanowell_registration_carried` (`nanowell_task._takes_located`), so the host treats the carried
 output folder as the in-place case — placements and masks reused under their keys, every timepoint located — and
-never takes it as it is. A failed upload costs only the reuse. The Fetcher brings `<well>_located.npz` back with the
+never takes it as it is. When a person did name one it appends `--nanowell_registration_identity
+<registration_identity(named folder)>`, which the settings key reads in place of the host's copy's path: that path is
+in the run directory, new on every batched attempt, and the host's key must be the one this computer computes for
+the same run (`util.settings_digest._registration_value`). A failed upload costs only the reuse. The Fetcher brings `<well>_located.npz` back with the
 masks (`remote_fetch_nanowells._fetch_masks`), and an adopted batch well brings it (`remote_batch_resume._NANOWELL_FILES`).
 `tests/test_nanowell_located_reuse.py` runs a well both ways through `process_microscopy.main` and compares the grid
 record and table, refuses an unfitting folder, and takes a well whose timepoints disagreed; `tests/test_reuse_is_keyed_completely.py`

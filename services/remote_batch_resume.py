@@ -566,7 +566,7 @@ def _blank_argv(proc) -> list[str]:
     if not getattr(proc, "_blank_stems", ()):
         return []
     run_dir = remote_run_dir(proc._runner.host, proc._run_id)
-    return [f"--background_dir={run_dir}/bg", *background_aliases(proc, run_dir, True)]
+    return [f"--background_dir={run_dir}/bg", "--background_dir_carried", *background_aliases(proc, run_dir, True)]
 
 
 def _settings_stamps(pipeline_argv: list[str]) -> tuple[str, ...]:

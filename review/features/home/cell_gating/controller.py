@@ -49,7 +49,7 @@ from review.core.plot_orchestrator import redraw_app
 from core.safe import swallow, swallowed
 from review.core.selection_controller import invalidate_stats_cache, invalidate_threshold_results
 from review.data.curation import apply_curation_to_cache
-from review.data.data_loading import get_rows, held_wells_note
+from review.data.data_loading import get_rows, held_wells_note, resolve_value_series
 from review.data.plate_scan import per_well
 from review.domain.gating_state import (
     default_thresh_count_on, default_thresh_frac_on, fluor_gate_for,
@@ -62,6 +62,7 @@ from pipeline.threshold_optimize import DEFAULT_SPECIFICITY_WEIGHT
 from review.features.home.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
     _cell_gating_valid_rows,
+    VALIDITY_COLUMNS,
     _distinct_timepoints,
     _earliest_timepoint,
     _gate_geom_sig,
@@ -70,6 +71,7 @@ from review.features.home.cell_gating.gating_compute import (
     _valid_values_for_channel,
     apply_fluor_gating,
     format_inclusion_counts,
+    gate_table_headers,
     format_inclusion_funnel,
     format_optimizer_result as _format_opt_result,
     inclusion_counts,
@@ -296,8 +298,8 @@ class GatingWorker(QThread):
 def _first_frame_values(df, channels, ratios) -> tuple | None:
     """One well's first-frame cell areas, positive channel values and ratios, or ``None``.
 
-    Respects the crop region and the QC debris gate, not the fluorescence gate —
-    these CDFs are what that gate is set from.
+    Respects every inclusion layer except the fluorescence decision
+    (``_cell_gating_valid_mask``) — these CDFs are what that gate is set from.
     """
     if df is None or df.empty:
         return None
@@ -326,11 +328,10 @@ def _first_frame_values(df, channels, ratios) -> tuple | None:
         den_col = rm.denominator_col()
         if num_col not in frame_df.columns or den_col not in frame_df.columns:
             continue
-        num = pd.to_numeric(frame_df[num_col], errors="coerce").to_numpy()
-        den = pd.to_numeric(frame_df[den_col], errors="coerce").to_numpy()
-        eps = float(rm.epsilon or 0.0)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = num / (den + eps) if eps else np.where(den != 0, num / den, np.nan)
+        # The one ratio rule (``RatioMetric``: the denominator is clamped to
+        # epsilon, not shifted by it), so the curve a cutoff is read from holds
+        # the values the cutoff is then applied to.
+        ratio = resolve_value_series(frame_df, rm.key(), {rm.key(): rm}).to_numpy(dtype=float)
         keep = np.isfinite(ratio) & (ratio > 0)
         if keep.any():
             ratio_vals[rm.display_label()] = ratio[keep]
@@ -340,7 +341,7 @@ def _first_frame_values(df, channels, ratios) -> tuple | None:
 #: The verdict columns ``_cell_gating_valid_mask`` reads. The projectors write
 #: them onto a narrow read when their layer is on; asked for by name too, so a
 #: file that carries them itself keeps them in the narrow frame.
-_VALIDITY_COLUMNS = frozenset({"QC_Pass", "Crop_Pass", "FOV_Pass"})
+_VALIDITY_COLUMNS = VALIDITY_COLUMNS
 
 
 def _first_frame_columns(channels, ratios) -> set[str]:
@@ -1788,24 +1789,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
         return
 
     include = kind == "include"
-    # Column headers name the layer each column feeds and the measurement it is
-    # made against. The fraction-on table carries two, because an intensity
-    # Property and an smFISH Count Property are cut against different units:
-    # ThreshFracOn is a brightness, ThreshCountOn a spot tally.
-    if include:
-        headers = [("Include \u2265\n(FluorGating, per-cell MFI)",
-                    "Cells whose mean fluorescence intensity in this channel is "
-                    "below the floor are excluded from analysis entirely.")]
-    else:
-        headers = [
-            ("ON \u2265\n(ThreshFracOn, per-cell MFI)",
-             "Included cells at or above this cut count as 'on' when the "
-             "selected Property is an intensity. It removes no cells."),
-            ("ON >\n(ThreshCountOn, spot count)",
-             "Included cells above this count as 'on' when the selected "
-             "Property is an smFISH Count. -1 counts every cell, including the "
-             "ones carrying no spots."),
-        ]
+    headers = gate_table_headers(kind)
 
     table = QWidget(host)
     grid = QGridLayout(table)

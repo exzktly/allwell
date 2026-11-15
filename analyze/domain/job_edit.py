@@ -28,6 +28,19 @@ and bridges each of those, and the fields living outside ``opts`` entirely
 (the remote, and the cleanup flags that ride on ``RunSpec`` itself) are
 restored here directly.
 
+**The inverse is exact for a spec the form wrote, and normalising for one it
+could not have written.** Hydrating puts a spec through the form's own rules,
+so collecting it back gives what the form would have saved for those choices:
+a nanowell job comes back with label-free segmentation and no Image correction
+(``nanowell_section._nanowell_pin_segmentation``, ``qc_section._correction_options``
+— the run applies neither choice, and switching the method hands the
+segmentation channel to the channel rows as it does when a user switches it);
+a blank-well map typed with a range comes back as the well list the range
+names, the same pairing for every well; and an *Upload ahead* value that is no
+mode comes back as the default, which is what the runner would have run it as
+(``services.remote_batch_step.upload_ahead_mode``). None of these changes what
+the job computes.
+
 The guard that keeps this honest is ``tests/test_analyze_job_edit.py``: a
 round trip of ``collect_spec()`` → ``hydrate_job()`` → ``collect_spec()`` over
 a fully-populated form. Any option added to ``_collect_run_options`` without a

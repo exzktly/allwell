@@ -71,6 +71,24 @@ def is_os_junk_member(name: str) -> bool:
     return base.lower() in _JUNK_BASENAMES or base.startswith("._")
 
 
+def data_member_basenames(names) -> frozenset[str]:
+    """The filenames a measurement row can refer to among an archive's member names.
+
+    A row's ``filename`` is an image's own name, with no directory: the
+    pipeline reads every member by its basename, because an archive need not be
+    flat. One made by Finder's *Compress* holds each image as ``A01/<name>``,
+    beside a ``__MACOSX/A01/._<name>`` twin and a directory entry. So "is the
+    image this row names in this archive?" is asked of basenames — and only of
+    members that hold data: a directory entry holds nothing, and an AppleDouble
+    twin is :func:`is_os_junk_member`, which cannot stand in for the image it
+    shadows.
+    """
+    return frozenset(
+        name.replace("\\", "/").rsplit("/", 1)[-1] for name in names
+        if not name.endswith("/") and not is_os_junk_member(name)
+    )
+
+
 def discover_parsed_member(
     name: str, schema: PipelineSchema, channels: tuple[str, ...],
 ) -> tuple[ParsedName, str]:

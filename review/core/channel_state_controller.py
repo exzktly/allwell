@@ -32,7 +32,7 @@ from review.data.data_loading import (
     normalize_channel_tokens,
 )
 from review.domain.channel_roles import default_fluor_channel, order_fluor_channels
-from review.domain.gating_state import fluor_gate_for, resolve_gate_key
+from review.domain.gating_state import fluor_gate_for, fluor_gate_in_force, resolve_gate_key
 from review.domain.heatmap_metrics import (
     METRIC_MEAN_ALL, METRICS_NEEDING_CUTOFF,
 )
@@ -1040,16 +1040,35 @@ def channel_key_for_label(ctx, label: str) -> str:
 
 
 def get_all_fluor_gates(ctx) -> dict[str, float]:
-    """Get FluorGating thresholds for all loaded channels.
+    """The FluorGating floors **in force**, per loaded channel (``0.0`` = off).
 
     Returns a dict mapping channel name -> gate threshold, e.g., {"gfp": 10.0, "mcherry": 20.0}.
     Used by aggregate_with_threshold_df to apply consistent gating across all channels.
+
+    While scatter gates define inclusion every value is off
+    (``domain.gating_state.fluor_gate_in_force``): the floors are replaced in
+    that mode, so an aggregate that still applied the stored one counted a
+    smaller population than the Cell Gating tab reports. What the tab holds —
+    for saving — is :func:`stored_fluor_gates`.
 
     A8 teardown: pure typed state (post-R6 the values live on
     ``ctx.state.cell_gating``), so it takes ``ctx`` — the shared render leaf every
     plot's gating reads."""
     return {
         channel: get_fluor_gate(ctx, channel)
+        for channel in ctx.state.channel.fluor_channels
+    }
+
+
+def stored_fluor_gates(ctx) -> dict[str, float]:
+    """The FluorGating floors the Cell Gating tab **holds**, whatever the inclusion mode.
+
+    For persistence only: a block saved while scatter gates define inclusion
+    must still carry the floors, or switching the mode back after a reload
+    would find them gone. Nothing that filters cells reads this — that is
+    :func:`get_all_fluor_gates`."""
+    return {
+        channel: fluor_gate_for(ctx.state.cell_gating, channel)
         for channel in ctx.state.channel.fluor_channels
     }
 
@@ -1410,13 +1429,14 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
 
 
 def get_fluor_gate(ctx, channel: str) -> float:
-    """Get FluorGating threshold for a channel.
+    """The FluorGating floor in force for a channel (``0.0`` = off).
 
     A8 teardown: reads the typed ``CellGatingState`` slice (post-R6), so it takes
     ``ctx``. The slice defaults an unset channel to 0.0 (gate off) — the same
     value the old tab-not-built guard returned — independent of whether the
-    lazily-built Cell Gating tab exists."""
-    return fluor_gate_for(ctx.state.cell_gating, channel)
+    lazily-built Cell Gating tab exists. Off for every channel while scatter
+    gates define inclusion, like :func:`get_all_fluor_gates`."""
+    return fluor_gate_in_force(ctx.state.cell_gating, channel)
 
 
 

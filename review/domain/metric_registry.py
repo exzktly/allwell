@@ -103,6 +103,28 @@ def column_gating_exempt(col: str) -> bool:
     return is_shape_column(col)
 
 
+#: The metric a FluorGating floor is defined on: the Cell Gating tab's floor for
+#: a channel is a minimum on that channel's **mean** intensity, and every
+#: aggregate applies it to ``<channel>_mean_intensity`` whatever it is plotting.
+FLUOR_GATE_METRIC_KEY = "mean_intensity"
+
+
+def fluor_floor_judges_column(col: str, floor: float) -> bool:
+    """Whether a channel's FluorGating *floor* may be compared against *col*'s own values.
+
+    Only when the floor is on (``0.0`` is the off value, not a floor at zero: a
+    background-subtracted channel legitimately runs at or below it) and *col*
+    is the column the floor is defined on, ``<channel>_mean_intensity``. A
+    floor of 50 on a channel's mean says nothing about its total or its
+    maximum, which are on other scales; a cell failing the floor is already out
+    of the ``Included`` layer the gating pass writes, whichever metric is drawn.
+    """
+    from review.domain.gating_state import FLUOR_GATE_OFF
+    if not isinstance(col, str) or float(floor) == FLUOR_GATE_OFF:
+        return False
+    return col.endswith(f"_{FLUOR_GATE_METRIC_KEY}") and not column_gating_exempt(col)
+
+
 # ── The ON cutoff a value column is measured against ────────────────────────
 #
 # Three kinds, because there are three scales. A ``shape_*`` morphology value has

@@ -235,6 +235,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "directory and named here, which is what lets every "
                         "batch build the same correction from it. Defaults to "
                         "--input_dir.")
+    # The batched remote host's own flag: --background_dir is the app's copy of the input's blank, not a
+    # directory a person named, so it is not part of the settings (util.settings_digest).
+    p.add_argument("--background_dir_carried", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--background_dir_alias", action="append", default=None,
                    help="An earlier path the same blank was read from (repeatable). "
                         "Not part of the settings: a well's part-way checkpoints "

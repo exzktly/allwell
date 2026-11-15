@@ -68,6 +68,7 @@ import math
 from typing import NamedTuple
 from collections.abc import Callable
 from review.domain.stats_compute import compute_rep_stats
+from domain.tp_match import tp_tolerance
 from review.domain.numeric import is_number
 from review.domain.stats_compute import compute_rep_per_fov_stats
 from review.domain.stats_compute import compute_rep_n_above_stats
@@ -82,13 +83,8 @@ from review.domain.fold_change_state import (  # noqa: F401 - re-exported
 
 CONTROL_NONE = ""
 
-# Relative-tolerance match for floating-point timepoint comparisons.
-# Combo widgets format their items with ``:.4g`` (≈4 significant figures),
-# so a fractional timepoint like 2/3 ≈ 0.6667 can be ~3e-5 off the original
-# float when parsed back from text. An absolute 1e-6 tolerance misses
-# those cases, so we use a relative one — passes for both whole-number
-# and fractional timepoints, fails only on truly mismatched values.
-_TP_REL_TOL = 1e-3
+# Timepoint comparisons use ``domain.tp_match.tp_tolerance``, the one rule the
+# rest of the app matches timepoints by (the rounding error of a ``:.4g`` label).
 
 
 def _as_finite(value) -> float | None:
@@ -160,9 +156,16 @@ def _subtract_pt(
     if not math.isfinite(shift):
         new = list(pt); new[1] = float("nan"); new[2] = 0.0
         return tuple(new)
-    s_val = s if is_number(s) else 0.0
-    shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
-    new_spread = math.sqrt(s_val * s_val + shift_var)
+    # An undefined spread stays undefined, as in ``_scale_pt``,
+    # ``_subtract_field`` and the bar path's ``scale_bar_value``. Folding it to
+    # 0.0 here handed a single-well replicate set, which has no spread of its
+    # own, the control's spread as if it were its own measured one.
+    s_val = _as_finite(s)
+    if s_val is None:
+        new_spread = float("nan")
+    else:
+        shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
+        new_spread = math.sqrt(s_val * s_val + shift_var)
     new = list(pt)
     new[1] = float(m) - float(shift)
     new[2] = float(new_spread)
@@ -299,7 +302,7 @@ def _resolve_stat(
     if t in stats:
         return stats[t]
     for ct, vs in stats.items():
-        if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t)):
+        if abs(ct - t) < tp_tolerance(ct, t):
             return vs
     return default
 
@@ -319,7 +322,7 @@ def _series_at(
     if target_t in series:
         return series[target_t]
     for ct, val in series.items():
-        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
+        if abs(ct - target_t) < tp_tolerance(ct, target_t):
             return val
     return None
 
@@ -341,7 +344,7 @@ def _series_baseline(
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for t, vs in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 return (float(t), vs[0], vs[1])
     earliest = min(series)
     vs = series[earliest]
@@ -371,40 +374,87 @@ def _baseline_usable(value, *, op: str) -> bool:
     return True if op == "subtract" else v != 0.0
 
 
-def _field_baseline(
-    pts, val_idx: int, baseline_tp: float | None, *, op: str = "ratio",
-) -> tuple[float | None, float]:
-    """``(baseline_val, baseline_spread_unused)`` for a field's vs-t0 step.
+def _baseline_point(pts, baseline_tp: float | None, value_of) -> tuple | None:
+    """The point a member's vs-t0 step is taken against, or ``None`` when it has no measured point at all.
 
-    Mirrors the mean baseline logic: prefer the point at *baseline_tp*, else the
-    earliest finite non-zero value. The spread returned is always the field's
-    own spread at that point is *not* needed here — the count/fraction t0
-    propagation reuses the field's own spread via ``_scale_field`` — so this
-    returns only the divisor; the caller passes ``shift_spread=0`` / a 0 rel-err
-    for the baseline (matching the mean path, which folds only the control and
-    the member's own per-point spread, not a separate baseline spread term).
+    The point at *baseline_tp* when the member has a measured value there;
+    otherwise (no timepoint named, one the member does not sample, or one where
+    nothing was measured — a mean over no ON cells) its earliest point with a
+    measured value, which is what a replicate set's series does, since it holds
+    no entry for a timepoint with nothing measured. **It is chosen by timepoint, never by whether its
+    value can divide.** The step used to skip a baseline that could not serve —
+    a fraction-on or an event count of 0 at t0, the normal reading at the start
+    of an induction — and take the next timepoint that could, so a curve was
+    drawn at 1.0 at 24 h under an axis labelled "vs t0" while the replicate-set
+    bar for the same member, which never skipped, read undefined. Whether the
+    chosen point can serve is the caller's question (:func:`_baseline_usable`),
+    and when it cannot the result is undefined rather than taken against
+    another timepoint.
     """
-    candidates = pts
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for pt in pts:
-            if abs(float(pt[0]) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(pt[0])), abs(tgt)):
-                v = pt[val_idx] if len(pt) > val_idx else None
-                if _baseline_usable(v, op=op):
-                    return float(v), 0.0
-                _logger.warning(
-                    "Fold change: the requested baseline timepoint %g has no "
-                    "usable value for field %d (%r) — falling back to the "
-                    "earliest timepoint that does, so this field is normalised "
-                    "against a different timepoint than the label says.",
-                    tgt, val_idx, v,
-                )
-                break
-    for pt in sorted(candidates, key=lambda p: p[0]):
-        v = pt[val_idx] if len(pt) > val_idx else None
-        if _baseline_usable(v, op=op):
-            return float(v), 0.0
-    return None, 0.0
+            if abs(float(pt[0]) - tgt) <= tp_tolerance(float(pt[0]), tgt):
+                if _as_finite(value_of(pt)) is not None:
+                    return pt
+                break                    # sampled, but nothing was measured there: as if not sampled
+    for pt in sorted(pts, key=lambda p: p[0]):
+        if _as_finite(value_of(pt)) is not None:
+            return pt
+    return None
+
+
+def _warn_unusable_baseline(pt, value, what: str) -> None:
+    _logger.warning(
+        "Fold change: the baseline timepoint %g has no usable %s (%r) for a "
+        "ratio, so this member is undefined on that panel rather than "
+        "normalised against another timepoint.", float(pt[0]), what, value,
+    )
+
+
+def _undefined_field(pt, val_idx: int, spread_idx: int | None) -> tuple:
+    """*pt* with one field, and its spread where the point carries one, set to NaN."""
+    slot = _spread_slot(pt, spread_idx)
+    new = list(pt)
+    _grow(new, val_idx, slot)
+    new[val_idx] = float("nan")
+    if slot is not None:
+        new[slot] = float("nan")
+    return tuple(new)
+
+
+def _field_baseline(
+    pts, val_idx: int, baseline_tp: float | None, *, op: str = "ratio",
+    spread_idx: int | None = None,
+) -> tuple[float | None, float]:
+    """``(baseline_val, baseline_spread)`` for a field's vs-t0 step.
+
+    Mirrors the mean baseline logic in :func:`normalize_pts`: the point
+    :func:`_baseline_point` names, and that point's
+    OWN spread with it so the baseline's error folds into every downstream
+    point in quadrature — the module docstring's formula, and what the bar
+    path does through ``member_first_tp_frac_resolved`` /
+    ``member_first_tp_n_resolved``. The spread is read only from a slot the
+    point actually carries (``_spread_slot``) and an undefined one counts as
+    0.0, "denominator treated as exact", exactly as the mean step treats it.
+
+    ``(None, 0.0)`` when the member has no measured point; ``(nan, 0.0)`` when
+    the baseline point's value cannot serve under *op* (zero, for a ratio), so
+    the caller makes the field undefined.
+    """
+    def _with_spread(pt) -> tuple[float, float]:
+        slot = _spread_slot(pt, spread_idx)
+        spread = _as_finite(pt[slot]) if slot is not None else None
+        return float(pt[val_idx]), (spread if spread is not None else 0.0)
+
+    pt = _baseline_point(pts, baseline_tp, lambda p: p[val_idx] if len(p) > val_idx else None)
+    if pt is None:
+        return None, 0.0
+    v = pt[val_idx] if len(pt) > val_idx else None
+    if not _baseline_usable(v, op=op):
+        _warn_unusable_baseline(pt, v, f"value in field {val_idx}")
+        return float("nan"), 0.0
+    return _with_spread(pt)
 
 
 def _normalize_field(
@@ -452,8 +502,11 @@ def _normalize_field(
 
     # Step B: vs-t0 baseline (uses each member's own post-control values).
     if use_t0:
-        base, base_spread = _field_baseline(pts, val_idx, baseline_tp, op=op_t0)
-        if base is not None:
+        base, base_spread = _field_baseline(pts, val_idx, baseline_tp, op=op_t0,
+                                            spread_idx=spread_idx)
+        if base is not None and not math.isfinite(base):
+            pts = [_undefined_field(pt, val_idx, spread_idx) for pt in pts]
+        elif base is not None:
             if op_t0 == "subtract":
                 pts = [_subtract_field(pt, val_idx, spread_idx, base,
                                        shift_spread=base_spread) for pt in pts]
@@ -488,7 +541,7 @@ def _match_control_mean(t: float, control_means: dict[float, float]) -> float | 
     if t in control_means:
         return control_means[t]
     for ct, cm in control_means.items():
-        if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t)):
+        if abs(ct - t) < tp_tolerance(ct, t):
             return cm
     return None
 
@@ -592,7 +645,7 @@ def normalize_pts(
                     t, (cm, 0.0)
                 ) if t in effective_stats else next(
                     ((m, s) for ct, (m, s) in effective_stats.items()
-                     if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t))),
+                     if abs(ct - t) < tp_tolerance(ct, t)),
                     (cm, 0.0),
                 )
                 if effective_op_ctrl == "subtract":
@@ -618,42 +671,20 @@ def normalize_pts(
     if use_t0:
         baseline = None
         baseline_spread = 0.0
-        if baseline_tp is not None and math.isfinite(baseline_tp):
-            tgt = float(baseline_tp)
-            for pt in stage1:
-                t = float(pt[0])
-                if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                    m = pt[1]
-                    if _baseline_usable(m, op=effective_op_t0):
-                        baseline = float(m)
-                        s = pt[2] if len(pt) > 2 else 0.0
-                        baseline_spread = (
-                            float(s) if is_number(s)
-                            else 0.0
-                        )
-                    else:
-                        _logger.warning(
-                            "Fold change: the requested baseline timepoint %g "
-                            "has no usable mean (%r) — falling back to the "
-                            "earliest timepoint that does.", tgt, m,
-                        )
-                    break
-        if baseline is None:
-            # Either no ``baseline_tp`` was supplied or the requested
-            # timepoint had no finite non-zero mean — fall through to
-            # earliest-finite behaviour so the user still gets a useful
-            # normalisation rather than a silent no-op.
-            for pt in sorted(stage1, key=lambda p: p[0]):
-                m = pt[1]
-                if _baseline_usable(m, op=effective_op_t0):
-                    baseline = float(m)
-                    s = pt[2] if len(pt) > 2 else 0.0
-                    baseline_spread = (
-                        float(s) if is_number(s)
-                        else 0.0
-                    )
-                    break
-        if baseline is None:
+        unusable = False
+        base_pt = _baseline_point(stage1, baseline_tp, lambda p: p[1])
+        if base_pt is not None:
+            m = base_pt[1]
+            if _baseline_usable(m, op=effective_op_t0):
+                baseline = float(m)
+                sp = base_pt[2] if len(base_pt) > 2 else 0.0
+                baseline_spread = float(sp) if is_number(sp) else 0.0
+            else:
+                unusable = True
+                _warn_unusable_baseline(base_pt, m, "mean")
+        if unusable:
+            stage2 = [_undefined_field(pt, 1, 2) for pt in stage1]
+        elif baseline is None:
             stage2 = stage1
         elif effective_op_t0 == "subtract":
             stage2 = [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
@@ -732,6 +763,43 @@ def _pt_frac(pt) -> tuple[float | None, float]:
     return float(f), fs
 
 
+def _pt_mean(pt) -> tuple[float | None, float]:
+    """``(mean, spread)`` of an AggPoint; an undefined spread counts as 0.0, the denominator taken as exact."""
+    m = pt[1] if len(pt) > 1 else None
+    s = pt[2] if len(pt) > 2 else 0.0
+    return (float(m) if is_number(m) else None), (float(s) if is_number(s) else 0.0)
+
+
+def _resolve_baseline(pts, baseline_tp: float | None, op: str, read) -> tuple[float | None, float | None, float]:
+    """``(tp, value, spread)`` of a member's vs-t0 baseline, read from its points by *read*.
+
+    The one rule behind every ``baseline_*_from_points*`` function, and the one
+    the line path applies (:func:`_baseline_point`): the baseline is the point
+    at *baseline_tp*, or the member's earliest measured point when it does not
+    sample that timepoint or none is named.
+
+    Three answers, and they mean different things:
+
+    * ``(None, None, 0.0)`` — the member has no measured point; there is no
+      baseline to speak of.
+    * ``(tp, nan, 0.0)`` — it has a baseline point and that point's value cannot
+      serve under *op*: zero, for a ratio. The quantity is **undefined**, and a
+      caller that divides or subtracts with it gets NaN. It is not taken against
+      a later timepoint, which is what these functions used to do.
+    * ``(tp, value, spread)`` — otherwise.
+    """
+    if not pts:
+        return None, None, 0.0
+    pt = _baseline_point(pts, baseline_tp, lambda q: read(q)[0])
+    if pt is None:
+        return None, None, 0.0
+    value, spread = read(pt)
+    if not _baseline_usable(value, op=op):
+        _warn_unusable_baseline(pt, value, "value")
+        return float(pt[0]), float("nan"), 0.0
+    return float(pt[0]), value, spread
+
+
 def baseline_from_points(
     pts, baseline_tp: float | None = None, *, op: str = "ratio",
 ) -> tuple[float | None, float]:
@@ -743,36 +811,8 @@ def baseline_from_points(
     callers can treat that as "no baseline available" without divide-by-
     zero or NaN propagation surprises.
     """
-    if not pts:
-        return None, 0.0
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for pt in pts:
-            t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                m = pt[1]
-                if _baseline_usable(m, op=op):
-                    s = pt[2] if len(pt) > 2 else 0.0
-                    return (
-                        float(m),
-                        float(s) if is_number(s) else 0.0,
-                    )
-                # Matched tp but its mean isn't finite/non-zero — fall
-                # through to earliest so the bar still normalises.
-                break
-        # Requested baseline tp wasn't found (or had bad data); fall
-        # through to earliest-finite — matches normalize_pts so the
-        # bar plot doesn't silently no-op when the user picks a tp
-        # the per-well series doesn't sample.
-    for pt in sorted(pts, key=lambda p: p[0]):
-        m = pt[1]
-        if _baseline_usable(m, op=op):
-            s = pt[2] if len(pt) > 2 else 0.0
-            return (
-                float(m),
-                float(s) if is_number(s) else 0.0,
-            )
-    return None, 0.0
+    _tp, value, spread = _resolve_baseline(pts, baseline_tp, op, _pt_mean)
+    return value, spread
 
 
 def baseline_from_points_resolved(
@@ -783,32 +823,7 @@ def baseline_from_points_resolved(
     Returns ``(tp, mean, spread)``. ``tp`` is ``None`` when no baseline
     qualifies. Used by the bar's per-well path so the caller can look up
     the control's value at the SAME tp the per-well baseline used."""
-    if not pts:
-        return None, None, 0.0
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for pt in pts:
-            t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                m = pt[1]
-                if _baseline_usable(m, op=op):
-                    s = pt[2] if len(pt) > 2 else 0.0
-                    return (
-                        t,
-                        float(m),
-                        float(s) if is_number(s) else 0.0,
-                    )
-                break
-    for pt in sorted(pts, key=lambda p: p[0]):
-        m = pt[1]
-        if _baseline_usable(m, op=op):
-            s = pt[2] if len(pt) > 2 else 0.0
-            return (
-                float(pt[0]),
-                float(m),
-                float(s) if is_number(s) else 0.0,
-            )
-    return None, None, 0.0
+    return _resolve_baseline(pts, baseline_tp, op, _pt_mean)
 
 
 def baseline_frac_from_points_resolved(
@@ -816,22 +831,7 @@ def baseline_frac_from_points_resolved(
 ) -> tuple[float | None, float | None, float]:
     """Frac counterpart of :func:`baseline_from_points_resolved` —
     returns ``(tp, frac, frac_spread)`` with ``tp=None`` for the no-match case."""
-    if not pts:
-        return None, None, 0.0
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for pt in pts:
-            t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                f, fs = _pt_frac(pt)
-                if _baseline_usable(f, op=op):
-                    return t, f, fs
-                break
-    for pt in sorted(pts, key=lambda p: p[0]):
-        f, fs = _pt_frac(pt)
-        if _baseline_usable(f, op=op):
-            return float(pt[0]), f, fs
-    return None, None, 0.0
+    return _resolve_baseline(pts, baseline_tp, op, _pt_frac)
 
 
 def baseline_frac_from_points(
@@ -845,22 +845,8 @@ def baseline_frac_from_points(
     "no baseline available" so the fraction bar passes through raw rather than
     div-by-zeroing.
     """
-    if not pts:
-        return None, 0.0
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for pt in pts:
-            t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                f, fs = _pt_frac(pt)
-                if _baseline_usable(f, op=op):
-                    return f, fs
-                break
-    for pt in sorted(pts, key=lambda p: p[0]):
-        f, fs = _pt_frac(pt)
-        if _baseline_usable(f, op=op):
-            return f, fs
-    return None, 0.0
+    _tp, value, spread = _resolve_baseline(pts, baseline_tp, op, _pt_frac)
+    return value, spread
 
 
 def _pt_n_above(pt, per_fov_spread: bool = False) -> tuple[float, float]:
@@ -891,22 +877,7 @@ def baseline_n_from_points_resolved(
 
     N-events counterpart of :func:`baseline_from_points_resolved`.
     """
-    if not pts:
-        return None, None, 0.0
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for pt in pts:
-            t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                n, ns = _pt_n_above(pt, per_fov_spread)
-                if _baseline_usable(n, op=op):
-                    return t, n, ns
-                break
-    for pt in sorted(pts, key=lambda p: p[0]):
-        n, ns = _pt_n_above(pt, per_fov_spread)
-        if _baseline_usable(n, op=op):
-            return float(pt[0]), n, ns
-    return None, None, 0.0
+    return _resolve_baseline(pts, baseline_tp, op, lambda pt: _pt_n_above(pt, per_fov_spread))
 
 
 # ── the member-series skeleton ───────────────────────────────────────────────
@@ -1708,7 +1679,7 @@ def member_baseline_value(
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for t, m in series.items():
-            if (abs(float(t) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(t)), abs(tgt))
+            if (abs(float(t) - tgt) <= tp_tolerance(float(t), tgt)
                     and _baseline_usable(m, op=op)):
                 return float(m)
         # Requested tp not sampled — fall through to earliest (mirrors the bar).
@@ -1864,7 +1835,7 @@ def member_first_tp_stats(
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for t, ms in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 return ms
         # Requested baseline tp not present for this member — fall
         # through to earliest-finite so the bar still normalises, same

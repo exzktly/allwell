@@ -187,8 +187,8 @@ def _aggpoint_to_linepoint(pt) -> LinePoint:
     frac = float(pt[3]) if (len(pt) > 3 and is_numeric(pt[3])) else float("nan")
     # n_above may be a fold-change ratio (float, or NaN at a missing-control
     # timepoint) once FC normalizes the N panel, so keep it float / NaN-safe
-    # rather than int(): the renderer reads ``float(p.n_above)`` and skips
-    # points without a mean anyway.
+    # rather than int(): the renderer draws the points whose count is a
+    # number, whether or not they have a mean.
     _n_raw = pt[4] if len(pt) > 4 else 0
     n_above = (float(_n_raw)
                if is_number(_n_raw)
@@ -207,6 +207,41 @@ def _aggpoint_to_linepoint(pt) -> LinePoint:
         has_mean=not (isinstance(mean, float) and math.isnan(mean)),
         has_frac=not (isinstance(frac, float) and math.isnan(frac)),
     )
+
+
+def set_measured_at(mean, frac) -> bool:
+    """Whether a replicate set has anything to plot at a timepoint.
+
+    The mean is the average intensity *of the cells above the ON cutoff*, so
+    it is NaN at a timepoint where no cell is above it — while the fraction
+    there is 0.0 and the event count 0, both measured. Keeping a set's point
+    only when it has a mean dropped that timepoint from all three panels, so a
+    set's curves began at the first timepoint with an ON cell and the zero
+    before it was never drawn. A timepoint is left out only when the set holds
+    no cell there at all, which is when the fraction is undefined too.
+
+    Shared with the batch line runner, which builds the same points.
+    """
+    return is_number(mean) or is_number(frac)
+
+
+def _events_points(series, *, fov_active: bool) -> list:
+    """``(t, events, spread)`` for each timepoint whose event count is known.
+
+    Judged on the count itself and never on ``has_mean``: zero events is a
+    measurement with no mean beside it, and a fold change can blank the mean
+    and keep the count. The Bar tab draws its Events bars by the same rule.
+    """
+    if fov_active:
+        raw = [(p.t, p.n_above_pf_mean, p.n_above_pf_spread) for p in series.points]
+    else:
+        # ``n_above_spread`` is the cross-well spread of the per-well counts,
+        # computed by ``compute_rep_n_above_stats`` and carried on the point
+        # (index 9 of the AggPoint tuple), so the Events panel draws the same
+        # replicate error band the Bar tab does.
+        raw = [(p.t, p.n_above, p.n_above_spread) for p in series.points]
+    return [(t, float(v), float(e) if is_number(e) else 0.0)
+            for t, v, e in raw if is_number(v)]
 
 
 def collect_line_series(
@@ -359,7 +394,7 @@ def collect_line_series(
                     # The per-FOV fields stay 0.0: they are genuinely not
                     # computed on this branch.
                     gnpf_m, gnpf_s = 0.0, 0.0
-                if not (isinstance(gm, float) and math.isnan(gm)):
+                if set_measured_at(gm, gf):
                     # AggPoint idx 6 = frac_spread (per-FOV fraction error), 7/8 =
                     # per-FOV n-above mean/spread. These were previously dropped,
                     # so the "fraction above threshold" subplot had no FOV error
@@ -598,18 +633,7 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
                                 fmt=value_label_format, color=color)
         any_ts = True
         # N events panel
-        if fov_active:
-            vn = [(p.t, p.n_above_pf_mean, p.n_above_pf_spread)
-                  for p in series.points if p.has_mean]
-        else:
-            # ``n_above_spread`` is the cross-well spread of the per-well
-            # counts, computed by ``compute_rep_n_above_stats`` and carried on
-            # the point since it was built (index 9 of the AggPoint tuple).
-            # Passing a literal 0.0 here threw it away at the last step, so the
-            # Line tab's Events panel drew no replicate error band while the
-            # Bar tab, reading the same statistic, drew one.
-            vn = [(p.t, float(p.n_above), float(p.n_above_spread))
-                  for p in series.points if p.has_mean]
+        vn = _events_points(series, fov_active=fov_active)
         if vn:
             vnt, vnv, vne = zip(*vn)
             _tag(ax_n.plot(

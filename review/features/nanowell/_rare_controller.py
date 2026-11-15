@@ -9,7 +9,10 @@ fold-change metric compares each nanowell with its own **Baseline** — with no 
 difference in seeding between the sides is said beside the verdict, ``rare_design_compute``), and *Responders higher
 / lower* chooses the tail; the Subset, Cell Gating and the rim-focus rule have already been applied to the metrics it
 reads, and a nanowell not measurable at the timepoint is excluded with its state as the reason
-(``rare_data_compute.from_site_metrics``).
+(``rare_data_compute.from_site_metrics``). A Metric with one value per nanowell (``distribution_compute.PER_NANOWELL``:
+the growth rate, the occupancy class) has no timepoint: it is read from the rows the sample tests read it from, a
+nanowell is left out only where the Metric is undefined, under ``series_compute.exclusion_reason``'s reason, and the
+Timepoint does not apply.
 
 **The moving average.** While it is on, each nanowell's value is its moving average at the Timepoint, taken exactly
 as the other Statistics tests and the Distribution view take it — the baseline's own window first
@@ -41,6 +44,7 @@ import math
 import pandas as pd
 
 from review.features.nanowell import controller as _controller
+from review.features.nanowell import distribution_compute as dc
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._rare_render import needed_height, needs_relayout, render_rare_page
@@ -48,6 +52,7 @@ from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS, RareParams
 from review.features.nanowell.rare_export_compute import report_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
 from review.features.nanowell.renderer import Footer, render_message, render_site_rows
+from review.features.nanowell.series_compute import exclusion_reason
 from review.features.nanowell.summary_compute import timepoint_phrase
 
 #: Results kept at most: the one drawn and a few the user may step back to.
@@ -58,6 +63,10 @@ NO_CONTROL = ("Rare responders test each group of wells against a control group:
 NOT_APPLIED = "The Fixed cohort does not apply to the rare-responder tests."
 UNIT_IGNORED = ("The rare-responder tests always compare groups with wells as the units; Compare does not apply.")
 VALUE_NOTE = "Values: the page's Metric at its Timepoint, each nanowell on its own; no strata."
+#: The note for a metric with one value per nanowell (a growth rate, the occupancy class): no Timepoint is read.
+VALUE_NOTE_PER_NANOWELL = ("Values: the page's Metric, one value per nanowell and none per timepoint, each nanowell "
+                           "on its own; no strata. The Timepoint does not apply, and a nanowell is left out only "
+                           "where the Metric is undefined.")
 #: :data:`VALUE_NOTE` while the moving average is on: the values tested are averages, and the cutoff is theirs.
 VALUE_NOTE_MOVING = ("Values: each nanowell's moving average of the page's Metric at its Timepoint, each nanowell on "
                      "its own; no strata. The control cutoff and the counts are those of the averaged values.")
@@ -83,16 +92,12 @@ def result_key(table: pd.DataFrame, params: RareParams) -> tuple:
 
 
 def drawn_timepoint(metrics: pd.DataFrame, groups: dict, timepoint: str) -> str:
-    """*timepoint*, or — when the page names none — the latest the drawn wells have, as the Statistics view's own
-    samples are drawn (``controller.shown_timepoint``)."""
-    if timepoint:
-        return timepoint
+    """The timepoint the test reads: the page's *timepoint* when the drawn wells have it, else the latest they have —
+    resolved by the call the Statistics view's sample tests resolve theirs with
+    (``distribution_compute.drawn_timepoint``), so the one Timepoint on the page means the same thing whichever
+    test is chosen. The page's Timepoint can name one only another well has (it is shared with the Array view)."""
     wells = [w for members in groups.values() for w in members]
-    rows = metrics[metrics["well"].isin(wells)]
-    if rows.empty:
-        return ""
-    order = "tp_order" if "tp_order" in rows else "time_h"
-    return str(rows.sort_values(order, kind="stable")["timepoint"].iloc[-1])
+    return dc.drawn_timepoint(metrics[metrics["well"].isin(wells)], timepoint)
 
 
 def why_not(groups: dict, control: str, metrics: pd.DataFrame, timepoint: str, hidden: dict | None = None,
@@ -155,7 +160,9 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
         render_message(fig, reason, gid="nw-rare-why")
         return None
     averaging = bool(column) and mvc.is_on(moving) and column in metrics
-    why = None
+    # One value per nanowell: read as the sample tests read it, with their reason where it is undefined.
+    per_nanowell = column in dc.PER_NANOWELL and column in metrics
+    why = exclusion_reason(metrics[metrics["well"].isin(list(conditions_of(groups)))], column) if per_nanowell else None
     if averaging:
         before = metrics[metrics["well"].isin(list(conditions_of(groups)))]
         metrics, why, rebased = windowed(metrics, conditions_of(groups), column, moving=moving,
@@ -169,7 +176,7 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
             return None
     try:
         table = from_site_metrics(metrics, conditions_of(groups), timepoint, value_column=column or None,
-                                  value_reasons=why)
+                                  value_reasons=why, per_nanowell=per_nanowell)
     except ValueError as exc:
         render_message(fig, str(exc), gid="nw-rare-why")
         return None
@@ -188,7 +195,8 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
         render_message(fig, held, gid="nw-rare-why")
         return None
     values = VALUE_NOTE_MOVING if averaging else VALUE_NOTE
-    notes = [f"{values} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.",
+    notes = [VALUE_NOTE_PER_NANOWELL if per_nanowell else
+             f"{values} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.",
              *([mvc.describe(moving, column, baseline_moving, moving_centred)] if averaging else []),
              *([excluded_note(excluded)] if excluded else []),
              *([NOT_APPLIED] if cohort else []), *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]

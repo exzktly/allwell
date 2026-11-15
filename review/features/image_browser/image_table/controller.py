@@ -393,7 +393,7 @@ def image_table_set_display(ctx, key: str, value) -> None:
 
 def image_table_set_thresh_frac(ctx, value, channel=None) -> None:
     """Edit a channel's ON cutoff from the Image Table controls row, then
-    re-composite so its "≥ Thr" binary overlay reflects it. ``channel`` picks
+    re-composite so its "> Thr" binary overlay reflects it. ``channel`` picks
     which channel (from the ON-cutoff dropdown); ``None`` falls back to the
     active channel.
 
@@ -741,7 +741,7 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         else:
             arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
     if arr is None and binary_mode:
-        # A mask / ≥threshold cell draws its segmentation, never the fluorescence
+        # A mask / >threshold cell draws its segmentation, never the fluorescence
         # pixels — ``_compose_image_table_rgb`` returns the silhouette before it
         # reads a single intensity value. Requiring the frame anyway made a whole
         # row read "(no image)" on a dataset whose output zip carries the mask and

@@ -13,7 +13,7 @@ import pandas as pd
 
 from domain.tp_match import tp_close_mask
 from review.data.data_loading import df_included_mask, resolve_value_series
-from review.domain.metric_registry import column_gating_exempt
+from review.domain.metric_registry import fluor_floor_judges_column
 # The one gate predicate every surface uses, so "inside a gate" means the
 # same thing here, in Cell Gating and in the Cell Browser.
 from review.domain.gates import compute_gate_inclusion
@@ -66,12 +66,14 @@ def well_cloud(df, *, col_x: str, col_y: str, target_tps, fluor_gate_x: float, f
         mask &= np.isfinite(area)
     x = resolve_value_series(df, col_x, ratios).to_numpy()
     y = resolve_value_series(df, col_y, ratios).to_numpy()
-    # smFISH counts are integer spot tallies and shape features are morphology
-    # values — neither is a fluorescence intensity, so the per-channel
-    # fluor-gate (an intensity floor like 50–1500) would gate out every such
-    # cell. The metric registry owns the "bypass the gate" rule.
-    gate_x_mask = np.ones_like(x, dtype=bool) if column_gating_exempt(col_x) else (x > fluor_gate_x)
-    gate_y_mask = np.ones_like(y, dtype=bool) if column_gating_exempt(col_y) else (y > fluor_gate_y)
+    # A channel's floor judges an axis only when it is on and the axis is the
+    # column the floor is defined on (the channel's mean intensity) — the
+    # metric registry owns that rule, and with it the bypass for smFISH counts
+    # and shape features. A floor of 0.0 is "off", not "above zero": applying
+    # it dropped every cell at or below zero on a background-subtracted
+    # channel, here and nowhere else in the app.
+    gate_x_mask = (x > fluor_gate_x) if fluor_floor_judges_column(col_x, fluor_gate_x) else np.ones_like(x, dtype=bool)
+    gate_y_mask = (y > fluor_gate_y) if fluor_floor_judges_column(col_y, fluor_gate_y) else np.ones_like(y, dtype=bool)
     mask &= np.isfinite(x) & np.isfinite(y) & gate_x_mask & gate_y_mask
     ungated = mask
     if gate_mask is not None:

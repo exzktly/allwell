@@ -167,7 +167,11 @@ def test_radial_profile_handles_empty_input():
 
 
 def test_variance_decomposition_identical_colonies_icc_zero():
-    """Every colony has the same mean and same spread → ICC = 0."""
+    """Every colony has the same mean and the same spread: no between-colony variance at all.
+
+    ICC(1) is then at its floor, ``-1 / (n0 - 1)`` (-0.5 for three cells a colony): colony means that agree
+    *exactly* agree more closely than chance would have them, which is what a negative ICC says.
+    """
     metric = np.array([1.0, 2.0, 3.0,   # colony 0
                        1.0, 2.0, 3.0,   # colony 1
                        1.0, 2.0, 3.0])  # colony 2
@@ -175,7 +179,7 @@ def test_variance_decomposition_identical_colonies_icc_zero():
     d = spc.variance_decomposition(metric, labels)
     assert d.sigma2_between == pytest.approx(0.0, abs=1e-9)
     assert d.sigma2_within > 0
-    assert d.icc == pytest.approx(0.0, abs=1e-9)
+    assert d.icc == pytest.approx(-0.5, abs=1e-9)
     assert d.sigma2_between + d.sigma2_within == pytest.approx(d.sigma2_total, abs=1e-9)
 
 
@@ -210,7 +214,35 @@ def test_variance_decomposition_matches_hand_calc():
     assert d.sigma2_between == pytest.approx(16.0 / 4.0)   # = 4
     assert d.sigma2_within == pytest.approx(4.0 / 4.0)     # = 1
     assert d.sigma2_total == pytest.approx(5.0)
-    assert d.icc == pytest.approx(4.0 / 5.0)
+    # ICC(1): MSB = 16 / (2 - 1), MSW = 4 / (4 - 2), n0 = 2 -> (16 - 2) / (16 + 2). Not 4 / 5, the share of
+    # the sums of squares, which is what this field used to hold.
+    assert d.icc == pytest.approx(14.0 / 18.0)
+
+
+def test_icc_on_pure_noise_is_about_zero_however_small_the_colonies():
+    """The share of the sums of squares reads (K - 1) / (N - 1) on noise: 0.8 for colonies of 1.25 cells."""
+    rng = np.random.default_rng(5)
+    for mean_size in (1.25, 2.0, 5.0):
+        n_cells = 4000
+        labels = rng.integers(0, int(n_cells / mean_size), n_cells)
+        d = spc.variance_decomposition(rng.normal(100.0, 15.0, n_cells), labels)
+        assert abs(d.icc) < 0.1, (mean_size, d.icc)
+        # ... while the quantity it replaced is fixed by the colony sizes, and far from zero:
+        assert d.sigma2_between / d.sigma2_total == pytest.approx((d.n_colonies - 1) / (n_cells - 1), abs=0.05)
+
+
+def test_icc_recovers_a_known_colony_effect():
+    """Colony means with variance 9 over cell noise with variance 1: ICC = 9 / (9 + 1)."""
+    rng = np.random.default_rng(6)
+    labels = np.repeat(np.arange(400), 6)
+    metric = rng.normal(0.0, 3.0, 400)[labels] + rng.normal(0.0, 1.0, labels.size)
+    assert spc.variance_decomposition(metric, labels).icc == pytest.approx(0.9, abs=0.03)
+
+
+def test_icc_is_not_defined_without_a_colony_of_two_cells_or_a_second_colony():
+    one_each = spc.variance_decomposition(np.array([1.0, 2.0, 3.0]), np.array([0, 1, 2]))
+    one_colony = spc.variance_decomposition(np.array([1.0, 2.0, 3.0]), np.array([0, 0, 0]))
+    assert np.isnan(one_each.icc) and np.isnan(one_colony.icc)
 
 
 def test_variance_decomposition_shape_mismatch_raises():
@@ -263,7 +295,7 @@ def test_summarise_frame_icc_nan_when_no_metric():
 
 def test_summary_metrics_catalog_shape():
     keys = {k for k, _lbl, _u in spc.SUMMARY_METRICS}
-    fields = {"n_cells", "n_colonies", "nnd_median", "knn5_mean_median",
+    fields = {"n_cells", "n_colonies", "n_colonies_with_hull", "nnd_median", "knn5_mean_median",
               "local_density_median", "colony_size_mean", "hull_area_median",
               "packing_density_median", "icc"}
     assert keys == fields

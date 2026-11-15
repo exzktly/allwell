@@ -326,7 +326,7 @@ def _run_group(monkeypatch, tmp_path, *, phase_output, tophat_dtype):
     lab[(yy - 32) ** 2 + (xx - 34) ** 2 < 49] = 2
     # Segmentation is the one stage stubbed: StarDist is not in the test stack,
     # and the claim under test is about what happens around it.
-    monkeypatch.setattr(pm, "_segment_image_group", lambda **k: (lab, None, None, None))
+    monkeypatch.setattr(pm, "_segment_image_group", lambda **k: (lab, None, None, None, None))
     records, _quality = pm.process_image_group(
         nuclear, fluors, ["GFP", "BF"], out, nuclear_token="DAPI",
         tophat_nir=True, tophat_radius_nir=5, tophat_fluor=[True, True],
@@ -496,7 +496,7 @@ def _run_main(monkeypatch, plate, *extra):
     lab = np.zeros((48, 48), np.int32)
     yy, xx = np.mgrid[0:48, 0:48]
     lab[(yy - 20) ** 2 + (xx - 20) ** 2 < 64] = 1
-    monkeypatch.setattr(pm, "_segment_image_group", lambda **k: (lab, None, None, None))
+    monkeypatch.setattr(pm, "_segment_image_group", lambda **k: (lab, None, None, None, None))
 
     def _serial(*, well_zips, output_dir, shared_kwargs_template, nuclear_token,
                 fluor_tokens, csv_prefix, schema, sep, incremental,

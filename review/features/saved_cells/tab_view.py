@@ -363,9 +363,7 @@ class SavedCellsPage(QWidget):
             self.gates.selectRow(0)
         self._sync_gate_buttons()
         floors = collect.intensity_gates(self.ctx)
-        self.intensity.setText(
-            "Intensity gates in force: " + ", ".join(f"{ch} ≥ {v:g}" for ch, v in floors)
-            if floors else "No intensity gate is in force.")
+        self.intensity.setText(collect.intensity_gates_text(floors))
         self._refresh_subsets()
 
 

@@ -148,7 +148,7 @@ def test_a_target_between_the_well_s_timepoints_is_computed_for_itself(ctx):
     from domain.tp_match import tp_close
     from review.domain.stats_compute import _well_extra
 
-    near = 24.0 + 0.01
+    near = 24.0 + 0.004        # inside the label-rounding tolerance at 24 h (0.005 h)
     assert tp_close(near, 24.0) and near not in TIMES
     ctx.state.dataset.cache.clear()
     got = _well_extra(ctx, WELL, near, 250.0, "mcherry_mean_intensity", {}, ctx.state.channel.ratio_index, None)

@@ -66,6 +66,7 @@ from services.remote_runner import (
 )
 from services import run_journal, run_provenance
 from services.remote_finished_wells import argv_forcing, drop_finished, nanowell_forced
+from services.remote_plate_record import record_plate_settings
 from services.remote_process import run_local_auto_threshold
 from services.remote_recover import recover_finished_outputs
 from services.remote_reservation import EARLY_JOB_ENDED
@@ -2360,6 +2361,12 @@ class PipelineRunner:
             return False
         for tok in (*zipped.up_to_date_wells, *(Path(w).stem for w in zipped.well_zips)):
             self._enqueue(("line", f"[remote] ✓ {tok}: up to date (local)\n"))
+        # No pipeline runs, here or on the host, so the plate-level half of a re-run is done here: the settings no
+        # well's output depends on are recorded, and the cell-gating pass runs over the plate (remote_plate_record).
+        if args:
+            record_plate_settings(output_dir, args, lambda m: self._enqueue(("line", m)))
+            if "--no_auto_threshold" not in args:
+                run_local_auto_threshold(output_dir, args, lambda m: self._enqueue(("line", m)))
         self._enqueue(("done", "Nothing to upload: every well is already "
                                "complete locally.\n"))
         return True

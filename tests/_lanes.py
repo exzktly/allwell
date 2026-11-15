@@ -302,6 +302,8 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_rare_responders.py": "the rare-responder analysis: QC, exceedance / HC / AD calibrated over wells, self-check",
     "test_nanowell_rare_responders_page.py": "the Rare responders test on the real Statistics view, its report and flagged crops",
     "test_nanowell_rare_moving_average.py": "the Rare responders test tests moving averages, excluding what the window leaves",
+    "test_nanowell_rare_timepoint_is_the_views.py": "the Rare responders test resolves the page's Timepoint as the sample tests do",
+    "test_nanowell_rare_per_nanowell_metric.py": "the Rare responders test keeps the nanowells the sample tests keep for a per-nanowell metric",
     "test_nanowell_statistics_pan_zoom.py": "a pan or zoom on the Statistics figure stays; an empty click redraws nothing",
     "test_nanowell_baseline_window_says_why.py": "a Baseline average that can never be complete says so on every view",
     "test_nanowell_subset.py": "The Nanowells page's *Subset*: any number of conditions — starting cells, a metric at a …",
@@ -320,6 +322,8 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
 #: Remote / HPC tests: ssh, rsync, the remote runner and its batches, Slurm,
 #: the bootstrap and the Remotes dialogs. ``scripts/test.sh --remote``.
 REMOTE_FILES: dict[str, str] = {
+    "test_a_batched_host_s_blank_copy_is_not_a_setting.py": "A plate a batched host computed against its copy of the blank is finished for a later remote or local run",
+    "test_a_finished_remote_rerun_updates_the_plate_record.py": "A remote re-run with nothing to send still records the focus cut and the cell-gating choice, and gates the plate here",
     "test_a_batched_restart_reuses_the_remote.py": "A restarted batched run looks at the remote before it uploads or runs anything",
     "test_a_node_is_asked_for_before_staging.py": "A scheduled run queues its job before the plate is staged and hands it the run once it is ready",
     "test_a_batched_resume_does_not_download_first.py": "A batched resume starts the run at once; wells already here are painted, whatever the …",

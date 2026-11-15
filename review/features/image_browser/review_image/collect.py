@@ -631,7 +631,7 @@ def _binary_gate_columns(ctx, channel=None):
     """Return ``(val_col, threshold)`` for the Segmentation binary mask.
 
     Keyed to the **displayed image channel** (``active_image_channel``) — the
-    channel the Segmentation tab is actually showing — so "Binary (≥ ON
+    channel the Segmentation tab is actually showing — so "Binary (> ON
     threshold)" binarises the channel you're viewing. The global plotting
     channel (``active_val_col`` / the active-channel threshold) can differ and
     would otherwise pull the wrong channel. Falls back to the plotting column

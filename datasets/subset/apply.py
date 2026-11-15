@@ -50,6 +50,7 @@ from datasets.subset.subset_compute import (
     row_verdict,
     timepoint_kept,
 )
+from datasets.core.member_names import data_member_basenames
 from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
 from util.well_token import canonical_well_label
 from datasets.core.nanowell_tables import carry_nanowell_tables
@@ -184,6 +185,35 @@ def _verify(
     )
 
 
+def _require_rows_name_kept_images(well: str, kept_rows: list[dict], kept_in_names) -> None:
+    """Refuse a subset whose CSV names an image its own ``in/`` archive does not hold.
+
+    *kept_in_names* is ``None`` when the well had no raw-input container to
+    compare against, which is not a failure. Otherwise each row's ``filename``
+    is looked up **by basename, among the members that hold data**
+    (:func:`~datasets.core.member_names.data_member_basenames`): an archive may
+    nest its images under a folder, as one made by Finder's Compress does, and
+    the pipeline that wrote these rows read them by basename too.
+    """
+    if kept_in_names is None:
+        return
+    kept_images = data_member_basenames(kept_in_names)
+    for row in kept_rows:
+        fname = row.get(FILENAME_COLUMN)
+        if fname and fname not in kept_images:
+            raise SubsetError(
+                f"Verification failed: well {well}'s row references "
+                f"{fname!r}, which isn't in the filtered in/{well}.zip"
+                + (
+                    " — the filter kept no member of that archive at "
+                    "all, so the destination has no in/"
+                    f"{well}.zip for the row to point into."
+                    if not kept_in_names
+                    else "."
+                )
+            )
+
+
 def execute_plan(
     plan: SubsetPlan,
     log: Callable[[str], None] | None = None,
@@ -303,20 +333,8 @@ def execute_plan(
             if kept_rows:
                 _write_rows(plan.dest.out_dir / csv_path.name, fieldnames, kept_rows)
                 row_count = len(kept_rows)
+                _require_rows_name_kept_images(well, kept_rows, kept_in_names)
                 for row in kept_rows:
-                    fname = row.get(FILENAME_COLUMN)
-                    if fname and kept_in_names is not None and fname not in kept_in_names:
-                        raise SubsetError(
-                            f"Verification failed: well {well}'s row references "
-                            f"{fname!r}, which isn't in the filtered in/{well}.zip"
-                            + (
-                                " — the filter kept no member of that archive at "
-                                "all, so the destination has no in/"
-                                f"{well}.zip for the row to point into."
-                                if not kept_in_names
-                                else "."
-                            )
-                        )
                     # cell_overrides.json stores fov/tp already normalized (via
                     # CellKey.as_tuple, domain/image_identity.py), so
                     # this set must be normalized the same way or a parseable

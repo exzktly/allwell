@@ -15,7 +15,7 @@ import logging
 from typing import Any
 
 from review.core.channel_state_controller import (
-    get_all_fluor_gates,
+    stored_fluor_gates,
     seg_channel_token_of,
 )
 from review.core.lazy import lazy_names
@@ -91,7 +91,7 @@ def _capture_gating_block(ctx) -> dict:
         return None if s is None else sorted(s)
 
     return build_gating_block(
-        get_all_fluor_gates(ctx),
+        stored_fluor_gates(ctx),
         dict(cg.thresh_frac_on),
         scatter_gates=cg.scatter_gates or None,
         use_scatter_gates=cg.use_scatter_gates,

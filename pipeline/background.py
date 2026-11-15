@@ -17,7 +17,7 @@ import logging
 import numpy as np
 from scipy.ndimage import grey_opening
 
-from pipeline.flatfield import _FLATFIELD_SIGMA, apply_flatfield
+from pipeline.flatfield import _FLATFIELD_SIGMA, apply_requested_flatfield
 
 # The pipeline's logger, as in ``pipeline.stardist`` — a correction that could
 # not be computed has to reach the run log, because the array it returns is
@@ -110,8 +110,8 @@ def _match_background_scale(img: np.ndarray, bg: np.ndarray) -> np.ndarray:
     residual that follows ``B``'s spatial shape — e.g. a corner-bright field
     leaves bright corners behind. So instead of subtracting ``B`` verbatim, fit
     the image's background as ``a·B + c`` (a least-squares regression of image
-    intensity on the field over the background-dominated — dimmest ~60% —
-    pixels, which excludes bright cells), and return that fitted field. The
+    intensity on the field over the background pixels, found by growing a
+    low-intensity seed and rejecting bright cells), and return that fitted field. The
     multiplicative term ``a`` absorbs the exposure/illumination mismatch and the
     constant ``c`` absorbs a uniform pedestal, so subtracting the result flattens
     the background regardless of where ``B`` is bright — with no assumption about
@@ -127,27 +127,75 @@ def _match_background_scale(img: np.ndarray, bg: np.ndarray) -> np.ndarray:
         return b
     iv = i[finite]
     bv = b[finite]
-    # Background-dominated subset: the dimmest ~60% of pixels. Bright cells sit
-    # in the top tail and would otherwise pull the regression up.
-    thr = float(np.percentile(iv, 60.0))
-    mask = iv <= thr
+    # A background-only subset to start from: the fifth of the pixels that sit
+    # lowest above the blank. Bright cells sit in the top tail and would
+    # otherwise pull the regression up, and a fifth is still background at 80%
+    # cover, where the dimmest 60% this started from is mostly cells.
+    above_blank = iv - bv
+    mask = above_blank <= float(np.percentile(above_blank, _BG_SEED_PERCENT))
     if int(mask.sum()) < 16:
         mask = np.ones_like(iv, dtype=bool)
-    x = bv[mask]
-    y = iv[mask]
-    xm = float(x.mean())
-    ym = float(y.mean())
-    denom = float(((x - xm) ** 2).sum())
-    if not np.isfinite(denom) or denom <= 0.0:
+    fit = _fit_line(bv[mask], iv[mask])
+    if fit is None:
         return b
-    a = float(((x - xm) * (y - ym)).sum() / denom)
-    if not np.isfinite(a):
-        return b
-    a = float(min(20.0, max(0.05, a)))
-    c = ym - a * xm
+    # Then grow it to the whole background. The seed is the low tail of the
+    # background's noise, so a line through it alone sits low; each round keeps
+    # every pixel within ``_BG_CLIP_SIGMA`` robust standard deviations of the
+    # fitted background — measured on the residual's lower half, which cells
+    # cannot reach — and refits, until the set stops changing. Cells are bright
+    # outliers of that residual and never join it. (Fitting the dimmest 60%
+    # once, as this did, put cell pixels in the fit past 40% cover: identical
+    # cells of mean 500 read 418 at 52%.)
+    for _round in range(_BG_CLIP_ROUNDS):
+        resid = iv - (fit[0] * bv + fit[1])
+        centre = float(np.median(resid[mask]))
+        below = resid[mask][resid[mask] <= centre]
+        sigma = 1.4826 * float(np.median(centre - below)) if below.size else 0.0
+        if not np.isfinite(sigma) or sigma <= 0.0:
+            break
+        keep = np.abs(resid - centre) <= _BG_CLIP_SIGMA * sigma
+        if int(keep.sum()) < 16 or bool(np.array_equal(keep, mask)):
+            break
+        refit = _fit_line(bv[keep], iv[keep])
+        if refit is None:
+            break
+        mask, fit = keep, refit
+    a, c = fit
     fitted = (a * b + c).astype(np.float32)
     fitted[~np.isfinite(fitted)] = 0.0
     return fitted
+
+
+#: Rounds of outlier rejection in :func:`_match_background_scale`, and the width
+#: of what counts as background in each, in robust standard deviations.
+_BG_CLIP_ROUNDS = 20
+_BG_CLIP_SIGMA = 3.0
+#: The share of the frame :func:`_match_background_scale` takes as certainly
+#: background to start its fit from. The fit therefore needs at least this much
+#: of the frame to be background; a field more confluent than that has no
+#: background left to fit a blank to.
+_BG_SEED_PERCENT = 20.0
+
+
+def _fit_line(x: np.ndarray, y: np.ndarray) -> tuple[float, float] | None:
+    """Least-squares ``y = a·x + c`` with ``a`` clamped to ``[0.05, 20]``; ``None`` on a degenerate fit.
+
+    A field with no spatial variation (a flat blank) is degenerate: it has no
+    shape for a scale to be fitted against, so the caller subtracts it as
+    measured. "No variation" is judged against the field's own level, not
+    against zero — a flat ``float32`` field's mean rounds, the sum of squares
+    comes out a hair above zero, and a slope fitted to that is noise.
+    """
+    xm = float(x.mean())
+    ym = float(y.mean())
+    denom = float(((x - xm) ** 2).sum())
+    if not np.isfinite(denom) or denom <= 1e-6 * max(1.0, xm * xm) * x.size:
+        return None
+    a = float(((x - xm) * (y - ym)).sum() / denom)
+    if not np.isfinite(a):
+        return None
+    a = float(min(20.0, max(0.05, a)))
+    return a, ym - a * xm
 
 
 def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
@@ -266,17 +314,16 @@ def _robust_grid_background(img: np.ndarray, box: int,
     outlier pixels more aggressively (use on crowded fields), larger keeps more
     pixels (use when objects are sparse and you want a tighter estimate).
     """
-    from scipy.ndimage import median_filter, zoom
+    from scipy.ndimage import median_filter
     a = np.asarray(img, dtype=np.float32)
     h, w = a.shape
     sigma = float(sigma) if float(sigma) > 0 else 3.0
     box = max(8, int(round(float(box))))
-    ny, nx = max(1, -(-h // box)), max(1, -(-w // box))   # ceil division
-    Hh, Ww = ny * box, nx * box
-    pad = a if (Hh == h and Ww == w) else np.pad(
-        a, ((0, Hh - h), (0, Ww - w)), mode="reflect")
-    tiles = (pad.reshape(ny, box, nx, box).transpose(0, 2, 1, 3)
-                .reshape(ny, nx, box * box).astype(np.float32))
+    rows, centre_y = _even_tiles(h, box)
+    cols, centre_x = _even_tiles(w, box)
+    ny, nx = rows.shape[0], cols.shape[0]
+    tiles = (a[rows[:, None, :, None], cols[None, :, None, :]]
+             .reshape(ny, nx, -1).astype(np.float32))
     tiles[~np.isfinite(tiles)] = np.nan
     data = tiles
     with np.errstate(invalid="ignore"):
@@ -304,11 +351,82 @@ def _robust_grid_background(img: np.ndarray, box: int,
         )
         mesh[:] = 0.0
     if ny >= 3 and nx >= 3:
-        mesh = median_filter(mesh, size=3, mode="nearest")
+        # The 3x3 median that drops a tile swamped by one large object. Run on
+        # the mesh continued one node past each edge at its own slope, then
+        # cropped back: with the edge row merely repeated, a border node's
+        # neighbourhood is lopsided, and under a gradient that runs along the
+        # border as well as across it the median is no longer the node itself
+        # (0.3 and 0.1 counts per pixel on 100 px tiles moved every border node
+        # by 10, which the edge then carried as a 16-count error).
+        ext, _ = _extend_nodes(mesh.astype(np.float64), centre_y, 0)
+        ext, _ = _extend_nodes(ext, centre_x, 1)
+        mesh = median_filter(ext, size=3, mode="nearest")[1:-1, 1:-1].astype(np.float32)
     if mesh.shape == (1, 1):
         return np.full((h, w), float(mesh[0, 0]), dtype=np.float32)
-    bg = zoom(mesh, (Hh / ny, Ww / nx), order=3, mode="nearest")
-    return bg[:h, :w].astype(np.float32)
+    return _upsample_tile_mesh(mesh, centre_y, centre_x, h, w)
+
+
+def _even_tiles(length: int, box: int) -> tuple[np.ndarray, np.ndarray]:
+    """One axis cut into equal tiles of real pixels: ``(pixel index per tile, tile centres)``.
+
+    ``ceil(length / box)`` tiles, each ``ceil(length / n)`` pixels — *box* when
+    it divides the axis, the nearest size below it otherwise — spread evenly
+    from the first pixel to the last, overlapping by a pixel here and there
+    where the division is not exact. Every tile is whole and holds only pixels
+    of the frame. Padding the frame out to a multiple of *box* by reflection,
+    which this replaces, made the last tile a mix of real and mirrored pixels:
+    its level then belongs to no one position, and on a ramp the background was
+    wrong by up to 0.3 of a tile's gradient at that edge.
+    """
+    n = max(1, -(-length // box))                     # ceil division
+    size = -(-length // n)
+    starts = np.rint(np.linspace(0, length - size, n)).astype(np.intp)
+    return starts[:, None] + np.arange(size, dtype=np.intp), starts + (size - 1) / 2.0
+
+
+def _extend_nodes(mesh: np.ndarray, at: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
+    """*mesh* and its node positions *at* with one node added at each end of *axis*.
+
+    The added node sits one node spacing further out and continues the mesh's
+    slope there. A single node has no slope to continue, so it is repeated a
+    pixel either side.
+    """
+    m = np.moveaxis(mesh, axis, 0)
+    if m.shape[0] == 1:
+        first, last, before, after = m[0], m[0], at[0] - 1.0, at[0] + 1.0
+    else:
+        first, last = 2.0 * m[0] - m[1], 2.0 * m[-1] - m[-2]
+        before, after = 2.0 * at[0] - at[1], 2.0 * at[-1] - at[-2]
+    return (np.moveaxis(np.concatenate([first[None], m, last[None]], axis=0), 0, axis),
+            np.concatenate([[before], at, [after]]))
+
+
+def _upsample_tile_mesh(mesh: np.ndarray, centre_y: np.ndarray, centre_x: np.ndarray,
+                        h: int, w: int) -> np.ndarray:
+    """A tile mesh as a full-resolution ``(h, w)`` background.
+
+    A tile's level is the background at the tile's **centre**, and that is
+    where its node is placed. Stretching the mesh so that its first and last
+    nodes land on the frame's first and last pixels — what a plain image zoom
+    does — moves every node toward the edges by up to half a tile, and the
+    background is then wrong by that distance times the local gradient across
+    the *whole* frame, not only at its rim: a ramp of 0.5 counts per pixel on
+    100 px tiles read +24.8 at the left edge, +11.1 a third of the way in and
+    -26.8 at the right.
+
+    Between the centres the surface is a cubic spline. Outside the outermost
+    centres, the half tile at each edge, the mesh is continued at its own slope
+    (:func:`_extend_nodes`) rather than held at the last node's level, which
+    would leave half a tile's worth of gradient unsubtracted there.
+    """
+    from scipy.interpolate import RectBivariateSpline
+
+    ext, node_y = _extend_nodes(mesh.astype(np.float64), centre_y, 0)
+    ext, node_x = _extend_nodes(ext, centre_x, 1)
+    # ``kx`` is the degree along the FIRST axis given, which here is y.
+    spline = RectBivariateSpline(node_y, node_x, ext,
+                                 kx=min(3, node_y.size - 1), ky=min(3, node_x.size - 1))
+    return spline(np.arange(h), np.arange(w)).astype(np.float32)
 
 
 def subtract_background(image, radius: int, method: str = "sliding_disk",
@@ -373,8 +491,19 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
         return _floor_after_subtract(
             img - _robust_grid_background(img, box, sigma=mesh_sigma))
     if method == "fft_bandpass":
-        return _floor_after_subtract(
-            _fft_butterworth_bandpass(img, large_px=int(radius), small_px=float(fft_small)))
+        filtered = _fft_butterworth_bandpass(img, large_px=int(radius), small_px=float(fft_small))
+        # The filter removes the frame's mean, so its output is zero-mean, not
+        # zero-background: the more of the field the cells cover, the further
+        # below zero the background sits, and flooring it there took that much
+        # off every cell (identical cells of mean 500 read 493 with 20 cells in
+        # the field and 337 with 3,000, at radius 200). Re-reference to the
+        # filtered frame's median, the same background level ``fov_median``
+        # uses, so the background is what sits at zero.
+        # Only when the high-pass ran: with no usable cutoff the frame comes
+        # back unchanged (and says so), and has no mean removed to put back.
+        finite = filtered[np.isfinite(filtered)]
+        level = float(np.median(finite)) if finite.size and int(radius) > 1 else 0.0
+        return _floor_after_subtract(filtered - level)
     if method == "fov_median":
         finite = img[np.isfinite(img)]
         if not finite.size:
@@ -432,14 +561,29 @@ def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
     additive background **tracks the illumination** (true for media autofluor-
     escence under uneven excitation): then for ``raw = gain·signal + B`` with
     ``gain ∝ B`` it recovers ``signal``, and the empty well itself maps to ~0.
-    Each field no-ops when absent / shape-mismatched.
+    A field that is absent or of another shape is skipped, and each skip is
+    warned about: the frame is otherwise written under the usual corrected
+    filename with nothing to tell it from a corrected one.
     """
     img = np.asarray(image, dtype=np.float32)
-    if bg_field is not None:
+    if bg_field is None:
+        log.warning(
+            "Background: empty_well was requested but no background field "
+            "was built for this channel — the frame is NOT background-subtracted.",
+        )
+    else:
         b = np.asarray(bg_field, dtype=np.float32)
         if b.shape == img.shape:
             b = _match_background_scale(img, b)
             img = _floor_after_subtract(img - b)
-    return apply_flatfield(img, ff_field)
+        else:
+            log.warning(
+                "Background: the empty-well field is %s and this frame is %s, "
+                "so it cannot be subtracted — the frame is NOT "
+                "background-subtracted. A blank acquired at a different binning "
+                "or crop from the plate is the usual cause.",
+                b.shape, img.shape,
+            )
+    return apply_requested_flatfield(img, ff_field)
 
 

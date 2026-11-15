@@ -37,9 +37,9 @@ from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
     relative_gap as _relative_gap,
     sweep_thresholds as _sweep_thresholds,
 )
-from review.data.data_loading import resolve_value_series
+from review.data.data_loading import VERDICT_LAYERS, df_included_mask, resolve_value_series
 from domain.text_columns import fov_text, timepoint_text
-from review.domain.gating_state import active_fluor_gates
+from review.domain.gating_state import CUT_SYMBOL, active_fluor_gates
 # The one gate predicate, below the features: the Scatter tab and the Cell
 # Browser ask the same function, so a cell is inside a gate everywhere or nowhere.
 from review.domain.gates import compute_gate_inclusion
@@ -177,6 +177,35 @@ def format_inclusion_counts(
     if failed:
         return f"{text}  ·  last gating pass failed"
     return text
+
+
+def gate_table_headers(kind: str) -> list[tuple[str, str]]:
+    """``(header, tooltip)`` for each cutoff column of the Cell Gating table *kind* (``"include"`` or ``"on"``).
+
+    Column headers name the layer each column feeds and the measurement it is
+    made against. The fraction-on table carries two, because an intensity
+    Property and an smFISH Count Property are cut against different units:
+    ThreshFracOn is a brightness, ThreshCountOn a spot tally.
+
+    Every header carries ``CUT_SYMBOL`` and every tooltip says "above": each of
+    these cuts is applied as a strict ``>`` (:func:`apply_fluor_gating`,
+    ``data_loading._aggregate_arrays``), so a cell exactly at the number typed
+    is excluded, or OFF. Here rather than in the Qt builder so a test can hold
+    the words to the comparison.
+    """
+    if kind == "include":
+        return [(f"Include {CUT_SYMBOL}\n(FluorGating, per-cell MFI)",
+                 "Cells whose mean fluorescence intensity in this channel is "
+                 "at or below the floor are excluded from analysis entirely.")]
+    return [
+        (f"ON {CUT_SYMBOL}\n(ThreshFracOn, per-cell MFI)",
+         "Included cells above this cut count as 'on' when the "
+         "selected Property is an intensity. It removes no cells."),
+        (f"ON {CUT_SYMBOL}\n(ThreshCountOn, spot count)",
+         "Included cells above this count as 'on' when the selected "
+         "Property is an smFISH Count. -1 counts every cell, including the "
+         "ones carrying no spots."),
+    ]
 
 
 # ── Per-well fluorescence gating (GatingWorker core) ─────────────────────────
@@ -417,26 +446,41 @@ def scan_fc_fractions(
 # directly rather than through a full-app fixture.
 
 
+#: The inclusion layers that are the **fluorescence decision itself**, which the
+#: CDFs and the optimizer are read to set and so must not be filtered by:
+#: ``Included`` (the intensity floors) is left out of the mask below by not
+#: being read at all, and ``Gate_Pass`` (the scatter gates, the floors'
+#: alternative) by this roster.
+_FLUORESCENCE_DECISION_LAYERS = ("Gate_Pass",)
+
+#: The verdict columns :func:`_cell_gating_valid_mask` reads — what a narrow
+#: read for the CDFs or the optimizer has to ask for by name.
+VALIDITY_COLUMNS = frozenset(c for c in VERDICT_LAYERS if c not in _FLUORESCENCE_DECISION_LAYERS)
+
+
 def _cell_gating_valid_mask(frame_df):
-    """Boolean mask: rows that pass crop AND QC AND the FOV selection (absent
-    columns ⇒ all-pass).
+    """Boolean mask: rows every plot would count, **before** the fluorescence decision.
+
+    That is ``data_loading.df_included_mask`` — the composed inclusion mask
+    every aggregate uses, so each verdict layer (hand deletions, QC, the crop,
+    flagged and hand-excluded fields, the focus cuts, the border rule, the FOV
+    selection, an excluded saved-cell set, the size class) is honoured by being
+    in ``VERDICT_LAYERS`` rather than by being listed here — minus the layers
+    of the fluorescence decision. Absent columns ⇒ all-pass, as there.
 
     The per-channel fluorescence gate (``Included``) is deliberately NOT applied:
     the CDFs and the threshold optimizer are what the user reads to SET that
     gate, so filtering by it would be circular — raising the threshold would
     shrink the very curve being read, and the optimizer would only see cells
-    that already pass its own (asynchronously-rewritten) cut. Crop + QC are
-    independent of the fluorescence gate, so they show the valid population
-    without that feedback loop. The FOV selection (``FOV_Pass``) is independent
-    of it too, and a field the user excluded from every calculation must not
-    set the threshold the remaining fields are read against.
+    that already pass its own (asynchronously-rewritten) cut. Every other layer
+    is independent of the fluorescence gate, so it shows the valid population
+    without that feedback loop: a field the user excluded from every
+    calculation, or a cell deleted by hand, must not set the threshold the
+    remaining cells are read against.
     """
-    mask = pd.Series(True, index=frame_df.index)
-    for col in ("QC_Pass", "Crop_Pass", "FOV_Pass"):
-        if col in frame_df.columns:
-            vals = pd.to_numeric(frame_df[col], errors="coerce").fillna(1)
-            mask = mask & vals.eq(1)
-    return mask
+    # Only the verdict columns are handed over: with no ``Included`` column the
+    # chokepoint starts from all-pass, which is the "not the floors" half.
+    return df_included_mask(frame_df[[c for c in frame_df.columns if c in VALIDITY_COLUMNS]])
 
 
 def _cell_gating_valid_rows(frame_df):
@@ -522,7 +566,7 @@ def _filter_rows_by_timepoint(df, timepoint):
 
 def _valid_values_for_channel(df, channel_key: str, ratios=None,
                               timepoint=None) -> np.ndarray:
-    """Finite per-cell values for ``channel_key`` over the QC+Crop-valid
+    """Finite per-cell values for ``channel_key`` over the valid
     population (at ``timepoint`` if given). Mirrors the CDF population — the
     fluorescence ``Included`` gate is deliberately not applied so the optimizer
     isn't filtered by the very threshold it's helping pick (see
@@ -682,24 +726,26 @@ def format_optimizer_result(result, well_a: str, well_b: str) -> str:
 def _cell_gating_first_frame_rows(df) -> tuple:
     """Return ``(sub_df, description)`` for the first FOV's first timepoint.
 
-    "First" among the fields the FOV selection keeps (``FOV_Pass``), when one
-    is set: the first field overall may be one the user excluded, and the CDFs
-    would then show either nothing or cells no calculation uses.
+    "First" among the cells the valid population keeps
+    (:func:`_cell_gating_valid_mask`), when any layer drops some: the first
+    field overall may be one the FOV selection left out, one the run flagged or
+    one the user excluded by hand, and its first timepoint one whose cells were
+    all cut — the CDFs would then show nothing while every plot has cells to
+    count. The rows returned are that frame's valid rows.
     """
     if df is None or df.empty:
         return df, ""
 
     fov_series = fov_text(df)
-    candidates = fov_series
-    if "FOV_Pass" in df.columns:
-        kept = pd.to_numeric(df["FOV_Pass"], errors="coerce").fillna(1).eq(1)
-        candidates = fov_series[kept]
-        if candidates.empty:
-            return df.iloc[0:0], ""
+    kept = _cell_gating_valid_mask(df)
+    all_kept = bool(kept.all())
+    candidates = fov_series if all_kept else fov_series[kept]
+    if candidates.empty:
+        return df.iloc[0:0], ""
 
     unique_fovs = sorted(candidates.unique(), key=fov_sort_key)
     first_fov = unique_fovs[0] if unique_fovs else "1"
-    same_fov = df.loc[fov_series == first_fov]
+    same_fov = df.loc[(fov_series == first_fov) if all_kept else ((fov_series == first_fov) & kept)]
     if same_fov.empty:
         return same_fov, ""
 

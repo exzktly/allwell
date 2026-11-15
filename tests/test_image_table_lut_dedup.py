@@ -1,6 +1,6 @@
 """The builder LUT panel lists each adjustable channel once, and names the rest.
 
-A channel shown as BOTH its fluorescence and its ≥Thresh binary previously appeared
+A channel shown as BOTH its fluorescence and its >Thresh binary previously appeared
 twice (keyed by ``axis_token`` → ``GFP`` and ``GFP (binary)``). A binary/mask render
 has no display range, so it must not get a LUT row; the fluorescence instance drives
 the single row. The ``NUC+SEG`` overlay is the same case: the render seam passes a
@@ -31,7 +31,7 @@ from review.features.image_browser.image_table.image_compose import (
 def test_fluor_plus_threshold_channel_appears_once():
     spec = TableSpec(rows=Axis(root="well", channels=[
         ChannelSpec("GFP", "corrected"),
-        ChannelSpec("GFP", "threshold"),   # ≥Thresh binary of the same channel
+        ChannelSpec("GFP", "threshold"),   # >Thresh binary of the same channel
     ]))
     lut = _table_channels(spec)
     assert list(lut) == ["GFP"], "GFP must appear once, not GFP + GFP (binary)"

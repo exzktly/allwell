@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QLabel, QTextEdit,
+    QComboBox, QFrame, QLabel, QScrollArea, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -19,6 +19,7 @@ from review.features.stats.controller import stats_on_test_change
 from review.features.stats.controller import TEST_LABELS
 from review.features.stats.controller import refresh_stats_test_inputs
 from review.features.stats.controller import stats_refresh_group_list
+from review.features.stats.controller import stats_refloor_group_list
 from review.features.stats.controller import stats_refresh_fov_indicator
 from review.features.stats.controller import stats_update_tp_menu
 from review.features.stats.controller import stats_refresh_map
@@ -29,6 +30,38 @@ from review.features.stats.controller import stats_resync_from_sample_defs
 from review.core.channel_state_controller import refresh_stats_property_combo
 from core.safe import swallowed
 
+
+
+class _GroupListScroll(QScrollArea):
+    """The group cards' scroll area, which measures its floors again when phone
+    layout changes the UI scale.
+
+    Its minimum height (two cards) and width (one card) are measured off the
+    cards it holds (``controller._stats_floor_group_list``), and a restyle
+    resizes those cards without rebuilding the list. The rescale pass calls
+    ``_aw_rescale`` on every widget whose type defines it, last, once every
+    widget is at its new size — so the floors follow the cards rather than
+    keeping the desk's.
+    """
+
+    def __init__(self, parent: QWidget, refloor) -> None:
+        super().__init__(parent)
+        self._refloor = refloor
+
+    def _aw_rescale(self) -> None:
+        self._refloor()
+
+
+def _group_list_scroll(parent: QWidget, refloor) -> tuple[QScrollArea, QWidget]:
+    """``(scroll area, inner widget)`` as ``ui_helpers.make_scrollable_canvas``
+    builds them, the area a :class:`_GroupListScroll`."""
+    sa = _GroupListScroll(parent, refloor)
+    sa.setWidgetResizable(True)
+    sa.setFrameShape(QFrame.NoFrame)
+    inner = QWidget(sa)
+    sa.setWidget(inner)
+    QVBoxLayout(inner)
+    return sa, inner
 
 
 def build_stats_tab(ctx, parent: QWidget) -> None:
@@ -74,7 +107,6 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     into.
     """
     from ui import theme
-    from review.core.ui_helpers import make_scrollable_canvas
     from review.core.ui_helpers import well_plate_tooltip_provider
     from widgets.responsive_row import ResponsiveRow
     from widgets.collapsible_section import CollapsibleSection
@@ -174,7 +206,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     hint.setWordWrap(True)
     col.addWidget(hint)
 
-    sa, inner = make_scrollable_canvas(side)
+    sa, inner = _group_list_scroll(side, partial(stats_refloor_group_list, ctx))
     # Bounded by the plate it sits beside, so however many groups are defined
     # the editor stays a strip at the top of the page and the results below it
     # keep the rest. Derived from the plate cap rather than chosen, so the two

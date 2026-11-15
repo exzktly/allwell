@@ -22,8 +22,15 @@ DESK = QRect(0, 0, 1640, 980)
 #: sideways (``tests/test_phone_windows.py`` uses the same two).
 PHONE_UPRIGHT = QRect(0, 0, 432, 936)
 PHONE_SIDEWAYS = QRect(0, 0, 936, 432)
+#: An unfolded foldable's inner screen — the iPhone Fold's 4:3 (1.41), at 1.2 px per phone point
+#: (``core.phone_layout.FOLD_REFERENCE_WIDTH_PT``: 690 pt across its short side) — held upright and
+#: sideways. Phone layout is entered by its button, as on the phones: sideways, a 1170 × 828 desktop
+#: is large enough for the desk layout, so it is not offered on its own.
+FOLD_UPRIGHT = QRect(0, 0, 828, 1170)
+FOLD_SIDEWAYS = QRect(0, 0, 1170, 828)
 
-SCREENS: dict[str, QRect] = {"desk": DESK, "phone-upright": PHONE_UPRIGHT, "phone-sideways": PHONE_SIDEWAYS}
+SCREENS: dict[str, QRect] = {"desk": DESK, "phone-upright": PHONE_UPRIGHT, "phone-sideways": PHONE_SIDEWAYS,
+                             "phone-fold-upright": FOLD_UPRIGHT, "phone-fold-sideways": FOLD_SIDEWAYS}
 
 
 def is_phone(screen: str) -> bool:

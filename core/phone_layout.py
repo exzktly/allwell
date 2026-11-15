@@ -29,6 +29,24 @@ from contextlib import contextmanager
 #: unit: a button is the same size on the phone in either orientation.
 PHONE_REFERENCE_WIDTH_PT = 390
 
+#: An unfolded foldable phone — a book-style fold such as the iPhone Fold, the
+#: Galaxy Z Fold or the Pixel Fold — has a near-square inner screen: about 4:3
+#: (1.41) on the iPhone, squarer on the Android folds, where every phone held
+#: upright or sideways is 16:9 (1.78) or longer, and most are 19.5:9 (2.17). A
+#: screen whose long side is less than ``FOLD_MAX_ASPECT`` times its short side
+#: is taken as that inner screen, and its short side as ``FOLD_REFERENCE_WIDTH_PT``
+#: points rather than 390: the iPhone Fold's 7.8-inch, 4:3 inner screen is
+#: 4.5 inches across its short side, and a phone point is 1/152 inch (390 pt over
+#: an iPhone 16's 2.56-inch width), which is 685 pt. With the phone's 390 that
+#: screen took every touch target, bar and line of text at 1.77 times its size.
+#: The Android folds' inner screens are a little wider still (750-840 pt), so on
+#: them a target comes out slightly larger than the floor, never smaller. The
+#: same rule covers any other near-square desktop phone layout is used on (a
+#: 1024 × 768 screen is narrower than the desk window, so phone-shaped), which
+#: is a small tablet's size rather than a phone's either.
+FOLD_MAX_ASPECT = 1.6
+FOLD_REFERENCE_WIDTH_PT = 690
+
 #: Touch sizes, in phone points. 44 pt is the smallest target a thumb hits
 #: reliably (Apple's minimum; Material's 48 dp is the same physical size on a
 #: 360-dp phone); bars, rows and menu items take 48. Targets sit at least 8 pt
@@ -179,12 +197,27 @@ def is_phone_shaped(width: int, height: int) -> bool:
     return width / height >= PHONE_MIN_ASPECT and height < PHONE_MAX_SHORT_SIDE
 
 
+def is_fold_shaped(width: int, height: int) -> bool:
+    """Is a screen of this size near-square, the shape of an unfolded foldable's
+    inner screen (``FOLD_MAX_ASPECT``) rather than of a phone, in either
+    orientation?"""
+    short, long = sorted((width, height))
+    return short > 0 and long / short < FOLD_MAX_ASPECT
+
+
+def reference_width_pt(width: int, height: int) -> int:
+    """How many phone points the short side of a screen of this size is taken
+    to be: ``FOLD_REFERENCE_WIDTH_PT`` on an unfolded foldable, otherwise
+    ``PHONE_REFERENCE_WIDTH_PT``."""
+    return FOLD_REFERENCE_WIDTH_PT if is_fold_shaped(width, height) else PHONE_REFERENCE_WIDTH_PT
+
+
 def phone_unit(width: int, height: int) -> float:
     """Logical pixels per phone point on a screen of this size (at least 1)."""
     short = min(width, height)
     if short <= 0:
         return 1.0
-    return max(1.0, short / PHONE_REFERENCE_WIDTH_PT)
+    return max(1.0, short / reference_width_pt(width, height))
 
 
 def type_scale(unit: float, size: str, desk_body_px: int) -> float:

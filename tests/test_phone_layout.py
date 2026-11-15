@@ -1795,3 +1795,124 @@ def test_the_controls_sheet_fits_a_band_row_wider_than_the_phone_and_gives_it_ba
         assert band.form() is None
         assert [band._scope.itemAt(i).widget() is not None for i in range(band._scope.count())], \
             "the band's own row is empty after the sheet closed"
+
+
+# ── an unfolded foldable ────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("w,h,fold", [
+    (1920, 2713, True),    # iPhone Fold's inner screen, upright: 4:3
+    (2713, 1920, True),    # and sideways
+    (2076, 2152, True),    # Pixel Fold's: nearly square
+    (1179, 2556, False),   # a 19.5:9 phone upright
+    (2556, 1179, False),   # and sideways
+    (750, 1334, False),    # a 16:9 phone (iPhone SE)
+    (1920, 1080, False),   # a 16:9 monitor
+])
+def test_a_near_square_screen_is_an_unfolded_foldable(w, h, fold):
+    assert phone_layout.is_fold_shaped(w, h) is fold
+
+
+@pytest.mark.parametrize("w,h,expected", [
+    (1920, 2713, 1920 / 690),  # iPhone Fold upright: 690 pt across its short side
+    (2713, 1920, 1920 / 690),  # sideways: the same unit, as a phone keeps its own
+    (1179, 2556, 1179 / 390),  # a phone still takes 390
+    (690, 975, 1.0),           # a desktop already at the fold's points
+])
+def test_an_unfolded_foldable_s_short_side_is_690_points(w, h, expected):
+    """Wrong implementation: the phone's 390 for every screen, which drew every
+    target and line of text on the fold's inner screen 1.77 times its size."""
+    assert phone_layout.phone_unit(w, h) == pytest.approx(expected)
+
+
+#: Full-resolution screens: a 19.5:9 phone and the iPhone Fold's inner screen,
+#: each held both ways.
+_PHONE_UP, _PHONE_SIDE = QRect(0, 0, 1179, 2556), QRect(0, 0, 2556, 1179)
+_FOLD_UP, _FOLD_SIDE = QRect(0, 0, 1920, 2713), QRect(0, 0, 2713, 1920)
+
+
+@pytest.mark.parametrize("screen,wide,short", [
+    (_PHONE_UP, False, False),
+    (_PHONE_SIDE, True, True),
+    (_FOLD_UP, True, False),
+    (_FOLD_SIDE, True, False),
+])
+def test_the_shell_reads_a_screen_s_size_in_points(qapp, screen, wide, short):
+    from tests._screens import FakeScreen
+    from ui.phone_shell import PhoneHandles, PhoneShell
+    host = QWidget()
+    try:
+        shell = PhoneShell(host, PhoneHandles())
+        with FakeScreen(screen):
+            assert (shell.is_wide(), shell.is_short()) == (wide, short)
+    finally:
+        host.deleteLater()
+
+
+def _fold_shell(qapp):
+    from PySide6.QtWidgets import QVBoxLayout
+
+    from ui.phone_drawer import RailDrawer
+    win = _window()
+    QVBoxLayout(win)
+    drawer = RailDrawer(win, panels=dict, top_inset=lambda: 0, on_closed_inside=lambda: None)
+    from ui.page_history import PageHistory
+    history = PageHistory(win, location=lambda: "home", go=lambda _loc: None)
+    return _shell(win, rail_drawer=drawer, history=history), drawer
+
+
+@pytest.mark.parametrize("screen", [_FOLD_UP, _FOLD_SIDE], ids=["upright", "sideways"])
+def test_an_unfolded_foldable_gets_a_full_bar_a_rail_panel_and_forward_in_the_bar(
+        qapp, app_sheet, screen):
+    """The fold's inner screen is a phone's touch targets on a screen twice as
+    wide: the full 52 pt bar with 48 pt ☰ and ⋯ (sideways too: at 690 pt tall it
+    has the height a phone on its side lacks), the rail a 360 pt panel rather
+    than the whole width less a strip, and Forward beside Back rather than in ⋯.
+    Wrong implementation: one keyed on orientation alone, which gave the fold
+    held upright a 634 pt rail and Forward in ⋯, and sideways the slim bar."""
+    from tests._screens import FakeScreen
+    from ui.phone_shell import LANDSCAPE_PANEL_PT
+    with FakeScreen(screen):
+        shell, drawer = _fold_shell(qapp)
+        shell.set_on(True, restyle=False)
+        try:
+            _pump(qapp)
+            u = 1920 / 690
+            assert shell.unit() == pytest.approx(u)
+            assert shell._h.band.height() == round(52 * u)
+            assert shell.menu_button.width() == round(48 * u)
+            assert drawer._width_hint() == round(LANDSCAPE_PANEL_PT * u)
+            assert not shell.forward_button.isHidden()
+            shell._fill_menu()
+            assert not [a for a in shell._menu.actions() if a.text().startswith("Forward")]
+        finally:
+            shell.set_on(False)
+            _pump(qapp)
+
+
+def test_a_phone_keeps_its_upright_and_sideways_forms(qapp, app_sheet):
+    """The phone itself is unchanged: upright, the full bar, the rail the whole
+    width less ``RAIL_GAP_PT``, Forward in ⋯; sideways the slim bar with 40 pt
+    ☰ and ⋯, the rail a panel and Forward in the bar."""
+    from tests._screens import FakeScreen
+    from ui.phone_shell import LANDSCAPE_PANEL_PT, RAIL_GAP_PT
+    u = 1179 / 390
+    with FakeScreen(_PHONE_UP) as screen:
+        shell, drawer = _fold_shell(qapp)
+        shell.set_on(True, restyle=False)
+        try:
+            _pump(qapp)
+            assert shell._h.band.height() == round(52 * u)
+            assert drawer._width_hint() == drawer._host.width() - round(RAIL_GAP_PT * u)
+            assert shell.forward_button.isHidden()
+            shell._fill_menu()
+            assert [a for a in shell._menu.actions() if a.text().startswith("Forward")]
+            screen.turn(_PHONE_SIDE)
+            shell._apply_sizes()
+            _pump(qapp)
+            assert shell._h.band.height() == round(44 * u)
+            assert shell.menu_button.width() == round(40 * u)
+            assert drawer._width_hint() == round(LANDSCAPE_PANEL_PT * u)
+            assert not shell.forward_button.isHidden()
+        finally:
+            shell.set_on(False)
+            _pump(qapp)

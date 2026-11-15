@@ -238,14 +238,23 @@ widget that appears or goes are (`tests/test_phone_snapshot_diff.py`).
 
 **The phone point.** Every size in phone layout is written in phone points
 (`u`): the short side of the screen's geometry divided by 390, the width in
-points of a typical phone held upright (`phone_layout.phone_unit`). RealVNC
+points of a typical phone held upright (`phone_layout.phone_unit`) — or by 690
+on a near-square screen, the inner screen of an unfolded foldable such as the
+iPhone Fold (long side under 1.6 times the short, `phone_layout.is_fold_shaped`;
+`FOLD_REFERENCE_WIDTH_PT`, the iPhone Fold's 4.5-inch short side at the 152
+points per inch of an iPhone held upright). Every phone is 16:9 or longer, so
+none is read as a fold; with 390 the fold drew every target and line of text
+1.77 times its size. RealVNC
 shrinks the remote desktop to the phone's screen, so a widget `n·u` pixels wide
 on the desktop is `n` points wide under the thumb, whatever resolution the
 desktop was given. The rules are the platform's: a control is at least 44 pt
 tall (`TOUCH_MIN_PT`), a row a thumb picks from — a menu item, a rail section, a
 control in the Controls sheet — 48 pt (`TOUCH_ROW_PT`), gaps 8 pt
-(`TOUCH_GAP_PT`), the top bar 52 pt (`TOP_BAR_PT`; 44 pt sideways,
-`phone_shell.LANDSCAPE_BAR_PT`, where height is what the plots lack). Sideways
+(`TOUCH_GAP_PT`), the top bar 52 pt (`TOP_BAR_PT`; 44 pt on a *short* screen,
+`phone_shell.LANDSCAPE_BAR_PT`, where height is what the plots lack). A screen is
+short when it is held sideways and under 500 pt tall (`PhoneShell.is_short`,
+`SHORT_SCREEN_PT`): a phone on its side (360–440 pt) is, an unfolded foldable on
+its side (690 pt) is not, and keeps the full bar. On a short screen
 the ☰ and ⋯ are 40 pt squares inside that slim bar
 (`phone_shell.LANDSCAPE_BAR_BUTTON_PT`), the one target deliberately below the
 floor. Body text is 15 pt
@@ -347,9 +356,11 @@ mode switch (Review · Analyze · Datasets, labels only, `MODE_PAD_PT` (9 pt) ei
 side of each label, one shared segment width that `ModeBar._equalise_widths`
 re-measures after every UI scale — measured before the restyle it clipped
 "Datasets"), and ⋯ (48 pt). The four do not leave room for a Forward at a touch
-size — at 12 pt of mode padding Back alone did not fit — so upright *Forward ›*
-is an item in ⋯, enabled as the button would be; sideways › sits beside ‹ in the
-one bar, both at `LANDSCAPE_BAR_BUTTON_PT`. The desk's ‹ › are hidden in phone
+size — at 12 pt of mode padding Back alone did not fit — so on a narrow screen
+*Forward ›* is an item in ⋯, enabled as the button would be; on a *wide* one — at
+least 600 pt across (`PhoneShell.is_wide`, `WIDE_SCREEN_PT`): any phone on its
+side, and an unfolded foldable either way — › sits beside ‹ in the one bar, at
+`LANDSCAPE_BAR_BUTTON_PT` on a short screen and the touch floor otherwise. The desk's ‹ › are hidden in phone
 layout (`desk_only`). The page's own controls are in a
 52 pt strip (`PhoneStrip`) at the **foot** of the window — added last to the
 band's parent layout, so in Analyze it sits under the run bar — because the foot
@@ -379,7 +390,9 @@ a column beside the page, so in phone layout `ui/phone_drawer.py` (`RailDrawer`)
 every pane's left panel — Review's rail (dataset, sections, well plate, the page's
 own rail frames, saved selections) and the Datasets tool list — to one left-edge
 `widgets.drawer.Drawer`, and ☰ slides the current mode's panel out
-*over* the page: the window's width less 56 pt upright (360 pt sideways), with the
+*over* the page: the window's width less 56 pt on a narrow screen, a 360 pt panel
+on a wide one (`LANDSCAPE_PANEL_PT`; an unfolded foldable held upright is 690 pt
+across, where the whole width of sections would be mostly air), with the
 page left showing behind a 50 % scrim. Review's sections become a two-wide grid of
 48 pt tiles (`RailNav.setColumns(2)`), and the top of the rail carries the status
 bar's line ("4 well(s) | 72 nuclei", `PhoneRailStatus`), refreshed every 400 ms
@@ -806,7 +819,11 @@ now*) offering the other layout. It never switches by itself.
 `phone_layout.is_phone_shaped` calls a screen a phone when it is upright, too
 small for the desk window, or sideways at a phone's proportions — at least 1.95:1
 with a short side under 1,300 px; phones are 19.5:9 (2.17) or longer, monitors
-16:9 (1.78) or 16:10. A geometry change while phone layout is on (the phone
+16:9 (1.78) or 16:10. An unfolded foldable held sideways at a desktop's size
+(1,100 × 800 or more) reads as a desk: at 4:3 it has a 4:3 or 3:2 monitor's shape
+(a Surface laptop's 2256 × 1504 among them), so no rule of size or shape can tell
+them apart, and the phone button is how it is chosen; held upright it is a phone.
+A geometry change while phone layout is on (the phone
 turned, and VNC resized the desktop under the maximized window) closes the
 Controls sheet and restyles at the new unit.
 
@@ -23414,10 +23431,11 @@ you're in before you type the command.
   `pytest_collection_modifyitems` auto-marks these `slow`, precisely so the fast
   lane skips them.
 - **Every page, every screen, with data** (`tests/test_every_page_renders.py`, slow
-  lane, ~6 minutes). Qt's offscreen screen is an 800×800 square, which is no screen a
+  lane, ~16 minutes). Qt's offscreen screen is an 800×800 square, which is no screen a
   person has, so a full-app test run on it says nothing about how a page fits one.
   `tests/_screens.py::FakeScreen` makes every `QScreen` report a chosen
-  rectangle — the desk 1640×980, a phone upright 432×936, a phone sideways 936×432 —
+  rectangle — the desk 1640×980, a phone upright 432×936, a phone sideways 936×432,
+  an unfolded foldable upright 828×1170 and sideways 1170×828 —
   and `place` puts the window there (maximizing would take the real 800×800).
   **The patch is Python's only.** Qt's C++ still sees the 800×800 screen, so what Qt
   places by itself — a `QMenu` it keeps on screen, a combo box's list — is placed

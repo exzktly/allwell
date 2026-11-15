@@ -967,6 +967,20 @@ SHEET_HEIGHT_SHARE = 0.6
 #: ``analyze/phone_view.AnalyzePhoneView._fit_progress``. The log takes the
 #: rest of the width.
 LANDSCAPE_SUMMARY_PT = 440
+#: A screen at least this wide, in phone points, is *wide*: the side rail is a
+#: fixed ``LANDSCAPE_PANEL_PT`` panel rather than the whole width less
+#: ``RAIL_GAP_PT``, and Forward sits in the bar beside Back. Any phone on its
+#: side is wide (a 19.5:9 phone is 845 pt across), and so is an unfolded
+#: foldable held either way (``phone_layout.FOLD_REFERENCE_WIDTH_PT``, 690 pt
+#: upright); a phone held upright (360-440 pt) is not. Upright, the bar holds
+#: ☰, Back, the three modes and ⋯ in 390 pt, so 600 leaves Forward its room.
+WIDE_SCREEN_PT = 600
+#: A screen less tall than this, in phone points, is *short*: the bar is the slim
+#: ``LANDSCAPE_BAR_PT`` one, its ☰ and ⋯ ``LANDSCAPE_BAR_BUTTON_PT`` squares,
+#: because height is what the plots lack. A phone on its side is 360-440 pt
+#: tall; an unfolded foldable on its side is 690, which has the height for the
+#: full bar and touch targets at the floor.
+SHORT_SCREEN_PT = 500
 #: How often the side rail's status line follows the status bar while out,
 #: and the Wells button its count while the Wells sheet is open.
 _RAIL_STATUS_MS = 400
@@ -1007,6 +1021,8 @@ class PhoneShell(QObject):
         self._sheet = None
         self._sheet_band = None
         self._landscape: bool | None = None
+        #: Whether Forward is in the bar (a wide screen) rather than in ⋯.
+        self._forward_in_bar = False
         self._build_controls()
         self._load_settings()
         self._listen_for_declarations()
@@ -1086,6 +1102,21 @@ class PhoneShell(QObject):
     def is_landscape(self) -> bool:
         a = self._avail()
         return a.width() > a.height()
+
+    def screen_points(self) -> tuple[float, float]:
+        """The screen's available width and height, in phone points."""
+        a, u = self._avail(), self.unit()
+        return a.width() / u, a.height() / u
+
+    def is_wide(self) -> bool:
+        """At least ``WIDE_SCREEN_PT`` across: a phone on its side, or an
+        unfolded foldable either way."""
+        return self.screen_points()[0] >= WIDE_SCREEN_PT
+
+    def is_short(self) -> bool:
+        """Held sideways and less than ``SHORT_SCREEN_PT`` tall: a phone on its
+        side, not an unfolded foldable on its side."""
+        return self.is_landscape() and self.screen_points()[1] < SHORT_SCREEN_PT
 
     def text_size(self) -> str:
         """The stored choice: ``"S"``, ``"M"`` or ``"L"``."""
@@ -1641,7 +1672,9 @@ class PhoneShell(QObject):
         band = self._h.band
         on = phone_layout.is_on()
         land = self.is_landscape()
+        short, wide = self.is_short(), self.is_wide()
         self._landscape = land if on else None
+        self._forward_in_bar = on and wide
         self._place_page_controls(landscape=on and land)
         if on:
             strip_lay = self._strip.layout()
@@ -1653,18 +1686,18 @@ class PhoneShell(QObject):
         self._size_canvases(on)
         if band is not None and band.layout() is not None:
             if on:
-                bar = self.pt(LANDSCAPE_BAR_PT if land else phone_layout.TOP_BAR_PT)
-                side = self.pt(LANDSCAPE_BAR_BUTTON_PT if land else phone_layout.TOUCH_ROW_PT)
+                bar = self.pt(LANDSCAPE_BAR_PT if short else phone_layout.TOP_BAR_PT)
+                side = self.pt(LANDSCAPE_BAR_BUTTON_PT if short else phone_layout.TOUCH_ROW_PT)
                 for b in (self.menu_button, self.options_button):
                     b.setFixedSize(side, side)
                 # Back at the touch floor upright, beside ☰; Forward joins it
-                # sideways, where the one bar is long enough for both.
-                step = self.pt(LANDSCAPE_BAR_BUTTON_PT if land else phone_layout.TOUCH_MIN_PT)
+                # on a wide screen, where the one bar is long enough for both.
+                step = self.pt(LANDSCAPE_BAR_BUTTON_PT if short else phone_layout.TOUCH_MIN_PT)
                 for b in self._history_buttons():
                     b.setFixedSize(step, step)
                     b.setIconPixels(round(self.pt(HISTORY_GLYPH_PT) / theme.ui_scale()))
                 if self.forward_button is not None:
-                    self.forward_button.setVisible(land)
+                    self.forward_button.setVisible(wide)
                 band.setFixedHeight(bar)
                 band.layout().setContentsMargins(self.pt(4), 0, self.pt(4), 0)
                 band.layout().setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
@@ -1681,7 +1714,7 @@ class PhoneShell(QObject):
                 band.layout().setSpacing(theme.Spacing.sm)
         drawer = self._h.rail_drawer
         if drawer is not None and on:
-            drawer._width_hint = (lambda: self.pt(LANDSCAPE_PANEL_PT)) if land else (
+            drawer._width_hint = (lambda: self.pt(LANDSCAPE_PANEL_PT)) if wide else (
                 lambda: max(1, drawer._host.width() - self.pt(RAIL_GAP_PT)))
             drawer._backdrop._alpha = 0.5
         self._apply_analyze_columns(on and land)
@@ -2409,9 +2442,9 @@ class PhoneShell(QObject):
             owned_action(m, "App log  •" if lit else "App log").triggered.connect(
                 self._h.show_log)
         history = self._h.history
-        if history is not None and not bool(self._landscape):
-            # Upright the bar has Back only; Forward is here, disabled when
-            # there is nowhere to go forward to.
+        if history is not None and not self._forward_in_bar:
+            # On a narrow screen the bar has Back only; Forward is here,
+            # disabled when there is nowhere to go forward to.
             fwd = owned_action(m, "Forward ›")
             fwd.setEnabled(history.can_forward())
             fwd.triggered.connect(history.forward)

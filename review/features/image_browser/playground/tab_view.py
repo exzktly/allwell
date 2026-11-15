@@ -128,7 +128,11 @@ def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
     rl.setSpacing(6)
     lbl = QLabel(label_text, row)
     lbl.setObjectName("Muted")
-    lbl.setFixedWidth(theme.Metrics.stepper_w)
+    # A floor, not a pin: the labels line up in a column at the desk, and a
+    # label whose text is wider than the column at phone layout's larger text
+    # takes the width it needs. Pinned, "Overlap (NMS)" and "Pixel size (µm)"
+    # were clipped by 7-9 px on an unfolded foldable's screen.
+    lbl.setMinimumWidth(theme.Metrics.stepper_w)
     if tooltip:
         row.setToolTip(tooltip)
         lbl.setToolTip(tooltip)

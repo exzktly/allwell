@@ -110,8 +110,8 @@ def _match_background_scale(img: np.ndarray, bg: np.ndarray) -> np.ndarray:
     residual that follows ``B``'s spatial shape — e.g. a corner-bright field
     leaves bright corners behind. So instead of subtracting ``B`` verbatim, fit
     the image's background as ``a·B + c`` (a least-squares regression of image
-    intensity on the field over the background-dominated — dimmest ~60% —
-    pixels, which excludes bright cells), and return that fitted field. The
+    intensity on the field over the background pixels, found by growing a
+    low-intensity seed and rejecting bright cells), and return that fitted field. The
     multiplicative term ``a`` absorbs the exposure/illumination mismatch and the
     constant ``c`` absorbs a uniform pedestal, so subtracting the result flattens
     the background regardless of where ``B`` is bright — with no assumption about
@@ -127,27 +127,75 @@ def _match_background_scale(img: np.ndarray, bg: np.ndarray) -> np.ndarray:
         return b
     iv = i[finite]
     bv = b[finite]
-    # Background-dominated subset: the dimmest ~60% of pixels. Bright cells sit
-    # in the top tail and would otherwise pull the regression up.
-    thr = float(np.percentile(iv, 60.0))
-    mask = iv <= thr
+    # A background-only subset to start from: the fifth of the pixels that sit
+    # lowest above the blank. Bright cells sit in the top tail and would
+    # otherwise pull the regression up, and a fifth is still background at 80%
+    # cover, where the dimmest 60% this started from is mostly cells.
+    above_blank = iv - bv
+    mask = above_blank <= float(np.percentile(above_blank, _BG_SEED_PERCENT))
     if int(mask.sum()) < 16:
         mask = np.ones_like(iv, dtype=bool)
-    x = bv[mask]
-    y = iv[mask]
-    xm = float(x.mean())
-    ym = float(y.mean())
-    denom = float(((x - xm) ** 2).sum())
-    if not np.isfinite(denom) or denom <= 0.0:
+    fit = _fit_line(bv[mask], iv[mask])
+    if fit is None:
         return b
-    a = float(((x - xm) * (y - ym)).sum() / denom)
-    if not np.isfinite(a):
-        return b
-    a = float(min(20.0, max(0.05, a)))
-    c = ym - a * xm
+    # Then grow it to the whole background. The seed is the low tail of the
+    # background's noise, so a line through it alone sits low; each round keeps
+    # every pixel within ``_BG_CLIP_SIGMA`` robust standard deviations of the
+    # fitted background — measured on the residual's lower half, which cells
+    # cannot reach — and refits, until the set stops changing. Cells are bright
+    # outliers of that residual and never join it. (Fitting the dimmest 60%
+    # once, as this did, put cell pixels in the fit past 40% cover: identical
+    # cells of mean 500 read 418 at 52%.)
+    for _round in range(_BG_CLIP_ROUNDS):
+        resid = iv - (fit[0] * bv + fit[1])
+        centre = float(np.median(resid[mask]))
+        below = resid[mask][resid[mask] <= centre]
+        sigma = 1.4826 * float(np.median(centre - below)) if below.size else 0.0
+        if not np.isfinite(sigma) or sigma <= 0.0:
+            break
+        keep = np.abs(resid - centre) <= _BG_CLIP_SIGMA * sigma
+        if int(keep.sum()) < 16 or bool(np.array_equal(keep, mask)):
+            break
+        refit = _fit_line(bv[keep], iv[keep])
+        if refit is None:
+            break
+        mask, fit = keep, refit
+    a, c = fit
     fitted = (a * b + c).astype(np.float32)
     fitted[~np.isfinite(fitted)] = 0.0
     return fitted
+
+
+#: Rounds of outlier rejection in :func:`_match_background_scale`, and the width
+#: of what counts as background in each, in robust standard deviations.
+_BG_CLIP_ROUNDS = 20
+_BG_CLIP_SIGMA = 3.0
+#: The share of the frame :func:`_match_background_scale` takes as certainly
+#: background to start its fit from. The fit therefore needs at least this much
+#: of the frame to be background; a field more confluent than that has no
+#: background left to fit a blank to.
+_BG_SEED_PERCENT = 20.0
+
+
+def _fit_line(x: np.ndarray, y: np.ndarray) -> tuple[float, float] | None:
+    """Least-squares ``y = a·x + c`` with ``a`` clamped to ``[0.05, 20]``; ``None`` on a degenerate fit.
+
+    A field with no spatial variation (a flat blank) is degenerate: it has no
+    shape for a scale to be fitted against, so the caller subtracts it as
+    measured. "No variation" is judged against the field's own level, not
+    against zero — a flat ``float32`` field's mean rounds, the sum of squares
+    comes out a hair above zero, and a slope fitted to that is noise.
+    """
+    xm = float(x.mean())
+    ym = float(y.mean())
+    denom = float(((x - xm) ** 2).sum())
+    if not np.isfinite(denom) or denom <= 1e-6 * max(1.0, xm * xm) * x.size:
+        return None
+    a = float(((x - xm) * (y - ym)).sum() / denom)
+    if not np.isfinite(a):
+        return None
+    a = float(min(20.0, max(0.05, a)))
+    return a, ym - a * xm
 
 
 def _floor_after_subtract(diff: np.ndarray) -> np.ndarray:
@@ -373,8 +421,19 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
         return _floor_after_subtract(
             img - _robust_grid_background(img, box, sigma=mesh_sigma))
     if method == "fft_bandpass":
-        return _floor_after_subtract(
-            _fft_butterworth_bandpass(img, large_px=int(radius), small_px=float(fft_small)))
+        filtered = _fft_butterworth_bandpass(img, large_px=int(radius), small_px=float(fft_small))
+        # The filter removes the frame's mean, so its output is zero-mean, not
+        # zero-background: the more of the field the cells cover, the further
+        # below zero the background sits, and flooring it there took that much
+        # off every cell (identical cells of mean 500 read 493 with 20 cells in
+        # the field and 337 with 3,000, at radius 200). Re-reference to the
+        # filtered frame's median, the same background level ``fov_median``
+        # uses, so the background is what sits at zero.
+        # Only when the high-pass ran: with no usable cutoff the frame comes
+        # back unchanged (and says so), and has no mean removed to put back.
+        finite = filtered[np.isfinite(filtered)]
+        level = float(np.median(finite)) if finite.size and int(radius) > 1 else 0.0
+        return _floor_after_subtract(filtered - level)
     if method == "fov_median":
         finite = img[np.isfinite(img)]
         if not finite.size:

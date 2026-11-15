@@ -37,8 +37,7 @@ from util.well_token import (
 )
 from pipeline.incremental_keys import (
     fov_tp_from_name,
-    read_done_fov_keys,
-    read_done_fov_keys_from_zip,
+    incremental_done_fov_keys,
 )
 from util.zip_write import atomic_zip
 from util.retry_io import retry_io
@@ -443,12 +442,7 @@ def _plan_staging(
             plans.append(_StagePlan(src=wz, keep=None, n_members=len(images)))
             continue
         if incremental and prior_output_dir is not None and well is not None:
-            # CSV is the primary done-set; fall back to the well's local output
-            # zip so a missing / lost CSV doesn't re-upload already-done FOVs.
-            done = read_done_fov_keys(prior_output_dir / f"{csv_prefix}_{well}.csv")
-            done |= read_done_fov_keys_from_zip(
-                prior_output_dir / f"{well}_out.zip",
-                schema=filename_schema, sep=filename_sep)
+            done = _done_here(prior_output_dir, well, csv_prefix, filename_schema, filename_sep)
             if done:
                 before = len(keep)
                 keep = [
@@ -645,6 +639,22 @@ def _materialize_staging(
 _IMAGE_MEMBER_EXTS = tuple(sorted(GROUP_IMAGE_EXTS))
 
 
+def _done_here(prior_output_dir: Path, well: str, csv_prefix: str, schema, sep: str) -> set[tuple[str, str]]:
+    """The ``(fov, timepoint)`` groups of *well* already finished in the local output, which an incremental
+    upload leaves out — the pipeline's own done-set (``pipeline.incremental_keys.incremental_done_fov_keys``), so
+    the split and the host cannot disagree about which fields are new.
+
+    A well with a record of finished groups (``pipeline.done_groups``) is done where its CSV or that record says
+    so: a field that held no cells is not sent again, and one whose images came back but whose quantification
+    failed is. A well without one keeps the earlier rule — the CSV, falling back to the local output zip so a
+    missing / lost CSV doesn't re-upload already-done FOVs for a full remote re-segmentation. The record is taken
+    whatever settings it was made under, as the CSV's keys are here: this split has no settings key, and the
+    uncompressed output folder is not read, as it never was.
+    """
+    return incremental_done_fov_keys(prior_output_dir, well, csv_prefix=csv_prefix, safe_well=well,
+                                     schema=schema, sep=sep, settings_key=None, output_folder=False)[0]
+
+
 def _is_image_member(member: str) -> bool:
     """Whether a zip member is one of the images the run is here to process.
 
@@ -706,15 +716,7 @@ def _filter_new_fovs_in_staging(
         if well is None:
             survivors.append(wz)
             continue
-        # CSV is the primary done-set; fall back to the well's local output zip
-        # so a missing/lost CSV doesn't make us re-upload already-done FOVs for a
-        # full remote re-segmentation ("reanalyzed previously processed images").
-        # The (fov, tp) key readers are the shared stdlib-only helpers in
-        # pipeline.incremental_keys (audit A2) — no imaging-stack import.
-        done = read_done_fov_keys(prior_output_dir / f"{csv_prefix}_{well}.csv")
-        done |= read_done_fov_keys_from_zip(
-            prior_output_dir / f"{well}_out.zip",
-            schema=filename_schema, sep=filename_sep)
+        done = _done_here(prior_output_dir, well, csv_prefix, filename_schema, filename_sep)
         if not done:
             survivors.append(wz)  # genuinely new well → upload in full
             continue

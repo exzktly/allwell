@@ -386,6 +386,7 @@ def write_well_report(
     aborted_reason: str = "",
     not_attempted: tuple[str, ...] | list[str] = (),
     groups_reached: int | None = None,
+    no_cells: list[str] | None = None,
 ) -> Path | None:
     """Record one well's completeness. Best-effort, with one exception.
 
@@ -395,10 +396,20 @@ def write_well_report(
     is being rewritten under it.
 
     ``groups_total`` is how many FOV-groups the well's *input* holds;
-    ``groups_covered`` is how many distinct ``(fov, timepoint)`` pairs its
-    output CSV actually carries once this run finished — ground truth read back
-    from the artifact rather than inferred from what the run believed it did, so
-    it stays correct across incremental runs and resumed checkpoints alike.
+    ``groups_covered`` is how many of them the output accounts for once this
+    run finished: the distinct ``(fov, timepoint)`` pairs its CSV carries —
+    read back from the artifact rather than inferred from what the run believed
+    it did, so it stays correct across incremental runs and resumed checkpoints
+    alike — and the groups the well's record of finished groups
+    (``pipeline.done_groups``) says were processed to the end and held no
+    cells.
+
+    *no_cells*, given by a well task that keeps that record, names those
+    groups (``fov/timepoint``). The payload then carries them and their count
+    as ``groups_no_cells``: covered, measured, nothing there — a count a reader
+    can see, never folded into ``groups_covered`` unseen. A record without the
+    two keys was written before they existed (or by a nanowell well, which
+    counts timepoints) and its ``groups_covered`` is the CSV's alone.
 
     ``groups_reached``, given only for a nanowell well (counted in timepoints),
     is how many of them the run reached with a verdict; :func:`well_is_whole`
@@ -419,6 +430,9 @@ def write_well_report(
     }
     if groups_reached is not None:
         payload["groups_reached"] = int(groups_reached)
+    if no_cells is not None:
+        payload["groups_no_cells"] = len(no_cells)
+        payload["no_cells"] = sorted(no_cells)
     withdraw_seal(output_dir, well_label)
     try:
         d = _report_dir(output_dir)
@@ -469,6 +483,8 @@ def block_of(wells: dict) -> dict:
         "empty_wells": sorted(w for w, r in wells.items() if found_nothing(r)),
         "groups_total": sum(int((r or {}).get("groups_total", 0)) for r in wells.values()),
         "groups_covered": sum(int((r or {}).get("groups_covered", 0)) for r in wells.values()),
+        # Covered groups that were measured and held no cells; 0 for wells recorded before the count existed.
+        "groups_no_cells": sum(_int(r, "groups_no_cells") for r in wells.values()),
     }
 
 
@@ -550,6 +566,21 @@ def summarize(report: dict) -> str:
     return "\n".join(lines)
 
 
+def no_cells_note(report: dict) -> str:
+    """One line naming the wells with groups that were measured and held no cells, or ``""`` when there are none.
+
+    Said whether or not anything is missing: such a group is covered, so no INCOMPLETE line mentions it, and a
+    field that segmented nothing is worth a reader's glance — it is what an out-of-focus or mis-thresholded field
+    looks like too."""
+    wells = report.get("wells") or {}
+    counts = {w: _int(r, "groups_no_cells") for w, r in wells.items() if _int(r, "groups_no_cells")}
+    if not counts:
+        return ""
+    shown = ", ".join(f"{w} ({n})" for w, n in sorted(counts.items())[:8]) + ("…" if len(counts) > 8 else "")
+    return (f"NO CELLS: {sum(counts.values())} FOV-group(s) in {len(counts)} well(s) were processed to the end "
+            f"and held no cells ({shown}). They are counted as covered; pipeline_info.json names them per well.")
+
+
 # ── The three call sites the pipeline uses ──────────────────────────────────
 
 
@@ -562,6 +593,7 @@ def record_well_completeness(
     *,
     aborted_reason: str = "",
     not_attempted: tuple[str, ...] | list[str] = (),
+    processed=None, schema=None, sep: str = "_", settings_key: str = "", incremental: bool = False,
 ) -> None:
     """Record how much of this well's input its output actually covers.
 
@@ -572,6 +604,18 @@ def record_well_completeness(
     storage gave out: all of them show up as the gap between the input's group
     count and the output's.
 
+    A group that was processed to the end and held no cells has no row to be
+    read back, so the CSV alone left every well with one empty field short of
+    its input for ever. *processed* — ``(nuclear file name, cell count)`` for
+    each group this run took to the end, which only the well task knows — is
+    written to the well's record of finished groups
+    (``pipeline.done_groups.record_processed_groups``, with *schema*, *sep*,
+    *settings_key* and *incremental*), and the groups that record says held no
+    cells are counted as covered and named apart. A group that failed is in
+    neither the CSV nor that record, so it stays uncovered. Without
+    *processed* (a caller with no well task behind it) coverage is the CSV's
+    alone, as it is for a record written before this existed.
+
     *aborted_reason* and *not_attempted* carry why a well stopped early and
     which groups it never tried. Both were computed by the worker and dropped
     on the floor here: `run_report` declared `aborted_reason`, serialised it
@@ -581,19 +625,29 @@ def record_well_completeness(
     """
     from pipeline.incremental_keys import read_done_fov_keys
 
-    covered = 0
+    keys: set = set()
     if csv_path is not None:
         try:
-            covered = len(read_done_fov_keys(csv_path))
+            keys = read_done_fov_keys(csv_path)
         except Exception:
-            covered = 0
+            keys = set()
+    no_cells = None
+    if processed is not None:
+        from pipeline.done_groups import record_processed_groups
+
+        done = record_processed_groups(output_dir, well_label, processed, schema=schema, sep=sep,
+                                       settings_key=settings_key, incremental=incremental, csv_keys=keys)
+        if done is not None:
+            no_cells = sorted(f"{fov}/{tp}" for fov, tp in done.no_cells)
+            keys = keys | done.no_cells
     write_well_report(
         output_dir, well_label,
         groups_total=int(groups_in_input),
-        groups_covered=int(covered),
+        groups_covered=len(keys),
         failed=list(failed or []),
         aborted_reason=aborted_reason,
         not_attempted=tuple(not_attempted or ()),
+        no_cells=no_cells,
     )
 
 
@@ -658,6 +712,9 @@ def finalize_run_report(output_dir, info_path, *, atomic_writer, log,
             else:
                 log.info("All %d well(s) cover every FOV-group in their input.",
                          len(report["wells"]))
+            note = no_cells_note(report)
+            if note:
+                log.info("%s", note)
         clear_run_report(output_dir)
     except Exception as exc:
         log.warning("Could not record run completeness: %s", exc)

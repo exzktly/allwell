@@ -226,6 +226,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # imports it at module scope.
     "pipeline/input_layout.py",
     "pipeline/incremental_keys.py",
+    # Which of a well's FOV-groups were processed to the end, recorded beside
+    # its output (`.aw_done/`): the well task writes it, and the completeness
+    # record and the incremental done-set read it.
+    "pipeline/done_groups.py",
     "pipeline/well_skip.py",
     # The per-worker process settings ``_worker_init`` makes (the open-file limit).
     "pipeline/worker_env.py",

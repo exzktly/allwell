@@ -83,7 +83,7 @@ def finished_here(output_dir: Path, pipeline_argv: Sequence[str], wells: Iterabl
         never |= set(wells_with_unused_anchors(_wells_directory(Path(args.input_dir)), output_dir))
     prefix = args.csv_prefix or "measurements"
     records = _completeness_records(output_dir)
-    covered = _nanowell_coverage(output_dir, args) if args.nanowell_format else _field_coverage(output_dir, args)
+    covered = _nanowell_coverage(output_dir, args) if args.nanowell_format else _field_coverage(output_dir, args, key)
     out = []
     for well in wells:
         label = canonical_well_label(well) or well
@@ -240,16 +240,19 @@ def _nanowell_coverage(output_dir: Path, args):
     return covered
 
 
-def _field_coverage(output_dir: Path, args):
+def _field_coverage(output_dir: Path, args, key: str):
     """``covered(well)`` for a field-mode run: whether the well's output holds every ``(fov, timepoint)`` its input
-    holds now (``pipeline.completeness.coverage_for_well``, from the CSV and the well's output archive or folder,
-    the union Validate's ``done_keys`` and the incremental planner take). A field that segmented no nuclei writes no
-    CSV rows but its images are in the output; read from the CSV alone, every well with one such field looked
-    unfinished and was uploaded and computed again on every re-run. A well whose archive gained a field or a timepoint since — a re-export, a Concatenate in place — is not
+    holds now (``pipeline.completeness.coverage_for_well``, the rule Validate's ``done_keys`` and the incremental
+    planner take). A field that segmented no nuclei writes no CSV rows; read from the CSV alone, every well with
+    one such field looked unfinished and was uploaded and computed again on every re-run. So a well with a record
+    of finished groups made under this run's settings *key* (``pipeline.done_groups``, fetched with the well) is
+    covered where its CSV or that record says so, and a well without one — fetched before the record existed —
+    where its CSV or its output archive or folder holds the field's images, as before. A well whose archive gained a field or a timepoint since — a re-export, a Concatenate in place — is not
     finished, and is sent. A well whose input cannot be listed per well (loose images at the input's top level) is
     decided by the other checks alone, as before; images replaced under the same names are not seen here, as a
     local run does not see them either."""
     from pipeline.completeness import coverage_for_well
+    from pipeline.done_groups import read_done_record
     from pipeline.incremental_keys import read_done_fov_keys
     from pipeline.well_skip import out_folder_path, out_zip_path
     from util.csv_gz import existing_csv
@@ -287,7 +290,7 @@ def _field_coverage(output_dir: Path, args):
         cov = coverage_for_well(well, in_members=members, csv_keys=keys, csv_state="ok",
                                 out_zip=out_zip if out_zip.exists() else None,
                                 out_folder=out_folder if out_folder.is_dir() else None, schema=schema, sep=sep, fov_field_present="fov" in fields,
-                                skip_hidden=True)
+                                skip_hidden=True, done_record=read_done_record(out, well, key))
         return cov.intent > 0 and not cov.missing
 
     return covered
@@ -430,4 +433,39 @@ def pull_settings_marker(pull, host, remote_path: str, dest: Path, **kwargs) -> 
     except OSError:
         dest.unlink(missing_ok=True)
     return False
+
+
+def pull_done_record(pull, host, remote_output_dir: str, local_output_dir: Path, well: str, *,
+                     incremental: bool, **kwargs) -> bool:
+    """Bring a well's record of finished FOV-groups (``pipeline.done_groups``, ``.aw_done/<well>.json``) back
+    beside its freshly fetched output with *pull*; whether the well has one here afterwards.
+
+    It is what says a field that held no cells was measured, and that a field whose images came back without
+    rows was not: without it the fetched well is read by the rule for wells written before the record existed,
+    where image members count as done.
+
+    * A whole fetched well's record replaces the local one. When the pull fails (a nanowell well writes none), the
+      local record is removed: it described the output this fetch just replaced.
+    * An *incremental* fetch merges, as the CSV and the archive are merged: the host was sent only the new fields,
+      so its record names only those (``done_groups.merge_fetched_done_record``). A failed pull leaves the local
+      record as it was — still true of the earlier fields.
+
+    Best-effort and quiet, like the settings marker: a record that cannot be installed leaves the earlier rule.
+    """
+    from pipeline.done_groups import DONE_DIRNAME, merge_fetched_done_record
+    from util.aw_safe import swallow
+
+    dest = Path(local_output_dir) / DONE_DIRNAME / f"{well}.json"
+    staged = dest.with_name(f".{dest.name}.fetched")
+    have = False
+    with swallow(f"bringing back the record of finished FOV-groups for {well}"):
+        if pull(host, f"{remote_output_dir}/{DONE_DIRNAME}/{well}.json", staged, **kwargs):
+            have = merge_fetched_done_record(staged, dest, incremental=incremental)
+        elif incremental:
+            have = dest.exists()
+        else:
+            dest.unlink(missing_ok=True)
+    with swallow(f"removing the staged record of finished FOV-groups for {well}"):
+        staged.unlink(missing_ok=True)
+    return have
 

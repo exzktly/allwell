@@ -287,6 +287,8 @@ def well_tooltip(well: str, cells: dict, record_wells: dict,
         bits.append(f"{covered} of {intent} field group(s)")
     if int(rec.get("covered_csv") or 0) != covered:
         bits.append(f"{int(rec.get('covered_csv') or 0)} in the measurements CSV")
+    if int(rec.get("no_cells") or 0):
+        bits.append(f"{int(rec['no_cells'])} measured with no cells")
     if rec.get("failed"):
         bits.append(f"{len(rec['failed'])} failed group(s)")
     if int(rec.get("not_addressed_count") or 0):

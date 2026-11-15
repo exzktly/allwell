@@ -1377,6 +1377,10 @@ allwell/
 │   ├── run_report.py           ← the end-of-run summary the log and Review both read,
 │   │                              and the completion seal: the one definition of
 │   │                              "is this well finished" (finished_wells)
+│   ├── done_groups.py          ← which of a well's FOV-groups were processed to
+│   │                              the end, recorded beside its output (.aw_done/):
+│   │                              how a field with no cells is done and a field
+│   │                              whose quantification failed is not
 │   ├── field_quality.py        ← per-cell + per-field image-quality metrics (§6.7)
 │   ├── field_quality_record.py ← the per-well record those are collected
 │   │                              through, and the CSV column's name.
@@ -15776,6 +15780,55 @@ parent process supervises the per-well worker pool:
   well's records free as the loop advances, so the parent holds at most one
   well's worth transiently (per-well CSV writing stays worker-side).
   `tests/test_well_worker_pool.py` pins the count.
+- **Which groups finished is recorded, because no artefact says it.** The CSV
+  says which `(fov, timepoint)` groups produced cells, and the archive which
+  had images written. Neither says which *finished*: a field that legitimately
+  holds no cells writes no row, and a group's images are written before it is
+  quantified, so a group whose quantification raised has images and no rows.
+  Read from the CSV alone, a well with one empty field covered fewer groups
+  than its input, was reported INCOMPLETE, was never sealed and was run again
+  by every plain re-run without ever changing; read from the CSV and the image
+  members, the group that failed was skipped by every later `--incremental`.
+  `pipeline/done_groups.py` is the record that separates them: one file per
+  well, `<out>/.aw_done/<WELL>.json`, written atomically after the well's CSV
+  is on disk, holding `format`, the settings `digest` it was made under,
+  `groups` (every group that returned from `process_image_group`, processed
+  now or taken back from its resume checkpoint) and `no_cells` (those among
+  them with no records). `_process_groups_in_worker` hands the well task the
+  `(nuclear file name, cell count)` of each such group; a group that failed,
+  was skipped by an abort or was not reached before a suspend is never among
+  them. `run_report.record_well_completeness` writes the record
+  (`record_processed_groups`) and counts it: a whole-well run starts the
+  record again and withdraws the old one before the rewrite, beside the seal
+  (`withdraw_done_record`), and an incremental run adds to the one made under
+  its settings. **Two rules, chosen by whether the record is readable.** With
+  one, a group is done when it is in the CSV or in the record's `groups`, and
+  image members count for nothing. Without one — every well written before
+  the record existed, or one whose record could not be written or fetched —
+  the earlier rule stands unchanged: the CSV for coverage, the CSV unioned
+  with the output's image members for the incremental done-set and Validate.
+  A missing record never reads as "nothing is done". Every reader takes the
+  switch from two functions — `incremental_keys.incremental_done_fov_keys`
+  (the well task, the remote upload's split) and `completeness.done_keys`
+  (Validate, the end-of-run check, the remote re-run's finished-here test) —
+  so they cannot disagree. **It is a reuse decision and is keyed like one:**
+  a reader that leaves a group alone on the record's word passes its settings
+  key, and a record made under other settings, or with none, is then no
+  record (`tests/test_reuse_is_keyed_completely.py`); Validate and the
+  end-of-run check, which describe the folder and reuse nothing, take any. The
+  remote fetch brings it back beside the settings marker
+  (`remote_finished_wells.pull_done_record`): a whole fetched well's record
+  replaces the local one, and an incremental fetch — whose host saw only the
+  new fields — merges into it, as the CSV and the archive are merged. A well
+  whose every field is empty has no CSV at all; it is recorded as fully
+  covered with every group among `no_cells`, and since the plain skip asks for
+  a CSV it is still processed again by a plain re-run. A dataset a Datasets
+  tool builds into a new folder (Concatenate, Merge Plates, Subset) carries no
+  record, so it is read by the earlier rule; Concatenate's in-place append
+  adds only input images and leaves `out/`, the record included, as it was.
+  `tests/test_a_field_with_no_cells_is_done.py` drives the well task through
+  each case and `tests/test_done_record_readers_agree.py` holds the other
+  readers to the same rule.
 - **Completeness is part of the output contract.** A well whose FOV-groups partly
   failed still writes its per-well CSV and `<well>_out.zip` from the groups that
   succeeded, and on disk that output is shaped exactly like a clean well's — so
@@ -15784,7 +15837,13 @@ parent process supervises the per-well worker pool:
   (`groups_total` from the well's input group count, `groups_covered` read back
   from the finished CSV's distinct `(fov, timepoint)` pairs — ground truth from
   the artifact, so it stays honest across incremental runs, resumed per-FOV
-  checkpoints, and groups a failing disk never let the run attempt). `main`
+  checkpoints, and groups a failing disk never let the run attempt — together
+  with the groups that were processed to the end and held no cells, which have
+  no row to be read back; see **Which groups finished** below). Those are named
+  in the record (`no_cells`, as `fov/timepoint`) and counted apart
+  (`groups_no_cells`, summed into the block), and the end-of-run log says
+  `NO CELLS: …` with the wells and counts, so "measured, nothing there" is
+  never folded into "covered" unseen. `main`
   folds them into a `run_report` block inside `pipeline_info.json` and logs the
   shortfall; `core/load_controller._report_incomplete_wells` names the affected
   wells in the status line, a toast and the log at dataset load. One file per
@@ -16599,11 +16658,14 @@ finished when:
   came back unaddressed and replaced the better result, on every re-run. Force,
   which re-runs the plate, is what re-anchors;
 - for a field-mode well whose input lists per well (an archive or a `<WELL>/`
-  folder), its output — the CSV together with its `_out.zip` or output folder, the
-  union Validate's `done_keys` takes — holds every field and timepoint the input
-  holds now (`_field_coverage`, `completeness.coverage_for_well`): a well whose
-  archive gained images since is sent, while a field that found no nuclei (no CSV
-  rows, its images in the archive) does not make a whole well look unfinished;
+  folder), its output holds every field and timepoint the input holds now
+  (`_field_coverage`, `completeness.coverage_for_well`, the rule Validate's
+  `done_keys` takes): the CSV together with the well's record of finished groups
+  made under this run's key, or — for a well fetched before that record existed —
+  with its `_out.zip` or output folder. A well whose archive gained images since
+  is sent, a field that found no nuclei (no CSV rows) does not make a whole well
+  look unfinished, and with a record a field whose images came back without
+  rows does;
 - neither `--force` nor `--force_wells` names it, and it is not an empty-well
   blank.
 
@@ -16716,7 +16778,7 @@ whose upload was rewritten (a channel filter dropping at least
 `REWRITE_MIN_SAVING` of the bytes) keyed on a fresh copy, and only the journal
 can find it. A search that finds nothing says so in one log line naming every
 place it looked. Each pull is the verifier's: sidecar merge, `errors/`, the per-well pull (which brings each
-well's `.aw_settings` marker too, as the in-stream fetch does), the fetch
+well's `.aw_settings` marker and its `.aw_done` record too, as the in-stream fetch does), the fetch
 report — so there is one fetch implementation, not a second one for this
 case. When it pulled anything the run is **staged incrementally** whatever was ticked,
 because only the split leaves a locally complete well out of the upload on
@@ -17216,8 +17278,10 @@ Suspend print "Processing Complete", tell the queue the job had succeeded, and
 hand the half-written folder to Review from a `QTimer` callback — where a load
 that raised took the application down.
 
-**The done-set is not recorded anywhere — the output directory is it.**
-`--incremental` reads the per-well CSVs and out-zips back as the set of
+**The done-set is not kept by the app — the output directory is it.**
+`--incremental` reads the per-well CSVs, and each well's record of finished
+groups beside them (`.aw_done/`, §6.2 *Which groups finished*; the out-zips for a
+well written before that record), back as the set of
 `(fov, timepoint)` groups already processed, so a resumed run recomputes only
 what is missing, and a suspended output is indistinguishable from one left by a
 run that ended early for any other reason. A group the run never attempted is
@@ -18769,12 +18833,16 @@ they only parse `(fov, timepoint)` positionally off member names. Validate calls
 the name-based half because it has already listed the container (see "one read
 per artefact" below); the two path-based readers call it after listing, so all
 three agree by construction. *Done* is read the same way `incremental_done_fov_keys` composes it
-(CSV rows ∪ out-zip members ∪ output folder — `_well_done` unions all three,
+— CSV rows ∪ the well's record of finished groups (`pipeline.done_groups`,
+`<out>/.aw_done/<WELL>.json`, read whatever settings it was made under, since
+Validate describes the folder and reuses nothing); for a well with no such
+record, CSV rows ∪ out-zip members ∪ output folder, where `_well_done` unions all three,
 the last via `core.dataset_paths.out_folders`, the `out_zips`-shaped
-well→path map for `compressed_output=False` datasets; a folder-mode well
-that legitimately segmented zero cells at a timepoint still writes an image
-there even with no CSV row for it, the same "done" evidence a zip-mode
-well's out-zip member supplies) but on the real, already-resolved CSV/zip
+well→path map for `compressed_output=False` datasets. The switch is one line
+in `pipeline.completeness.done_keys`, so Validate, the end-of-run check and the
+remote re-run's finished-here test cannot make it differently. A `WellReport`
+carries `no_cells`, the covered groups that record says held no cells, into
+the `run_check` entry — but on the real, already-resolved CSV/zip
 paths rather than by reconstructing `f"{csv_prefix}_{safe_well}.csv"`
 — `csv_prefix` is a CLI arg never recorded in the sidecar, and `_safe_well`
 only strips path separators, so an unpadded on-disk CSV would reconstruct to a
@@ -19027,8 +19095,10 @@ sidecar (`tests/test_only_wells_handoff.py`).
 
 **A remote run needs telling twice.** The flag on the remote command line is not
 enough on its own, because the client decides what to upload before the remote
-sees anything. `remote_staging._plan_staging` computes its own done-set — the
-local CSV's rows unioned with the local `<WELL>_out.zip`'s members — and drops a
+sees anything. `remote_staging._plan_staging` computes the done-set from the
+local output (`_done_here`, the pipeline's own `incremental_done_fov_keys`: the
+local CSV's rows unioned with the well's record of finished groups, or with
+the local `<WELL>_out.zip`'s members for a well that has no record) and drops a
 well whose input it considers covered, logging `✓ <well>: up to date (local) —
 not uploaded`. For the well this whole path exists to recover (images present,
 CSV missing) that check fires, the archive is never uploaded, and the flag
@@ -23315,13 +23385,19 @@ ninety-six.
 3. **Args** — `build_pipeline_args` emits `--incremental` and
    `--incremental_prior_dir <output_dir>` (where the prior per-well CSVs live).
 4. **Diff + process** — for each well, `process_well_zip_task` builds the
-   done-set (`pipeline.io.incremental_done_fov_keys`): the `(fov, timepoint)`
-   pairs from the prior per-well CSV, **unioned** with those recovered from the
-   processed-output artefacts — `<well>_out.zip` members and the uncompressed
-   output folder, whose names keep the input stem. The output fallback matters
-   when a well has its `<well>_out.zip` but no sibling CSV (a remote-only
-   materialise, or a CSV that was moved/lost): without it the done-set would be
-   empty and every already-processed FOV would be needlessly re-segmented. It
+   done-set (`pipeline.incremental_keys.incremental_done_fov_keys`): the
+   `(fov, timepoint)` pairs from the prior per-well CSV, **unioned** with the
+   groups the well's record of finished groups names (`pipeline.done_groups`,
+   made under this run's settings key) — which is how a field that held no
+   cells is done, and why a field whose images were written before its
+   quantification failed is processed again. A well with no such record — one
+   written before it existed — keeps the earlier rule: the CSV's pairs unioned
+   with those recovered from the processed-output artefacts, `<well>_out.zip`
+   members and the uncompressed output folder, whose names keep the input stem.
+   That fallback matters when a well has its `<well>_out.zip` but no sibling CSV
+   (a remote-only materialise, or a CSV that was moved/lost): without it the
+   done-set would be empty and every already-processed FOV would be needlessly
+   re-segmented. §6.2 *Which groups finished* has the record. It
    processes only the groups whose `(fov, timepoint)` isn't in the done-set, and:
    - a well with **no** new groups → logs `Well X — up to date (no new FOVs).`
      and returns (no rewrite);
@@ -23349,12 +23425,15 @@ ninety-six.
 **Remote** keeps the client smart and the remote a dumb compute engine, so only
 genuinely-new bytes cross the wire (see §6.4 / `services/remote_runner.py`):
 `stage_local_zips` **splits** before upload — for each touched well it keeps
-only the new-FOV members (`_filter_new_fovs_in_staging`, done-set from the local
-CSV **unioned** with the local `<well>_out.zip`) and drops wells whose local
+only the new-FOV members (`_plan_staging`, done-set from `_done_here`: the local
+CSV **unioned** with the well's local record of finished groups, or with the
+local `<well>_out.zip` when it has none) and drops wells whose local
 output already covers every input FOV (emitting `[remote] ✓ X: up to date
 (local)`); the remote argv has `--incremental` stripped (it just processes what
 it received); and on fetch the partial outputs are **merged** into the local
-full CSV / `<well>_out.zip` with the same `pipeline.io` helpers.
+full CSV / `<well>_out.zip` with the same `pipeline.io` helpers, and the
+host's record of finished groups into the local one
+(`remote_finished_wells.pull_done_record`).
 
 **Dashboard:** up-to-date, merged, and new wells each reach a correct terminal
 state — `ProgressTracker` maps the `up to date` / `merging N new FOV(s)` /

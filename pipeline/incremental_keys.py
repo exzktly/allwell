@@ -171,18 +171,34 @@ def read_done_fov_keys_from_folder(
 def incremental_done_fov_keys(
     prior_dir: Path | str, well_label: str, *,
     csv_prefix: str, safe_well: str, schema: str | list[str], sep: str,
+    settings_key: str | None = None, output_folder: bool = True,
 ) -> tuple[set[tuple[str, str]], bool]:
-    """Done ``(fov, timepoint)`` keys for an incremental diff, from every prior
-    artefact: the per-well CSV (primary) unioned with the processed-output
-    archive (``<well>_out.zip``) and the uncompressed output folder. A
-    missing/lost CSV then can't make an incremental run re-segment FOVs that
-    already have outputs. Returns ``(keys, from_csv)`` — *from_csv* is False when
-    the keys were recovered only from the outputs, so the caller can log it.
+    """Done ``(fov, timepoint)`` keys for an incremental diff. Returns ``(keys, from_csv)`` — *from_csv* is False
+    when no key came from the CSV, so the caller can log it.
+
+    **Which rule applies is decided by the well's record of finished groups** (``pipeline.done_groups``):
+
+    * *With a record* made under *settings_key*: the per-well CSV's keys unioned with the groups the record says
+      were processed to the end, which is how a field that held no cells is done. The output's image members
+      count for nothing: they are written before a group is quantified, so a group whose quantification raised
+      has members and no rows, and counting them made every later incremental run skip it.
+    * *Without one* — a well written before the record existed — the earlier rule, unchanged: the CSV (primary)
+      unioned with the processed-output archive (``<well>_out.zip``) and, with *output_folder*, the uncompressed
+      output folder, so a missing/lost CSV can't make an incremental run re-segment FOVs that already have outputs.
+
+    *settings_key* ``None`` takes a record made under any settings: the caller has no key and already treats
+    the CSV's keys the same way.
     """
+    from pipeline.done_groups import recorded_done_keys
+
     prior = Path(prior_dir)
     csv_keys = read_done_fov_keys(prior / f"{csv_prefix}_{safe_well}.csv")
     keys = set(csv_keys)
+    recorded = recorded_done_keys(prior, well_label, settings_key)
+    if recorded is not None:
+        return keys | recorded, bool(csv_keys)
     keys |= read_done_fov_keys_from_zip(
         prior / f"{well_label}_out.zip", schema=schema, sep=sep)
-    keys |= read_done_fov_keys_from_folder(prior / well_label, schema=schema, sep=sep)
+    if output_folder:
+        keys |= read_done_fov_keys_from_folder(prior / well_label, schema=schema, sep=sep)
     return keys, bool(csv_keys)

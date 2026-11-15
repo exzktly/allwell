@@ -1918,6 +1918,8 @@ def test_required_files_list_is_what_we_promised():
     # imports it at module scope.
     "pipeline/input_layout.py",
     "pipeline/incremental_keys.py",
+        # The well's record of which FOV-groups were processed to the end (`.aw_done/`).
+        "pipeline/done_groups.py",
         "pipeline/well_skip.py",
         # The per-worker process settings `_worker_init` makes; the re-anchoring's pool runs it too.
         "pipeline/worker_env.py",

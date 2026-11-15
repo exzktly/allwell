@@ -6246,6 +6246,10 @@ difference of means carries a 95% interval: Welch's *t* interval when a group
 holds fewer than 30 values, a bootstrap from there. A pair whose test cannot be
 computed (two groups that are the same constant) says so, and is left out of the
 Benjamini-Hochberg adjustment of the others.
+The KS test compares the per-cell values of each well's **ON** cells, and ON
+means there what it means on Bar Plots and Line Graphs: the cells above the ON
+cutoff, or — while [Cell Gating](#cell-gating) takes fraction-on from the
+scatter gates — the cells inside the thresholding gate.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Home → Sample Map → Replicates](#replicates).

@@ -6,22 +6,18 @@ import math
 import statistics as _pystats
 
 import numpy as np
-import pandas as pd
 
 from review.data.data_loading import (
-    df_included_mask,
     get_rows,
     is_ratio_key,
-    resolve_value_series,
 )
 from core.safe import swallow
 from review.domain.significance import p_phrase, significance_stars
 from review.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
 )
-from review.domain.stats_compute import group_replicate_stats
+from review.domain.stats_compute import group_replicate_stats, on_cell_values
 from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
-from domain.tp_match import tp_close_mask
 
 
 #: Every entry the Test combo offers, in the order it offers them, with what
@@ -128,7 +124,13 @@ def collect_group_per_cell_values(
     ctx, grp, target_t: float, *, val_col: str | None = None,
     threshold: float | None = None,
 ) -> list[float]:
-    """Return per-cell values above threshold for KS-test (distribution comparison)."""
+    """The group's ON cells' values at *target_t*, for the KS test (distribution comparison).
+
+    The ON population is ``stats_compute.on_cell_values``' — the one the bar,
+    line and replicate statistics take their mean over: cells inside the
+    thresholding gate when scatter-gate thresholding is active, cells above
+    *threshold* otherwise.
+    """
     val_col = val_col or ctx.state.channel.active_val_col
     if threshold is None:
         try:
@@ -137,7 +139,6 @@ def collect_group_per_cell_values(
         except Exception:
             threshold = float(ctx.state.channel.threshold)
     threshold = float(threshold)
-    ratios = ctx.state.channel.ratio_index
     chunks: list[np.ndarray] = []
     for lbl in grp.wells:
         if lbl not in ctx.state.dataset.well_paths:
@@ -145,14 +146,9 @@ def collect_group_per_cell_values(
         df = get_rows(ctx, lbl)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             continue
-        mask = df_included_mask(df).to_numpy(copy=True)
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-        with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(tp) & tp_close_mask(tp, target_t)
-        val = resolve_value_series(df, val_col, ratios).to_numpy()
-        mask &= np.isfinite(val) & (val > threshold)
-        if mask.any():
-            chunks.append(val[mask])
+        values = on_cell_values(ctx, df, target_t, val_col=val_col, threshold=threshold)
+        if values.size:
+            chunks.append(values)
     return np.concatenate(chunks).tolist() if chunks else []
 
 
@@ -772,7 +768,8 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             if not vals:
                 app._stats_write_result(
                     f"Group '{g.name}' has no per-cell {channel_lbl} data "
-                    f"at t={tp_str} h above threshold ({threshold:.2f})."
+                    f"at t={tp_str} h in the ON population (inside the thresholding "
+                    f"gate, or above threshold {threshold:.2f})."
                 )
                 return
         else:

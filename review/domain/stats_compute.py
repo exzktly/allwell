@@ -30,6 +30,7 @@ from review.data.data_loading import (
     aggregate_with_threshold_df,
     df_included_mask,
     get_rows,
+    on_population_values,
     resolve_value_series,
 )
 from review.domain.batch_models import ReplicateSet
@@ -475,6 +476,20 @@ def replicate_mean_and_spread(reps, field: str, *, use_sem: bool) -> tuple[float
     single-replicate set is ``NaN``, never ``0.0`` — see :func:`_reduce_reps`.
     """
     return _reduce_reps(reps, field, use_sem=use_sem)
+
+
+def on_cell_values(ctx, df, target_t: float, *, val_col: str, threshold: float) -> np.ndarray:
+    """One well's ON cells' values at *target_t*, under the settings every aggregate reads.
+
+    ``data_loading.on_population_values`` with the context's half filled in the
+    way :func:`aggregate_well` fills it — the intensity floors in force, the
+    ratio index and :func:`_thresh_on_col` — so a per-cell test (the Statistics
+    tab's KS) and the bar, line and replicate statistics have one ON population.
+    """
+    return on_population_values(
+        df, target_t, threshold=float(threshold), val_col=val_col,
+        fluor_gates=get_all_fluor_gates(ctx), ratios=ctx.state.channel.ratio_index or {},
+        on_col=_thresh_on_col(ctx))
 
 
 def _thresh_on_col(ctx) -> str | None:

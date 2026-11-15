@@ -259,6 +259,32 @@ def test_hydrate_then_collect_reproduces_a_remote_spec(tab, spec):
     assert tab.collect_spec() == spec
 
 
+@pytest.mark.parametrize("mode", ["batch", "well", "none"])
+def test_every_upload_ahead_mode_round_trips(tab, mode):
+    """Review tracker H4 reported "all" coming back as "batch". There is no such mode: these three are the whole
+    set (``services.remote_batch_step.UPLOAD_AHEAD_CHOICES``), and each is restored as stored."""
+    from services.remote_batch_step import UPLOAD_AHEAD_CHOICES
+
+    assert sorted(m for m, _label in UPLOAD_AHEAD_CHOICES) == ["batch", "none", "well"]
+    spec, before = copy.deepcopy(_REMOTE_SPEC), copy.deepcopy(_REMOTE_SPEC)
+    spec["opts"]["remote_upload_ahead"] = mode
+    before["opts"]["remote_upload_ahead"] = "batch" if mode == "none" else "none"
+    tab.hydrate_job(before)                                  # over a job holding another mode
+    tab.hydrate_job(spec)
+    assert tab.collect_spec()["opts"]["remote_upload_ahead"] == mode
+
+
+def test_an_upload_ahead_value_that_is_no_mode_is_edited_as_what_the_run_would_do(tab):
+    """A stored value that is not a mode (a hand-edited job) is run as the default by the runner
+    (``upload_ahead_mode``), so the editor shows that mode instead of a blank choice saving something else."""
+    from services.remote_batch_step import upload_ahead_mode
+
+    spec = copy.deepcopy(_REMOTE_SPEC)
+    spec["opts"]["remote_upload_ahead"] = "all"
+    tab.hydrate_job(spec)
+    assert tab.collect_spec()["opts"]["remote_upload_ahead"] == upload_ahead_mode("all") == "batch"
+
+
 def test_the_auto_threshold_method_is_read_not_inferred(tab):
     """Otsu stays Otsu even when both control wells happen to be filled.
 

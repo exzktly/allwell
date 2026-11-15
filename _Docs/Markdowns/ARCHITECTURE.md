@@ -14838,8 +14838,12 @@ says which wells bring each back. The empty state uses it when every group is hi
 drawn; and the sample tests' report (`controller.control_not_drawn`) when the well or group chosen under *vs* is
 not among the samples, so every pair was compared instead — which `statistics_compute.compare` does silently.
 *vs* keeps its choice (`NanowellState.control`) while its group is hidden, so showing it again restores the test. A click on the
-figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to six, read from matplotlib's
-`event.modifiers`); empty space clears; the plate selection is never touched.
+figure selects the nearest drawn dot within 6 px, one at a time; empty space clears the selection, and with nothing
+selected changes nothing and draws nothing (`controller._select`); the plate selection is never touched. While the
+figure card's toolbar has Pan or Zoom on, a press and its release are the toolbar's and the page does nothing with
+them (`controller.toolbar_owns`, checked first in `on_click` and `on_release`): the press that began a pan used to be
+read as an empty-space click, whose full redraw threw the pan away on every view without a drag of its own
+(Statistics, Trajectories, Position) — `tests/test_nanowell_statistics_pan_zoom.py`.
 
 **Shared machinery.** The page is on every roster a plot page joins: `plot_style._FIG_PREF_KEY_MAP`
 (`nanowell`, `nanowell_detail`, and `nanowell_crops` / `nanowell_crops_popout` for the crop strip and the pop-out window), the Properties dock and open-panel maps in `features/export/style.py`, the

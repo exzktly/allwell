@@ -1886,7 +1886,10 @@ def _array_hover(ctx, st, event) -> None:
 
 def on_release(ctx, event) -> None:
     """The end of a press on the Array view: a drag keeps where it panned to; a click sets the anchor (with *Set
-    anchor* on) or selects the nanowell under it, as on the Distribution figure."""
+    anchor* on) or selects the nanowell under it, as on the Distribution figure. Nothing while the toolbar's Pan or
+    Zoom owns the press (:func:`toolbar_owns`)."""
+    if toolbar_owns(event):
+        return
     st = _state(ctx)
     if st is not None and st.view == "identity":
         idc.on_release(ctx, event)
@@ -2503,7 +2506,10 @@ def on_click(ctx, event) -> None:
     """A press on the figure. On the Array view and the Distribution figure a press starts a drag or a click, which
     :func:`on_release` tells apart: a click on the Distribution figure selects the nanowell under it (one at a time), or
     clears the selection on empty space, and a drag draws a window (``_window_controller``). The plate selection is
-    never touched."""
+    never touched. While the card's toolbar has Pan or Zoom on, a press is the toolbar's, and the page does nothing
+    with it (:func:`toolbar_owns`)."""
+    if toolbar_owns(event):
+        return
     st = _state(ctx)
     if st is not None and st.view == "qc":
         qcc.on_click(ctx, event)
@@ -2533,6 +2539,16 @@ def on_click(ctx, event) -> None:
     _select(ctx, site)
 
 
+def toolbar_owns(event) -> bool:
+    """Whether the figure card's toolbar has Pan or Zoom on, so a press or release on the figure is its, not the
+    page's. Reported: the Statistics figures ignored Pan and Zoom. They did not: each drag panned, and the press that
+    began it was also read as a click on empty space, which cleared the selection and drew the figure again from
+    scratch, throwing the pan away."""
+    toolbar = getattr(getattr(event, "canvas", None), "toolbar", None)
+    mode = getattr(toolbar, "mode", "")
+    return mode not in ("", None)
+
+
 def _select(ctx, site, *, in_popout: bool = False) -> None:
     """Select *site* alone (``None``: empty space, which clears the selection).
 
@@ -2544,6 +2560,8 @@ def _select(ctx, site, *, in_popout: bool = False) -> None:
     A click *inside* the pop-out (*in_popout*) leaves its **Show** alone: that click picks a nanowell out of the
     window being browsed, which must stay on screen."""
     st = _state(ctx)
+    if site is None and not st.selected_sites:
+        return                                   # empty space with nothing selected: nothing changes, nothing redrawn
     st.selected_sites = [] if site is None else [[str(site[0]), int(site[1]), int(site[2])]]
     if site is not None and not in_popout:
         show_selected_in_popout(ctx)

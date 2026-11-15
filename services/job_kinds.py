@@ -263,6 +263,8 @@ def _analyze_detail(spec: dict) -> str:
     parts = [raw] if raw else []
     if spec.get("auto_detect"):
         parts.append("schema and channels read from the input when it runs")
+    elif spec.get("add_detected_channels"):
+        parts.append("adds the input's channels when it runs")
     remote = str(spec.get("remote_name") or "").strip()
     if remote:
         # Said on the row because it decides what may run beside the job: a

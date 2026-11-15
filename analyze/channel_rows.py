@@ -23,6 +23,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLineEdit, QPushButton, QWidget
 
 from widgets.value_combo import ValueCombo
+from widgets.wrap_checkbox import WrapCheckBox
 
 #: A channel's roles, ``(value, label)``.
 CHANNEL_ROLES = (
@@ -38,8 +39,51 @@ ROLE_TIP = (
     "correction, and the Label-free method segments it. At most one channel.")
 
 
+#: The run-time channel option's tooltip.
+ADD_DETECTED_TIP = (
+    "When the run starts, read every filename in the input and add each channel "
+    "it carries that is not listed above, using the filename schema the run "
+    "uses. The channels listed above are always kept, in their order and with "
+    "their roles; a channel added this way is quantified only. Use it when "
+    "some plates carry extra channels, or when the input does not exist yet. "
+    "If the filenames cannot be read for channels, the run fails and says why.")
+
+
 class AnalyzeChannelRowsMixin:
     """The channel rows' builders and readers. Binds to the ``AnalyzeTab``."""
+
+    def _build_channel_list_controls(self, sec: QWidget) -> None:
+        """Under the rows: "+ Add channel", and the option that adds the
+        input's own channels to the rows when the run starts
+        (``services.run_detect.add_detected_channels``)."""
+        add_btn = QPushButton("+ Add channel", sec)
+        add_btn.setProperty("variant", "secondary")
+        add_btn.setFixedWidth(self._ADD_BTN_W)
+        add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
+        sec.layout().addWidget(add_btn)
+        self._fluor_add_btn = add_btn  # for an OME-mode hide nothing performs yet
+
+        # A WrapCheckBox for the reason the schema section's run-time box is
+        # one: a plain QCheckBox's minimum width is its whole label, which
+        # holds the form wider than phone layout's drawer.
+        self._add_detected_channels_cb = WrapCheckBox(
+            "Also add channels found in the input at run time", sec)
+        self._add_detected_channels_cb.setToolTip(ADD_DETECTED_TIP)
+        # The rows may be left blank with this on, and the channel-naming
+        # options are checked against the merged list at run time instead.
+        self._add_detected_channels_cb.toggled.connect(
+            lambda _on: self._refresh_segmentation_hints())
+        sec.layout().addWidget(self._add_detected_channels_cb)
+
+    def _add_detected_channels_on(self) -> bool:
+        box = getattr(self, "_add_detected_channels_cb", None)
+        return bool(box is not None and box.isChecked())
+
+    def _channels_settled_at_run(self) -> bool:
+        """Whether the channel list the run uses is decided when it starts —
+        replaced by full run-time detection, or added to by the input's own
+        channels — so the form's list need not be complete now."""
+        return self._auto_detect_on() or self._add_detected_channels_on()
 
     def _fluor_add_row(self, default_token: str = "") -> None:
         row = QWidget(self._fluor_frame)

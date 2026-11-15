@@ -1143,6 +1143,23 @@ Any string  preserved as-is and sorted lexicographically
   **Reference the phase input image** under [Advanced](#9-advanced--output-performance-scratch-folder)).
   It is still quantified like any other channel. At most one channel can be
   Phase, and it cannot also be smFISH.
+- **Also add channels found in the input at run time.** Tick it under the rows
+  and, when the run starts, All-Well reads every filename in the input with the
+  run's filename schema and adds each channel it finds that the rows do not
+  list. The rows you entered are always kept — in their order, with their
+  roles, even a channel the files turn out not to carry — so this only ever
+  adds. An added channel is quantified only; give it an smFISH or Phase role by
+  listing it in a row. The segmentation channel is not added as a fluorescent
+  channel (except for Label-free, which quantifies the phase channel too), and
+  a channel already listed in another letter case (`gfp` for `GFP`) is not
+  added twice. With the box ticked the rows may be left blank. The Analyze log
+  and the run's status line say which channels were added; a job in the Job
+  Queue says "adds the input's channels when it runs" on its row. If the
+  filenames cannot be read for channels — the schema has no *channel* field, or
+  no filename matches it — the run fails and says why rather than running only
+  the listed channels. With **Detect schema & channels at run time** also
+  ticked, the detected channels are added after your rows instead of replacing
+  them.
 
   **All-Well sets Phase itself when a channel's name reads as brightfield** — `DIC`,
   `BF`, `Phase`, `Brightfield`, `Trans` and the usual spellings around them,

@@ -32,6 +32,7 @@ from core.safe import swallowed
 from services.pipeline_service import find_pipeline_script
 from services.run_detect import (
     DetectionError,
+    add_detected_channels,
     missing_input_error,
     resolve_detection,
 )
@@ -58,6 +59,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
             output_filter="full",
             selective_channels=True,
             auto_detect=self._auto_detect_on(),
+            add_detected_channels=self._add_detected_channels_on(),
         )
 
     def start_run(self, spec: RunSpec, *, pipeline: Path | None = None) -> str | None:
@@ -92,13 +94,18 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         # resolves to — and before any UI state is touched, like every other
         # refusal here. The scan reads a bounded sample of names (the same one
         # the form's Detect button reads on this thread), so it is not a walk.
+        # The listed channels are read before full detection replaces them, so
+        # "add the input's channels" adds to what the form listed.
+        listed = list(spec.opts.get("fluor_tokens") or [])
         try:
             resolved, layout = resolve_detection(spec.to_json())
+            resolved, added_note = add_detected_channels(resolved, listed)
         except DetectionError as exc:
             return str(exc)
-        if layout is not None:
+        if layout is not None or added_note:
             spec = RunSpec.from_json(resolved)
-        self._detection_note = layout.summary() if layout is not None else ""
+        self._detection_note = " ".join(
+            n for n in (layout.summary() if layout is not None else "", added_note) if n)
         spec = self.resume_aware_spec(spec)
         try:
             remote = spec.resolve_remote()

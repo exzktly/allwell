@@ -549,7 +549,7 @@ class AnalyzeSegParamsMixin:
             cell = self._nuclear_row_widget
             row = cell.parentWidget()
             (row if row is not None and row.objectName() == "AnalyzeFormRow" else cell).setVisible(not phase_locked)
-        errors = self._segmentation_validation_errors(channels=not self._auto_detect_on())
+        errors = self._segmentation_validation_errors(channels=not self._channels_settled_at_run())
         if errors:
             self._set_status(self._segmentation_hint_lbl, "  ".join(errors), error=True)
             return

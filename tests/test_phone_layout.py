@@ -1795,3 +1795,282 @@ def test_the_controls_sheet_fits_a_band_row_wider_than_the_phone_and_gives_it_ba
         assert band.form() is None
         assert [band._scope.itemAt(i).widget() is not None for i in range(band._scope.count())], \
             "the band's own row is empty after the sheet closed"
+
+
+# ── the iPhone Duo: a foldable whose screens are both near-square ──────────
+
+#: The Duo's screens at their published resolutions, each held both ways, and a
+#: 19.5:9 phone's.
+_DUO_IN_UP, _DUO_IN_SIDE = QRect(0, 0, 1878, 2670), QRect(0, 0, 2670, 1878)
+_DUO_OUT_UP, _DUO_OUT_SIDE = QRect(0, 0, 1398, 2034), QRect(0, 0, 2034, 1398)
+_PHONE_UP, _PHONE_SIDE = QRect(0, 0, 1179, 2556), QRect(0, 0, 2556, 1179)
+
+
+@pytest.mark.parametrize("w,h,screen", [
+    (1878, 2670, "inner"), (2670, 1878, "inner"),     # unfolded, at Apple's resolution, either way up
+    (1398, 2034, "outer"), (2034, 1398, "outer"),     # folded
+    (939, 1335, "inner"), (699, 1017, "outer"),       # the same shapes at half the pixels: read by shape
+    (1024, 768, "inner"), (2048, 1536, "inner"),      # 4:3, which the user asked to be a foldable
+    (2076, 2152, "inner"),                            # an Android fold's inner screen: squarer still
+    (2256, 1504, None),                               # 3:2, a Surface laptop
+    (1179, 2556, None), (750, 1334, None),            # phones: 19.5:9 and 16:9
+    (1920, 1080, None),                               # a monitor
+])
+def test_which_of_a_foldable_s_screens_a_screen_is(w, h, screen):
+    """Wrong implementations: one threshold for both screens (the Duo folded is near-square too, so it read as
+    unfolded and took the inner screen's size), or one that let 3:2 or a 16:9 phone in."""
+    assert phone_layout.duo_screen(w, h) == screen
+    assert phone_layout.is_fold_shaped(w, h) is (screen is not None)
+    assert phone_layout.is_unfolded(w, h) is (screen == "inner")
+
+
+@pytest.mark.parametrize("w,h,expected", [
+    (1878, 2670, 1878 / 626),  # unfolded: 626 pt across
+    (2670, 1878, 1878 / 626),  # sideways: the same unit, as a phone keeps its own
+    (1398, 2034, 1398 / 466),  # folded: 466 pt across
+    (1179, 2556, 1179 / 390),  # a phone still takes 390
+    (626, 890, 1.0),           # a desktop already at the inner screen's points
+])
+def test_a_duo_screen_s_short_side_is_its_published_width_in_points(w, h, expected):
+    """Wrong implementation: a phone's 390 for every screen, which drew the unfolded Duo's targets and text 1.6 times
+    their size and the folded Duo's 1.2 times."""
+    assert phone_layout.phone_unit(w, h) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("w,h,expected", [
+    (2670, 1878, True), (2034, 1398, True),           # the Duo sideways, at a desktop's size: offered phone layout
+    (2048, 1536, True),                               # and so is a 4:3 monitor, the same shape
+    (2256, 1504, False), (1920, 1080, False),         # 3:2 and 16:9 are not
+])
+def test_a_near_square_screen_is_offered_phone_layout(w, h, expected):
+    assert phone_layout.is_phone_shaped(w, h) is expected
+
+
+@pytest.mark.parametrize("screen,wide,short", [
+    (_PHONE_UP, False, False),
+    (_PHONE_SIDE, True, True),
+    (_DUO_IN_UP, True, False),     # 626 pt across
+    (_DUO_IN_SIDE, True, False),   # 626 pt tall: the full bar
+    (_DUO_OUT_UP, False, False),   # 466 pt across: a phone's form
+    (_DUO_OUT_SIDE, True, True),   # 466 pt tall: the slim bar
+])
+def test_the_shell_reads_a_screen_s_size_in_points(qapp, screen, wide, short):
+    from tests._screens import FakeScreen
+    from ui.phone_shell import PhoneHandles, PhoneShell
+    host = QWidget()
+    try:
+        shell = PhoneShell(host, PhoneHandles())
+        with FakeScreen(screen):
+            assert (shell.is_wide(), shell.is_short()) == (wide, short)
+    finally:
+        host.deleteLater()
+
+
+def _history_shell(qapp):
+    from PySide6.QtWidgets import QVBoxLayout
+
+    from ui.page_history import PageHistory
+    from ui.phone_drawer import RailDrawer
+    win = _window()
+    QVBoxLayout(win)
+    drawer = RailDrawer(win, panels=dict, top_inset=lambda: 0, on_closed_inside=lambda: None)
+    history = PageHistory(win, location=lambda: "home", go=lambda _loc: None)
+    return _shell(win, rail_drawer=drawer, history=history), drawer
+
+
+@pytest.mark.parametrize("screen", [_DUO_IN_UP, _DUO_IN_SIDE], ids=["upright", "sideways"])
+def test_the_unfolded_duo_gets_a_full_bar_a_rail_panel_and_forward_in_the_bar(qapp, app_sheet, screen):
+    """The inner screen is a phone's touch targets on a screen 1.6 times as wide: the full 52 pt bar with 48 pt ☰
+    and ⋯ (sideways too: at 626 pt tall it has the height a phone on its side lacks), the rail a 360 pt panel rather
+    than the whole width less a strip, and Forward beside Back rather than in ⋯. Wrong implementation: one keyed on
+    orientation alone, which gave the Duo held upright a 570 pt rail and Forward in ⋯, and sideways the slim bar."""
+    from tests._screens import FakeScreen
+    from ui.phone_shell import LANDSCAPE_PANEL_PT
+    with FakeScreen(screen):
+        shell, drawer = _history_shell(qapp)
+        shell.set_on(True, restyle=False)
+        try:
+            _pump(qapp)
+            u = 1878 / 626
+            assert shell.unit() == pytest.approx(u)
+            assert shell._h.band.height() == round(52 * u)
+            assert shell.menu_button.width() == round(48 * u)
+            assert drawer._width_hint() == round(LANDSCAPE_PANEL_PT * u)
+            assert not shell.forward_button.isHidden()
+            shell._fill_menu()
+            assert not [a for a in shell._menu.actions() if a.text().startswith("Forward")]
+        finally:
+            shell.set_on(False)
+            _pump(qapp)
+
+
+def test_the_folded_duo_is_a_phone_at_its_own_size(qapp, app_sheet):
+    """Folded, the Duo is 466 pt across: a phone's form — the full bar, the rail the width less ``RAIL_GAP_PT``,
+    Forward in ⋯ — at a phone point of 1398 / 466 px; sideways, the slim bar of a phone on its side."""
+    from tests._screens import FakeScreen
+    from ui.phone_shell import LANDSCAPE_PANEL_PT, RAIL_GAP_PT
+    u = 1398 / 466
+    with FakeScreen(_DUO_OUT_UP) as screen:
+        shell, drawer = _history_shell(qapp)
+        shell.set_on(True, restyle=False)
+        try:
+            _pump(qapp)
+            assert shell.unit() == pytest.approx(u)
+            assert shell._h.band.height() == round(52 * u)
+            assert drawer._width_hint() == drawer._host.width() - round(RAIL_GAP_PT * u)
+            assert shell.forward_button.isHidden()
+            screen.turn(_DUO_OUT_SIDE)
+            shell._apply_sizes()
+            _pump(qapp)
+            assert shell._h.band.height() == round(44 * u)
+            assert drawer._width_hint() == round(LANDSCAPE_PANEL_PT * u)
+        finally:
+            shell.set_on(False)
+            _pump(qapp)
+
+
+def test_a_phone_keeps_its_upright_and_sideways_forms(qapp, app_sheet):
+    """The phone itself is unchanged: upright, the full bar, the rail the whole
+    width less ``RAIL_GAP_PT``, Forward in ⋯; sideways the slim bar with 40 pt
+    ☰ and ⋯, the rail a panel and Forward in the bar."""
+    from tests._screens import FakeScreen
+    from ui.phone_shell import LANDSCAPE_PANEL_PT, RAIL_GAP_PT
+    u = 1179 / 390
+    with FakeScreen(_PHONE_UP) as screen:
+        shell, drawer = _history_shell(qapp)
+        shell.set_on(True, restyle=False)
+        try:
+            _pump(qapp)
+            assert shell._h.band.height() == round(52 * u)
+            assert drawer._width_hint() == drawer._host.width() - round(RAIL_GAP_PT * u)
+            assert shell.forward_button.isHidden()
+            shell._fill_menu()
+            assert [a for a in shell._menu.actions() if a.text().startswith("Forward")]
+            screen.turn(_PHONE_SIDE)
+            shell._apply_sizes()
+            _pump(qapp)
+            assert shell._h.band.height() == round(44 * u)
+            assert shell.menu_button.width() == round(40 * u)
+            assert drawer._width_hint() == round(LANDSCAPE_PANEL_PT * u)
+            assert not shell.forward_button.isHidden()
+        finally:
+            shell.set_on(False)
+            _pump(qapp)
+
+
+# ── the unfolded Duo's Controls, docked left of the page ────────────────────
+
+#: The Duo's inner screen at half its pixels, so the docked column (300 pt, 450 px) and a page beside it fit the
+#: offscreen platform's 800 px window.
+_DUO_HALF_UP = QRect(0, 0, 939, 1335)
+_DUO_HALF_FOLDED = QRect(0, 0, 699, 1017)
+
+
+def _docked_window(qapp):
+    """A window whose page, with a control band, sits in a splitter as Review's pages sit in ``_h_pane``."""
+    from PySide6.QtWidgets import QPushButton, QSplitter, QVBoxLayout
+
+    from widgets.control_band import ControlBand
+    win = _window()
+    QVBoxLayout(win)
+    split = QSplitter(win)
+    win.layout().addWidget(split)
+    page = QWidget()
+    QVBoxLayout(page)
+    split.addWidget(page)
+    band = ControlBand(page)
+    page.layout().addWidget(band)
+    band.add_scope("Channel", QPushButton("GFP"))
+    shell = _shell(win, band_roots=lambda: [page], centre_split=split)
+    return win, shell, split, page, band
+
+
+def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_sheet):
+    """Unfolded, the page's controls are a 300 pt column *in* the layout, left of the page — not an overlay over it —
+    opened with the page, hidden and shown again by ⚙ Controls, and the choice held across a refresh. Folding the
+    phone takes the column away and gives the page its controls back.
+
+    Wrong implementations: the phone's overlay sheet on the Duo (the page under the controls, closed until asked
+    for), a column that does not follow ⚙ Controls, or one left behind in the splitter once the phone folds."""
+    from tests._screens import FakeScreen
+    from ui.phone_dock import DockedSheet
+    with FakeScreen(_DUO_HALF_UP) as screen:
+        win, shell, split, page, band = _docked_window(qapp)
+        shell.set_on(True, restyle=False)
+        try:
+            _pump(qapp)
+            u = 939 / 626
+            assert shell.is_docked()
+            sheet = shell._sheet
+            assert isinstance(sheet, DockedSheet) and sheet.isOpen()
+            assert split.indexOf(sheet) == 0 and split.indexOf(page) == 1
+            assert sheet.isAncestorOf(band)
+            # Upright the column is 626 - 360 = 266 pt, so the page beside it keeps the narrowest phone's width.
+            assert sheet.width() == round(266 * u) - split.handleWidth()
+            assert page.mapTo(win, page.rect().topLeft()).x() >= sheet.width(), "the page is under the controls"
+            # ⚙ Controls stays in reach while the page's controls are in the column (it counted the lent band as no
+            # page's, and went).
+            shell.refresh()
+            _pump(qapp)
+            assert shell._sheet.isOpen() and shell.controls_button.isVisibleTo(win)
+            assert shell.controls_button.text() == "Hide controls"
+            # ⚙ Controls hides it, and a refresh (a page change) does not bring it back.
+            shell.toggle_controls()
+            _pump(qapp)
+            assert not sheet.isOpen() and split.indexOf(sheet) < 0 and page.isAncestorOf(band)
+            shell.refresh()
+            _pump(qapp)
+            assert not shell._sheet.isOpen()
+            shell.toggle_controls()
+            _pump(qapp)
+            assert shell._sheet.isOpen() and shell._sheet.isAncestorOf(band)
+            # A page with no controls on screen (here: the page gone): the column goes and the band goes home.
+            page.hide()
+            shell.refresh()
+            _pump(qapp)
+            assert not shell._sheet.isOpen() and page.isAncestorOf(band)
+            page.show()
+            shell.refresh()
+            _pump(qapp)
+            assert shell._sheet.isOpen() and shell._sheet.isAncestorOf(band)
+            # Sideways the screen is 890 pt across, so the column takes its whole 300 pt.
+            screen.turn(QRect(0, 0, 1335, 939))
+            shell._on_geometry_changed(None)
+            _pump(qapp)
+            assert shell._sheet.isOpen() and shell._sheet.width() == round(300 * u) - split.handleWidth()
+            # Folded: no column, and the controls are back on the page.
+            screen.turn(_DUO_HALF_FOLDED)
+            # A refresh alone takes the column away (a screen change that reached the window without a geometry
+            # change of its own), and the geometry change after it restyles for the folded screen.
+            shell.refresh()
+            _pump(qapp)
+            assert split.count() == 1 and page.isAncestorOf(band)
+            shell._on_geometry_changed(None)
+            _pump(qapp)
+            assert not shell.is_docked()
+            assert split.count() == 1 and page.isAncestorOf(band)
+            assert not (shell._sheet is not None and shell._sheet.isOpen())
+        finally:
+            shell.set_on(False)
+            _pump(qapp)
+    assert split.count() == 1 and page.isAncestorOf(band)
+
+
+def test_a_phone_s_controls_stay_an_overlay(qapp, app_sheet):
+    """On a phone the same window keeps the overlay sheet, closed until ⚙ Controls opens it."""
+    from tests._screens import FakeScreen
+    from widgets.drawer import Drawer
+    with FakeScreen(QRect(0, 0, 432, 936)):
+        win, shell, split, page, band = _docked_window(qapp)
+        shell.set_on(True, restyle=False)
+        try:
+            _pump(qapp)
+            assert not shell.is_docked()
+            assert shell._sheet is None or not shell._sheet.isOpen()
+            assert split.count() == 1
+            shell.open_controls()
+            _pump(qapp)
+            assert isinstance(shell._sheet, Drawer) and split.count() == 1
+        finally:
+            shell.set_on(False)
+            _pump(qapp)

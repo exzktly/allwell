@@ -66,3 +66,29 @@ def _draw_and_check(ctx):
                for e in [t.get_window_extent(measure)] if e.x0 < -1.5 or e.x1 > fig.bbox.width + 1.5]
     assert not outside, f"titles past the {fig.bbox.width:.0f}px figure's edges: {outside}"
     assert "MCHERRY" in " ".join(t.get_text() for t in titles), "a fitted title still names its channel"
+
+
+def test_the_y_labels_stay_inside_when_the_page_narrows_after_the_draw(ctx):
+    """The page drawn wide, then narrowed without a redraw of the data — an unfolded iPhone Duo, where the page's
+    ⚙ Controls dock beside it after the page is drawn (``ui/phone_dock.py``): 867 px of canvas became 475. The
+    renderer laid the figure out once, at its width then, so at 475 px and phone layout's 108 dpi each left-hand
+    "Cumulative Probability" hung 12 px off the figure's edge (the page-render test, mini dataset, Duo upright).
+    Laid out on every draw, it is fitted at the width it is drawn at. Wrong implementation: the one-shot
+    ``tight_layout`` this replaced."""
+    fig = ctx.runtime.cell_gating.figure
+    fig.set_dpi(108)
+    fig.set_size_inches(867 / 108, 820 / 108)
+    rng = np.random.default_rng(0)
+    ctx.runtime.cell_gating.cell_areas = rng.lognormal(5, 0.5, 500).tolist()
+    ctx.runtime.cell_gating.fluor_data = {name: rng.lognormal(3, 1, 500).tolist()
+                                         for name in ("dapi", "gfp", "mcherry")}
+    renderer._cell_gating_plot_cdf(ctx)
+    fig.canvas.draw()
+    fig.set_size_inches(475 / 108, 820 / 108)         # the dock opens beside the page
+    fig.canvas.draw()
+    measure = plot_style._renderer_of(fig)
+    labels = [ax.yaxis.label for ax in fig.axes if ax.yaxis.label.get_text()]
+    assert len(labels) == 4
+    outside = [(lab.get_text(), round(e.x0), round(e.x1)) for lab in labels
+               for e in [lab.get_window_extent(measure)] if e.x0 < -0.5 or e.x1 > fig.bbox.width + 0.5]
+    assert not outside, f"y-labels past the {fig.bbox.width:.0f}px figure's edges: {outside}"

@@ -374,3 +374,67 @@ def test_folding_the_editor_hands_its_height_to_the_results(loaded_app):
     assert section.height() == strip_open, (
         f"re-opening left the editor {section.height()}px against the "
         f"{strip_open}px it had")
+
+
+@pytest.mark.slow
+def test_the_group_list_floors_follow_phone_layout_s_larger_text(loaded_app):
+    """Phone layout's restyle grows the cards without rebuilding the list, so the
+    list must measure its floors again — and against caps grown by the same UI
+    scale the plate's caps grow by.
+
+    Wrong implementations: floors measured once at the desk (two desk-sized
+    cards of height for two touch-sized ones), or capped at the desk's
+    ``PLATE_MAX_HEIGHT`` — which on an unfolded foldable, wide enough to keep the
+    list beside the map, held two cards in a 159 px strip."""
+    from PySide6.QtWidgets import QApplication, QFrame
+
+    from ui import theme
+    from ui.phone_shell import rescale_widgets
+    from widgets.plate_geometry import PLATE_MAX_HEIGHT
+
+    app = loaded_app
+    ctx = app._ctx
+    app.resize(1600, 1000)
+    _statistics_split(app)
+    _two_groups(ctx)
+    _settle()
+    canvas = ctx.widgets.get("_stats_grp_canvas")
+    inner = ctx.widgets.get("_stats_grp_inner")
+    def _two_cards() -> int:
+        cards = [w for w in inner.findChildren(QFrame) if w.objectName() == "StatsGroupCard"]
+        assert len(cards) == 2
+        return sum(c.sizeHint().height() for c in cards)
+
+    desk_cards = _two_cards()
+    from core import phone_layout
+    # The UI scale phone layout takes on an unfolded foldable's 828 x 1170 screen.
+    unit = phone_layout.phone_unit(828, 1170)
+    k = phone_layout.type_scale(unit, "M", theme.desk_body_size())
+    before = QApplication.instance().styleSheet()
+    try:
+        theme.apply_ui_scale(k)
+        theme.set_touch_unit(unit)          # the touch floors, which make the cards tall
+        QApplication.instance().setStyleSheet(theme.qss())
+        rescale_widgets(1.0, k)
+        _settle()
+        two_cards = _two_cards()
+        assert two_cards > desk_cards           # the case only measures something if they grew
+        assert canvas.maximumHeight() == round(PLATE_MAX_HEIGHT * k)
+        assert canvas.minimumHeight() >= two_cards, (
+            f"the list's floor is {canvas.minimumHeight()} px for two cards needing {two_cards} px "
+            f"at UI scale {k:.2f} (they needed {desk_cards} px at the desk)")
+        # A card wider than the list's width cap gives the difference back from
+        # its count rather than scrolling the list sideways, whose bar would then
+        # take its height from the two cards.
+        cap = canvas.minimumWidth()
+        assert max(c.sizeHint().width() for c in inner.findChildren(QFrame)
+                   if c.objectName() == "StatsGroupCard") > cap - 2 * inner.layout().contentsMargins().left()
+        assert inner.minimumSizeHint().width() <= cap, (
+            f"the cards need at least {inner.minimumSizeHint().width()} px in a list floored at {cap} px, "
+            f"so at that width it scrolls sideways")
+    finally:
+        theme.apply_ui_scale(1.0)
+        theme.set_touch_unit(None)
+        QApplication.instance().setStyleSheet(before)
+        rescale_widgets(k, 1.0)
+        _settle()

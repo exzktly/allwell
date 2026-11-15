@@ -487,33 +487,71 @@ def test_no_control_exceedance_reports_an_unbounded_odds_ratio_not_a_number():
     assert any("no control well has a nanowell above the threshold" in n for n in a.notes)
 
 
-def test_the_page_figure_keeps_its_panels_legible_however_long_the_text():
-    """The reported defect: the report drawn into the figure crushed the panels. Whatever the lines and the figure's
-    size, every panel keeps a readable height and no line of text sits on a panel."""
+def _laid_out(res, width, lines=(), **kw):
+    """*res*'s page drawn at *width* inches and the height it asked for: drawn once to learn the height, then again at
+    it, as the page does once the canvas has grown (``_rare_controller.fit_canvas_height``)."""
     from matplotlib.figure import Figure
 
     from review.features.nanowell import _rare_render as rd
 
+    fig = Figure(figsize=(width, 5.0))
+    need = rd.render_rare_page(fig, res, lines, **kw)
+    fig.set_size_inches(width, need)
+    assert rd.render_rare_page(fig, res, lines, **kw) == pytest.approx(need)    # a fixed point: no redraw loop
+    assert not rd.needs_relayout(fig) and rd.needed_height(fig) == pytest.approx(need)
+    return fig
+
+
+def _panel(fig, gid):
+    return next(ax for ax in fig.axes if ax.get_gid() == gid)
+
+
+def test_every_comparison_is_drawn_one_row_per_test_however_many_and_however_narrow():
+    """User decision: each row holds the plots of one test only, headed by the test; a panel of one dot per well holds
+    every comparison on one axes; a panel of curves is drawn once per comparison, as many across as the width holds and
+    the rest wrapping — so the figure never grows sideways and no comparison is ever left off it. The figure is as tall
+    as it needs, and nothing on it overlaps."""
+    from review.features.nanowell import _rare_render as rd
+    from review.features.nanowell import rare_export_compute as rx
+
     t = pd.concat([plate(n=120, responders=4, seed=s, treatment=f"drug{s}") if s == 0 else
                    plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(4)])
     res = rr.analyse(t)
+    assert len(res.units) == 4
     lines = [f"line {i} " + "x" * 150 for i in range(12)]
-    for size in ((14.5, 7.0), (10.0, 5.5), (7.0, 4.0)):
-        fig = Figure(figsize=size)
-        rd.render_rare_page(fig, res, lines, note="a note")
-        renderer = fig.canvas.get_renderer() if hasattr(fig.canvas, "get_renderer") else None
-        panels = [ax for ax in fig.axes if ax.get_visible() and ax.axison]
-        assert panels, size
-        heights = [ax.get_position().height * size[1] for ax in panels]
-        # A row's axes keep at least what ROW_MIN_IN leaves after its title, ticks and labels (1.3 in).
-        assert min(heights) >= rd.ROW_MIN_IN - rd._ROW_PAD_IN - 1e-6 and min(heights) >= 1.25, (size, heights)
-        lowest = min(ax.get_position().y0 for ax in panels)
+    for width, columns in ((14.5, 3), (10.0, 3), (7.0, 2), (4.06, 1)):
+        assert rd.columns_for(width) == columns
+        fig = _laid_out(res, width, lines, note="a note")
+        height = fig.get_figheight()
+        gids = {ax.get_gid() for ax in fig.axes}
+        keys = [row[0] for row in rx.TEST_ROWS]
+        assert {f"nw-rare-shared:{k}" for k in ("exceedance", "hc", "shape")} <= gids
+        assert {f"nw-rare-panel:{k}:{i}" for k in ("exceedance", "hc", "pooled") for i in range(4)} <= gids
+        # Every comparison is named over the figure, and each named panel says which comparison it is.
+        heads = sorted(t.get_text() for t in fig.texts if str(t.get_gid()).startswith("nw-rare-comparison-head:"))
+        assert heads == [rx.comparison_title(res, i) for i in range(4)]
+        assert [t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-groups"][0].replace("\n", " ").startswith(
+            "5 groups tested: control control (")
+        # The test rows in order, each heading above its own panels and below the previous row's.
+        tops = [next(t for t in fig.texts if t.get_gid() == f"nw-rare-test:{k}").get_position()[1] for k in keys]
+        assert tops == sorted(tops, reverse=True), width
+        for k, top, below in zip(keys, tops, [*tops[1:], -1.0]):
+            row = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))
+                   and str(ax.get_gid()).split(":")[1] == k]
+            assert row and all(below < ax.get_position().y0 and ax.get_position().y1 < top for ax in row), (width, k)
+        # The panels of one row's wrap: as many across as the width holds.
+        x0s = {round(_panel(fig, f"nw-rare-panel:pooled:{i}").get_position().x0, 4) for i in range(4)}
+        assert len(x0s) == columns, width
+        panels = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))]
+        boxes = [ax.get_position() for ax in panels]
+        assert all(b.y0 >= 0 and b.y1 <= 1 and b.x0 >= 0 and b.x1 <= 1 for b in boxes), width
+        assert all(b.height * height >= 0.9 and b.width * width >= 2.4 for b in boxes), width
+        for i, one in enumerate(boxes):                                     # no panel on another
+            for other in boxes[i + 1:]:
+                assert one.x1 <= other.x0 or other.x1 <= one.x0 or one.y1 <= other.y0 or other.y1 <= one.y0, width
         texts = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
-        assert texts and max(t.get_position()[1] for t in texts) < lowest, size
-        drawn = {t.get_text() for ax in panels for t in ax.texts if t.get_gid() == "nw-rare-unit"}
-        if len(drawn) < len(res.units):
-            assert any("not drawn" in t.get_text() for t in texts), size
-        del renderer
+        assert texts and max(t.get_position()[1] for t in texts) < min(b.y0 for b in boxes), width
+        assert not any("not drawn" in t.get_text() for t in fig.texts), width
 
 
 def _plate_wells(t: pd.DataFrame) -> pd.DataFrame:
@@ -535,8 +573,6 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
     shades on screen, publication shades after a capture's repaint, legend included — and each treatment well is
     its own plate colour."""
     from matplotlib.colors import to_hex
-    from matplotlib.figure import Figure
-
     from review.domain.selections_model import color_for_well
     from review.features.nanowell import _rare_render as rd
     from review.features.nanowell.renderer import _is_publication
@@ -548,9 +584,9 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
     unit = res.units[0]
     strata = rd._strata(unit)
     assert len(strata) == 4                                    # n0 1…5: strata 1, 2, 3 and 4 and over
-    fig = Figure(figsize=(14.5, 7.0))
-    rd.render_rare_page(fig, res, ["verdict"])
-    ecdf, exceed, hc_ax = [ax for ax in fig.axes if ax.axison][:3]
+    fig = _laid_out(res, 14.5, ["verdict"])
+    ecdf, exceed, hc_ax = (_panel(fig, gid) for gid in ("nw-rare-panel:exceedance:0", "nw-rare-shared:exceedance",
+                                                         "nw-rare-panel:hc:0"))
 
     def treatment_lines():
         return {ln.get_gid().split(":", 1)[1]: to_hex(ln.get_color()).upper() for ln in ecdf.lines
@@ -583,42 +619,29 @@ def test_the_page_figure_colours_strata_by_occupancy_and_treatment_wells_as_the_
     assert color_for_well("B01").upper() != WELL_COLORS_TUPLE[0].upper()   # the fixture tells right from wrong
 
 
-def test_a_phone_s_figure_stacks_each_treatment_s_panels_in_a_column():
-    """The reported defect: on a phone (a figure about 4 × 7.3 in) the three panels sat side by side, each about an
-    inch across, their axis labels running into one another. Narrower than STACK_BELOW_IN they stack, every panel the
-    figure's width, none overlapping another or the verdict under them, all inside the figure; wider, they stay in one
-    row. The exceedance panel keeps headroom over its highest dot for that dot's p label."""
+def test_a_phone_s_figure_holds_one_comparison_across_and_keeps_its_count_labels_inside():
+    """On a phone (a figure about 4 in wide) each per-comparison panel takes the figure's width, one under another, and
+    a shared panel of one dot per well keeps headroom over its highest dot for that dot's count and over the groups for
+    their names: every label inside its axes."""
     from matplotlib.backends.backend_agg import FigureCanvasAgg
-    from matplotlib.figure import Figure
-
-    from review.features.nanowell import _rare_render as rd
 
     res = rr.analyse(_plate_wells(plate(n_ctrl=3, n_treat=2, n=200, responders=6, seed=12)),
                      RareParams(strata_edges=(1, 2, 3, 4)))
-    lines = ["drug: 2 vs 3 control wells — supports rare-responder enrichment", "A exceedance: p 0.001"]
-    for size, stacked in (((4.06, 7.32), True), ((14.5, 7.0), False)):
-        fig = Figure(figsize=size)
-        rd.render_rare_page(fig, res, lines, note="a note")
-        panels = [ax for ax in fig.axes if ax.axison]
-        assert len(panels) == 3, size
-        boxes = [ax.get_position() for ax in panels]
-        if stacked:
-            assert len({round(b.x0, 6) for b in boxes}) == 1, size              # one column
-            assert all(b.width * size[0] >= 2.5 for b in boxes), [b.width * size[0] for b in boxes]
-            ordered = sorted(boxes, key=lambda b: -b.y0)
-            assert all(upper.y0 > lower.y1 for upper, lower in zip(ordered, ordered[1:])), size
-            assert min(b.height for b in boxes) * size[1] >= rd.STACKED_ROW_MIN_IN - rd._ROW_PAD_IN - 1e-6
-        else:
-            assert len({round(b.y0, 6) for b in boxes}) == 1, size              # one row
-        assert all(b.y0 >= 0 and b.y1 <= 1 for b in boxes), size
-        texts = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
-        assert max(t.get_position()[1] for t in texts) < min(b.y0 for b in boxes), size
-        renderer = FigureCanvasAgg(fig).get_renderer()
-        exceed = panels[1]
-        box = exceed.get_window_extent(renderer)
-        labels = [t for t in exceed.texts if t.get_gid() == "rare-exceed-count"]
-        assert labels, size
-        assert all(t.get_window_extent(renderer).y1 <= box.y1 for t in labels), size   # inside, under the title
+    fig = _laid_out(res, 4.06, ["drug: 2 vs 3 control wells"], note="a note")
+    small = [_panel(fig, f"nw-rare-panel:{k}:0") for k in ("exceedance", "hc", "pooled")]
+    assert len({round(ax.get_position().x0, 6) for ax in small}) == 1
+    assert all(ax.get_position().width * 4.06 >= 2.5 for ax in small)
+    renderer = FigureCanvasAgg(fig).get_renderer()
+    for key in ("exceedance", "hc", "shape"):
+        ax = _panel(fig, f"nw-rare-shared:{key}")
+        box = ax.get_window_extent(renderer)
+        labels = [t for t in ax.texts if str(t.get_gid()).endswith(("-count", "-group"))]
+        assert labels, key
+        assert all(t.get_window_extent(renderer).y1 <= box.y1 + 1 for t in labels), key
+    # The names over the groups never run into one another.
+    groups = sorted((t.get_window_extent(renderer) for t in _panel(fig, "nw-rare-shared:exceedance").texts
+                     if str(t.get_gid()).endswith("-group")), key=lambda b: b.x0)
+    assert all(a.x1 <= b.x0 + 1 for a, b in zip(groups, groups[1:]))
 
 
 # ── what the result says, and what the figure draws (tracker RARE_RESPONDERS_UX_TRACKER.md) ──────────────────────
@@ -735,67 +758,56 @@ def test_a_relabeling_whose_statistic_is_undefined_does_not_make_p_smaller():
 
 
 def test_the_figure_draws_counts_and_fold_changes_not_p_values_and_logarithms():
-    from matplotlib.figure import Figure
-
-    from review.features.nanowell import _rare_render as rd
+    from review.features.nanowell import rare_export_compute as rx
 
     res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
-    fig = Figure(figsize=(14.5, 7.0))
-    rd.render_rare_page(fig, res)
+    fig = _laid_out(res, 14.5)
     fig.canvas.draw()
-    ecdf, exceed, hc_ax = [ax for ax in fig.axes if ax.axison][:3]
-    assert ecdf.get_title() == ("Fold change (Nt / N0)\nsolid: drug · dotted: control\n"       # no strata by default
-                                "dashed: exceedance test's cutoff · shaded: what the shape test counts")
+    ecdf, exceed, hc_ax = (_panel(fig, gid) for gid in ("nw-rare-panel:exceedance:0", "nw-rare-shared:exceedance",
+                                                         "nw-rare-panel:hc:0"))
+    assert ecdf.get_title() == "Fold change (Nt / N0)\nsolid: drug · dotted: control · dashed: the cutoff"
     ticks = [t.get_text() for t in ecdf.get_xticklabels() if t.get_text()]
     assert {"2×", "4×", "8×"} <= set(ticks) and all(t.endswith("×") for t in ticks)      # fold changes, not log₂
     counts = sorted(t.get_text() for t in exceed.texts if t.get_gid() == "rare-exceed-count")
     assert counts == ["0/60", "0/60", "0/60", "4/60", "4/60"]
     assert not any(t.get_text().startswith("p=") for t in exceed.texts)
     assert exceed.get_ylim()[0] == 0
-    assert hc_ax.get_title().startswith("Higher Criticism: p = 0.9\n")
+    assert hc_ax.get_title() == "colour: drug wells · grey: control"          # its p is in its row and caption
     heads = [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-rare-unit"]
     assert heads and heads[0].startswith("drug: rare responders detected. 8 of 120")
-    lines = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
-    assert lines[0].get_text() == _deciding(res.units[0])
-    assert lines[0].get_position()[1] < min(ax.get_position().y0 for ax in (ecdf, exceed, hc_ax))
+    # The deciding test's p is in its own row's heading, and in the caption of each of its panels.
+    p_line = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-test-p:exceedance")
+    assert p_line == f"drug: {_deciding(res.units[0])[len('Deciding: exceedance test '):].rstrip('.')}"
+    caption = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-comparison:exceedance:0")
+    assert caption.replace("\n", " ") == f"{rx.comparison_title(res, 0)} · {p_line[len('drug: '):]}"
+    panels = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))]
     assert min(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-unit") > max(
-        ax.get_position().y1 for ax in (ecdf, exceed, hc_ax))        # the answer above the panels
+        ax.get_position().y1 for ax in panels)                          # the answer above the panels
+    lines = [t for t in fig.texts if t.get_gid() == "nw-rare-line"]
+    assert lines and max(t.get_position()[1] for t in lines) < min(ax.get_position().y0 for ax in panels)
 
 
-def test_a_short_figure_cuts_its_text_between_sentences_and_keeps_the_caveats_first():
-    """However short the figure, the deciding test is drawn; then the caveats, before the supporting tests; and what is
-    cut is cut between sentences, with one pointer to Details."""
-    from matplotlib.figure import Figure
-
-    from review.features.nanowell import _rare_render as rd
+def test_the_figure_draws_every_caveat_of_every_comparison_whole():
+    """Nothing is cut from the figure any more — it is as tall as it needs and the page scrolls — so every caveat of
+    every comparison is drawn, each named by its comparison, before the lines and the note."""
+    from review.features.nanowell import rare_export_compute as rx
 
     res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
-    for size in ((4.06, 7.32), (4.06, 9.0), (4.06, 12.0)):
-        fig = Figure(figsize=size)
-        rd.render_rare_page(fig, res, note="pointer")
-        lines = [t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-line"]
-        assert lines[0] == _deciding(res.units[0]), size
-        joined = " ".join(line.strip() for line in lines)
-        if "Supporting" in joined:
-            assert "⚠" in joined and joined.index("⚠") < joined.index("Supporting"), size
-        if lines[-1].startswith("… "):
-            assert lines[-1].endswith("more, and the full report: Details ▸ under the figure."), size
-            drawn = " ".join(line.strip() for line in lines[:-1])
-        else:
-            assert lines[-1] == "pointer", size
-            drawn = " ".join(line.strip() for line in lines[:-1])
-        for sentence in drawn.split("⚠ ")[1:]:                      # every caveat drawn is drawn whole
-            assert sentence.split("Supporting")[0].rstrip().endswith("."), (size, sentence)
-
+    fig = _laid_out(res, 4.06, ["a line"], note="pointer")
+    drawn = " ".join(t.get_text().strip() for t in fig.texts if t.get_gid() == "nw-rare-line")
+    caveats = rx.unit_text(res, res.units[0])["caveats"]
+    assert caveats
+    for caveat in caveats:
+        assert f"⚠ Comparison 1 of 1 (drug): {caveat}" in drawn or " ".join(
+            f"⚠ Comparison 1 of 1 (drug): {caveat}".split()) in " ".join(drawn.split())
+    assert drawn.endswith("a line pointer")
 
 
 def test_the_value_is_the_page_s_metric_with_no_strata_and_direction_reads_either_tail():
     """User decision: the page's Metric drives the test (a ``value`` column), nanowells are not stratified, and a
     direction chooses the tail. A bottom-tail plate (four nanowells per drug well dropping to a tenth of anything in
     control) is found looking lower and missed looking higher; the figure draws the values as measured."""
-    from matplotlib.figure import Figure
 
-    from review.features.nanowell import _rare_render as rd
     from review.features.nanowell import rare_export_compute as rx
     from review.features.nanowell.rare_data_compute import ALL
 
@@ -821,9 +833,8 @@ def test_the_value_is_the_page_s_metric_with_no_strata_and_direction_reads_eithe
                                        "the control cutoff (its bottom 1%) on GFP brightness")
     assert any(c.startswith("GFP brightness is a level, not a change from the Baseline: nanowells that started "
                             "lower") for c in text["caveats"])
-    fig = Figure(figsize=(14.5, 7.0))
-    rd.render_rare_page(fig, lower)
-    ecdf = [ax for ax in fig.axes if ax.axison][0]
+    fig = _laid_out(lower, 14.5)
+    ecdf = _panel(fig, "nw-rare-panel:exceedance:0")
     cut = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-threshold:{ALL}")
     assert 2 ** cut.get_xdata()[0] > 90                               # the cutoff drawn at a measured brightness
     drawn = next(ln for ln in ecdf.lines if ln.get_gid() == f"rare-ecdf-treatment:{ALL}")
@@ -842,7 +853,9 @@ def test_a_design_too_small_for_the_deciding_test_cannot_be_decided_rather_than_
     unit = spiked.units[0]
     assert unit.interpretation == rr.UNDECIDED
     text = rx.unit_text(spiked, unit)
-    assert text["headline"].startswith("drug: cannot be decided with these wells. 8 of 120 drug nanowells (6.7%)")
+    # Asked for: the headline says why, not only the line under the panels.
+    assert text["headline"].startswith("drug: cannot be decided with these wells — the deciding test needs at least 3 "
+                                       "control wells (this design has 2). 8 of 120 drug nanowells (6.7%)")
     assert text["lines"][0] == ("Deciding: exceedance test has no group p — it needs at least 3 control wells (this "
                                 "design has 2). With fewer, it gives each well's own p only (Details).")
     null = rr.analyse(_small_plate(spiked=False, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]
@@ -1035,49 +1048,37 @@ def test_the_shape_test_s_floor_is_said_when_higher_criticism_has_none():
 
 # ── The shape test's region on the cumulative panel ──────────────────────────────────────────────────────────────
 
-def test_the_shaded_region_is_where_the_shape_test_counts():
-    """Control 1..10 (median 5.5); treated 3, 3, 3, 4..8, 20, 30. Above the median the treated curve runs under the
-    control one from 9 to just under 30. Below the median it runs under it too (at 1 and 2, where the treated sample
-    has no value), and that does not count: the shape test looks only past the control median. A value where the
-    curves meet counts nothing."""
-    control = np.arange(1.0, 11.0)
-    treated = np.array([3, 3, 3, 4, 5, 6, 7, 8, 20, 30], dtype=float)
-    x, f0, fn, excess = ad.drawn_excess(control, treated)
-    assert ad.tail_start(control) == 5.5
-    assert list(x[excess]) == [9.0, 10.0, 20.0]
-    assert list(f0[excess] - fn[excess]) == pytest.approx([0.1, 0.2, 0.1])
-    # Responders lower: the mirror image — below the median, where the treated nanowells hold more of the bottom.
-    x, f0, fn, excess = ad.drawn_excess(-control, -treated, sign=-1)
-    assert list(x[excess]) == [-30.0, -20.0, -10.0]
-    # Identical samples: nothing to shade.
-    assert not ad.drawn_excess(control, control)[3].any()
-
-
-def test_the_cumulative_panel_shades_the_shape_test_s_region_and_says_so():
+def test_the_pooled_row_shades_the_gap_its_two_sided_test_measures_and_only_there():
+    """User decision: the shading is on the pooled shape test's row. That test is two-sided and measures the gap
+    between the two cumulative curves at every value, so the shading covers the whole gap — where the treated curve
+    runs under the control's and where it runs over — and stops where the curves meet; the exceedance row's panel,
+    which draws the cutoff instead, is not shaded."""
     from matplotlib.collections import PolyCollection
-    from matplotlib.figure import Figure
-
-    from review.features.nanowell import _rare_render as rd
 
     res = rr.analyse(plate(responders=40, seed=1))
-    fig = Figure(figsize=(6, 4))
-    ax = fig.add_subplot(1, 1, 1)
+    fig = _laid_out(res, 14.5)
     unit = res.units[0]
-    rd.draw_ecdf_strata(ax, unit, res.prepared.value_label, log_axis=True)
-    shaded = [c for c in ax.collections if isinstance(c, PolyCollection) and c.get_gid() == "rare-ad-excess:all"]
+    pooled = _panel(fig, "nw-rare-panel:pooled:0")
+    shaded = [c for c in pooled.collections if isinstance(c, PolyCollection) and c.get_gid() == "rare-pooled-gap:all"]
     assert len(shaded) == 1
-    control = np.concatenate([w.values["all"] for w in unit.controls])
+    assert pooled.get_title().endswith("shaded: the gap the test measures")
+    assert not any(ln.get_gid() == "rare-threshold:all" for ln in pooled.lines)        # no cutoff on this row
+    exceed = _panel(fig, "nw-rare-panel:exceedance:0")
+    assert not [c for c in exceed.collections if str(c.get_gid()).startswith("rare-pooled-gap")]
+    assert any(ln.get_gid() == "rare-threshold:all" for ln in exceed.lines)
+    control = np.sort(np.concatenate([w.values["all"] for w in unit.controls]))
+    treated = np.sort(np.concatenate([w.values["all"] for w in unit.treated]))
     xs = np.concatenate([path.vertices[:, 0] for path in shaded[0].get_paths()])
-    assert xs.min() >= math.log2(ad.tail_start(control)) - 1e-9      # never below the control median
-    # Past every control value is the mass the test weighs most: the shading runs on to the largest treated value,
-    # where the treated curve reaches the top — not stopping one step short of it.
-    treated = np.concatenate([w.values["all"] for w in unit.treated])
-    assert (treated > control.max()).any()
-    assert xs.max() == pytest.approx(math.log2(treated.max()))
-    assert ax.get_title().endswith("dashed: exceedance test's cutoff · shaded: what the shape test counts")
-
-
-# ── A treatment group the exclusions emptied: never silently missing ─────────────────────────────────────────────
+    # From where the curves first part to the largest value either sample reaches: past every control value, the
+    # responders' last step is shaded too, not stopped one step short.
+    x = np.unique(np.concatenate([control, treated]))
+    f0 = np.searchsorted(control, x, side="right") / len(control)
+    fn = np.searchsorted(treated, x, side="right") / len(treated)
+    parted = x[(f0 != fn) & (x > 0)]                                  # the log axis leaves a fold change of 0 out
+    assert xs.min() == pytest.approx(math.log2(parted.min()))
+    assert xs.max() == pytest.approx(math.log2(max(control.max(), treated.max())))
+    # Both directions: the treated curve is under the control's somewhere (responders) and over it somewhere.
+    assert (fn < f0).any() and (fn > f0).any()
 
 def _groups_table(emptied):
     """Two control wells and two wells each of drug and drug2, ten nanowells a well; the groups in *emptied* have no
@@ -1113,3 +1114,95 @@ def test_a_treatment_group_the_exclusions_emptied_is_warned_of_while_the_others_
     assert [u.treatment for u in result.units] == ["drug"]
     assert (f"drug2: every one of its 20 nanowells was excluded before testing ({VALUE_MISSING}: 20)"
             in result.warnings)
+
+
+def test_a_well_whose_top_nanowells_are_past_every_control_is_marked_as_having_no_hc_score():
+    """Found while drawing the page: Higher Criticism+ leaves out p ≤ 1/n, and an empirical p of a nanowell past every
+    control value is 1/(N+1) — below 1/n whenever the control pool is larger than the well. A well whose most extreme
+    nanowells are all past the controls, the strongest responders there are, has no HC score. User decision: keep the
+    definition and mark the well on the figure, never leave it silently undrawn. Fifteen of a hundred nanowells past
+    300 control ones: the top ten (alpha0·n) are all at p = 1/301 < 1/100."""
+    res = rr.analyse(plate(n_ctrl=3, n_treat=3, n=100, responders=15, seed=2))
+    unit = res.units[0]
+    assert {unit.hc[w.key].reason for w in unit.treated} == {hc.BEYOND_CONTROLS}
+    assert all(math.isnan(unit.hc[w.key].value) for w in unit.treated)
+    fig = _laid_out(res, 14.5)
+    shared = _panel(fig, "nw-rare-shared:hc")
+    marks = {t.get_gid(): t.get_text() for t in shared.texts if str(t.get_gid()).startswith("rare-hc-peak-missing:")}
+    assert marks == {f"rare-hc-peak-missing:{w.key}": "no HC score" for w in unit.treated}
+    title = _panel(fig, "nw-rare-panel:hc:0").get_title().replace("\n", " ")
+    assert title.startswith("colour: drug wells · grey: control no HC score: ")
+    for w in unit.treated:
+        assert f"{w.key.split(':', 1)[-1]} (its most extreme nanowells are past every control value" in title
+    # A well that simply has nothing extreme is not blamed on the controls.
+    assert hc.unscored_reason(np.array([0.5, 0.6, 0.9, 1.0]), 0.5).startswith("no HC score: none of its 2 most")
+
+
+def test_what_qualifies_the_whole_result_is_drawn_at_the_top_not_below_the_fold():
+    """Found retaking the tutorial: the figure scrolls, and the lead — a control taken because of its name, nanowells
+    the run's flags left out — was drawn after all four test rows, where only a reader who scrolled past the whole
+    figure would see it. It is drawn under the groups line, above the first comparison's headline and every panel."""
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    lead = "⚠ ctrl was taken as the control because of its name"
+    fig = _laid_out(res, 14.5, ["a line"], lead=[lead], note="pointer")
+    texts = {t.get_text(): t.get_position()[1] for t in fig.texts}
+    groups = next(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-groups")
+    first_head = max(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-unit")
+    panels = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))]
+    assert groups > texts[lead] > first_head > max(ax.get_position().y1 for ax in panels)
+    assert texts["a line"] < min(ax.get_position().y0 for ax in panels)       # the rest stays under the rows
+
+
+def test_one_comparison_fills_half_the_row_and_nothing_on_it_overlaps():
+    """Seen retaking the tutorial on a plate with one comparison: its curve panel took a third of the row and left the
+    rest empty; the pooled row's caption sat on its p line, which has no shared panel between them; and a negative HC
+    peak was drawn half off its axes. One comparison now takes half the row, every caption clears its row's p line, and
+    every dot is inside its axes."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    fig = _laid_out(res, 12.6)
+    for key in ("exceedance", "hc", "pooled"):
+        assert _panel(fig, f"nw-rare-panel:{key}:0").get_position().width * 12.6 >= 0.4 * 12.6, key
+    renderer = FigureCanvasAgg(fig).get_renderer()
+    for key in ("exceedance", "hc", "pooled"):
+        p_box = next(t for t in fig.texts if t.get_gid() == f"nw-rare-test-p:{key}").get_window_extent(renderer)
+        caption = next(t for t in fig.texts if t.get_gid() == f"nw-rare-comparison:{key}:0")
+        # Clear by a visible space, not merely not overlapping: touching was what the tutorial showed.
+        assert p_box.y0 - caption.get_window_extent(renderer).y1 >= 6 / 72 * fig.dpi, key
+    hc_ax = _panel(fig, "nw-rare-shared:hc")
+    values = [res.units[0].hc[w.key].value for w in res.units[0].controls + res.units[0].treated]
+    assert min(values) < 0                                       # the fixture has a negative peak to place
+    low, high = hc_ax.get_ylim()
+    radius = (high - low) * 0.03
+    assert all(low + radius <= v <= high for v in values if math.isfinite(v))
+
+
+def test_a_group_p_computed_without_an_unscored_well_names_the_wells_it_used():
+    """User decision (option 1): the group statistic of Higher Criticism is the mean over the wells that have a score,
+    which keeps its p valid but leaves out a well whose most extreme nanowells are all past every control value — the
+    strongest responders. The p is kept and says which wells it came from, on the figure's row and caption, over the
+    group on the shared panel, and in Details. Only drug2 is spiked, so it alone has no HC score."""
+    t = plate(n_ctrl=3, n_treat=3, n=100, responders=0, seed=4)
+    spiked = (t["well_id"] == "drug2") & (t["nanowell_id"].astype(int) < 15)
+    t.loc[spiked, "nt"] = (t.loc[spiked, "n0"] * 2 ** 6.5).astype(int)
+    res = rr.analyse(t)
+    unit = res.units[0]
+    hc_scores = {w.key.split(":", 1)[-1]: unit.hc[w.key].value for w in unit.treated}
+    assert math.isnan(hc_scores["drug2"]) and math.isfinite(hc_scores["drug0"]) and math.isfinite(hc_scores["drug1"])
+    from review.features.nanowell import rare_export_compute as rx
+
+    p = rx._num(unit.hc_perm.p)
+    said = rx.test_p(unit, "hc", res.prepared.params, 1)
+    assert said.startswith(f"p = {p}") and said.endswith(" — from drug0, drug1; drug2 has no HC score"), said
+    fig = _laid_out(res, 14.5)
+    row = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-test-p:hc")
+    assert row.endswith(" — from drug0, drug1; drug2 has no HC score")
+    caption = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-comparison:hc:0").replace("\n", " ")
+    assert caption.endswith(" — from drug0, drug1; drug2 has no HC score")
+    groups = [t.get_text() for t in _panel(fig, "nw-rare-shared:hc").texts if t.get_gid() == "rare-hc-peak-group"]
+    assert any("(drug0, drug1 only)" in " ".join(g.split()) for g in groups), groups
+    details = [line for line in rx.report_lines(res) if line.strip().startswith("Higher Criticism: mean score")]
+    assert details and details[0].endswith(" — from drug0, drug1; drug2 has no HC score")
+    # Every well scored, or none: nothing to qualify.
+    assert rx.scored_note(rr.analyse(plate(n_ctrl=3, n_treat=3, n=100, seed=4)).units[0], "hc") == ""

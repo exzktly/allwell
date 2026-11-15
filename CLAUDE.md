@@ -147,8 +147,9 @@ the container**:
   touch the UI. A test that drives a control and asserts what reached a spec,
   argv, state or file is *behaviour* and must not join the roster, or CI stops
   running it.
-- **Every page, every screen, with data** (`tests/test_every_page_renders.py`, ~6
-  minutes, slow lane): three datasets × desk / phone upright / phone sideways, each
+- **Every page, every screen, with data** (`tests/test_every_page_renders.py`, ~19
+  minutes, slow lane): three datasets × desk / phone upright / phone sideways /
+  iPhone Duo unfolded upright / unfolded sideways / folded, each
   case in a subprocess, on a patched screen of the real size (Qt's offscreen 800×800
   is no screen a person has), every page's ⚙ Controls sheet opened on a phone. It
   cannot see what appears only once a control is pressed — §7.10. Run it with `scripts/test.sh

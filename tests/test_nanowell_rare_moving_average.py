@@ -221,7 +221,11 @@ def test_the_top_left_label_never_overlaps_the_headline(plate, size, moving, sub
     canvas.draw()
     renderer = canvas.get_renderer()
     (label,) = [t for t in fig.texts if t.get_gid() == "nw-subset-label"]
-    head = [t for t in fig.texts if t.get_gid() == "nw-rare-unit"][0]
-    assert label.get_text() and head.get_text().startswith("drug:")
+    # The figure's first line names the groups tested; the headline comes under it.
+    (head,) = [t for t in fig.texts if t.get_gid() == "nw-rare-groups"]
+    verdict = [t for t in fig.texts if t.get_gid() == "nw-rare-unit"][0]
+    assert label.get_text() and head.get_text().startswith("2 groups tested:")
+    assert verdict.get_text().startswith("drug:")
     label_box, head_box = label.get_window_extent(renderer), head.get_window_extent(renderer)
     assert label_box.y0 >= head_box.y1, (label_box, head_box)        # display y grows upwards
+    assert head_box.y0 >= verdict.get_window_extent(renderer).y1

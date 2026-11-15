@@ -7219,8 +7219,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   2)*): for example *drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its
   top 1%), against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells.*
 
-  Then **one row per test**, each headed by the test's name, whether it decides the verdict, what it asks, and every
-  comparison's p:
+  Then **one block per test**, each framed and headed by the test's name, whether it decides the verdict, what it
+  asks, and every comparison's p. The bar down a block's left edge gives its role: blue for the test that decides,
+  grey for the supporting tests, amber for the one that is description only.
   1. **Exceedance test — decides the verdict.** Every well's share of nanowells past the control cutoff, with its
      count (*4/60*), all comparisons on one plot: the control wells in grey, the shaded band the range they span
      (what chance gives on this plate), then each group's wells in their plate colours, with the group's name and p
@@ -7237,8 +7238,10 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
      unscored well, which is usually the strongest; the exceedance test is the one that counts it.
   3. **Shape test — supporting.** Every well's upper-tail Anderson–Darling score against the control wells, on one
      plot, wells as the units like the two above.
-  4. **Pooled shape test — description only.** One plot per comparison of all its nanowells against all the
-     control's, with the whole gap between the two curves shaded — what this two-sided test measures. Its heading
+  4. **Pooled shape test — description only.** One plot per comparison of the gap between the control's and the
+     group's share of nanowells at or below each value (the two curves of block 1, one subtracted from the other),
+     shaded to 0. Above 0, more of the group lies above that value than of the control. The test squares that gap
+     and sums it over every value, on both sides, which is what the shading shows. Its heading
      says it treats every nanowell as **independent**, so its p is not calibrated: nanowells of one well are not
      independent, and this p overstates the evidence. It can never change the verdict.
 
@@ -11336,7 +11339,8 @@ The figure then reads from the top:
    grouped before reading any.
 2. **Each comparison's answer**, under its name (*Comparison 1 of 3: Drug X vs DMSO*): the verdict in bold and the
    counts behind it.
-3. **One row per test**, headed by the test, its role and every comparison's p. A plot of one dot per well holds
+3. **One framed block per test**, headed by the test, its role and every comparison's p, with a bar down its left
+   edge in its role's colour (blue decides, grey supports, amber is description only). A plot of one dot per well holds
    every comparison on one set of axes — control wells once, in grey with the band they span, then each group's
    wells in their plate colours with the group's name and p over them. A plot of curves is drawn once per
    comparison and captioned with it, side by side as far as the width allows and continuing below inside the same
@@ -11351,8 +11355,8 @@ The figure then reads from the top:
      most extreme nanowells are all past every control value has **no HC score**, said on both plots; the group's
      HC p then names the wells it was computed from.
    * **Shape test** (supporting): each well's upper-tail Anderson–Darling score.
-   * **Pooled shape test** (description only): each comparison's pooled nanowells against the control's, the gap
-     between the curves shaded. It treats every nanowell as independent, says so in its heading, and its p is not
+   * **Pooled shape test** (description only): for each comparison, the gap between the control's and the group's
+     cumulative shares, shaded — what the test sums. It treats every nanowell as independent, says so in its heading, and its p is not
      calibrated.
 4. **The caveats**, each named by its comparison, and the notes.
 

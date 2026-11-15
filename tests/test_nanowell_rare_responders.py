@@ -1048,37 +1048,75 @@ def test_the_shape_test_s_floor_is_said_when_higher_criticism_has_none():
 
 # ── The shape test's region on the cumulative panel ──────────────────────────────────────────────────────────────
 
-def test_the_pooled_row_shades_the_gap_its_two_sided_test_measures_and_only_there():
-    """User decision: the shading is on the pooled shape test's row. That test is two-sided and measures the gap
-    between the two cumulative curves at every value, so the shading covers the whole gap — where the treated curve
-    runs under the control's and where it runs over — and stops where the curves meet; the exceedance row's panel,
-    which draws the cutoff instead, is not shaded."""
+def test_the_pooled_row_draws_the_gap_its_two_sided_test_sums_and_not_the_curves_again():
+    """User decision: the pooled shape test's row draws, per comparison, the gap between the pooled control's and the
+    group's share of nanowells at or below each value — what that two-sided test squares and sums — and not the two
+    cumulative curves, which the exceedance row already draws (they had been drawn twice on the page). The gap is
+    checked value by value against shares counted here, and is shaded between it and 0 on both sides."""
     from matplotlib.collections import PolyCollection
 
     res = rr.analyse(plate(responders=40, seed=1))
     fig = _laid_out(res, 14.5)
     unit = res.units[0]
     pooled = _panel(fig, "nw-rare-panel:pooled:0")
-    shaded = [c for c in pooled.collections if isinstance(c, PolyCollection) and c.get_gid() == "rare-pooled-gap:all"]
-    assert len(shaded) == 1
-    assert pooled.get_title().endswith("shaded: the gap the test measures")
-    assert not any(ln.get_gid() == "rare-threshold:all" for ln in pooled.lines)        # no cutoff on this row
-    exceed = _panel(fig, "nw-rare-panel:exceedance:0")
-    assert not [c for c in exceed.collections if str(c.get_gid()).startswith("rare-pooled-gap")]
-    assert any(ln.get_gid() == "rare-threshold:all" for ln in exceed.lines)
+    assert not [ln for ln in pooled.lines if str(ln.get_gid()).startswith("rare-ecdf-")]     # not the curves again
+    assert not [ln for ln in pooled.lines if str(ln.get_gid()).startswith("rare-threshold")]
+    (line,) = [ln for ln in pooled.lines if ln.get_gid() == "rare-pooled-gap-line:all"]
     control = np.sort(np.concatenate([w.values["all"] for w in unit.controls]))
     treated = np.sort(np.concatenate([w.values["all"] for w in unit.treated]))
-    xs = np.concatenate([path.vertices[:, 0] for path in shaded[0].get_paths()])
-    # From where the curves first part to the largest value either sample reaches: past every control value, the
-    # responders' last step is shaded too, not stopped one step short.
     x = np.unique(np.concatenate([control, treated]))
-    f0 = np.searchsorted(control, x, side="right") / len(control)
-    fn = np.searchsorted(treated, x, side="right") / len(treated)
-    parted = x[(f0 != fn) & (x > 0)]                                  # the log axis leaves a fold change of 0 out
-    assert xs.min() == pytest.approx(math.log2(parted.min()))
-    assert xs.max() == pytest.approx(math.log2(max(control.max(), treated.max())))
-    # Both directions: the treated curve is under the control's somewhere (responders) and over it somewhere.
-    assert (fn < f0).any() and (fn > f0).any()
+    expected = np.array([(control <= v).mean() - (treated <= v).mean() for v in x])
+    keep = x > 0                                                       # the log axis leaves a fold change of 0 out
+    assert np.allclose(line.get_xdata(), np.log2(x[keep])) and np.allclose(line.get_ydata(), expected[keep])
+    assert (expected[keep] > 0).any() and (expected[keep] < 0).any()  # the fixture's gap goes both ways
+    shaded = [c for c in pooled.collections if isinstance(c, PolyCollection) and c.get_gid() == "rare-pooled-gap:all"]
+    assert len(shaded) == 1
+    ys = np.concatenate([path.vertices[:, 1] for path in shaded[0].get_paths()])
+    assert ys.min() == pytest.approx(expected[keep].min()) and ys.max() == pytest.approx(expected[keep].max())
+    low, high = pooled.get_ylim()
+    assert low == pytest.approx(-high) and high >= np.abs(expected).max()
+    assert pooled.get_title().startswith("gap: control − drug\n")
+    # The exceedance row keeps the cumulative curves and the cutoff.
+    exceed = _panel(fig, "nw-rare-panel:exceedance:0")
+    assert {ln.get_gid() for ln in exceed.lines} >= {"rare-ecdf-control:all", "rare-ecdf-treatment:all",
+                                                     "rare-threshold:all"}
+
+
+def test_each_test_is_one_framed_block_with_its_role_on_its_edge():
+    """User decision: the plots of one test read as one block, visibly apart from the next — a frame around each
+    test's heading, p line and every panel of its row, with a bar on its left edge in the colour of its role (accent:
+    decides the verdict; secondary ink: supporting; warning amber: description only). No two blocks overlap, and the
+    frame's outline repaints with the card's theme."""
+    from ui.theme import Colors
+    from review.features.nanowell import rare_export_compute as rx
+    from widgets.plot_card import repaint_theme_ink
+
+    t = pd.concat([plate(n=120, responders=4, seed=s, treatment=f"drug{s}") if s == 0 else
+                   plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(4)])
+    res = rr.analyse(t)
+    for width in (14.5, 4.06):
+        fig = _laid_out(res, width)
+        spans = {}
+        for key, *_rest in rx.TEST_ROWS:
+            fills = [p for p in fig.patches if p.get_gid() == f"nw-rare-block:{key}"]
+            assert len(fills) == 1, (width, key, len(fills))
+            fill = fills[0]
+            y0, y1 = fill.get_y(), fill.get_y() + fill.get_height()
+            spans[key] = (y0, y1)
+            heading = next(t for t in fig.texts if t.get_gid() == f"nw-rare-test:{key}").get_position()[1]
+            assert y0 < heading < y1, (width, key)
+            row = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))
+                   and str(ax.get_gid()).split(":")[1] == key]
+            assert row and all(y0 < ax.get_position().y0 and ax.get_position().y1 < y1 for ax in row), (width, key)
+            (bar,) = [ln for ln in fig.lines if ln.get_gid() == f"nw-rare-block-role:{key}"]
+            expected = {"exceedance": Colors.accent, "hc": Colors.text_secondary, "shape": Colors.text_secondary,
+                        "pooled": Colors.warn}[key]
+            assert bar.get_color() == expected, (width, key)
+        ordered = [spans[k] for k, *_rest in rx.TEST_ROWS]
+        assert all(upper[0] > lower[1] for upper, lower in zip(ordered, ordered[1:])), width   # apart, in order
+    (edge,) = [ln for ln in fig.lines if ln.get_gid() == "nw-rare-block-edge:pooled"]
+    repaint_theme_ink(fig, "#000000", "#123456")
+    assert edge.get_color() == "#123456"
 
 def _groups_table(emptied):
     """Two control wells and two wells each of drug and drug2, ten nanowells a well; the groups in *emptied* have no

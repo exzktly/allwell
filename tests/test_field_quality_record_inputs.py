@@ -13,6 +13,7 @@ import numpy as np
 
 import process_microscopy as pm
 from pipeline import field_quality as fq
+from util.schema import DEFAULT_SCHEMA, parse_schema
 
 
 def _field():
@@ -25,7 +26,7 @@ def _field():
     nir = ((labels > 0) * 800.0 + 100 + rng.normal(0, 2, labels.shape)).astype(np.float32)
     records = pm._quantify_image_group(
         labels=labels, fluor_tophat=[nir], fluor_tokens=["GFP"], nir_corr=nir,
-        nuclear_path=Path("exp_DAPI_A01_f1_t0.tif"), schema=pm.parse_schema(pm.DEFAULT_SCHEMA), sep="_",
+        nuclear_path=Path("exp_DAPI_A01_f1_t0.tif"), schema=parse_schema(DEFAULT_SCHEMA), sep="_",
         shape_features=["circularity"])
     return labels, nir, records
 

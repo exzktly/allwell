@@ -1136,3 +1136,73 @@ def test_a_well_whose_top_nanowells_are_past_every_control_is_marked_as_having_n
         assert f"{w.key.split(':', 1)[-1]} (its most extreme nanowells are past every control value" in title
     # A well that simply has nothing extreme is not blamed on the controls.
     assert hc.unscored_reason(np.array([0.5, 0.6, 0.9, 1.0]), 0.5).startswith("no HC score: none of its 2 most")
+
+
+def test_what_qualifies_the_whole_result_is_drawn_at_the_top_not_below_the_fold():
+    """Found retaking the tutorial: the figure scrolls, and the lead — a control taken because of its name, nanowells
+    the run's flags left out — was drawn after all four test rows, where only a reader who scrolled past the whole
+    figure would see it. It is drawn under the groups line, above the first comparison's headline and every panel."""
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    lead = "⚠ ctrl was taken as the control because of its name"
+    fig = _laid_out(res, 14.5, ["a line"], lead=[lead], note="pointer")
+    texts = {t.get_text(): t.get_position()[1] for t in fig.texts}
+    groups = next(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-groups")
+    first_head = max(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-unit")
+    panels = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))]
+    assert groups > texts[lead] > first_head > max(ax.get_position().y1 for ax in panels)
+    assert texts["a line"] < min(ax.get_position().y0 for ax in panels)       # the rest stays under the rows
+
+
+def test_one_comparison_fills_half_the_row_and_nothing_on_it_overlaps():
+    """Seen retaking the tutorial on a plate with one comparison: its curve panel took a third of the row and left the
+    rest empty; the pooled row's caption sat on its p line, which has no shared panel between them; and a negative HC
+    peak was drawn half off its axes. One comparison now takes half the row, every caption clears its row's p line, and
+    every dot is inside its axes."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    fig = _laid_out(res, 12.6)
+    for key in ("exceedance", "hc", "pooled"):
+        assert _panel(fig, f"nw-rare-panel:{key}:0").get_position().width * 12.6 >= 0.4 * 12.6, key
+    renderer = FigureCanvasAgg(fig).get_renderer()
+    for key in ("exceedance", "hc", "pooled"):
+        p_box = next(t for t in fig.texts if t.get_gid() == f"nw-rare-test-p:{key}").get_window_extent(renderer)
+        caption = next(t for t in fig.texts if t.get_gid() == f"nw-rare-comparison:{key}:0")
+        # Clear by a visible space, not merely not overlapping: touching was what the tutorial showed.
+        assert p_box.y0 - caption.get_window_extent(renderer).y1 >= 6 / 72 * fig.dpi, key
+    hc_ax = _panel(fig, "nw-rare-shared:hc")
+    values = [res.units[0].hc[w.key].value for w in res.units[0].controls + res.units[0].treated]
+    assert min(values) < 0                                       # the fixture has a negative peak to place
+    low, high = hc_ax.get_ylim()
+    radius = (high - low) * 0.03
+    assert all(low + radius <= v <= high for v in values if math.isfinite(v))
+
+
+def test_a_group_p_computed_without_an_unscored_well_names_the_wells_it_used():
+    """User decision (option 1): the group statistic of Higher Criticism is the mean over the wells that have a score,
+    which keeps its p valid but leaves out a well whose most extreme nanowells are all past every control value — the
+    strongest responders. The p is kept and says which wells it came from, on the figure's row and caption, over the
+    group on the shared panel, and in Details. Only drug2 is spiked, so it alone has no HC score."""
+    t = plate(n_ctrl=3, n_treat=3, n=100, responders=0, seed=4)
+    spiked = (t["well_id"] == "drug2") & (t["nanowell_id"].astype(int) < 15)
+    t.loc[spiked, "nt"] = (t.loc[spiked, "n0"] * 2 ** 6.5).astype(int)
+    res = rr.analyse(t)
+    unit = res.units[0]
+    hc_scores = {w.key.split(":", 1)[-1]: unit.hc[w.key].value for w in unit.treated}
+    assert math.isnan(hc_scores["drug2"]) and math.isfinite(hc_scores["drug0"]) and math.isfinite(hc_scores["drug1"])
+    from review.features.nanowell import rare_export_compute as rx
+
+    p = rx._num(unit.hc_perm.p)
+    said = rx.test_p(unit, "hc", res.prepared.params, 1)
+    assert said.startswith(f"p = {p}") and said.endswith(" — from drug0, drug1; drug2 has no HC score"), said
+    fig = _laid_out(res, 14.5)
+    row = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-test-p:hc")
+    assert row.endswith(" — from drug0, drug1; drug2 has no HC score")
+    caption = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-comparison:hc:0").replace("\n", " ")
+    assert caption.endswith(" — from drug0, drug1; drug2 has no HC score")
+    groups = [t.get_text() for t in _panel(fig, "nw-rare-shared:hc").texts if t.get_gid() == "rare-hc-peak-group"]
+    assert any("(drug0, drug1 only)" in " ".join(g.split()) for g in groups), groups
+    details = [line for line in rx.report_lines(res) if line.strip().startswith("Higher Criticism: mean score")]
+    assert details and details[0].endswith(" — from drug0, drug1; drug2 has no HC score")
+    # Every well scored, or none: nothing to qualify.
+    assert rx.scored_note(rr.analyse(plate(n_ctrl=3, n_treat=3, n=100, seed=4)).units[0], "hc") == ""

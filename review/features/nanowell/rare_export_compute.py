@@ -86,10 +86,10 @@ def _unit_lines(result, unit, r) -> list[str]:
     # A permutation that never ran (too few wells for a group test) is said as such, not as an undefined statistic.
     lines.append(f"  {NAME_B}: mean score {_num(r['hc_mean'])} over the {r['treatment']} wells; "
                  + _perm_text(r["hc_p"], r["hc_q"], r["hc_permutations"], r["hc_exhaustive"], r["hc_min_p"],
-                              NOT_RUN if unit.hc_perm is None else "not computable"))
+                              NOT_RUN if unit.hc_perm is None else "not computable") + scored_note(unit, "hc"))
     lines.append(f"  {NAME_C}: " + (f"mean {_num(r['a2r_mean'])}; " if math.isfinite(r["a2r_mean"]) else "")
                  + _perm_text(r["a2r_p"], r["a2r_q"], r["a2r_permutations"], r["hc_exhaustive"], r["a2r_min_p"],
-                              NOT_RUN if unit.a2_perm is None else C_UNDEFINED))
+                              NOT_RUN if unit.a2_perm is None else C_UNDEFINED) + scored_note(unit, "shape"))
     stat, sp, note = unit.scholz
     capped = note.startswith("p capped")
     p_text = (f"p ≥ {_num(sp)} (scipy caps it)" if capped and math.isfinite(sp) and sp >= 0.25 else
@@ -383,11 +383,13 @@ def test_heading(key: str, params) -> str:
 
 def test_p(unit, key: str, params, n_units: int, *, short: bool = False) -> str:
     """*unit*'s result in the test row *key*, as its heading lists it: ``p = …`` (with q when several groups were
-    tested, and marked when it is the lowest the wells allow), or why there is none. *short* is the form written over
-    a group on a shared panel, where the room is a group's width: the same numbers, in fewer words."""
+    tested, marked when it is the lowest the wells allow, and naming the wells it was computed from when some had no
+    score — :func:`scored_note`), or why there is none. *short* is the form written over a group on a shared panel,
+    where the room is a group's width: the same numbers, in fewer words."""
     full = _test_p(unit, key, params, n_units)
     if not short:
         return full
+    full = full.replace(scored_note(unit, key), scored_note(unit, key, short=True)) if scored_note(unit, key) else full
     return (full.replace(" (the lowest possible with these wells)", " (lowest possible)")
             .replace(" (scipy reports no p outside 0.001–0.25)", "").replace(", uncalibrated", ""))
 
@@ -406,8 +408,39 @@ def _test_p(unit, key: str, params, n_units: int) -> str:
     if not unit.group_allowed:
         return "not run"
     if key == "hc":
-        return _support_part("", unit.hc_perm, "not computable").strip()
-    return _support_part("", unit.a2_perm, C_UNDEFINED).strip()
+        return _support_part("", unit.hc_perm, "not computable").strip() + scored_note(unit, key)
+    return _support_part("", unit.a2_perm, C_UNDEFINED).strip() + scored_note(unit, key)
+
+
+#: Each well's score in the tests whose group statistic is the mean over a group's wells, by test row key.
+_WELL_SCORE = {"hc": lambda unit, w: unit.hc[w.key].value, "shape": lambda unit, w: unit.a2[w.key][0]}
+_SCORE_NAME = {"hc": "HC score", "shape": "shape score"}
+
+
+def scored_note(unit, key: str, *, short: bool = False) -> str:
+    """What *unit*'s group p in the test row *key* (``"hc"`` or ``"shape"``) was computed from, when some of its
+    treatment wells have no score: ``" — from D01, D03; D02 has no HC score"`` (*short*: ``" (D01, D03 only)"``);
+    ``""`` when every well was scored, or none was (then there is no p to qualify).
+
+    The group statistic is the mean over the treatment wells that have a score, against the same mean under every
+    relabelling of the wells, so the p is valid, but it describes the scored wells only. A well HC cannot score is the
+    one whose most extreme nanowells are all past every control value — the strongest responders — so without this
+    a reader would take a p computed without that well for HC having looked at the whole group and found nothing."""
+    if key not in _WELL_SCORE or (key == "hc" and unit.hc_perm is None) or (key == "shape" and unit.a2_perm is None):
+        return ""
+    score = _WELL_SCORE[key]
+    scored = [w for w in unit.treated if math.isfinite(score(unit, w))]
+    unscored = [w for w in unit.treated if not math.isfinite(score(unit, w))]
+    if not scored or not unscored:
+        return ""
+
+    def names(wells) -> str:
+        return ", ".join(w.key.split(":", 1)[-1] for w in wells)
+
+    if short:
+        return f" ({names(scored)} only)"
+    return (f" — from {names(scored)}; {names(unscored)} {'has' if len(unscored) == 1 else 'have'} no "
+            f"{_SCORE_NAME[key]}")
 
 
 def groups_line(result) -> str:

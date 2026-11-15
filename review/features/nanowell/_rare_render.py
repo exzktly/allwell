@@ -458,6 +458,8 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
     ax.set_ylabel(ylabel)
     low = min(0.0, min(tops, default=0.0))
     high = max(tops, default=1.0) or 1.0
+    if low < 0:                                      # a negative score (an HC peak) keeps its whole dot on the axes
+        low -= 0.06 * (high - low)
     # Each group's name is wrapped to its own width on the axes, so the names of narrow groups on a phone's figure
     # stack rather than run into one another; the dots get the height the tallest name leaves.
     pt = _TITLE_PT * 0.8
@@ -553,7 +555,9 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     per comparison, captioned with the comparison's name and p (gid ``nw-rare-comparison:<key>:<i>``; the axes'
     ``nw-rare-panel:<key>:<i>``, a shared panel's ``nw-rare-shared:<key>``), as many side
     by side as the width holds (:func:`columns_for`) and the rest wrapping below in the same row. Under the rows: each
-    comparison's caveats (marked ⚠), *lead* (never cut), then *lines* and *note* (gid ``nw-rare-line``).
+    comparison's caveats (marked ⚠), then *lines* and *note* (gid ``nw-rare-line``). *lead* — a control chosen by its
+    name, nanowells the run's flags left out — is drawn under the groups line instead: the figure scrolls, and what
+    qualifies the whole result must not be below the fold.
 
     *stamped* says a label (a saved subset's name, the moving average) is written at the figure's top left once the
     page is drawn (``renderer.stamp_subset``): the first line then starts :data:`_STAMP_IN` lower, below it."""
@@ -563,7 +567,9 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     params, units = result.prepared.params, result.units
     value_label = result.prepared.value_label
     log_axis = log_axis_for(result)
-    cols = columns_for(width)
+    # Never more columns than comparisons, but at least two when the width holds them: one comparison drawn a third
+    # of the width left two thirds of the row empty, and drawn the whole width its curves stretched flat.
+    cols = max(1, min(columns_for(width), max(len(units), min(columns_for(width), 2))))
     lines_of = -(-len(units) // cols) if units else 0
     step = _REPORT_PT * _LEADING / 72
     probe = fig.add_axes([0, 0, 0.001, 0.001], frameon=False)
@@ -596,6 +602,12 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     if units:
         text(rx.groups_line(result), _HEAD_PT, "nw-rare-groups", bold=True)
         y += 0.06
+    for item in lead:                       # what qualifies the whole result: at the top, never below the fold
+        for part in _wrapped(fig, [item], 0.96):
+            _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
+            y += step
+    if lead:
+        y += 0.04
     for i, unit in enumerate(units):
         y += 0.04
         text(rx.comparison_title(result, i), _HEAD_PT, f"nw-rare-comparison-head:{i}", bold=True)
@@ -619,6 +631,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
         draw = _small_panel(key, value_label, log_axis)
         if draw is None:
             continue
+        y += 0.12                                    # the captions clear the p line above them
         for i, unit in enumerate(units):
             line, col = divmod(i, cols)
             top = y + line * (CAPTION_IN + SMALL_IN)
@@ -635,7 +648,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     y += _TEXT_PAD_IN
     caveats = [f"⚠ {rx.comparison_title(result, i).split(':', 1)[0]} ({u.label}): {c}"
                for i, u in enumerate(units) for c in rx.unit_text(result, u)["caveats"]]
-    for item in [*lead, *caveats, *lines, *([note] if note else [])]:
+    for item in [*caveats, *lines, *([note] if note else [])]:
         for part in _wrapped(fig, [item], 0.96):
             _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
             y += step

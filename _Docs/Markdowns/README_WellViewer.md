@@ -7196,7 +7196,7 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   Choose the control group under **Control** (the band's *vs* combo, captioned *Control* while this test is chosen),
   with the control and treatment groups shown on the plate. When one group's name says it is a control — *ctrl*,
   *control*, *DMSO*, *vehicle*, *untreated*, *mock*, *negative* — and no control is chosen yet, choosing this test
-  preselects it, and the figure says so first ("ctrl was taken as the control because of its name…"); choosing a
+  preselects it, and the figure says so at its top, under the groups line ("ctrl was taken as the control because of its name…"); choosing a
   control yourself ends the guess. Two such names, or none, and nothing is guessed. With replicate
   sets defined, a click on a well in the plate shows or hides that well's whole group, so a click on a group that is
   already shown hides it: when the control is hidden the figure says so and names the wells that bring it back, and
@@ -7232,7 +7232,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   2. **Higher Criticism — supporting.** Every well's highest excess score on one plot, then one plot per comparison
      of each well's excess score over its nanowells, most extreme first. A well whose most extreme nanowells are all
      past every control value gets **no HC score** — Higher Criticism leaves those out by definition — and is
-     marked so on both plots rather than left out.
+     marked so on both plots rather than left out. The group's HC p is then computed from its other wells, and
+     says so: *p = 0.25 — from D01, D03; D02 has no HC score*. That p is still valid, but it says nothing about the
+     unscored well, which is usually the strongest; the exceedance test is the one that counts it.
   3. **Shape test — supporting.** Every well's upper-tail Anderson–Darling score against the control wells, on one
      plot, wells as the units like the two above.
   4. **Pooled shape test — description only.** One plot per comparison of all its nanowells against all the
@@ -11346,7 +11348,8 @@ The figure then reads from the top:
      per number of starting cells, from the occupancy ramp.
    * **Higher Criticism** (supporting): each well's highest score, then each comparison's curves, most extreme
      nanowells first. A curve rising well above the grey bundle near the left edge is a sparse excess. A well whose
-     most extreme nanowells are all past every control value has **no HC score**, said on both plots.
+     most extreme nanowells are all past every control value has **no HC score**, said on both plots; the group's
+     HC p then names the wells it was computed from.
    * **Shape test** (supporting): each well's upper-tail Anderson–Darling score.
    * **Pooled shape test** (description only): each comparison's pooled nanowells against the control's, the gap
      between the curves shaded. It treats every nanowell as independent, says so in its heading, and its p is not

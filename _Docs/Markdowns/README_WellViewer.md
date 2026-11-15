@@ -2816,7 +2816,11 @@ recently. The log line for a folder the automatic clean-up kept says the same.
   place it looked when it finds nothing. They are not uploaded or computed
   again; only what is still missing is sent, and if nothing is, the run ends
   with "Nothing to upload" — an empty-well blank whose own results are already
-  here is not uploaded on its own just to be recomputed. This needs the same images, the same host, and the
+  here is not uploaded on its own just to be recomputed. A run that ends this
+  way still records the two settings that change no well's numbers — the focus
+  cut you stated and whether auto-threshold is on — and, when auto-threshold is
+  on, computes the plate's thresholds on this computer for any channel that has
+  none, exactly as a local re-run of a finished plate does. This needs the same images, the same host, and the
   same settings that change the numbers (segmentation, channels, corrections,
   QC gates and so on); worker counts, the low-disk override and the run check
   do not matter. Change one that alters the numbers and the old output is

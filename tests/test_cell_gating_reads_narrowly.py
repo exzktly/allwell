@@ -18,7 +18,8 @@ final. ``tests/test_a_load_reads_cell_gating_once.py`` drives the real load.
 
 The fixture is the narrow-read one (``tests/test_narrow_rows.py``) with every
 verdict layer on, two changes made so the layers this tab reads bite inside the
-first frame (FOV 1, the earliest timepoint): cell 1 is below the QC area floor
+first frame (FOV 1; at its later timepoint once the layers are on, because the
+run flagged the field at 0 h): cell 1 is below the QC area floor
 — and the brightest cell of the well, so the optimizer's range moves with it —
 and cell 2 is outside the crop. It is doubled across two timepoints whose values
 differ threefold, so a first frame taken from the wrong timepoint, or an extent
@@ -154,18 +155,17 @@ def test_the_cdf_values_are_the_whole_frame_s(ctx, monkeypatch, layers):
 
 
 def test_the_fixture_s_layers_change_the_first_frame(ctx):
-    """What makes the equality above mean something: the QC and crop verdicts
-    drop two of the first frame's four cells, and the first frame is not the
-    later timepoint's."""
-    from review.features.home.cell_gating.controller import _first_frame_values
-
+    """What makes the equality above mean something: the layers move the first
+    frame and thin it. FOV 1 is flagged at 0 h and flagged fields are excluded,
+    so the first frame the analysis counts is FOV 1 at 24 h — the CDFs read the
+    population every plot counts — and there the QC and crop verdicts drop two
+    of its four cells."""
     ungated = _as_lists(_expected_first_frame(ctx))
     _layers_on(ctx)
     gated = _as_lists(_expected_first_frame(ctx))
     assert len(ungated[1]["gfp"]) == 4 and len(gated[1]["gfp"]) == 2
-    raw = _full(ctx)
-    later = _as_lists(_first_frame_values(raw[raw["timepoint"].astype(str) == "24"], CHANNELS, [RATIO]))
-    assert later[1]["gfp"] != gated[1]["gfp"]
+    kept = [ungated[1]["gfp"][i] for i in range(4) if i not in (QC_IN_FIRST_FRAME, CROP_IN_FIRST_FRAME)]
+    assert gated[1]["gfp"] == pytest.approx([3.0 * v for v in kept])
 
 
 def test_a_repeat_reads_nothing_and_a_new_ratio_reads_again(ctx, monkeypatch):

@@ -62,6 +62,7 @@ from pipeline.threshold_optimize import DEFAULT_SPECIFICITY_WEIGHT
 from review.features.home.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
     _cell_gating_valid_rows,
+    VALIDITY_COLUMNS,
     _distinct_timepoints,
     _earliest_timepoint,
     _gate_geom_sig,
@@ -296,8 +297,8 @@ class GatingWorker(QThread):
 def _first_frame_values(df, channels, ratios) -> tuple | None:
     """One well's first-frame cell areas, positive channel values and ratios, or ``None``.
 
-    Respects the crop region and the QC debris gate, not the fluorescence gate —
-    these CDFs are what that gate is set from.
+    Respects every inclusion layer except the fluorescence decision
+    (``_cell_gating_valid_mask``) — these CDFs are what that gate is set from.
     """
     if df is None or df.empty:
         return None
@@ -340,7 +341,7 @@ def _first_frame_values(df, channels, ratios) -> tuple | None:
 #: The verdict columns ``_cell_gating_valid_mask`` reads. The projectors write
 #: them onto a narrow read when their layer is on; asked for by name too, so a
 #: file that carries them itself keeps them in the narrow frame.
-_VALIDITY_COLUMNS = frozenset({"QC_Pass", "Crop_Pass", "FOV_Pass"})
+_VALIDITY_COLUMNS = VALIDITY_COLUMNS
 
 
 def _first_frame_columns(channels, ratios) -> set[str]:

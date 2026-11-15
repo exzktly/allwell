@@ -3625,7 +3625,11 @@ choice applies once, when the menu closes.
   others had been removed by the debris gate. The button then names what is
   kept (*FOVs 1–3, 5*), and the line beneath it says how many of the dataset's
   fields are being used. The Cell Gating curves and the optimizer use the kept
-  fields too, so a threshold is never set from a field you excluded. **All**
+  fields too, so a threshold is never set from a field you excluded — and the
+  same holds for every other way a cell leaves the analysis apart from the
+  intensity minimum and the scatter gates themselves: a cell you deleted by
+  hand, a field excluded in QC triage or flagged by the run, a focus or border
+  cut, an excluded saved set, the chosen size class. **All**
   in the menu puts every field back; **None** keeps no cells at all.
 
   The choice is saved with the dataset, beside your gates, and comes back when

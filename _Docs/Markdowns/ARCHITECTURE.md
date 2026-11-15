@@ -5592,11 +5592,21 @@ laid out as the two questions it answers, in the order the app applies them:
    The selection is
    `CellGatingState.fov_selection` and reaches the data as the `FOV_Pass`
    verdict layer (`review/data/fov_selection.py`, see §6.6b's roster), so it
-   composes with whichever inclusion source the radio pair below chooses. It is
-   also in `_cell_gating_valid_mask` beside QC and crop: the CDFs and the
-   optimizer read the population a threshold is set *for*, and a field
-   excluded from every calculation is not part of it; the CDFs' "first frame of
-   first FOV" is the first *kept* field. A muted line under the button says how
+   composes with whichever inclusion source the radio pair below chooses. The
+   CDFs and the optimizer read the population a threshold is set *for*:
+   `gating_compute._cell_gating_valid_mask` is `df_included_mask` over every
+   verdict layer except the fluorescence decision's own (`Included`, the
+   intensity floors, and `Gate_Pass`, the scatter gates — filtering by the gate
+   being set would be circular), so a field excluded from every calculation, a
+   flagged field or a cell deleted by hand cannot set the threshold the
+   remaining cells are read against, and a new verdict layer is honoured by
+   joining `VERDICT_LAYERS`. `VALIDITY_COLUMNS` is that roster, which the narrow
+   reads ask for by name; `tests/test_cell_gating_optimises_on_the_cells_the_plots_count.py`
+   holds the optimizer's count to the aggregate's, layer by layer. The CDFs'
+   "first frame of first FOV" is chosen among the valid cells
+   (`_cell_gating_first_frame_rows`): the first field with a cell the plots
+   count, at that field's first timepoint with one, so an excluded or flagged
+   first field moves the frame on rather than emptying the curves. A muted line under the button says how
    many of the dataset's fields are used, names a selected field the dataset
    does not have, and names the wells the selection could not apply to.
 2. **Fraction-on**, glossed as *which of the included cells count as ON*. The

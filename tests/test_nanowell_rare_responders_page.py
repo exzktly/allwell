@@ -378,38 +378,73 @@ def test_the_control_curve_is_dotted_on_the_page_as_its_title_says(page, qtbot):
     assert any("dotted: control" in t.get_text() for ax in fig.axes for t in ax.texts + [ax.title])
 
 
-def test_count_disagreeing_nanowells_are_excluded_by_default_and_kept_by_choice(page, qtbot):
+def _flag(st, wells, flag, sites=None):
+    """Set the run's *flag* on *wells*' nanowells (all, or the ``nw_q`` in *sites*) at the Timepoint t_a."""
+    rows = st.metrics["well"].isin(wells) & (st.metrics["timepoint"] == "t_a")
+    if sites is not None:
+        rows &= st.metrics["nw_q"].isin(sites)
+    st.metrics.loc[rows, flag] = True if flag != "identity_ok" else False
+
+
+def test_flagged_nanowells_are_kept_by_default_and_excluded_by_choice(page, qtbot):
     """Reported: the Rare responders test emptied both treatment groups on a plate whose Distribution view drew
-    their nanowells. The test leaves out a nanowell the run flagged as count-disagreeing; Distribution draws it. User
-    decision: a choice on the page, beside the direction. Here every drug nanowell is flagged at the Timepoint."""
+    their nanowells: the test left out every nanowell the run had flagged, and Distribution draws them. User decisions:
+    by default the test keeps them, as every other view does; each flag can be excluded under QC flags, and then the
+    figure says what it left out. Here every drug nanowell is flagged count-disagreeing at the Timepoint."""
     st = _open(qtbot, page)
-    drug = st.metrics["well"].isin(["B01", "B02"]) & (st.metrics["timepoint"] == "t_a")
-    st.metrics.loc[drug, "count_disagreement"] = True
+    _flag(st, ["B01", "B02"], "count_disagreement")
     _choose(page, "_nw_stats_test_cb", "rare")
     _choose(page, "_nw_control_cb", "ctrl")
-    choice = page.widgets.get("_nw_rare_disagreeing_cb")
-    assert choice.isVisibleTo(page.window) and choice.currentData() == "exclude" == st.rare_disagreeing
+    button = page.widgets.get("_nw_rare_qc_btn")
+    assert button.isVisibleTo(page.window) and button.text() == "QC flags: none excluded"
+    assert st.rare_qc_excluded == []
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-unit")), timeout=30000)
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders detected.")
+    assert st.rare_footer.counts.endswith("300 nanowells kept, 0 excluded")
+    assert not any(t.startswith("⚠ Left out by the run's flags") for t in _texts(page, "nw-rare-line"))
+    page.widgets.get("_nw_rare_qc_count_disagreement").trigger()          # the menu's tick, as a click sets it
+    assert st.rare_qc_excluded == ["count_disagreement"] and button.text() == "QC flags: 1 excluded"
     why = "nw-rare-why"
     qtbot.waitUntil(lambda: any("no treatment group has a nanowell left to test" in t for t in _texts(page, why)),
                     timeout=30000)
     assert any("drug: every one of its 120 nanowells was excluded before testing (QC: count_disagreement: 120)"
                in t for t in _texts(page, why))
-    _choose(page, "_nw_rare_disagreeing_cb", "keep")
-    assert st.rare_disagreeing == "keep"
-    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-unit")), timeout=30000)
-    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders detected.")
-    assert rc.KEPT_DISAGREEING in st.rare_footer.notes
     _choose(page, "_nw_stats_test_cb", "welch")
-    assert not choice.isVisibleTo(page.window)
+    assert not button.isVisibleTo(page.window)
 
 
-def test_the_count_disagreeing_choice_is_saved_with_the_page_and_a_bad_one_is_not_restored():
+@pytest.mark.parametrize("flag, column, label", [("count_disagreement", "count_disagreement", "count-disagreeing"),
+                                                 ("edge", "partially_visible", "partly visible"),
+                                                 ("fused", "fused", "on a tile seam (fused)"),
+                                                 ("identity", "identity_ok", "identity not confirmed")])
+def test_an_excluded_flag_s_nanowells_are_counted_on_the_figure(page, qtbot, flag, column, label):
+    """Two nanowells of each drug well (none of the responders) carry the flag: kept and unremarked by default;
+    left out once the flag's tick is set, and the figure says how many, since every other view draws them."""
+    st = _open(qtbot, page)
+    _flag(st, ["B01", "B02"], column, sites=[0, 1])
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    qtbot.waitUntil(lambda: st.rare_footer is not None, timeout=30000)
+    assert st.rare_footer.counts.endswith("300 nanowells kept, 0 excluded")
+    assert not any(t.startswith("⚠ Left out by the run's flags") for t in _texts(page, "nw-rare-line"))
+    page.widgets.get(f"_nw_rare_qc_{flag}").trigger()
+    assert st.rare_qc_excluded == [flag]
+    said = f"⚠ Left out by the run's flags before testing, as chosen under QC flags: 4 {label}. Other views draw them."
+    qtbot.waitUntil(lambda: said in _texts(page, "nw-rare-line"), timeout=30000)
+    assert st.rare_footer.counts.endswith("296 nanowells kept, 4 excluded")
+    assert rc.excluded_note([flag]) in st.rare_footer.notes
+
+
+def test_the_excluded_flags_are_saved_with_the_page_and_an_unknown_one_is_not_restored():
     from review.features.nanowell.state import NanowellState
 
+    assert NanowellState().rare_qc_excluded == []                         # nothing thrown away by default
     st = NanowellState()
-    st.rare_disagreeing = "keep"
+    st.rare_qc_excluded = ["fused", "count_disagreement"]
     again = NanowellState()
     again.apply_config(st.to_config())
-    assert again.rare_disagreeing == "keep"
-    again.apply_config({"rare_disagreeing": "maybe"})
-    assert again.rare_disagreeing == "exclude"
+    assert again.rare_qc_excluded == ["count_disagreement", "fused"]     # the roster's order
+    again.apply_config({"rare_qc_excluded": ["tilted", "edge"]})
+    assert again.rare_qc_excluded == ["edge"]
+    again.apply_config({"rare_qc_excluded": "edge"})
+    assert again.rare_qc_excluded == []

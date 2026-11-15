@@ -41,6 +41,7 @@ from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import _qc_controller as qcc
 from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell import _rare_controller as rc
+from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell.identity_compute import identity_note, marks_legend, timepoint_marks
 from review.features.nanowell import subset_compute as ss
@@ -54,7 +55,7 @@ from review.features.nanowell.renderer import (
     redraw_selection_rings, render_position, render_site_detail, render_trajectories, stamp_subset,
 )
 from review.features.nanowell.state import (
-    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, RARE_DIRECTIONS, RARE_DISAGREEING, ArrayLayers, COLOURINGS, POSITIONS,
+    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, RARE_DIRECTIONS, ArrayLayers, COLOURINGS, POSITIONS,
 )
 from review.features.nanowell.series_compute import (crop_metric_lines, long_format, metric_kinds, rim_focus_text,
                                                      site_metrics, site_series)
@@ -2947,10 +2948,15 @@ def set_stats_test(ctx, test: str) -> None:
     _set(ctx, "stats_test", test)
 
 
-def set_rare_disagreeing(ctx, choice: str) -> None:
-    """Whether the Rare responders test leaves out count-disagreeing nanowells (``NanowellState.rare_disagreeing``)."""
-    if choice in RARE_DISAGREEING:
-        _set(ctx, "rare_disagreeing", choice)
+def set_rare_qc_excluded(ctx, flag: str, excluded: bool) -> None:
+    """Leave out (*excluded*) or keep the nanowells the run flagged with *flag* (``rare_data_compute.RARE_QC_FLAGS``)
+    in the Rare responders test (``NanowellState.rare_qc_excluded``)."""
+    st = _state(ctx)
+    if st is None or flag not in RARE_QC_FLAGS:
+        return
+    now = {k for k in st.rare_qc_excluded if k in RARE_QC_FLAGS}
+    now = now | {flag} if excluded else now - {flag}
+    _set(ctx, "rare_qc_excluded", [k for k in RARE_QC_FLAGS if k in now])
 
 
 def set_rare_direction(ctx, direction: str) -> None:

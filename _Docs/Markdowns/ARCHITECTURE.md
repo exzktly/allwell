@@ -14020,10 +14020,14 @@ it never applies — a greyed control reads as one to unlock),
 resolves the timepoint as the view's samples do (the latest the drawn wells have when none is named), builds the
 per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — **the page's Metric**
 at that timepoint (`controller.metric_column`, labelled by `controller._label`), in the band's direction
-(`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*), leaving out
-count-disagreeing nanowells unless the band says *Count-disagreeing: kept* (`NanowellState.rare_disagreeing`, saved,
-`statistics_view.DISAGREEING`; `compose(keep_disagreeing=True)` drops the table's `qc_count_disagreement` column, so
-`qc_reasons` never sees it and the result is keyed apart, and Details carries `rc.KEPT_DISAGREEING`) — and keys the
+(`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*), keeping every
+nanowell the run flagged unless the band's *QC flags ▾* excludes the flag (`NanowellState.rare_qc_excluded`, saved,
+empty by default; `rare_data_compute.RARE_QC_FLAGS` is the roster: count-disagreeing, partly visible, fused, identity
+not confirmed). `compose(exclude_qc=)` drops every other flag's column from the table, so `qc_reasons` never sees it
+and each choice is keyed apart; an excluded flag that left nanowells out is counted on the figure, in a lead line that
+is never cut (`rc.qc_line`, from `rare_data_compute.qc_flag_counts`), and named in Details (`rc.excluded_note`). Every
+other view draws flagged nanowells, so this keeps the test's nanowells the ones they draw unless the user chooses
+otherwise — and keys the
 result on a hash of that table, the parameters and the Metric's label,
 so a key cannot return a result computed for other numbers. **With the moving average on**, `_compose_statistics`
 passes `moving`, `baseline_moving` (already `moving_compute.baseline_window_for`'s) and `moving_centred` (0 for a

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from PySide6.QtWidgets import QComboBox, QPushButton
 
+from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS
 from review.features.nanowell import _rare_controller as rc
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import statistics_compute as sc
@@ -42,12 +43,20 @@ STATS_CONTROL_TIP = ("Compare each sample with this one only — fewer compariso
 
 #: The Rare responders test's direction choices, as the band offers them: ``(label, NanowellState.rare_direction)``.
 DIRECTIONS = (("Responders higher", "higher"), ("Responders lower", "lower"))
-#: What the Rare responders test does with count-disagreeing nanowells: ``(label, NanowellState.rare_disagreeing)``.
-DISAGREEING = (("Count-disagreeing: excluded", "exclude"), ("Count-disagreeing: kept", "keep"))
-_DISAGREEING_TIP = ("A nanowell is count-disagreeing when its segmented cell count and its foreground area's estimate\n"
-                    "differ by more than 30% and a cell — often a clump segmented as one cell, in a crowded well.\n"
-                    "Excluded: left out of the test, as fused and edge nanowells are, since a miscount can hide or\n"
-                    "fake a responder. Kept: tested as counted, as the Distribution view draws them.")
+_QC_TIP = ("The run flags some nanowells at each timepoint without removing them. Every view draws them, and the\n"
+           "Rare responders test tests them, unless a flag is ticked here to exclude its nanowells:\n"
+           "• count-disagreeing: the cell count and the estimate from the cells' area differ by more than 30%\n"
+           "  and a cell — often a clump outlined as one cell, or cells larger than the tile's typical cell;\n"
+           "• partly visible: only part of the nanowell was seen or imaged;\n"
+           "• on a tile seam (fused): measured from a blend of two tiles;\n"
+           "• identity not confirmed: its address may name another nanowell at this timepoint.\n"
+           "The figure says how many an excluded flag left out.")
+
+
+def qc_button_text(excluded) -> str:
+    """The QC flags button's label: how many of the run's flags the test excludes."""
+    excluded = [k for k in RARE_QC_FLAGS if k in set(excluded)]
+    return "QC flags: none excluded" if not excluded else f"QC flags: {len(excluded)} excluded"
 _DIRECTION_TIP = ("Which tail of the Metric a rare responder is in. Higher: a few nanowells far above anything the\n"
                   "control wells reach (growth, a rise in signal). Lower: far below (death, a loss of signal).")
 
@@ -59,11 +68,12 @@ class StatisticsControls:
     group: object
     flagged: object = None
     direction: object = None
-    disagreeing: object = None
+    qc: object = None
+    qc_actions: dict = None
 
     @property
     def signalling(self) -> tuple:
-        return tuple(w for w in (self.unit, self.test, self.direction, self.disagreeing) if w is not None)
+        return tuple(w for w in (self.unit, self.test, self.direction) if w is not None)
 
 
 def build_statistics_controls(ctx, band) -> StatisticsControls:
@@ -90,15 +100,37 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     direction.setToolTip(_DIRECTION_TIP)
     direction.currentIndexChanged.connect(lambda _i: nwc.set_rare_direction(ctx, direction.currentData() or "higher"))
     ctx.widgets.register("_nw_rare_direction_cb", direction)
-    disagreeing = QComboBox()
-    for label, key in DISAGREEING:
-        disagreeing.addItem(label, key)
-    disagreeing.setToolTip(_DISAGREEING_TIP)
-    disagreeing.currentIndexChanged.connect(
-        lambda _i: nwc.set_rare_disagreeing(ctx, disagreeing.currentData() or "exclude"))
-    ctx.widgets.register("_nw_rare_disagreeing_cb", disagreeing)
-    group = band.add_scope("Compare", unit, test, direction, disagreeing, flagged)
-    return StatisticsControls(unit, test, group, flagged, direction, disagreeing)
+    qc, qc_actions = _qc_button(ctx)
+    group = band.add_scope("Compare", unit, test, direction, qc, flagged)
+    return StatisticsControls(unit, test, group, flagged, direction, qc, qc_actions)
+
+
+def _qc_button(ctx):
+    """*QC flags ▾*: one tick per flag of the run (``rare_data_compute.RARE_QC_FLAGS``); ticked leaves its nanowells
+    out of the Rare responders test. ``triggered`` fires on a click only, so setting the ticks from the state cannot loop."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QMenu, QToolButton
+
+    from widgets.owned_action import owned_action
+
+    button = QToolButton()
+    button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    button.setPopupMode(QToolButton.InstantPopup)
+    button.setProperty("variant", "secondary")
+    button.setProperty("hasMenu", True)
+    button.setToolTip(_QC_TIP)
+    button.setText(qc_button_text(()))
+    menu = QMenu(button)
+    button.setMenu(menu)
+    actions = {}
+    for key, (_column, label) in RARE_QC_FLAGS.items():
+        action = owned_action(menu, f"Exclude {label}")
+        action.setCheckable(True)
+        action.triggered.connect(lambda on=False, key=key: nwc.set_rare_qc_excluded(ctx, key, bool(on)))
+        ctx.widgets.register(f"_nw_rare_qc_{key}", action)
+        actions[key] = action
+    ctx.widgets.register("_nw_rare_qc_btn", button)
+    return button, actions
 
 
 def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool) -> None:
@@ -108,12 +140,16 @@ def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool)
     # Hidden, not greyed: the rare-responder tests always take wells as the units, so the choice never applies to
     # them, and a greyed control the user cannot use reads as one they must first unlock.
     controls.unit.setVisible(not rare)
-    for combo, value in ((controls.direction, st.rare_direction), (controls.disagreeing, st.rare_disagreeing)):
-        if combo is not None:
-            combo.setVisible(rare)
-            index = combo.findData(value)
-            if index >= 0:
-                combo.setCurrentIndex(index)
+    if controls.direction is not None:
+        controls.direction.setVisible(rare)
+        index = controls.direction.findData(st.rare_direction)
+        if index >= 0:
+            controls.direction.setCurrentIndex(index)
+    if controls.qc is not None:
+        controls.qc.setVisible(rare)
+        controls.qc.setText(qc_button_text(st.rare_qc_excluded))
+        for key, action in (controls.qc_actions or {}).items():
+            action.setChecked(key in st.rare_qc_excluded)
     if controls.flagged is not None:
         controls.flagged.setVisible(rare)
         ready = bool(st.rare_flagged)

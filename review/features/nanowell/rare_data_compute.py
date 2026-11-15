@@ -332,6 +332,26 @@ def exclusion_counts(exclusions: pd.DataFrame) -> dict:
 #: The site table's per-row flags that become QC flags of a nanowell at its final timepoint (``nanowell_task``).
 SITE_QC_FLAGS = {"fused": "qc_fused", "partially_visible": "qc_edge", "count_disagreement": "qc_count_disagreement"}
 
+#: The run's flags a nanowell can be left out of the Rare responders test for: the page's key -> (the table's column,
+#: what the page calls it). Every other view draws such nanowells, and so does this test unless the page excludes the
+#: flag (``NanowellState.rare_qc_excluded``); the state at the timepoint and a missing value exclude everywhere, so are
+#: not here.
+RARE_QC_FLAGS = {
+    "count_disagreement": ("qc_count_disagreement", "count-disagreeing"),
+    "edge": ("qc_edge", "partly visible"),
+    "fused": ("qc_fused", "on a tile seam (fused)"),
+    "identity": ("qc_identity", "identity not confirmed"),
+}
+
+
+def qc_flag_counts(exclusions: pd.DataFrame) -> dict:
+    """``flag key -> how many nanowells it left out`` for the :data:`RARE_QC_FLAGS` among *exclusions*' reasons (a
+    nanowell left out for two flags counts under each), only the flags that left any out, in the roster's order."""
+    counts = exclusion_counts(exclusions)
+    by_reason = {f"QC: {column[len(QC_PREFIX):]}": key for key, (column, _label) in RARE_QC_FLAGS.items()}
+    found = {by_reason[r]: n for r, n in counts.items() if r in by_reason}
+    return {key: found[key] for key in RARE_QC_FLAGS if found.get(key)}
+
 
 def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: str, *, plate_id: str = "plate",
                       crop_path=None, value_column: str | None = None,

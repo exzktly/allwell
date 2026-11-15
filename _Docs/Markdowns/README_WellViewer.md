@@ -11019,17 +11019,23 @@ in the report — when:
 - it has **no value of the Metric at the Timepoint** — for a fold change, no cell at the Baseline (N0 = 0), whose
   fold change is undefined, not infinite;
 - it has **no count at the Timepoint**, or is not measurable there (occluded, clipped, unaddressed): its state
-  is the reason;
-- the run flagged it as **fused**, **partly visible** (an edge nanowell) or **count-disagreeing**, or the
-  **identity check** could not confirm it is the same nanowell over time.
+  is the reason.
 
-A nanowell is **count-disagreeing** when its segmented cell count and the estimate from its foreground area differ
-by more than 30 % and by at least one cell — often a clump segmented as one cell, which is common in crowded wells
-at late timepoints. The Distribution view draws such nanowells; the Rare responders test leaves them out by default,
-since a miscount can hide or fake a responder. **Count-disagreeing: excluded / kept**, beside *Responders higher /
-lower*, chooses: *kept* tests them as counted, and Details says so. The choice is saved with the page. If the test
-says a treatment group lost every nanowell to *QC: count_disagreement* while the Distribution view shows them, this
-is why.
+**The run's flags.** At each timepoint the run also flags some nanowells, without removing them:
+
+- **count-disagreeing**: its cell count (the cells Cellpose outlined) and the estimate from the cells' area (that
+  area divided by the tile's typical isolated cell) differ by more than 30 % and by at least one cell — often a
+  clump outlined as one cell, or cells larger than the tile's typical cell;
+- **partly visible**: only part of the nanowell was seen or imaged;
+- **on a tile seam (fused)**: measured from a blend of two tiles;
+- **identity not confirmed**: its address may name another nanowell at this timepoint.
+
+Every view draws flagged nanowells, and by default the Rare responders test tests them too. **QC flags ▾**, beside
+*Responders higher / lower*, has a tick per flag: a ticked flag's nanowells are left out of the test, the figure
+says how many each one left out (*⚠ Left out by the run's flags before testing, as chosen under QC flags: 40
+count-disagreeing…*), and Details says which flags were excluded. Excluding a flag guards against a miscount or a
+nanowell that is not what it seems, at the cost of testing fewer nanowells than the other views draw. The choice is
+saved with the page.
 
 When these leave the control group, every treatment group, or every group with no nanowell at all, the test does
 not run and the figure says, for each group, how many nanowells were excluded and why; a treatment group they empty

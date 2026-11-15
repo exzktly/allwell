@@ -39,6 +39,7 @@ from __future__ import annotations
 import pandas as pd
 
 from review.features.nanowell import controller as _controller
+from review.features.nanowell import distribution_compute as dc
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._rare_render import render_rare_page
@@ -81,16 +82,12 @@ def result_key(table: pd.DataFrame, params: RareParams) -> tuple:
 
 
 def drawn_timepoint(metrics: pd.DataFrame, groups: dict, timepoint: str) -> str:
-    """*timepoint*, or — when the page names none — the latest the drawn wells have, as the Statistics view's own
-    samples are drawn (``controller.shown_timepoint``)."""
-    if timepoint:
-        return timepoint
+    """The timepoint the test reads: the page's *timepoint* when the drawn wells have it, else the latest they have —
+    resolved by the call the Statistics view's sample tests resolve theirs with
+    (``distribution_compute.drawn_timepoint``), so the one Timepoint on the page means the same thing whichever
+    test is chosen. The page's Timepoint can name one only another well has (it is shared with the Array view)."""
     wells = [w for members in groups.values() for w in members]
-    rows = metrics[metrics["well"].isin(wells)]
-    if rows.empty:
-        return ""
-    order = "tp_order" if "tp_order" in rows else "time_h"
-    return str(rows.sort_values(order, kind="stable")["timepoint"].iloc[-1])
+    return dc.drawn_timepoint(metrics[metrics["well"].isin(wells)], timepoint)
 
 
 def why_not(groups: dict, control: str, metrics: pd.DataFrame, timepoint: str, hidden: dict | None = None,

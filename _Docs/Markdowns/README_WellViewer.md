@@ -7265,7 +7265,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   every group again; *vs* keeps the control you chose meanwhile. Every other group drawn is tested against the
   control. The value is the page's **Metric** at the **Timepoint** — a fold-change metric compares each nanowell
   with its own **Baseline** — with no grouping by starting cells, and **Responders higher / lower** (beside the Test)
-  chooses the tail the tests look in. **Subset**, Cell Gating, the rim focus rule and the **Moving average** apply:
+  chooses the tail the tests look in. When the Timepoint names one the drawn wells were not imaged at (the page has
+  one Timepoint for every view, and the Array view offers a single well's), the test reads the latest timepoint they
+  have, as the other tests on this view do, and Details names the timepoint read. **Subset**, Cell Gating, the rim focus rule and the **Moving average** apply:
   with the moving average on, each nanowell's value is its moving average at the Timepoint, taken exactly as the
   other tests on this view take it, and the figure carries the *Moving average over N timepoints* tag. The Fixed
   cohort does not apply, and the report says so when it is ticked; *Compare* is hidden while this test is chosen,

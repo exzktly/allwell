@@ -14123,7 +14123,10 @@ refuses, since it compares no samples). `controller._compose_statistics` hands t
 `_rare_controller.compose`, which takes each group the page draws as a condition and the *vs* control as the control
 (`statistics_view.control_choices` lists groups for this test on either unit, and the unit combo is hidden, since
 it never applies — a greyed control reads as one to unlock),
-resolves the timepoint as the view's samples do (the latest the drawn wells have when none is named), builds the
+resolves the timepoint through the call the view's sample tests resolve theirs with
+(`rc.drawn_timepoint` → `distribution_compute.drawn_timepoint`: the page's Timepoint when the drawn wells have it,
+else the latest they have — the page's one Timepoint is shared with the Array view, so it can name a timepoint only
+another well has), builds the
 per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — **the page's Metric**
 at that timepoint (`controller.metric_column`, labelled by `controller._label`), in the band's direction
 (`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*), keeping every

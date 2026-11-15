@@ -519,7 +519,7 @@ def test_every_comparison_is_drawn_one_row_per_test_however_many_and_however_nar
     res = rr.analyse(t)
     assert len(res.units) == 4
     lines = [f"line {i} " + "x" * 150 for i in range(12)]
-    for width, columns in ((14.5, 3), (10.0, 3), (7.0, 2), (4.06, 1)):
+    for width, columns in ((14.5, 3), (10.0, 2), (7.0, 2), (4.06, 1)):
         assert rd.columns_for(width) == columns
         fig = _laid_out(res, width, lines, note="a note")
         height = fig.get_figheight()
@@ -1291,7 +1291,9 @@ def _drawn_overlaps(fig) -> list:
         for u, c in boxes[i + 1:]:
             if id(t) in slanted and id(u) in slanted:
                 continue
-            if min(b.x1, c.x1) - max(b.x0, c.x0) > 1 and min(b.y1, c.y1) - max(b.y0, c.y0) > 1:
+            # Touching counts: two texts less than 2 px apart read as one (the well names "A01A02A03", an x label's
+            # second line on the next caption).
+            if min(b.x1, c.x1) - max(b.x0, c.x0) > -2 and min(b.y1, c.y1) - max(b.y0, c.y0) > -2:
                 found.append(("text on text", t.get_text()[:30], u.get_text()[:30]))
     return found
 
@@ -1302,7 +1304,10 @@ def test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width(n_d
     (3.88 in) the margins were shares of the width, so text started 0.08 in from the edge — under the role bar,
     which ends 0.11 in in — and every block's heading, p line and the panels' y labels ran under it; titles wider than
     their panel ran off the figure; with many wells, count labels and well names ran into one another. Measured on the
-    drawn figure, at a desk's, a narrow window's and a phone's width, with one to four comparisons."""
+    drawn figure, at a desk's, a narrow window's and a phone's width, with one to four comparisons, after the page's
+    own passes: its 9 pt sizes, its X tick angle (which laid the upright well names flat into one another until the
+    renderer recorded their angle) and, on the phone, its label fit (which broke an x label onto a second line that
+    sat on the next comparison's caption)."""
     t = [plate(n=120, responders=4, seed=0, treatment="drug0")]
     t += [plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(1, n_drugs)]
     res = rr.analyse(pd.concat(t))
@@ -1311,17 +1316,45 @@ def test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width(n_d
         # The page's style pass draws every tick label, axis label and title at 9 pt (Properties' sizes, measured on
         # the page), larger than matplotlib's defaults: a margin that clears the role bar at the defaults ran the
         # page's y labels under it on a phone.
+        from review.core import plot_style
+
         for ax in fig.axes:
             ax.tick_params(labelsize=9)
             for label in (ax.xaxis.label, ax.yaxis.label, ax.title):
                 label.set_fontsize(9)
+            plot_style._style_x_tick_angle(ax, 0)     # the page's X tick angle at its default: "the plot's own"
         if width < 5:
             # And on a phone it breaks each label to fit its axes (``plot_style._fit_labels_to_phone``), which stands a
             # y label two lines wide — the shape that ran under the role bar.
             from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-            from review.core import plot_style
-
             FigureCanvasAgg(fig).draw()
             plot_style._fit_labels_to_phone(fig)
         assert _drawn_overlaps(fig) == [], width
+
+
+def test_a_shared_panel_too_narrow_for_every_well_wraps_its_comparisons_onto_another():
+    """With six control wells and four comparisons of three wells each, a phone's shared panel would give each well
+    about 8 pt — less than an upright 9 pt label — and the well names ran into one another. The panel wraps as the
+    curve panels do: as many comparisons as fit with every well's slot at least ``MIN_SLOT_PT``, the rest on another
+    panel below, the control wells drawn again on each, and every comparison on exactly one."""
+    from review.features.nanowell import _rare_render as rd
+
+    t = [plate(n=120, responders=4, seed=0, treatment="drug0")]
+    t += [plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(1, 4)]
+    res = rr.analyse(pd.concat(t))
+    desk = _laid_out(res, 12.58)
+    assert [ax.get_gid() for ax in desk.axes if str(ax.get_gid()).startswith("nw-rare-shared:exceedance")] == [
+        "nw-rare-shared:exceedance"]                                             # the desk holds them all
+    phone = _laid_out(res, 3.88)
+    panels = [ax for ax in phone.axes if str(ax.get_gid()).startswith("nw-rare-shared:exceedance")]
+    assert len(panels) > 1
+    drawn = []
+    for ax in panels:
+        controls = [c for c in ax.collections if c.get_gid() == "rare-exceed-control"]
+        assert controls and len(controls[0].get_offsets()) == 6                # every control well, on every panel
+        groups = [t.get_text().split("\n")[0] for t in ax.texts if t.get_gid() == "rare-exceed-group"]
+        drawn += groups[1:]                                                    # after the control's own name
+        slot_pt = ax.get_position().width * 3.88 * 72 / (ax.get_xlim()[1] - ax.get_xlim()[0])
+        assert slot_pt >= rd.MIN_SLOT_PT, slot_pt
+    assert sorted(drawn) == sorted(u.label for u in res.units)                  # each comparison exactly once

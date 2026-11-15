@@ -1,6 +1,6 @@
 """The field-quality record is built from what the run actually measured.
 
-Full-app review rows C3 and C10 (``_Docs/Markdowns/FULL_REVIEW_TRACKER.md``): the record's median nuclear
+The full-app review (pull request #1343), rows C3 and C10: the record's median nuclear
 area read a key no cell record carries, so it was ``None`` on every field of every run; its nucleus count was
 the largest label id, which over-counts whenever the ids have gaps; and a cell with no perimeter was given a
 circularity of 0.0.

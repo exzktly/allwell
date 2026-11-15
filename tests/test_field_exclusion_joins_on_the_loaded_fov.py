@@ -1,6 +1,6 @@
 """A flagged or hand-excluded field drops its cells whatever way the run spelled the field.
 
-Full-app review row B1 (``_Docs/Markdowns/FULL_REVIEW_TRACKER.md``). The run's field-quality block and the
+The full-app review (pull request #1343), row B1. The run's field-quality block and the
 hand-exclusion map key a field by the raw filename token; ``load_well_csv`` normalises the frame's ``fov``
 (``"01"`` -> ``"1"``, no field slot -> ``"1"``). Joined as written, a zero-padded or field-less plate matched
 nothing: the panel read "Currently excluding 1 field" while every cell of that field stayed included.

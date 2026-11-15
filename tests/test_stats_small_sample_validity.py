@@ -1,6 +1,6 @@
 """The statistics are valid at the replicate counts the app treats as normal.
 
-Three findings of the full-app review (``_Docs/Markdowns/FULL_REVIEW_TRACKER.md``, rows S1-S3), each held
+Three findings of the full-app review (pull request #1343), rows S1-S3, each held
 against a reference this file computes independently of the code under test:
 
 * **S1** — a pair whose test could not be computed is not a member of the Benjamini-Hochberg family.

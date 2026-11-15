@@ -1,6 +1,6 @@
 """Two archives that name one well are refused, by the run, the remote staging and the Analyze readout.
 
-Full-app review row H1 (``_Docs/Markdowns/FULL_REVIEW_TRACKER.md``). ``A1.zip`` beside ``A01.zip`` were both
+The full-app review (pull request #1343), row H1. ``A1.zip`` beside ``A01.zip`` were both
 accepted and both run as well A01; each wrote the well's one CSV, so the second to finish replaced the first's
 rows (fields 1-2 survived with one worker, fields 3-4 with two) and the run report counted the well complete.
 """

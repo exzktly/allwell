@@ -1,6 +1,6 @@
 """A cell reads the same whether the field around it is sparse or crowded.
 
-Full-app review rows C1 and C2 (``_Docs/Markdowns/FULL_REVIEW_TRACKER.md``). Identical synthetic cells of a
+The full-app review (pull request #1343), rows C1 and C2. Identical synthetic cells of a
 known mean over a known background, at increasing cover:
 
 * ``empty_well`` fitted the blank to the dimmest 60% of the frame, which holds cell pixels once cells cover

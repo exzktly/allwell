@@ -519,7 +519,7 @@ def test_every_comparison_is_drawn_one_row_per_test_however_many_and_however_nar
     res = rr.analyse(t)
     assert len(res.units) == 4
     lines = [f"line {i} " + "x" * 150 for i in range(12)]
-    for width, columns in ((14.5, 3), (10.0, 3), (7.0, 2), (4.06, 1)):
+    for width, columns in ((14.5, 3), (10.0, 2), (7.0, 2), (4.06, 1)):
         assert rd.columns_for(width) == columns
         fig = _laid_out(res, width, lines, note="a note")
         height = fig.get_figheight()
@@ -1244,3 +1244,163 @@ def test_a_group_p_computed_without_an_unscored_well_names_the_wells_it_used():
     assert details and details[0].endswith(" — from drug0, drug1; drug2 has no HC score")
     # Every well scored, or none: nothing to qualify.
     assert rx.scored_note(rr.analyse(plate(n_ctrl=3, n_treat=3, n=100, seed=4)).units[0], "hc") == ""
+
+
+def _drawn_overlaps(fig) -> list:
+    """Every overlap on a drawn rare page that a reader sees: text running under a block's role bar or off the
+    figure, text crossing a block's top or bottom edge, and text on text. Tick labels outside their axis' limits are
+    not drawn and are skipped; so is the overlap of two slanted tick labels' upright bounding boxes, which a reader
+    does not see."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    from review.features.nanowell import _rare_render as rd
+
+    canvas = FigureCanvasAgg(fig)
+    canvas.draw()
+    renderer = canvas.get_renderer()
+
+    def ticks(ax):
+        out = []
+        for labels, values, lim in ((ax.get_xticklabels(), ax.get_xticks(), ax.get_xlim()),
+                                    (ax.get_yticklabels(), ax.get_yticks(), ax.get_ylim())):
+            lo, hi = sorted(lim)
+            out += [t for t, v in zip(labels, values) if lo - 1e-9 <= v <= hi + 1e-9 and t.get_text().strip()]
+        return out
+
+    texts = [t for t in fig.texts if t.get_text().strip()]
+    for ax in fig.axes:
+        if ax.get_gid() == rd.PAGE_MARK:
+            continue
+        texts += [t for t in (ax.title, ax.xaxis.label, ax.yaxis.label, *ax.texts) if t.get_text().strip()]
+        texts += ticks(ax)
+    boxes = [(t, t.get_window_extent(renderer)) for t in texts]
+    bars = [ln.get_window_extent(renderer) for ln in fig.lines if str(ln.get_gid()).startswith("nw-rare-block-role")]
+    fills = [p.get_window_extent(renderer) for p in fig.patches if str(p.get_gid()).startswith("nw-rare-block:")]
+    width = fig.bbox.width
+    found = []
+    for t, b in boxes:
+        name = t.get_text()[:40].replace("\n", " / ")
+        if b.x0 < -0.5 or b.x1 > width + 0.5:
+            found.append(("off the figure", name))
+        if any(b.x0 < bar.x1 + 2 and b.y0 < bar.y1 and b.y1 > bar.y0 for bar in bars):
+            found.append(("under a role bar", name))
+        if any(b.x1 > f.x0 and b.x0 < f.x1 and (b.y0 < f.y1 < b.y1 or b.y0 < f.y0 < b.y1) for f in fills):
+            found.append(("across a block's edge", name))
+    slanted = {id(t) for t, _b in boxes if t.get_rotation() not in (0.0, 90.0, 270.0)}
+    for i, (t, b) in enumerate(boxes):
+        for u, c in boxes[i + 1:]:
+            if id(t) in slanted and id(u) in slanted:
+                continue
+            # Touching counts: two texts less than 2 px apart read as one (the well names "A01A02A03", an x label's
+            # second line on the next caption).
+            if min(b.x1, c.x1) - max(b.x0, c.x0) > -2 and min(b.y1, c.y1) - max(b.y0, c.y0) > -2:
+                found.append(("text on text", t.get_text()[:30], u.get_text()[:30]))
+    return found
+
+
+@pytest.mark.parametrize("font", ["the page's", "DejaVu Sans"])
+@pytest.mark.parametrize("n_drugs", [1, 3, 4])
+def test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width(n_drugs, font, monkeypatch):
+    """Reported: the colour bar overlapped the text, and the grey blocks the text around them. On a phone's figure
+    (3.88 in) the margins were shares of the width, so text started 0.08 in from the edge — under the role bar,
+    which ends 0.11 in in — and every block's heading, p line and the panels' y labels ran under it; titles wider than
+    their panel ran off the figure; with many wells, count labels and well names ran into one another. Measured on the
+    drawn figure, at a desk's, a narrow window's and a phone's width, with one to four comparisons, after the page's
+    own passes: its 9 pt sizes, its X tick angle (which laid the upright well names flat into one another until the
+    renderer recorded their angle) and, on the phone, its label fit (which broke an x label onto a second line that
+    sat on the next comparison's caption)."""
+    # And in matplotlib's fallback face: CI's runner drew DejaVu Sans, a fifth wider than the bundled Inter, and the
+    # lines wrapped by an average character width ran off the figure there while fitting here.
+    import matplotlib
+
+    if font == "DejaVu Sans":
+        monkeypatch.setitem(matplotlib.rcParams, "font.family", ["DejaVu Sans"])
+    t = [plate(n=120, responders=4, seed=0, treatment="drug0")]
+    t += [plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(1, n_drugs)]
+    res = rr.analyse(pd.concat(t))
+    for width in (12.58, 7.0, 3.88):
+        fig = _laid_out(res, width, ["a line"], lead=["⚠ a lead line"], note="a note")
+        # The page's style pass draws every tick label, axis label and title at 9 pt (Properties' sizes, measured on
+        # the page), larger than matplotlib's defaults: a margin that clears the role bar at the defaults ran the
+        # page's y labels under it on a phone.
+        from review.core import plot_style
+
+        for ax in fig.axes:
+            ax.tick_params(labelsize=9)
+            for label in (ax.xaxis.label, ax.yaxis.label, ax.title):
+                label.set_fontsize(9)
+            plot_style._style_x_tick_angle(ax, 0)     # the page's X tick angle at its default: "the plot's own"
+        if width < 5:
+            # And on a phone it breaks each label to fit its axes (``plot_style._fit_labels_to_phone``), which stands a
+            # y label two lines wide — the shape that ran under the role bar.
+            from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+            FigureCanvasAgg(fig).draw()
+            plot_style._fit_labels_to_phone(fig)
+        assert _drawn_overlaps(fig) == [], width
+
+
+def test_a_shared_panel_too_narrow_for_every_well_wraps_its_comparisons_onto_another():
+    """With six control wells and four comparisons of three wells each, a phone's shared panel would give each well
+    about 8 pt — less than an upright 9 pt label — and the well names ran into one another. The panel wraps as the
+    curve panels do: as many comparisons as fit with every well's slot at least ``MIN_SLOT_PT``, the rest on another
+    panel below, the control wells drawn again on each, and every comparison on exactly one."""
+    from review.features.nanowell import _rare_render as rd
+
+    t = [plate(n=120, responders=4, seed=0, treatment="drug0")]
+    t += [plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(1, 4)]
+    res = rr.analyse(pd.concat(t))
+    desk = _laid_out(res, 12.58)
+    assert [ax.get_gid() for ax in desk.axes if str(ax.get_gid()).startswith("nw-rare-shared:exceedance")] == [
+        "nw-rare-shared:exceedance"]                                             # the desk holds them all
+    phone = _laid_out(res, 3.88)
+    panels = [ax for ax in phone.axes if str(ax.get_gid()).startswith("nw-rare-shared:exceedance")]
+    assert len(panels) > 1
+    drawn = []
+    for ax in panels:
+        controls = [c for c in ax.collections if c.get_gid() == "rare-exceed-control"]
+        assert controls and len(controls[0].get_offsets()) == 6                # every control well, on every panel
+        groups = [t.get_text().split("\n")[0] for t in ax.texts if t.get_gid() == "rare-exceed-group"]
+        drawn += groups[1:]                                                    # after the control's own name
+        slot_pt = ax.get_position().width * 3.88 * 72 / (ax.get_xlim()[1] - ax.get_xlim()[0])
+        assert slot_pt >= rd.MIN_SLOT_PT, slot_pt
+    assert sorted(drawn) == sorted(u.label for u in res.units)                  # each comparison exactly once
+
+
+def test_a_panel_keeps_room_under_it_for_every_line_its_x_label_is_broken_onto():
+    """Seen on a phone: the page's label fit breaks an x label wider than its panel onto a second line
+    (``plot_style._fit_labels_to_phone``), and that line sat on the next comparison's caption. Under each
+    per-comparison panel, the room down to the next caption — or to its block's bottom edge — holds the tick labels
+    and every line of the label as broken, at the page's 9 pt and matplotlib's tick and label spacing, with 2 pt to
+    spare."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    from review.core import plot_style
+
+    t = [plate(n=120, responders=4, seed=0, treatment="drug0")]
+    t += [plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(1, 3)]
+    res = rr.analyse(pd.concat(t))
+    fig = _laid_out(res, 3.88)
+    for ax in fig.axes:
+        ax.tick_params(labelsize=9)
+        for label in (ax.xaxis.label, ax.yaxis.label, ax.title):
+            label.set_fontsize(9)
+    FigureCanvasAgg(fig).draw()
+    plot_style._fit_labels_to_phone(fig)
+    height_pt = fig.get_figheight() * 72
+    checked = 0
+    for ax in fig.axes:
+        gid = str(ax.get_gid())
+        if not gid.startswith("nw-rare-panel:"):
+            continue
+        key, i = gid.split(":")[1], int(gid.split(":")[2])
+        lines = ax.xaxis.label.get_text().count("\n") + 1
+        tick = ax.xaxis.get_major_ticks()[0]
+        need = (tick.tick1line.get_markersize() + tick.get_pad() + 9 * 1.2 + ax.xaxis.labelpad
+                + lines * 9 * ax.xaxis.label._linespacing + 2)
+        below = [t.get_position()[1] for t in fig.texts if t.get_gid() == f"nw-rare-comparison:{key}:{i + 1}"]
+        floor = below[0] if below else next(p.get_y() for p in fig.patches if p.get_gid() == f"nw-rare-block:{key}")
+        room = (ax.get_position().y0 - floor) * height_pt
+        assert room >= need, (gid, lines, round(room, 1), round(need, 1))
+        checked += lines > 1
+    assert checked                          # the fixture's x label is broken onto two lines on this phone's panels

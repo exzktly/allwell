@@ -22,6 +22,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from review.core.plot_style import own_xtick_angle
 from review.features.nanowell.rare_data_compute import ALL
 from review.features.nanowell import rare_export_compute as rx
 from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
@@ -410,36 +411,65 @@ def render_hc(fig, unit) -> None:
     draw_hc(_new_axes(fig, 1)[0], unit)
 
 
-def _wrapped(fig, lines, width_frac: float, pt: float = None, indent: str = "   ") -> list[str]:
-    """*lines* wrapped to what fits *width_frac* of the figure's width at *pt* (the report's size) in the body face,
-    whose average character is about half its point size wide."""
+def _wrapped(fig, lines, width_frac: float, pt: float = None, indent: str = "   ", *, bold: bool = False) -> list[str]:
+    """*lines* broken between words so each drawn line fits *width_frac* of the figure's width at *pt* (the report's
+    size), measured in the face the figure draws with. Measured rather than estimated from an average character: the
+    estimate was right for the bundled Inter and short by a fifth for DejaVu Sans, matplotlib's fallback where the
+    bundled face is not registered, and the figure's widest lines ran off its right edge. A single word wider than the
+    room keeps its own line rather than being cut."""
+    from matplotlib.backends.backend_agg import RendererAgg
+    from matplotlib.font_manager import FontProperties
+
     pt = pt or _REPORT_PT
-    chars = max(30, int(fig.get_figwidth() * width_frac * 72 / (pt * 0.52)))
-    return [part for line in lines for part in (textwrap.wrap(line, chars, subsequent_indent=indent) or [""])]
+    room = fig.get_figwidth() * width_frac * 72                       # points
+    renderer = RendererAgg(1, 1, 72)                                   # 72 dpi: a width in pixels is one in points
+    prop = FontProperties(size=pt, weight="bold" if bold else "normal")
+
+    def width_of(text: str) -> float:
+        return renderer.get_text_width_height_descent(text, prop, ismath=False)[0]
+
+    out = []
+    for line in lines:
+        words, current = line.split(), ""
+        if not words:
+            out.append("")
+            continue
+        for word in words:
+            trial = f"{current} {word}" if current else word
+            if current and width_of(trial) > room:
+                out.append(current)
+                current = indent + word
+            else:
+                current = trial
+        out.append(current)
+    return out
 
 
-def _shared_controls(result) -> list:
-    """The control wells of every comparison, each once, in the order the comparisons name them."""
+def _shared_controls(units) -> list:
+    """The control wells of every comparison in *units*, each once, in the order the comparisons name them."""
     seen = {}
-    for unit in result.units:
+    for unit in units:
         for w in unit.controls:
             seen.setdefault(w.key, (unit, w))
     return list(seen.values())
 
 
 def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None, missing: str = "no value",
-                   p_of=None) -> None:
+                   p_of=None, units=None) -> None:
     """One dot per well for every comparison on one axes: the control wells once, as the grey band chance gives, then
     each group's wells in their plate colours, a thin rule between groups and the group's name — with its p, from
     *p_of* — over them. *value_of(unit, well)* is the dot's height; a well it has no value for (NaN) is written in as
     *missing* at the axis' foot rather than left out; *label_of(unit, well)*, when given, labels each dot (the
-    exceedance counts). Each dot's gid is ``<gid>-control`` / ``<gid>-treated:<well key>``."""
+    exceedance counts). Each dot's gid is ``<gid>-control`` / ``<gid>-treated:<well key>``. *units* draws those
+    comparisons only (all of them by default): a figure too narrow for every well at a readable spacing draws them
+    on several such panels (:func:`well_dot_chunks`)."""
     from widgets.plot_card import plot_tokens
 
     _ground, ink, muted = _inks(ax)
     publication = _is_publication(ax)
     outline = {mode: plot_tokens(mode)[1] for mode in ("screen", "publication")}
-    controls = _shared_controls(result)
+    units = result.units if units is None else units
+    controls = _shared_controls(units)
     ctrl = np.array([value_of(u, w) for u, w in controls], dtype=float)
     finite = ctrl[np.isfinite(ctrl)]
     if finite.size:
@@ -452,7 +482,7 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
     groups = [(control if "control" in control.lower() else f"{control} (control)", 0, len(controls) - 1)]
     tops = list(finite)
     x = len(controls) + 1
-    for unit in result.units:
+    for unit in units:
         start = x
         for w in unit.treated:
             value, colour = float(value_of(unit, w)), _well_colour(w.key)
@@ -473,10 +503,21 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
             x += 1
         groups.append((unit.label + (f"\n{p_of(unit)}" if p_of else ""), start, x - 1))
         x += 1
+    # Points of width each well has on the axes. Packed tightly (many wells on a phone), a count label ("15/150",
+    # about six characters) is wider than its well's slot, so it stands upright over its dot, a line's height wide;
+    # the well names stand upright too rather than slanting into their neighbours.
+    slot_pt = ax.get_position().width * ax.figure.get_figwidth() * 72 / max(x - 0.6, 1.0)
+    count_pt = _TITLE_PT * 0.65
+    upright = slot_pt < count_pt * 0.55 * 6 + 2
     for xi, value, text in labelled:
-        _ink(ax.annotate(text, (xi, value), textcoords="offset points", xytext=(0, 5), ha="center",
-                         fontsize=_TITLE_PT * 0.65, color=ink, gid=f"{gid}-count"))
-    ax.set_xticks(xs, ticks, rotation=60, fontsize=_TITLE_PT * 0.75)
+        _ink(ax.annotate(text, (xi, value), textcoords="offset points", xytext=(0, 5), ha="center", va="bottom",
+                         rotation=90 if upright else 0, fontsize=count_pt, color=ink, gid=f"{gid}-count"))
+    tick_pt = _TITLE_PT * 0.75
+    angle, align = (90, "center") if slot_pt < tick_pt * 2.5 else (60, "right")
+    ax.set_xticks(xs, ticks, rotation=angle, ha=align, fontsize=tick_pt)
+    # The page's style pass flattens x tick labels to the Properties angle unless the renderer records its own: the
+    # well names were drawn upright and then laid flat into one another on a phone.
+    own_xtick_angle(ax, angle, align)
     ax.set_xlim(-0.7, x - 1.3)
     ax.set_ylabel(ylabel)
     low = min(0.0, min(tops, default=0.0))
@@ -493,13 +534,42 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
              for name, first, last in groups]
     tallest = max((len(n) for n in names), default=1)
     axes_in = max(ax.get_position().height * ax.figure.get_figheight(), 0.3)
-    share = min(0.7, (pt * _LEADING * tallest + 8) / 72 / axes_in)
+    # Above the highest dot: its count label (upright, as long as its text; else one line) and the group names.
+    longest = max((len(text) for _x, _v, text in labelled), default=0)
+    label_pt = (longest * count_pt * 0.6 if upright else count_pt * 1.3) + 5 if labelled else 0
+    share = min(0.75, (pt * _LEADING * tallest + 8 + label_pt) / 72 / axes_in)
     ax.set_ylim(low, low + (high - low) * 1.08 / (1 - share))
     for (_name, first, last), wrapped in zip(groups, names):
         if first:
             ax.axvline(first - 1, color=muted, linewidth=0.6, alpha=0.6).set_gid(f"{gid}-rule")
         _ink(ax.text((first + last) / 2, 0.98, "\n".join(wrapped), transform=ax.get_xaxis_transform(), ha="center",
                      va="top", fontsize=pt, fontweight="bold", color=ink, linespacing=_LEADING, gid=f"{gid}-group"))
+
+
+#: The least width one well's slot may have on a shared panel, in points: a 9 pt label (the page's size) stood
+#: upright is about 11 pt across, and two neighbours closer than that read as one ("A01A02A03").
+MIN_SLOT_PT = 13.0
+
+
+def well_dot_chunks(units, axes_in: float) -> list:
+    """*units* split into the runs that each fit one shared panel *axes_in* wide with every well's slot at least
+    :data:`MIN_SLOT_PT`: each run's control wells, its groups' wells and a gap between groups, as
+    :func:`draw_well_dots` lays them out. One run when they all fit; a run is never empty, so a comparison too
+    large for any panel still gets one of its own."""
+    capacity = max(1.0, axes_in * 72 / MIN_SLOT_PT)
+    chunks, current = [], []
+
+    def slots(run) -> float:
+        return len(_shared_controls(run)) + sum(len(u.treated) + 1 for u in run) + 0.4
+
+    for unit in units:
+        if current and slots([*current, unit]) > capacity:
+            chunks.append(current)
+            current = []
+        current.append(unit)
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _count_rate(unit, well) -> float:
@@ -537,10 +607,12 @@ def _small_panel(key: str, value_label: str, log_axis: bool) -> Callable[[object
     return None
 
 
-#: The least width of one per-comparison panel, in inches: a figure holds as many side by side as fit, at most
-#: :data:`MAX_COLUMNS`, and the rest wrap to the next line of the same test row — so the figure never grows sideways,
-#: whatever the number of comparisons. A phone's figure (about 4 in) holds one.
-COLUMN_MIN_IN = 3.2
+#: The least width of one per-comparison panel's axes, in inches: a figure holds as many side by side as fit in what
+#: its margins leave, at most :data:`MAX_COLUMNS`, and the rest wrap to the next line of the same test row — so the
+#: figure never grows sideways, whatever the number of comparisons. A phone's figure (about 4 in) holds one.
+COLUMN_MIN_IN = 2.4
+#: Inches between two per-comparison panels side by side: the next panel's tick labels and y label.
+_COLUMN_GAP_IN = 0.85
 MAX_COLUMNS = 3
 #: Heights, in inches: a shared one-dot-per-well panel with its group names, ticks and title; one per-comparison panel
 #: with its two-line title, ticks and labels; the caption above it; the gap after each test row.
@@ -549,6 +621,16 @@ SHARED_IN, SMALL_IN, CAPTION_IN, ROW_GAP_IN = 2.6, 2.5, 0.3, 0.3
 BLOCK_PAD_IN = 0.1
 #: Inches the block frame stands in from the figure's left and right edges, and the width of its role bar in points.
 _BLOCK_INSET_IN, _ROLE_BAR_PT = 0.06, 3.5
+#: Inches from the figure's left edge to where every line of text starts, and from there to a panel's y axis: the
+#: room its tick labels and its y label take. Both are in inches, not shares of the width, so a phone's figure keeps
+#: them as a desk's does: as shares, a 4 in figure left 0.08 in for text the role bar ends 0.11 in into.
+_CONTENT_IN, _AXIS_ROOM_IN = 0.3, 0.72
+#: Inches from a panel's right edge to the figure's: the block's inset and a little room inside it.
+_RIGHT_IN = _BLOCK_INSET_IN + 0.2
+#: How much larger than its drawn size an axes title is allowed for when it is wrapped to its axes' width, in
+#: points per character: the body face's average character is about half its size, and the page's style pass can
+#: enlarge titles after the draw.
+_TITLE_GROWTH = 0.62
 #: What of each height the axes leave to the text around them before their title is known, and the ticks and
 #: labels below; once drawn, the axes start under their title whatever its length.
 _ABOVE_IN, _BELOW_IN = 0.5, 0.62
@@ -602,9 +684,34 @@ def _draw_block(fig, probe, key: str, top_in: float, bottom_in: float, width: fl
     _ink(edge, muted=True)
 
 
+def _small_x_label(key: str, value_label: str, log_axis: bool) -> str:
+    """The x label of the test row *key*'s per-comparison panel, as its draw function writes it."""
+    if key == "hc":
+        return "share of the well's nanowells, most extreme first"
+    return _x_label(value_label, log_axis)
+
+
+#: The size the page's style pass draws axis labels at, in points (Properties' default, measured on the page).
+_PAGE_LABEL_PT = 9.0
+
+
+def _x_label_lines(fig, label: str, panel_frac: float) -> list[str]:
+    """*label* broken to a panel *panel_frac* of the figure wide, measured at the page's label size (:func:`_wrapped`):
+    the renderer breaks it so at every width — the page's phone fit does the same on a phone, and at the desk an x
+    label wider than its panel ran off the figure from the right-hand column."""
+    return _wrapped(fig, [label], panel_frac * 0.96, _PAGE_LABEL_PT, "")
+
+
+def _x_label_extra_in(lines: int) -> float:
+    """Inches more than one line that an x label broken onto *lines* lines takes under its panel."""
+    return (max(lines, 1) - 1) * _PAGE_LABEL_PT * _LEADING / 72
+
+
 def columns_for(width_in: float) -> int:
-    """How many per-comparison panels a figure *width_in* wide holds side by side."""
-    return max(1, min(MAX_COLUMNS, int(width_in // COLUMN_MIN_IN)))
+    """How many per-comparison panels a figure *width_in* wide holds side by side, each at least
+    :data:`COLUMN_MIN_IN` across in what the margins leave."""
+    usable = width_in - _CONTENT_IN - _AXIS_ROOM_IN - _RIGHT_IN
+    return max(1, min(MAX_COLUMNS, int((usable + _COLUMN_GAP_IN) // (COLUMN_MIN_IN + _COLUMN_GAP_IN))))
 
 
 def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped: bool = False) -> float:
@@ -645,24 +752,33 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     ink = _inks(probe)[1]
     y = _TOP_IN + (_STAMP_IN if stamped else 0.0)          # inches down from the figure's top
 
-    def text(content, pt, gid, *, bold=False, x=0.02, wrap=0.96) -> None:
+    content_x = _CONTENT_IN / width                   # every line of text starts here, clear of a block's role bar
+    content_w = 1.0 - 2 * content_x
+
+    def text(content, pt, gid, *, bold=False, x=content_x, wrap=content_w) -> None:
         nonlocal y
-        wrapped = _wrapped(fig, [content], wrap, pt, "")
+        wrapped = _wrapped(fig, [content], wrap, pt, "", bold=bold)
         _ink(fig.text(x, 1 - y / height, "\n".join(wrapped), fontsize=pt, fontweight="bold" if bold else "normal",
                       va="top", color=ink, linespacing=_LEADING, gid=gid))
         y += len(wrapped) * pt * _LEADING / 72
 
-    def axes(x0: float, top: float, w: float, h: float):
-        ax = fig.add_axes([x0, 1 - (top + h - _BELOW_IN) / height, w, (h - _ABOVE_IN - _BELOW_IN) / height])
+    def axes(x0: float, top: float, w: float, h: float, below: float = _BELOW_IN):
+        ax = fig.add_axes([x0, 1 - (top + h - below) / height, w, (h - _ABOVE_IN - below) / height])
         _prepare_axes(ax, GRID_TYPE_SCALE)
         return ax
 
-    def fit_title(ax, top: float, h: float) -> None:
+    def fit_title(ax, top: float, h: float, below: float = _BELOW_IN) -> None:
         # The axes start under their own title, however many lines it took: a fixed allowance left an inch of
         # nothing over a one-line title and ran a four-line one into the caption above.
+        # Wrapped to the axes' own width first, at the size the page's style pass may draw it: a title one panel of
+        # three wide ran into its neighbour's, and on a phone off the figure.
+        if ax.get_title():
+            chars = max(16, int(ax.get_position().width * width * 72 / (ax.title.get_fontsize() * _TITLE_GROWTH)))
+            ax.title.set_text("\n".join(part for line in ax.get_title().split("\n")
+                                         for part in (textwrap.wrap(line, chars) or [""])))
         lines = ax.get_title().count("\n") + 1 if ax.get_title() else 0
         above = 0.12 + lines * _TITLE_PT * _LEADING / 72
-        bottom = top + h - _BELOW_IN
+        bottom = top + h - below
         ax.set_position([ax.get_position().x0, 1 - bottom / height, ax.get_position().width,
                          max(bottom - top - above, 0.3) / height])
 
@@ -670,8 +786,8 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
         text(rx.groups_line(result), _HEAD_PT, "nw-rare-groups", bold=True)
         y += 0.06
     for item in lead:                       # what qualifies the whole result: at the top, never below the fold
-        for part in _wrapped(fig, [item], 0.96):
-            _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
+        for part in _wrapped(fig, [item], content_w):
+            _ink(fig.text(content_x, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
             y += step
     if lead:
         y += 0.04
@@ -679,8 +795,8 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
         y += 0.04
         text(rx.comparison_title(result, i), _HEAD_PT, f"nw-rare-comparison-head:{i}", bold=True)
         text(rx.unit_text(result, unit)["headline"], _HEAD_PT, "nw-rare-unit")
-    left, gap = 0.75 / width, 0.85 / width
-    panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
+    left, gap, right = (_CONTENT_IN + _AXIS_ROOM_IN) / width, _COLUMN_GAP_IN / width, _RIGHT_IN / width
+    panel_w = (1.0 - left - right - (cols - 1) * gap) / cols
     for key, *_rest in rx.TEST_ROWS if units else ():
         y += ROW_GAP_IN
         block_top = y
@@ -690,37 +806,49 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
              f"nw-rare-test-p:{key}")
         if key in SHARED_PANELS:
             value_of, ylabel, title, gid, label_of, missing = SHARED_PANELS[key]
-            ax = axes(left, y, 1.0 - left - 0.25 / width, SHARED_IN)
-            ax.set_gid(f"nw-rare-shared:{key}")
-            _title(ax, title)
-            fit_title(ax, y, SHARED_IN)
-            draw_well_dots(ax, result, value_of, ylabel, gid, label_of=label_of, missing=missing,
-                           p_of=lambda u, k=key: rx.test_p(u, k, params, len(units), short=True))
-            y += SHARED_IN
+            # As many comparisons as the width holds at a readable spacing; the rest on another such panel below,
+            # the control wells drawn again on each.
+            for j, run in enumerate(well_dot_chunks(units, (1.0 - left - right) * width)):
+                ax = axes(left, y, 1.0 - left - right, SHARED_IN)
+                ax.set_gid(f"nw-rare-shared:{key}" + (f":{j}" if j else ""))
+                _title(ax, title)
+                fit_title(ax, y, SHARED_IN)
+                draw_well_dots(ax, result, value_of, ylabel, gid, label_of=label_of, missing=missing,
+                               p_of=lambda u, k=key: rx.test_p(u, k, params, len(units), short=True), units=run)
+                y += SHARED_IN
         draw = _small_panel(key, value_label, log_axis)
         if draw is not None:
             y += 0.12                                    # the captions clear the p line above them
+            # The phone fit breaks an x label wider than its panel onto more lines (``plot_style``): the room under
+            # the panel grows by those lines, or the last one sat on the next comparison's caption.
+            x_label = _x_label_lines(fig, _small_x_label(key, value_label, log_axis), panel_w)
+            extra = _x_label_extra_in(len(x_label))
+            small_in = SMALL_IN + extra
+            # Every caption whole, wrapped to its column, never cut: the room above the panels is the tallest one's.
+            captions = [_wrapped(fig, [f"{rx.comparison_title(result, i)} · {rx.test_p(u, key, params, len(units))}"],
+                                 panel_w + gap * 0.45, _REPORT_PT, "", bold=True) for i, u in enumerate(units)]
+            caption_in = max(CAPTION_IN, max(len(c) for c in captions) * _REPORT_PT * _LEADING / 72 + 0.08)
             for i, unit in enumerate(units):
                 line, col = divmod(i, cols)
-                top = y + line * (CAPTION_IN + SMALL_IN)
+                top = y + line * (caption_in + small_in)
                 x0 = left + col * (panel_w + gap)
-                caption = f"{rx.comparison_title(result, i)} · {rx.test_p(unit, key, params, len(units))}"
-                short = _wrapped(fig, [caption], panel_w + gap * 0.8, _REPORT_PT, "")[:2]
-                _ink(fig.text(x0 - 0.45 / width, 1 - top / height, "\n".join(short), fontsize=_REPORT_PT,
-                              fontweight="bold", va="top", color=ink, gid=f"nw-rare-comparison:{key}:{i}"))
-                ax = axes(x0, top + CAPTION_IN, panel_w, SMALL_IN)
+                _ink(fig.text(x0 - 0.45 / width, 1 - top / height, "\n".join(captions[i]), fontsize=_REPORT_PT,
+                              fontweight="bold", va="top", color=ink, linespacing=_LEADING,
+                              gid=f"nw-rare-comparison:{key}:{i}"))
+                ax = axes(x0, top + caption_in, panel_w, small_in, _BELOW_IN + extra)
                 ax.set_gid(f"nw-rare-panel:{key}:{i}")
                 draw(ax, unit)
-                fit_title(ax, top + CAPTION_IN, SMALL_IN)
-            y += lines_of * (CAPTION_IN + SMALL_IN)
+                ax.xaxis.label.set_text("\n".join(x_label))
+                fit_title(ax, top + caption_in, small_in, _BELOW_IN + extra)
+            y += lines_of * (caption_in + small_in)
         y += BLOCK_PAD_IN
         _draw_block(fig, probe, key, block_top, y, width, height)
     y += _TEXT_PAD_IN
     caveats = [f"⚠ {rx.comparison_title(result, i).split(':', 1)[0]} ({u.label}): {c}"
                for i, u in enumerate(units) for c in rx.unit_text(result, u)["caveats"]]
     for item in [*caveats, *lines, *([note] if note else [])]:
-        for part in _wrapped(fig, [item], 0.96):
-            _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
+        for part in _wrapped(fig, [item], content_w):
+            _ink(fig.text(content_x, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
             y += step
     fig._aw_rare_laid_out = (round(width, 2), round(height, 2))
     fig._aw_rare_need_in = y + _TEXT_PAD_IN

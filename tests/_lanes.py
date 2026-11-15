@@ -319,6 +319,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
 #: Remote / HPC tests: ssh, rsync, the remote runner and its batches, Slurm,
 #: the bootstrap and the Remotes dialogs. ``scripts/test.sh --remote``.
 REMOTE_FILES: dict[str, str] = {
+    "test_a_batched_host_s_blank_copy_is_not_a_setting.py": "A plate a batched host computed against its copy of the blank is finished for a later remote or local run",
     "test_a_finished_remote_rerun_updates_the_plate_record.py": "A remote re-run with nothing to send still records the focus cut and the cell-gating choice, and gates the plate here",
     "test_a_batched_restart_reuses_the_remote.py": "A restarted batched run looks at the remote before it uploads or runs anything",
     "test_a_node_is_asked_for_before_staging.py": "A scheduled run queues its job before the plate is staged and hands it the run once it is ready",

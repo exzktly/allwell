@@ -1104,7 +1104,7 @@ class RemoteRunner:
         # correction. Empty on every other path, where the whole plate is in
         # `--input_dir` and the pipeline's default already finds it.
         if background_dir:
-            out.append(f"--background_dir={background_dir}")
+            out += [f"--background_dir={background_dir}", "--background_dir_carried"]   # a copy: not a setting
         for token in self._host_argv_extras(output_filter):
             # Only the two switches are deduplicated, and only against their
             # own spelling. A blanket ``token not in out`` filter reads ``out``

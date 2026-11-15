@@ -95,7 +95,10 @@ KEYED_ON: dict[str, str] = {
     "mesh_ratio":                  "the mesh background model's grid spacing",
     "mesh_sigma":                  "the mesh background model's smoothing",
     "flatfield":                   "divides every frame by an illumination field",
-    "background_dir":              "the blank the correction is built from",
+    "background_dir":              "the blank the correction is built from, when a person named a directory "
+                                   "other than the input. Not keyed when the app carried the input's own blank "
+                                   "to a batched host (background_dir_carried): that copy is the blank a run "
+                                   "of the same input reads by default, at a path that is new on every attempt",
     "nanowell_registration_from":  "a folder a person named is taken as it is — every timepoint's tile "
                                    "positions, lattice, central square and nanowell addresses come from it, "
                                    "checked only to fit the plate's tiles — so another folder, or none, "
@@ -190,6 +193,9 @@ NOT_KEYED_ON: dict[str, str] = {
     "nanowell_reanchor_only": "runs only the re-anchoring over wells already computed under these settings",
     "suspend_file":          "where a request to stop early may appear; what "
                              "is computed for the groups that run is unchanged",
+    "background_dir_carried": "marks --background_dir as the app's own copy of the input's blank on a batched "
+                              "remote host rather than a directory a person named; it is read by the key of "
+                              "background_dir (a carried copy is not keyed), never keyed itself",
     "background_dir_alias":  "earlier paths of the same blank; it only widens "
                              "which recorded digests count as these settings",
     # Execution and machine. The digest must be identical for the same plate
@@ -319,8 +325,11 @@ def legacy_settings_digests(opts) -> tuple[str, ...]:
         aliases = [a for a in (opts.get("background_dir_alias") or ()) if a]
     except AttributeError:
         aliases = []
+    if _blank_is_carried(opts):
+        # What a build from before the carried copy was left out of the key recorded for this attempt's path.
+        variants.append({**opts, _CARRIED_KEY: False})
     if aliases and opts.get("background_dir"):
-        variants += [{**opts, "background_dir": alias} for alias in aliases]
+        variants += [{**opts, "background_dir": alias, _CARRIED_KEY: False} for alias in aliases]
 
     found = []
     for variant in variants:
@@ -412,6 +421,20 @@ def _registration_value(opts) -> str | None:
 
 
 
+_CARRIED_KEY = "background_dir_carried"
+
+
+def _blank_is_carried(opts) -> bool:
+    """Whether *opts* names a ``background_dir`` that is the app's copy of the input's own blank on a batched
+    remote host (``RemoteRunner._build_remote_argv``), which is left out of the digest: the well it corrects is the
+    one a run reading the same blank from its input computes, so a later run here, or a single-shot remote one,
+    must recognise it — and the copy's path, inside the run directory, says nothing about the blank."""
+    try:
+        return bool(opts.get(_CARRIED_KEY) and opts.get("background_dir"))
+    except AttributeError:
+        return False
+
+
 def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outside_method: bool = False,
             as_spelled: bool = False) -> str:
     """The digest of *keys* in *opts*; with *as_spelled*, the :data:`_CANONICAL` options as typed, which is how the
@@ -437,6 +460,8 @@ def _digest(opts, keys, *, skip_nanowell_outside_mode: bool, skip_cellpose_outsi
             value = _registration_value(opts) if key == _REGISTRATION_KEY else opts[key]
         except (KeyError, TypeError, AttributeError):
             continue
+        if key == "background_dir" and _blank_is_carried(opts):
+            value = ""                   # the parser's default, "read from the input": what the copy stands for
         if value is None:
             continue
         if key in _CANONICAL and not as_spelled:

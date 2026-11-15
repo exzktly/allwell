@@ -16501,9 +16501,27 @@ finished when:
   blank.
 
 An argv that does not yield a key finishes nothing, since `settings_match` would
-accept an empty key as matching every well. In batched mode the filter keys with
+accept an empty key as matching every well.
+
+**A batched host's copy of the blank is not a setting.** A batched run uploads the
+empty-well blank once to `<run dir>/bg` and names it to every batch with
+`--background_dir`, which is keyed (`KEYED_ON`: a directory a person names holds
+another blank). The copy is the input's own blank at a path that is new on every
+attempt, so `RemoteRunner._build_remote_argv` marks it `--background_dir_carried`
+and `settings_digest._blank_is_carried` makes a carried directory contribute what
+an unset one does. The host's record is then the key every later question
+produces — `PipelineRunner._finished_here` before staging, a single-shot remote
+re-run, a local run — and does not change with the attempt. A well recorded
+before the mark existed carries the path's own digest; `legacy_settings_digests`
+still offers that digest for this run's directory and for each
+`--background_dir_alias`, so a batched run that knows the path finds it, and a
+question that names no path recomputes it once.
+`tests/test_a_batched_host_s_blank_copy_is_not_a_setting.py` builds the host argv
+with the runner's own builder and asks through the real remote path.
+
+In batched mode the filter keys with
 the blank's argv as the host gets it (`remote_batch_resume._blank_argv`:
-`--background_dir` in this run's directory, each earlier attempt's as an alias),
+`--background_dir` in this run's directory, marked carried, each earlier attempt's as an alias),
 and since staging has already left out every other finished well, what it finds
 there is a finished blank — not processed, still uploaded as the correction's
 input. Staging drops the finished wells' archives before planning

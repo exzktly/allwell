@@ -535,6 +535,26 @@ def nucleus_seed_markers(
     return markers, n_markers, n_total - int(keep.size)
 
 
+def seed_nucleus_labels(nucleus_labels: np.ndarray, min_nucleus_area_px: int) -> np.ndarray:
+    """The seeded nuclei as a label image, numbered as their watershed cells are.
+
+    :func:`nucleus_seed_markers` plants marker ``k`` at the centroid of the
+    ``k``-th nucleus large enough to keep, and the watershed gives the cell
+    grown from it the same id. This is those nuclei's own outlines under those
+    ids, so a per-cell measurement that belongs at the *nucleus* — focus, which
+    is a transition width read on the nuclear frame — can be looked up by cell
+    id. A nucleus too small to seed is absent, as it is from the cells.
+    """
+    labels = np.asarray(nucleus_labels)
+    if labels.size == 0:
+        return np.zeros_like(labels, dtype=np.int32)
+    ids, areas = _label_areas(labels)
+    keep = ids[areas >= int(min_nucleus_area_px)]
+    lut = np.zeros(int(labels.max()) + 1, dtype=np.int32)
+    lut[keep] = np.arange(1, keep.size + 1, dtype=np.int32)
+    return lut[labels]
+
+
 def cytoplasm_mask(cytoplasm_tophat: np.ndarray, fov: str) -> np.ndarray:
     """Otsu mask of the corrected cytoplasm frame, saying so when it is empty.
 
@@ -591,7 +611,14 @@ def _segment_stardist_seeded_watershed_cell(
     cytoplasm_raw: np.ndarray,
     tophat_radius_fluor: int,
     min_nucleus_area_px: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Cells grown by watershed from StarDist nuclei, inside the cytoplasm mask.
+
+    Returns ``(labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask,
+    seed_nuclei)``. ``labels`` are **cell** outlines, found on the cytoplasm
+    frame; ``seed_nuclei`` (:func:`seed_nucleus_labels`) are the nuclei they
+    grew from, under the same ids, for what has to be measured at the nucleus.
+    """
     fov = _SEG_FOV_LABEL or "?"
     stardist_labels = _segment_stardist_nuclei(nir_corr)
     nuclear_points, n_markers, n_small = nucleus_seed_markers(
@@ -631,4 +658,5 @@ def _segment_stardist_seeded_watershed_cell(
             markers=nuclear_points,
             mask=cytoplasm_binary_mask,
         ).astype(np.int32)
-    return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
+    return (labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask,
+            seed_nucleus_labels(stardist_labels, min_nucleus_area_px))

@@ -975,14 +975,15 @@ def _segment_image_group(
 ):
     """Dispatch to the configured segmenter -> label image (+ watershed extras).
 
-    Returns ``(labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask)``;
-    the last three are ``None`` for every method except seeded-watershed cell.
+    Returns ``(labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask,
+    seed_nuclei)``; the last four are ``None`` except for seeded-watershed cell.
     """
     _t = time.perf_counter()
     labels: np.ndarray
     nuclear_points: np.ndarray | None = None
     cytoplasm_tophat: np.ndarray | None = None
     cytoplasm_binary_mask: np.ndarray | None = None
+    seed_nuclei: np.ndarray | None = None
     if segmentation_method == "stardist_seeded_watershed_cell":
         if not cytoplasm_token:
             raise ValueError(
@@ -993,7 +994,7 @@ def _segment_image_group(
                 f"Cytoplasm token '{cytoplasm_token}' is missing from fluor token list: {fluor_tokens}"
             )
         cyto_idx = fluor_tokens.index(cytoplasm_token)
-        labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask = (
+        labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, seed_nuclei = (
             _segment_stardist_seeded_watershed_cell(
                 nir_corr=nir_corr,
                 cytoplasm_raw=fluor_raws[cyto_idx],
@@ -1037,12 +1038,12 @@ def _segment_image_group(
         labels = _segment_stardist_nuclei(nir_corr)
         log.info("  stardist:    %.1f s  (%d nuclei detected)",
                  time.perf_counter() - _t, len(np.unique(labels)) - 1)
-    return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
+    return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, seed_nuclei
 
 
 def _quantify_image_group(
     *, labels, fluor_tophat, fluor_tokens, nir_corr, nuclear_path, schema, sep,
-    shape_features, measure_focus: bool = True,
+    shape_features, measure_focus: bool = True, focus_labels=None,
 ):
     """Per-nucleus intensity + shape/region quantification -> record dicts."""
     # Quantify each nucleus across all fluorescent channels.
@@ -1100,21 +1101,18 @@ def _quantify_image_group(
     # Cells the field of view cuts (imclearborder's rule); always emitted.
     border_ids = labels_touching_border(labels)
 
-    # Per-cell focus (always emitted), measured at each nucleus's own outline.
-    # It is the one focus number comparable between cells, fields, wells and
-    # plates — a transition WIDTH in pixels, so gain, pedestal, brightness and
-    # nucleus size barely move it, and only clipping moves it much. See
-    # ``pipeline.field_quality.edge_focus`` for the measured table, for why a
-    # score relative to its own frame cannot see a frame that is uniformly
-    # soft, and why every whole-image statistic confounds nucleus size with
-    # defocus. Measured on ``nir_corr``, the frame the labels were computed
-    # from, so the outline the estimator reads is the outline that was
-    # segmented.
+    # Per-cell focus (always emitted), measured at each nucleus's own outline
+    # on ``nir_corr``, the frame that outline was segmented from: a transition
+    # WIDTH in pixels, comparable between cells, fields, wells and plates
+    # (``pipeline.field_quality.edge_focus`` has the measured table). Under
+    # seeded watershed ``labels`` are cell outlines found on the cytoplasm
+    # frame, where the nuclear frame has no edge, so *focus_labels* carries the
+    # seed nuclei under the cells' ids and the outline read is still a nucleus's.
     # Off leaves the column out of the record entirely rather than filling it
     # with a placeholder: a run that did not measure focus and a run that
     # measured it and found nothing must not produce the same CSV.
-    focus_by_id = (_field_quality.cell_focus_by_label(nir_corr, labels)
-                   if measure_focus else {})
+    focus_by_id = (_field_quality.cell_focus_by_label(
+        nir_corr, labels if focus_labels is None else focus_labels) if measure_focus else {})
 
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
@@ -1225,7 +1223,7 @@ def process_image_group(
         phase_token=phase_token,
     )
 
-    labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask = (
+    labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, seed_nuclei = (
         _segment_image_group(
             segmentation_method=segmentation_method, nir_corr=nir_corr,
             fluor_raws=fluor_raws, fluor_tokens=fluor_tokens,
@@ -1267,7 +1265,7 @@ def process_image_group(
     records = _quantify_image_group(
         labels=labels, fluor_tophat=fluor_tophat, fluor_tokens=fluor_tokens,
         nir_corr=nir_corr, nuclear_path=nuclear_path, schema=schema, sep=sep,
-        shape_features=shape_features, measure_focus=measure_focus,
+        shape_features=shape_features, measure_focus=measure_focus, focus_labels=seed_nuclei,
     )
     parsed = parse_filename(nuclear_path, schema=schema, sep=sep)
     return records, _field_quality.group_record(

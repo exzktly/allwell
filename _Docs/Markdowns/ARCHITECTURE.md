@@ -20887,8 +20887,20 @@ layer and the argument parser can have the name without pulling numpy and
 scipy in behind it). A field's `focus` is the **median of its own cells'
 values** (`field_focus`), so the field-level and cell-level numbers are two
 poolings of one measurement rather than two statistics that can disagree. It
-is measured on the corrected frame the labels were computed from, so the
-outline the estimator reads is the outline that was segmented.
+is measured on the corrected nuclear frame, at the outline of the nucleus that
+was segmented from that frame. For StarDist nuclei, Cellpose and the classical
+threshold the labels *are* those outlines. For seeded watershed they are not:
+the labels are cell outlines found on the cytoplasm frame, where the nuclear
+frame has no edge to read (81 identical nuclei measured 28 of 81, from 0.18 to
+15.7, where the nucleus outlines read 0.36 for all 81). So
+`_segment_stardist_seeded_watershed_cell` also returns the seed nuclei
+(`pipeline.stardist.seed_nucleus_labels`: the kept StarDist nuclei, numbered as
+`nucleus_seed_markers` numbers their seeds and therefore as the watershed
+numbers the cells grown from them), `_segment_image_group` hands them on as its
+fifth value, and `_quantify_image_group(focus_labels=…)` reads focus from them
+and looks each cell's value up by its id. A cell's `qc_edge_focus` is therefore
+its own nucleus's, under every segmenter
+(`tests/test_focus_is_read_at_the_nucleus_under_seeded_watershed.py`).
 
 Measuring is on by default and is switched off with `--no_focus_metric`, which
 leaves the column **out of the record entirely** rather than filling it: a run

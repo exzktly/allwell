@@ -215,7 +215,7 @@ def test_a_constant_cytoplasm_channel_says_it_produced_no_cells(monkeypatch, cap
     flat = np.full(labels.shape, 42.0, np.float32)
     sd.set_fov_label("A01_f1_t0")
     with caplog.at_level(logging.WARNING, logger="process_microscopy"):
-        out, points, _tophat, mask = sd._segment_stardist_seeded_watershed_cell(
+        out, points, _tophat, mask, _nuclei = sd._segment_stardist_seeded_watershed_cell(
             nir_corr=np.zeros_like(flat), cytoplasm_raw=flat,
             tophat_radius_fluor=5, min_nucleus_area_px=5)
     assert int(out.max()) == 0
@@ -236,7 +236,7 @@ def test_every_nucleus_below_the_area_floor_says_so(monkeypatch, caplog):
     _install_nuclei(monkeypatch, labels)
     sd.set_fov_label("B02_f0_t0")
     with caplog.at_level(logging.WARNING, logger="process_microscopy"):
-        out, points, _tophat, _mask = sd._segment_stardist_seeded_watershed_cell(
+        out, points, _tophat, _mask, _nuclei = sd._segment_stardist_seeded_watershed_cell(
             nir_corr=np.zeros_like(cyto), cytoplasm_raw=cyto,
             tophat_radius_fluor=5, min_nucleus_area_px=10 ** 6)
     assert int(out.max()) == 0
@@ -255,7 +255,7 @@ def test_seeds_outside_the_cytoplasm_mask_are_counted(monkeypatch, caplog):
     _install_nuclei(monkeypatch, labels)
     sd.set_fov_label("C03_f2_t1")
     with caplog.at_level(logging.WARNING, logger="process_microscopy"):
-        out, _points, _tophat, _mask = sd._segment_stardist_seeded_watershed_cell(
+        out, _points, _tophat, _mask, _nuclei = sd._segment_stardist_seeded_watershed_cell(
             nir_corr=np.zeros_like(cyto), cytoplasm_raw=cyto,
             tophat_radius_fluor=20, min_nucleus_area_px=5)
     assert "C03_f2_t1" in caplog.text
@@ -268,7 +268,7 @@ def test_a_healthy_field_warns_about_none_of_it(monkeypatch, caplog):
     _install_nuclei(monkeypatch, labels)
     sd.set_fov_label("D04_f0_t0")
     with caplog.at_level(logging.WARNING, logger="process_microscopy"):
-        out, _points, _tophat, _mask = sd._segment_stardist_seeded_watershed_cell(
+        out, _points, _tophat, _mask, _nuclei = sd._segment_stardist_seeded_watershed_cell(
             nir_corr=np.zeros_like(cyto), cytoplasm_raw=cyto,
             tophat_radius_fluor=20, min_nucleus_area_px=5)
     assert len(np.unique(out)) - 1 == 4

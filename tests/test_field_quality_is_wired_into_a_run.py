@@ -66,7 +66,7 @@ def stubbed_segmenter(monkeypatch):
     labels[40:50, 40:50] = 2
     labels[70:80, 70:80] = 3
     monkeypatch.setattr(
-        pm, "_segment_image_group", lambda **k: (labels, None, None, None))
+        pm, "_segment_image_group", lambda **k: (labels, None, None, None, None))
     monkeypatch.setattr(pm, "_write_processed_images", lambda **k: None)
     # The records carry the per-cell focus column the real quantifier emits,
     # because the field's ``focus`` is now the median of exactly these values

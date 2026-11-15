@@ -50,7 +50,7 @@ def stubbed_segmenter(monkeypatch):
     labels = np.zeros((48, 48), np.int32)
     labels[5:15, 5:15] = 1
     monkeypatch.setattr(pm, "_segment_image_group",
-                        lambda **k: (labels, None, None, None))
+                        lambda **k: (labels, None, None, None, None))
     monkeypatch.setattr(pm, "_write_processed_images", lambda **k: None)
 
     def _quantify(**k):

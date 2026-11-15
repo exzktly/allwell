@@ -907,8 +907,14 @@ text size changed), and given their desk form back on the way out, before the
 restyle (`_unfit_windows`): the layout, the row of buttons at its index and
 stretch, the maximum, the minimum (put back only when the code set it; one the
 layout set is left to the layout) and the size. A *native* file dialog —
-`QFileDialog.getOpenFileName` and its siblings, which open Windows' own picker —
-is not a Qt widget at all, and phone layout cannot size it.
+`QFileDialog.getOpenFileName` and its siblings, which open the operating
+system's own picker on Windows and macOS — is not a Qt window on screen at all,
+and phone layout leaves it wholly alone (`phone_window.is_native_dialog`: the
+sweep neither marks it, nor installs its filter, nor clamps it, and `kind`
+answers `None`). Touching it is not merely useless: the sweep's 300 ms tick runs
+inside the system dialog's own message loop and again on the focus change as it
+closes, and a Windows user choosing a folder on Convert CZI in phone layout had
+the app close with a native access violation inside `app.exec()` while it did.
 `tests/test_phone_windows.py` drives a `PhoneShell`, phone layout on, the real
 dialogs and the shell's own sweep on a phone-shaped screen;
 `tests/test_phone_remote_windows.py` (remote roster) does the same for Remote

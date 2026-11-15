@@ -11,7 +11,7 @@ import math
 
 
 from review.domain.fold_change import (
-    _match_control_mean, _TP_REL_TOL, _rel_err_sq, _propagate_spread,
+    _match_control_mean, _rel_err_sq, _propagate_spread,
     apply_cell_scale, build_cell_scaling,
     control_mean_at_for_bar, control_stats_at_for_bar,
     fold_change_state, fold_change_suffix,
@@ -101,9 +101,10 @@ def test_match_control_mean_far_miss():
     assert _match_control_mean(0.0, {1.0: 5.0}) is None
 
 
-def test_tp_rel_tol_value():
-    # Document the constant — if this changes, downstream behaviour shifts.
-    assert _TP_REL_TOL == 1e-3
+def test_fold_change_matches_timepoints_by_the_shared_rule():
+    """No tolerance of its own: a frame 5 minutes from the target is another timepoint, at any hour."""
+    assert _match_control_mean(100.0, {100.0 + 5 / 60: 5.0}) is None
+    assert _match_control_mean(float(f"{2 / 3:.4g}"), {2 / 3: 5.0}) == 5.0
 
 
 # ── normalize_pts ───────────────────────────────────────────────────────────

@@ -68,6 +68,7 @@ import math
 from typing import NamedTuple
 from collections.abc import Callable
 from review.domain.stats_compute import compute_rep_stats
+from domain.tp_match import tp_tolerance
 from review.domain.numeric import is_number
 from review.domain.stats_compute import compute_rep_per_fov_stats
 from review.domain.stats_compute import compute_rep_n_above_stats
@@ -82,13 +83,8 @@ from review.domain.fold_change_state import (  # noqa: F401 - re-exported
 
 CONTROL_NONE = ""
 
-# Relative-tolerance match for floating-point timepoint comparisons.
-# Combo widgets format their items with ``:.4g`` (≈4 significant figures),
-# so a fractional timepoint like 2/3 ≈ 0.6667 can be ~3e-5 off the original
-# float when parsed back from text. An absolute 1e-6 tolerance misses
-# those cases, so we use a relative one — passes for both whole-number
-# and fractional timepoints, fails only on truly mismatched values.
-_TP_REL_TOL = 1e-3
+# Timepoint comparisons use ``domain.tp_match.tp_tolerance``, the one rule the
+# rest of the app matches timepoints by (the rounding error of a ``:.4g`` label).
 
 
 def _as_finite(value) -> float | None:
@@ -299,7 +295,7 @@ def _resolve_stat(
     if t in stats:
         return stats[t]
     for ct, vs in stats.items():
-        if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t)):
+        if abs(ct - t) < tp_tolerance(ct, t):
             return vs
     return default
 
@@ -319,7 +315,7 @@ def _series_at(
     if target_t in series:
         return series[target_t]
     for ct, val in series.items():
-        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
+        if abs(ct - target_t) < tp_tolerance(ct, target_t):
             return val
     return None
 
@@ -341,7 +337,7 @@ def _series_baseline(
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for t, vs in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 return (float(t), vs[0], vs[1])
     earliest = min(series)
     vs = series[earliest]
@@ -388,7 +384,7 @@ def _field_baseline(
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for pt in pts:
-            if abs(float(pt[0]) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(pt[0])), abs(tgt)):
+            if abs(float(pt[0]) - tgt) <= tp_tolerance(float(pt[0]), tgt):
                 v = pt[val_idx] if len(pt) > val_idx else None
                 if _baseline_usable(v, op=op):
                     return float(v), 0.0
@@ -488,7 +484,7 @@ def _match_control_mean(t: float, control_means: dict[float, float]) -> float | 
     if t in control_means:
         return control_means[t]
     for ct, cm in control_means.items():
-        if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t)):
+        if abs(ct - t) < tp_tolerance(ct, t):
             return cm
     return None
 
@@ -592,7 +588,7 @@ def normalize_pts(
                     t, (cm, 0.0)
                 ) if t in effective_stats else next(
                     ((m, s) for ct, (m, s) in effective_stats.items()
-                     if abs(ct - t) < _TP_REL_TOL * max(1.0, abs(ct), abs(t))),
+                     if abs(ct - t) < tp_tolerance(ct, t)),
                     (cm, 0.0),
                 )
                 if effective_op_ctrl == "subtract":
@@ -622,7 +618,7 @@ def normalize_pts(
             tgt = float(baseline_tp)
             for pt in stage1:
                 t = float(pt[0])
-                if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                if abs(t - tgt) <= tp_tolerance(t, tgt):
                     m = pt[1]
                     if _baseline_usable(m, op=effective_op_t0):
                         baseline = float(m)
@@ -749,7 +745,7 @@ def baseline_from_points(
         tgt = float(baseline_tp)
         for pt in pts:
             t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 m = pt[1]
                 if _baseline_usable(m, op=op):
                     s = pt[2] if len(pt) > 2 else 0.0
@@ -789,7 +785,7 @@ def baseline_from_points_resolved(
         tgt = float(baseline_tp)
         for pt in pts:
             t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 m = pt[1]
                 if _baseline_usable(m, op=op):
                     s = pt[2] if len(pt) > 2 else 0.0
@@ -822,7 +818,7 @@ def baseline_frac_from_points_resolved(
         tgt = float(baseline_tp)
         for pt in pts:
             t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 f, fs = _pt_frac(pt)
                 if _baseline_usable(f, op=op):
                     return t, f, fs
@@ -851,7 +847,7 @@ def baseline_frac_from_points(
         tgt = float(baseline_tp)
         for pt in pts:
             t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 f, fs = _pt_frac(pt)
                 if _baseline_usable(f, op=op):
                     return f, fs
@@ -897,7 +893,7 @@ def baseline_n_from_points_resolved(
         tgt = float(baseline_tp)
         for pt in pts:
             t = float(pt[0])
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 n, ns = _pt_n_above(pt, per_fov_spread)
                 if _baseline_usable(n, op=op):
                     return t, n, ns
@@ -1708,7 +1704,7 @@ def member_baseline_value(
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for t, m in series.items():
-            if (abs(float(t) - tgt) <= _TP_REL_TOL * max(1.0, abs(float(t)), abs(tgt))
+            if (abs(float(t) - tgt) <= tp_tolerance(float(t), tgt)
                     and _baseline_usable(m, op=op)):
                 return float(m)
         # Requested tp not sampled — fall through to earliest (mirrors the bar).
@@ -1864,7 +1860,7 @@ def member_first_tp_stats(
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
         for t, ms in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+            if abs(t - tgt) <= tp_tolerance(t, tgt):
                 return ms
         # Requested baseline tp not present for this member — fall
         # through to earliest-finite so the bar still normalises, same

@@ -1461,7 +1461,9 @@ allwell/
 │   ├── image_identity.py       ← single source of truth for image filenames, CellKey,
 │   │                              and the suffix/role catalog (§6.4)
 │   ├── text_columns.py         ← the one rendering of a value into a text column
-│   ├── tp_match.py             ← when two timepoints are the same measurement
+│   ├── tp_match.py             ← when two timepoints are the same measurement: within the rounding error of a
+│   │                              `:.4g` label (half a unit of its fourth significant figure), never a share of
+│   │                              the hour value, which pooled neighbouring frames of a long time-lapse
 │   ├── nanowell_roster.py      ← which rule decided a nanowell well's roster (disk,
 │   │                              evidence, inferred), read by Validate, Merge Plates
 │   │                              and Review's Nanowells page

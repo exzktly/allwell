@@ -28,7 +28,6 @@ those sets in hidden for that reason; see its own docstring.
 
 from __future__ import annotations
 
-import math
 
 import numpy as np
 
@@ -48,6 +47,7 @@ from review.core.lazy import lazy as _lazy
 # calls work; annotations are strings under ``from __future__`` above.
 LineSeries = _lazy("review.features.lineplot.controller", "LineSeries")
 _aggpoint_to_linepoint = _lazy("review.features.lineplot.controller", "_aggpoint_to_linepoint")
+set_measured_at = _lazy("review.features.lineplot.controller", "set_measured_at")
 from review.domain.stats_compute import (
     aggregate_well,
     compute_rep_n_above_stats,
@@ -193,7 +193,7 @@ def collect_line_series_for_group(
                 # tab they were exported from. Only the per-FOV fields are
                 # genuinely uncomputed on this branch.
                 gnpf_m, gnpf_s = 0.0, 0.0
-            if not (isinstance(gm, float) and math.isnan(gm)):
+            if set_measured_at(gm, gf):
                 raw_pts.append((
                     t, gm, gerr, gf, n_above_val, cells_at.get(t, 0),
                     gfe, gnpf_m, gnpf_s,

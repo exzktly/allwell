@@ -196,7 +196,8 @@ figures are exported in, are the same in either.
 The pipeline alone (no GUI) can be invoked directly — useful for CI or
 batch processing on headless workers. `--input_dir` must hold one `<WELL>.zip`
 per well; the pipeline refuses loose images and per-well folders, naming them,
-exactly as Analyze does:
+exactly as Analyze does, and refuses two archives that name the same well
+(`A1.zip` beside `A01.zip`):
 
 ```sh
 python process_microscopy.py --help
@@ -968,6 +969,13 @@ same way, so you never have to pick the inner one:
 - A folder containing an `in/` subfolder → input = that `in/`, output =
   `<selected folder>/out`.
 
+**Each image is one greyscale frame.** A multi-page image is read as its first
+page. An image saved as RGB whose three colour planes are identical — a grey
+frame a program exported as colour — is read as that grey frame. An image whose
+colour planes differ has no single intensity per pixel, so the field it belongs
+to fails with `… is a colour image` in the run's `errors/` folder, naming the
+file: export each channel as its own greyscale image.
+
 **Loose images and per-well folders are not analysis input.** If the selected
 folder (or its `in/`) holds loose images, `A01/`-style folders of images with
 no matching `A01.zip`, or any other folder with images in it (a `TimePoint_1/`
@@ -1322,12 +1330,12 @@ special combined case described below.
 | Method (shown as) | Operation | Notes |
 |--------|-----------|-------|
 | **`none`** (None) | Image unchanged. | — |
-| **`robust_mesh`** (Robust local mesh) | `img − B`, `B` a sigma-clipped background on a coarse grid of tiles, bicubically interpolated. | **Recommended when background needs removing.** SExtractor/Background2D style: each tile's background is estimated with bright object pixels clipped away, so it is robust to bright or confluent objects on an uneven background, where the morphological methods struggle. The radius sets the scale; **Mesh tile ratio** (tile = radius ÷ ratio) and **Mesh sigma-clip** tune it. |
+| **`robust_mesh`** (Robust local mesh) | `img − B`, `B` a sigma-clipped background on a coarse grid of tiles, each level placed at its tile's centre and joined by a smooth (cubic) surface that is carried on at its own slope to the frame's edges, so an illumination gradient is followed right to the border. | **Recommended when background needs removing.** SExtractor/Background2D style: each tile's background is estimated with bright object pixels clipped away, so it is robust to bright or confluent objects on an uneven background, where the morphological methods struggle. The radius sets the scale; **Mesh tile ratio** (tile = radius ÷ ratio) and **Mesh sigma-clip** tune it. |
 | **`top_hat`** (Top-hat) | `img − grey_opening(img, square)`, square footprint of side `2·radius+1`. | Fast (separable 1-D passes) but the square footprint leaves anisotropic, *terraced* residuals — square halos/hotspots next to bright objects. Legacy method. |
 | **`sliding_disk`** (Rolling disk) | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | **The default** (the command line's too). A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
 | **`fov_median`** (Field median) | `img − median(img)`. | Subtracts a **single scalar**, the median intensity of the whole field of view. Most pixels in a field are background, so the median is a robust flat-background estimate (insensitive to bright cells/debris). Removes a **uniform offset only** — it does *not* flatten spatial gradients (use a morphological method or `empty_well` for that). No radius and no reference well needed; the cheapest correction. |
-| **`empty_well`** (From blank well(s)) | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). No-op if no field is available for the channel. Requires a Background well. |
-| **`fft_bandpass`** (FFT band-pass) | 2-D FFT Butterworth high-pass. | Removes low-frequency background (illumination, gradients, large blobs) whatever the object size. The radius is the large-structure cutoff; **Segmentation small px** / **Other small px** are an optional high-frequency cutoff for a true band-pass (`0` = high-pass only). |
+| **`empty_well`** (From blank well(s)) | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). Before it is subtracted, `B` is fitted to each frame's own background (a scale and an offset), which absorbs an exposure difference or a pedestal between the blank and the plate; the fit is made on the frame's background pixels only, so it needs at least a fifth of the field to be free of cells. No-op if no field is available for the channel. Requires a Background well. |
+| **`fft_bandpass`** (FFT band-pass) | 2-D FFT Butterworth high-pass. | Removes low-frequency background (illumination, gradients, large blobs) whatever the object size. The radius is the large-structure cutoff; **Segmentation small px** / **Other small px** are an optional high-frequency cutoff for a true band-pass (`0` = high-pass only). The filtered frame is re-referenced to its own median before it is floored at zero, so the background sits at zero whatever share of the field the cells cover; use a radius several times the cell size, because structure wider than the radius is removed from the cells too. |
 
 The **Segmentation-channel radius** / **Other channels' radius** entries set the
 background length scale (in px) for the methods that take one (`robust_mesh`,
@@ -1641,6 +1649,14 @@ skip what is done".
     then merged into the existing CSV and archive. Wells with no output at all
     process in full; complete wells are left untouched. Datasets → *Validate &
     Repair* → **Complete this run in Analyze** chooses this for you.
+    A field that was analysed and held no cells counts as recorded — it is not
+    processed again, and it does not make its well incomplete — while a field
+    that failed part way is processed again even though some of its images
+    were already saved. Each well keeps a small record of which fields it
+    finished for this (`.aw_done/` in the output folder). A well analysed
+    before that record existed is read as it always was, from its CSV and its
+    saved images; choose **Redo it**, or name the well under **Force these
+    wells**, to bring such a well up to date.
   - **Redo it.** Re-processes wells whose output ZIPs already exist (`--force`). It also
     discards the per-FOV checkpoints a stopped run left behind, so forcing really
     does recompute: it used to re-run the well and then resume those checkpoints,
@@ -1690,8 +1706,9 @@ skip what is done".
   but a queued job keeps it.
 - **Force these wells.** Comma-separated wells to reprocess in full, whatever
   else the run decides. This is the only thing that recovers a well whose
-  `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
-  processed images count as already-done work, so an incremental run reports
+  `<WELL>_out.zip` exists but whose measurements CSV is missing: its record of
+  finished fields (or, for a well analysed before that record existed, its own
+  processed images) counts as already-done work, so an incremental run reports
   that well "up to date" and skips it forever. Forcing it re-segments the well
   and overwrites its outputs; every other well is unaffected. Validate &
   Repair's completion handoff fills this in for you with exactly those wells.
@@ -2808,7 +2825,11 @@ recently. The log line for a folder the automatic clean-up kept says the same.
   place it looked when it finds nothing. They are not uploaded or computed
   again; only what is still missing is sent, and if nothing is, the run ends
   with "Nothing to upload" — an empty-well blank whose own results are already
-  here is not uploaded on its own just to be recomputed. This needs the same images, the same host, and the
+  here is not uploaded on its own just to be recomputed. A run that ends this
+  way still records the two settings that change no well's numbers — the focus
+  cut you stated and whether auto-threshold is on — and, when auto-threshold is
+  on, computes the plate's thresholds on this computer for any channel that has
+  none, exactly as a local re-run of a finished plate does. This needs the same images, the same host, and the
   same settings that change the numbers (segmentation, channels, corrections,
   QC gates and so on); worker counts, the low-disk override and the run check
   do not matter. Change one that alters the numbers and the old output is
@@ -2849,6 +2870,10 @@ recently. The log line for a folder the automatic clean-up kept says the same.
 ├── errors/                 ← one traceback per failed field, when any fail;
 │   └── superseded/            once the well later finishes whole, its old
 │                              tracebacks move here (kept, never deleted)
+├── .aw_done/<well>.json    ← which of the well's fields were analysed to the
+│                              end, and which of those held no cells
+├── .aw_settings/, .aw_complete/  ← the settings each well was made under, and
+│                              a seal on each well whose output is whole
 ├── provenance.jsonl        ← the dataset's history (see below)
 └── (transient tmp_<well>/  ← deleted on success)
 ```
@@ -2874,7 +2899,8 @@ importers until its first Analyze run.
 **The completeness record.** `pipeline_info.json` gains a `run_check` block at
 the end of every run, holding one entry per well: how many
 `(field, timepoint)` groups its input held, how many its measurements CSV
-covers, how many the CSV and the output archive cover between them, which are
+covers, how many are covered once the fields that were analysed and held no
+cells are counted too (and how many those are, as `no_cells`), which are
 missing, and which of five states that adds up to: **complete** (every group
 accounted for, with both the measurements CSV and the output archive on disk),
 **partial** (some groups missing), **measurements with no output archive** (the
@@ -2886,6 +2912,14 @@ Repair** ask you to chase. It is written *after* the last well, which is why
 its presence means something on its own — the rest of `pipeline_info.json` is written before
 the first image is read, so a run that died in its first seconds still leaves
 that file behind looking perfectly normal.
+
+A field with no cells is a result, not a gap: it is counted as covered, the
+well is complete with it, and the end of the run log names how many there were
+and in which wells (`NO CELLS: …`) — worth a glance, since an out-of-focus
+field looks the same. Hovering the well on Home says `… measured with no
+cells`. A field that failed is the opposite case and stays missing until it is
+processed again. For a well analysed before fields with no cells were
+recorded, covered still means "in the CSV, or has saved images".
 
 The same block is written by [Validate & Repair](#validate--repair-dataset) when
 its check finishes, which is how a dataset produced before this record existed
@@ -3408,9 +3442,13 @@ choice applies once, when the menu closes.
   typing for a second — not as you type each digit — and one typed just before
   you close the window is saved with the dataset. Then
   choose the source of the inclusion decision —
-  the per-channel **intensity minimum** (the `Include ≥` column below), or the
+  the per-channel **intensity minimum** (the `Include >` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
-  drawn a gate there, the scatter option is greyed out and says so. A gate drawn
+  drawn a gate there, the scatter option is greyed out and says so. The two are
+  alternatives: while the scatter gates decide inclusion the intensity minimums
+  are greyed out and nothing applies them — every plot, statistic and export
+  uses the cells the **Included for analysis** line counts — and the values you
+  typed are kept for when you switch back. A gate drawn
   on nanowell metrics (on the nanowell scatter, or on the "Nanowell ▸" axes)
   keeps every cell whose own nanowell lies inside it at that cell's timepoint.
   The nanowell values it reads count every cell the other gates keep, *before*
@@ -3457,8 +3495,9 @@ choice applies once, when the menu closes.
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
   plate it measures six things about every field it looks at — how sharply
-  focused it is, how much of it is clipped at the sensor's maximum, how much
-  contrast it has, how many nuclei it found, how large they are, and how bright
+  focused it is, how much of it is clipped at the sensor's maximum (the
+  camera's own: a 12-bit camera saved as 16-bit files clips at 4,095, and that
+  is where it is counted), how much contrast it has, how many nuclei it found, how large they are, and how bright
   the background is — and afterwards compares each field with the rest of the
   plate. The first three are compared plate-wide, within a timepoint, because a
   well-run plate should be uniform in them. The last three are compared only
@@ -3620,7 +3659,11 @@ choice applies once, when the menu closes.
   others had been removed by the debris gate. The button then names what is
   kept (*FOVs 1–3, 5*), and the line beneath it says how many of the dataset's
   fields are being used. The Cell Gating curves and the optimizer use the kept
-  fields too, so a threshold is never set from a field you excluded. **All**
+  fields too, so a threshold is never set from a field you excluded — and the
+  same holds for every other way a cell leaves the analysis apart from the
+  intensity minimum and the scatter gates themselves: a cell you deleted by
+  hand, a field excluded in QC triage or flagged by the run, a focus or border
+  cut, an excluded saved set, the chosen size class. **All**
   in the menu puts every field back; **None** keeps no cells at all.
 
   The choice is saved with the dataset, beside your gates, and comes back when
@@ -3710,10 +3753,12 @@ choice applies once, when the menu closes.
   compute fraction-on from a different set.
 
   This question has **two** cutoffs per channel, because the answer depends on
-  what you are plotting. `ON ≥ (ThreshFracOn)` is the brightness a cell must
-  reach, and applies when the selected Property is an intensity.
-  `ON > (ThreshCountOn)` is the number of spots it must carry, and applies when
-  the Property is an smFISH Count. They are separate values on purpose: one asks
+  what you are plotting. `ON > (ThreshFracOn)` is the brightness a cell must
+  exceed, and applies when the selected Property is an intensity.
+  `ON > (ThreshCountOn)` is the number of spots it must exceed, and applies when
+  the Property is an smFISH Count. Every cutoff on this tab is read the way
+  its header is written, strictly above: at an `Include >` of 50 a cell
+  measuring exactly 50 is left out, and at an `ON >` of 50 it is not ON. They are separate values on purpose: one asks
   how *bright* a cell is, the other how many *spots* it holds, and the two live
   on scales that share no useful number. A channel with no spot-count column has
   no count cutoff to set, and shows an em-dash in that column.
@@ -3735,7 +3780,7 @@ readout channel's ON cutoff starts at 50; the nuclear (segmentation) channel
 starts at 0, because an ON/OFF brightness cut has no meaning for the channel
 nuclei are *found* with — every segmented cell is by construction a detection in
 it, so a non-zero cut there only hides nuclei from the Image Table's
-"≥ threshold" view. Whichever channel it is, a value you set yourself always wins
+"> threshold" view. Whichever channel it is, a value you set yourself always wins
 over the starting one.
 
 Two helpers sit beside the fraction-on section:
@@ -5197,6 +5242,12 @@ subtract) with a propagated error bar, which is the ΔΔCt convention; the
 option to draw it raw, because a raw control beside ratio bars would put two
 units on one axis.
 
+Error bars are propagated the same way on Bar Plots and Line Graphs, in all
+three panels: the spread of the control and of the baseline timepoint is
+combined with the sample's own. A sample with no spread of its own — a
+replicate set holding one well — stays without one after normalising, on a bar
+and on a curve alike, rather than borrowing its control's.
+
 Assignments are kept, never silently reset. A control whose group is deleted
 shows as `Veh_old (missing)` and comes back when the group does; an
 assignment for a sample that is no longer plotted collects under **Unused
@@ -5457,6 +5508,11 @@ describe one well's worth of signal and the three can be read together. A
 two-well set of 5 events each plots 5, not 10. The Bar Plots tab reports the
 same number, so the two tabs can be compared directly; the cross-well total is
 still exported (see below).
+
+A timepoint at which no cell is above the ON cutoff is drawn at zero on the
+fraction and N events panels, for a well and for a replicate set alike: nothing
+ON is a measurement. The mean panel has no point there, because the mean is the
+average intensity of the ON cells and there are none to average.
 
 - **Needs** — selected wells spanning more than one timepoint to see a trend
   (single-timepoint data draws a single point).
@@ -6021,6 +6077,13 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
   wells, or *Faceted (one per group)*); **Bins** count; **log x** / **log y**
   toggles; **Pool replicates**; the timepoint picker; the channel-wide
   threshold reference line.
+- **log x and values at or below zero** — a logarithmic axis cannot show a value
+  at or below zero, which a background-subtracted intensity often is. With
+  **log x** on, the histogram's bins are log-spaced over the positive values, so
+  the bars are equally wide on the axis, and the figure says how many values it
+  leaves off (*"117 of 500 values (23.4%) are at or below zero and are not on
+  the logarithmic axis"*). The counts in the legend and title still count every
+  value, and the CSV export keeps them all.
 - **Pool replicates** — with replicate groups defined, clicking a well on the
   plate shows its whole group. Ticked (the default), each group is drawn as one
   series of all its wells' cells. Unticked, every well of the shown groups is
@@ -6228,7 +6291,19 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
 sets — pairwise **t-tests** (Welch or Student), **Wilcoxon rank-sum**,
 **Mann-Whitney U** and a **KS** test with its CDF plot, plus four tests that
 answer a different question: **Dunnett** against one control group, a **paired
-t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
+t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**. Wilcoxon rank-sum
+and Mann-Whitney U are one test under two names (the report prints *W* for one
+and *U* for the other), and its p is **exact** whenever the groups are small
+enough to count every arrangement, tied values included — so three wells against
+three can never read below p = 0.1, whichever name you pick. Each comparison's
+difference of means carries a 95% interval: Welch's *t* interval when a group
+holds fewer than 30 values, a bootstrap from there. A pair whose test cannot be
+computed (two groups that are the same constant) says so, and is left out of the
+Benjamini-Hochberg adjustment of the others.
+The KS test compares the per-cell values of each well's **ON** cells, and ON
+means there what it means on Bar Plots and Line Graphs: the cells above the ON
+cutoff, or — while [Cell Gating](#cell-gating) takes fraction-on from the
+scatter gates — the cells inside the thresholding gate.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Home → Sample Map → Replicates](#replicates).
@@ -6444,7 +6519,11 @@ The **Spatial** tab (under **Analysis** on the rail, next to Multivariate) analy
 positions in the well plane — the pipeline emits `shape_centroid_row` /
 `shape_centroid_col` for every segmented cell (in pixels of its field), and a
 nanowell run also each cell's position across the whole well in µm, which the
-tab then uses instead, labelling distances in µm. The tab uses them to
+tab then uses instead, labelling distances in µm. Where a well was imaged in
+several fields and positions are in pixels, a cell's neighbours are looked for
+in its own field only: distances, densities, Ripley's L and colonies never
+join cells of two fields, although the Spatial map draws the fields over one
+another. The tab uses them to
 answer questions the plotting and multivariate tabs can't: *"Do my cells
 form colonies, and are they growing or sparse?"*, *"Do edge cells behave
 differently from interior cells?"*, *"How much of the GFP variability is
@@ -6506,7 +6585,7 @@ the row stays short at Cell level and grows at Colony / Intra-colony / Summary:
 | Are my cells clustered, dispersed, or random? | Cell | Ripley L(r) − r | Sample curve vs a Monte-Carlo CSR envelope. Above the envelope = clustered at that radius; below = dispersed; inside = consistent with random. |
 | How closely packed are my cells? | Cell | NND histogram | Distribution of each cell's nearest-neighbour distance, with a median marker (the reference scale for the ε multiplier). |
 | How many colonies did I get, and how big? | Colony | Colony size histogram | One bar per colony-cell-count bucket. |
-| **How much of my GFP (or any metric) is between colonies vs inside them?** | Colony | **Per-colony distribution** | One violin per colony, sorted by median. The top-left callout gives `ICC = σ²_between / σ²_total`, `σ²_between`, `σ²_within`, and the cell / colony count. **ICC → 1** means variability is almost entirely between colonies; **ICC → 0** means variability lives inside colonies. |
+| **How much of my GFP (or any metric) is between colonies vs inside them?** | Colony | **Per-colony distribution** | One violin per colony, sorted by median. The top-left callout gives the intraclass correlation `ICC`, `σ²_between`, `σ²_within`, and the cell / colony count. **ICC → 1** means variability is almost entirely between colonies; **ICC ≈ 0** means colony identity tells you nothing about the signal (it can dip slightly below zero by chance). It is the ANOVA estimate, ICC(1), which stays near zero on unstructured data however small the colonies are; it reads "not defined" with a single colony or when no colony holds two cells. |
 | Do edge cells look different from centre cells? | Intra-colony | Radial profile | Metric ± SEM binned by normalised radius `r/R` (0 = colony centre, 1 = furthest cell). |
 | Do boundary cells look different from interior cells? | Intra-colony | Boundary vs interior | Split violin of the metric partitioned by the Boundary % percentile. |
 | Where are my cells / colonies in the well? | any | Spatial map | Scatter of centroids in the well plane, coloured by metric / colony id / r/R, with optional convex-hull overlays per colony. |
@@ -6522,7 +6601,9 @@ timepoint, it walks every well in your plate selection × every loaded
 timepoint and computes a small dataclass (`FrameSummary`) of scalar
 summaries per frame — cell count, colony count, median NND, median k-NN
 mean distance, median local density, mean colony size, median hull area,
-median packing density, and (if you picked a per-cell Metric) the
+median packing density (both medians are over the colonies of three or more
+cells, which are the ones that have a hull; *Colonies with a hull* is how many
+that is), and (if you picked a per-cell Metric) the
 between-vs-within ICC on that column. Pick which one to plot from the
 **Summary metric** dropdown and choose *Heatmap* or *Line plot* from
 **Display**. **Save summary data…** writes every summary column at once (long
@@ -7170,7 +7251,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   many were computed, and whether anything was corrected. With three or more samples an omnibus (one-way
   ANOVA, or Kruskal-Wallis for the rank tests) is stated first. Each sample gets a line with its n, mean, sd,
   median and interquartile range (and a 95% interval on Groups); each comparison its statistic, p, stars, Hedges'
-  *g* and the difference of means with a bootstrap 95% interval. Above the report a box per sample (the dots
+  *g* and the difference of means with its 95% interval (Welch's *t* interval when a sample holds fewer than 30
+  values, a bootstrap from there). Mann-Whitney's p is exact whenever the two samples are small enough to count
+  every arrangement, tied values included. Above the report a box per sample (the dots
   over it, the mean as a diamond — with its 95% interval on Groups) shows what was compared, with a bracket and
   stars over each comparison below 0.05. A comparison that cannot be made says why in its row (fewer than two
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose
@@ -7204,12 +7287,16 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   every group again; *vs* keeps the control you chose meanwhile. Every other group drawn is tested against the
   control. The value is the page's **Metric** at the **Timepoint** — a fold-change metric compares each nanowell
   with its own **Baseline** — with no grouping by starting cells, and **Responders higher / lower** (beside the Test)
-  chooses the tail the tests look in. **Subset**, Cell Gating, the rim focus rule and the **Moving average** apply:
+  chooses the tail the tests look in. When the Timepoint names one the drawn wells were not imaged at (the page has
+  one Timepoint for every view, and the Array view offers a single well's), the test reads the latest timepoint they
+  have, as the other tests on this view do, and Details names the timepoint read. **Subset**, Cell Gating, the rim focus rule and the **Moving average** apply:
   with the moving average on, each nanowell's value is its moving average at the Timepoint, taken exactly as the
   other tests on this view take it, and the figure carries the *Moving average over N timepoints* tag. The Fixed
   cohort does not apply, and the report says so when it is ticked; *Compare* is hidden while this test is chosen,
   since it never applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
-  report. A group or control with fewer than two wells is not tested as a group, and the figure says so.
+  report. A Metric with one value per nanowell — the growth rate, the occupancy class — has no timepoint: the
+  Timepoint does not apply to it, and a nanowell is left out only where that Metric is undefined (a growth rate needs
+  three timepoints with cells), so the test is on the same nanowells the other tests on this view compare. A group or control with fewer than two wells is not tested as a group, and the figure says so.
 
   **Reading the figure.** The figure's first line says how its plots are grouped: how many groups were tested,
   each with its wells, and the comparisons that makes — each group against the control (for example *4 groups
@@ -7761,7 +7848,7 @@ segmentation, the status line says so. Opening another dataset clears it.
   the intensity gate are told apart — the first is "deleted here", the second
   "below the intensity gate" — so a deletion you never made is never shown as
   yours. To bring back a cell another layer removed, raise that threshold or
-  switch that layer off. The overlay works in the binary (≥ threshold)
+  switch that layer off. The overlay works in the binary (> threshold)
   view too, which is usually where the question comes up, since a binary mask is
   already a picture of which cells counted.
 - **The status line says when it is showing you less than it was asked for.**
@@ -7769,7 +7856,7 @@ segmentation, the status line says so. Opening another dataset clears it.
   well's archive stopped part way, the line ends with **INCOMPLETE** and the
   reason — the FOV and timepoint menus above it are then shorter than the dataset
   actually is, which is otherwise indistinguishable from a well that holds that
-  few frames. And if you switch on the binary (≥ threshold) view for a field the
+  few frames. And if you switch on the binary (> threshold) view for a field the
   measurements do not cover — no rows for the well, or none for this
   FOV/timepoint — the binary view is declined rather than drawn: you get the
   ordinary intensity image and a line saying the threshold could not be measured
@@ -7898,7 +7985,7 @@ channel for every well).
   come from the sidebar plate; changing that selection — including **Select all /
   none** — re-runs the layout in place.
 - **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
-  Corrected**, **Mask**, **≥ threshold** (renders that channel's
+  Corrected**, **Mask**, **> threshold** (renders that channel's
   ON-cutoff binary — ThreshFracOn, or ThreshCountOn when the selected Property
   is a spot count — positive cells white), **Colour cells**, a **boundary** outline
   overlay, and a **colormap + LUT** min/max. The options travel with the channel
@@ -7912,14 +7999,14 @@ channel for every well).
 - **Cells the analysis has dropped are not drawn.** A cell you deleted on the
   Segmentation tab, one a crop excluded, one that failed the QC debris gate, and
   one outside your gating all get no outline when the table renders, and do not
-  appear in the **Mask** or **≥ threshold** views — the table shows the same
+  appear in the **Mask** or **> threshold** views — the table shows the same
   population every plot, statistic and export counts. A grid drawn *before* such
   an edit does not repaint itself (re-rendering a plate is seconds of work): the
   header cues **edited — press Generate**, and the grid is current again after
   that. The one place that still shows every segmented cell is the pipeline's
   own **NUC+SEG** overlay channel, whose boundaries are drawn into the saved
   image before All-Well ever sees it.
-- **Colour cells** — in the **Mask** and **≥ threshold** views, give every cell its
+- **Colour cells** — in the **Mask** and **> threshold** views, give every cell its
   own colour instead of painting them all white. Two nuclei that touch are
   otherwise a single white shape, which is exactly the mistake you are looking at a
   mask to catch. The colour is a fixed function of the cell's label id, so it does
@@ -8086,7 +8173,7 @@ channel for every well).
 - **Cells that can't be drawn say so** — a cell never shows a different picture
   than the one you asked for. `(no image)` means nothing decoded for that well /
   channel / timepoint / FOV; `(no mask)` means the cell's **Mask** or
-  **≥ threshold** view has no segmentation mask for that frame (the intensity
+  **> threshold** view has no segmentation mask for that frame (the intensity
   image is *not* shown in its place, so a threshold view is never half
   silhouettes and half pictures — and such a cell draws from its mask alone, so a
   missing fluorescence frame does not stop it); `(render failed)` means that one cell errored —
@@ -10369,6 +10456,11 @@ the speed of copying the archives yourself in Finder or Explorer. Narrowing
 by well only is the fastest case — nothing inside those wells' archives has
 to be touched at all — and narrowing by timepoint or FOV costs roughly in
 proportion to how much you keep.
+
+A well archive need not be flat. One made with Finder's **Compress**, which
+holds each image inside a folder named for the well beside macOS's hidden
+`__MACOSX` copies, is subset like any other: members keep the names they have,
+and each kept measurement row is checked against the images by filename.
 
 A dataset that spells one well two ways (`in/A1.zip` beside `in/A01.zip`, say)
 is refused before anything is copied, for the reason given under

@@ -78,6 +78,48 @@ log = logging.getLogger("process_microscopy")
 # checkpoints a restart resumes from).
 
 
+class ColourImageError(ValueError):
+    """An input image holds colour, and the pipeline measures one grey plane."""
+
+
+def first_2d_plane(img: np.ndarray, name: object = "") -> np.ndarray:
+    """The one 2-D plane the pipeline measures from whatever a reader returned.
+
+    A multi-page stack ``(Z, H, W)`` gives its first page. An image with a
+    trailing colour axis ``(H, W, 3)`` or ``(H, W, 4)`` is a different thing —
+    taking index 0 of it yields the image's first *row*, a ``(W, 3)`` strip that
+    every later step then treats as a frame. So it is recognised and handled:
+
+    * all colour planes equal (a grey image a program exported as RGB, the usual
+      way one arrives) — that plane, which is exactly the grey image; an alpha
+      plane is ignored;
+    * planes that differ — :class:`ColourImageError`. There is no one grey value
+      of a coloured pixel (luminance weights, the brightest plane and the sum
+      each give a different intensity), so the run stops on that frame and the
+      error names it, instead of measuring a number nobody chose.
+
+    A trailing axis counts as colour only when the other two are both longer
+    than 4, which keeps a ``(3, H, W)`` stack — and a degenerate 3-pixel-wide
+    one — on the stack rule.
+    """
+    arr = np.asarray(img)
+    while arr.ndim > 3:
+        arr = arr[0]
+    if arr.ndim == 3 and arr.shape[-1] in (3, 4) and min(arr.shape[:2]) > 4:
+        first = arr[..., 0]
+        if all(np.array_equal(first, arr[..., c]) for c in (1, 2)):
+            return first
+        raise ColourImageError(
+            f"{name or 'an input image'} is a colour image "
+            f"({arr.shape[1]} x {arr.shape[0]}, {arr.shape[-1]} planes that differ). "
+            "The pipeline measures one grey plane per channel; export each "
+            "channel as its own greyscale image."
+        )
+    while arr.ndim > 2:
+        arr = arr[0]
+    return arr
+
+
 def load_2d_gray(path: Path) -> np.ndarray:
     """Load a TIFF (or other format) as a 2-D float32 array."""
     return load_2d_gray_with_ceiling(path)[0]
@@ -109,9 +151,8 @@ def load_2d_gray_with_ceiling(path) -> tuple[np.ndarray, float | None]:
     """
     # A path, or an open binary file — a zip-mode well hands over a member it
     # read from the archive in place (pipeline.zip_members).
-    img = imread(path if hasattr(path, "read") else str(path))
-    while img.ndim > 2:
-        img = img[0]
+    img = first_2d_plane(imread(path if hasattr(path, "read") else str(path)),
+                         getattr(path, "name", path))
     ceiling: float | None = None
     dt = np.asarray(img).dtype
     if np.issubdtype(dt, np.integer):
@@ -1161,8 +1202,8 @@ def merge_records_into_csv(
         # new rows alone. Atomically, so there was no partial file to notice;
         # the caller logged "+N row(s), merged" with N being the whole of what
         # survived; and because `done_keys` unions the CSV with the well's
-        # `_out.zip`, which still held every image, the well went on reporting
-        # complete. The lost timepoints were unrecoverable short of --force.
+        # record of finished groups (or its `_out.zip`, which still held every
+        # image), the well went on reporting complete. The lost timepoints were unrecoverable short of --force.
         #
         # Note that a *corrupt* CSV already failed the well loudly here —
         # UnicodeDecodeError and csv.Error were never caught — so an unreadable

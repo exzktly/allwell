@@ -28,6 +28,7 @@ import numpy as np
 from tifffile import imread
 from skimage.filters import threshold_otsu
 
+from pipeline.io import first_2d_plane
 from pipeline.threshold_optimize import round_stored_threshold
 from util.image_exts import is_group_image
 from util.well_token import canonical_well_label
@@ -298,8 +299,8 @@ def _sample_one_well(zf, labels, tophats, *, channels, picked_tps, per_channel,
                 # An input frame may be a multi-page stack; the pipeline measures
                 # its first plane (pipeline.io.load_2d_gray_with_ceiling), so the
                 # sample must be that plane, not the (Z, H) slice below would cut.
-                while fluor_zf is not zf and fluor_arr.ndim > 2:
-                    fluor_arr = fluor_arr[0]
+                if fluor_zf is not zf:
+                    fluor_arr = first_2d_plane(fluor_arr, fluor_name)
             except Exception as exc:
                 decode_failed[ch] += 1
                 log.debug("Auto-threshold: skipping %s / %s: %s",

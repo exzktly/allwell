@@ -807,8 +807,11 @@ def _load_ratio_array(ctx, cache, well, ratio, tp, fov, *, use_tophat) -> Path |
         return None
     num_f = _np.asarray(num_arr, dtype=_np.float32)
     den_f = _np.asarray(den_arr, dtype=_np.float32)
+    # Epsilon is the floor the denominator is clamped to, not a term added to
+    # it — the rule ``RatioMetric`` states and ``resolve_value_series`` applies
+    # to the cells measured from these pixels.
     eps = float(ratio.epsilon) if getattr(ratio, "epsilon", None) else 1e-6
-    return num_f / (den_f + eps)
+    return num_f / _np.maximum(den_f, _np.float32(eps))
 
 def _render_with_boundary_overlay(arr_2d, sz_w, sz_h, lo, hi, cmap_name, mask_arr,
                                   log_scale: bool = False):

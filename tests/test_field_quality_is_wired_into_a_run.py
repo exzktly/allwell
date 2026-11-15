@@ -66,7 +66,7 @@ def stubbed_segmenter(monkeypatch):
     labels[40:50, 40:50] = 2
     labels[70:80, 70:80] = 3
     monkeypatch.setattr(
-        pm, "_segment_image_group", lambda **k: (labels, None, None, None))
+        pm, "_segment_image_group", lambda **k: (labels, None, None, None, None))
     monkeypatch.setattr(pm, "_write_processed_images", lambda **k: None)
     # The records carry the per-cell focus column the real quantifier emits,
     # because the field's ``focus`` is now the median of exactly these values
@@ -74,7 +74,7 @@ def stubbed_segmenter(monkeypatch):
     from pipeline.field_quality import FOCUS_COLUMN
     monkeypatch.setattr(
         pm, "_quantify_image_group",
-        lambda **k: [{"nucleus_id": i, "area": 100.0 * i,
+        lambda **k: [{"nucleus_id": i, "area_px": 100.0 * i,
                       FOCUS_COLUMN: 0.30 + 0.01 * i} for i in (1, 2, 3)])
     return labels
 
@@ -175,7 +175,7 @@ def test_the_focus_column_is_absent_rather_than_zero_where_unmeasurable(
 
     monkeypatch.setattr(
         pm, "_quantify_image_group",
-        lambda **k: [{"nucleus_id": i, "area": 100.0, FOCUS_COLUMN: None}
+        lambda **k: [{"nucleus_id": i, "area_px": 100.0, FOCUS_COLUMN: None}
                      for i in (1, 2, 3)])
     nuc, flu = _write_group(tmp_path)
     out = tmp_path / "out"

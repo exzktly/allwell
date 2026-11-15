@@ -978,6 +978,15 @@ def collect_bar_items(
     return req.use_groups, items, band_lbl
 
 
+def _is_replicate_member(rset_name: str | None, wells: list[str], pool_replicates: bool) -> bool:
+    """Whether a batch member is drawn as a replicate set (one bar over its wells) rather than as a well.
+
+    A pooled set is one however many wells it holds; an expanded entry carries its set's name for the label
+    and colour and is one well shown for its own sake.
+    """
+    return rset_name is not None and (pool_replicates or len(wells) > 1)
+
+
 def batch_members(ctx, group, *, pool_replicates: bool):
     """``(key, display, wells, rset_name_or_None, colour)`` for a batch group.
 
@@ -1085,12 +1094,18 @@ def collect_bar_items_for_group(
 
         A pooled multi-well replicate set uses ``compute_rep_stats`` /
         ``compute_rep_per_fov_stats`` (mean-of-per-well-means) — NOT the old
-        pool-of-cells ``aggregate_group`` — so batch bars equal the tab. A solo
+        pool-of-cells ``aggregate_group`` — so batch bars equal the tab, a set
+        of one well included. A solo
         well (or a non-pooled single-well entry) stays on ``aggregate_group``
         (== ``aggregate_well`` for one well), preserving its within-well spread.
         The caller sets ``active_val_col`` so the rep-set stat reads the batch
         panel's column."""
-        if rset_name is not None and len(wells) > 1:
+        # A pooled replicate set of ONE well is still a set: one replicate, so no
+        # spread (``replicate_unit``), which is what the tab draws for it. Sent
+        # down the well branch instead it was given that well's cell-to-cell SD
+        # as its error bar and an events spread of 0.0. Only an expanded entry
+        # (``pool_replicates`` off) is a well shown for its own sake.
+        if _is_replicate_member(rset_name, wells, pool_replicates):
             rset = ReplicateSet(rset_name, wells)
             rset_per_fov = replicate_unit(len(wells), per_fov_spread) == "fov"
             all_tps: set = set()

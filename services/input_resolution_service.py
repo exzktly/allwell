@@ -205,6 +205,15 @@ def _too_large_plan(where: str) -> InputPlan:
 
 def _needs_zipping_plan(found: NonZipInput, where: str) -> InputPlan:
     """The refusal for loose images / well folders, as one readout line."""
+    if found.duplicates:
+        well, names = found.duplicates[0]
+        more = f" (and {len(found.duplicates) - 1} more)" if len(found.duplicates) > 1 else ""
+        return InputPlan(
+            NEEDS_ZIPPING, None, None, len(found.loose),
+            f"⚠ {where} names well {well} with more than one archive ({', '.join(names)}){more}. Each would "
+            f"be run as {well} and the last to finish would replace the others' results — keep one archive "
+            f"per well.",
+        )
     parts = []
     if found.loose:
         parts.append(f"{len(found.loose)} loose image(s)")

@@ -129,7 +129,7 @@ def test_process_image_group_forwards_phase_token(monkeypatch):
     monkeypatch.setattr(pm, "_correct_image_group", _capture)
     monkeypatch.setattr(
         pm, "_segment_image_group",
-        lambda **k: (np.zeros((32, 32), np.int32), None, None, None))
+        lambda **k: (np.zeros((32, 32), np.int32), None, None, None, None))
     monkeypatch.setattr(pm, "_write_processed_images", lambda **k: None)
     monkeypatch.setattr(pm, "_quantify_image_group", lambda **k: [])
 

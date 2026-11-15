@@ -130,26 +130,55 @@ def _gaussian_kde(values: Sequence[float], grid: np.ndarray) -> np.ndarray:
 _KDE_BLOCK_CELLS = 2_000_000
 
 
+def _axis_span(values_lists: Iterable[Sequence[float]], log_x: bool,
+               value_range: tuple[float, float] | None) -> tuple[float, float, bool] | None:
+    """``(lo, hi, log_spaced)`` for the value axis, or ``None`` with nothing finite to span.
+
+    The one rule the bin edges and the KDE grid share. On a logarithmic axis
+    the span is the **positive** values', log-spaced: a value at or below zero
+    has no place on that axis, and spacing the edges linearly from a negative
+    minimum (which is what a background-subtracted intensity gives) drew bars
+    of wildly unequal width across it. ``_non_positive_note`` states how many
+    values that leaves off. With no positive value at all there is nothing a
+    log axis can show, and the span is the linear one.
+
+    *value_range* is every value's range when the drawn values are a sample;
+    its lower end is used when it is positive, and otherwise the smallest
+    positive value drawn.
+    """
+    chunks = [np.asarray(vs, dtype=float) for vs in values_lists]
+    pooled = np.concatenate(chunks) if chunks else np.empty(0)
+    pooled = pooled[np.isfinite(pooled)]
+    if value_range is not None:
+        lo, hi = value_range
+    elif pooled.size:
+        lo, hi = float(pooled.min()), float(pooled.max())
+    else:
+        return None
+    log_spaced = False
+    if log_x and hi > 0:
+        if lo <= 0:
+            positive = pooled[pooled > 0]
+            lo = float(positive.min()) if positive.size else lo
+        log_spaced = lo > 0
+    if hi <= lo:
+        hi = lo * 10.0 if log_spaced else lo + 1.0
+    return lo, hi, log_spaced
+
+
+def _spaced(span, n: int) -> np.ndarray:
+    if span is None:
+        return np.linspace(0.0, 1.0, n)
+    lo, hi, log_spaced = span
+    if log_spaced:
+        return np.logspace(math.log10(lo), math.log10(hi), n)
+    return np.linspace(lo, hi, n)
+
+
 def _grid_for(values_lists: Iterable[Sequence[float]], n_pts: int = 200, log_x: bool = False,
               value_range: tuple[float, float] | None = None) -> np.ndarray:
     """Build an x-axis grid spanning all per-group min/max (*value_range* when given)."""
-    if value_range is not None:
-        lo, hi = value_range
-    else:
-        chunks = [np.asarray(vs, dtype=float) for vs in values_lists]
-        if not chunks:
-            return np.linspace(0.0, 1.0, n_pts)
-        pooled = np.concatenate(chunks)
-        pooled = pooled[np.isfinite(pooled)]
-        if pooled.size == 0:
-            return np.linspace(0.0, 1.0, n_pts)
-        lo = float(pooled.min())
-        hi = float(pooled.max())
-    if hi <= lo:
-        hi = lo + 1.0
-    if log_x and lo > 0:
-        return np.logspace(math.log10(lo), math.log10(hi), n_pts)
-    return np.linspace(lo, hi, n_pts)
+    return _spaced(_axis_span(values_lists, log_x, value_range), n_pts)
 
 
 def _empty_msg(ax, message: str = "") -> None:
@@ -217,25 +246,41 @@ def _shared_bin_edges(
     combined range, then pass the edge array to every per-group hist
     call so the same x-axis bins are shared across groups.
     """
-    n_edges = max(2, int(bins)) + 1
-    if value_range is not None:
-        # A sampled selection: the range of every value, not of the sample.
-        lo, hi = value_range
-    else:
-        chunks = [np.asarray(vs, dtype=float) for vs in values_lists]
-        if not chunks:
-            return np.linspace(0.0, 1.0, n_edges)
-        pooled = np.concatenate(chunks) if len(chunks) > 1 else chunks[0]
-        pooled = pooled[np.isfinite(pooled)]
-        if pooled.size == 0:
-            return np.linspace(0.0, 1.0, n_edges)
-        lo = float(pooled.min())
-        hi = float(pooled.max())
-    if hi <= lo:
-        hi = lo + 1.0
-    if log_x and lo > 0:
-        return np.logspace(math.log10(lo), math.log10(hi), n_edges)
-    return np.linspace(lo, hi, n_edges)
+    return _spaced(_axis_span(values_lists, log_x, value_range), max(2, int(bins)) + 1)
+
+
+#: Tag on the note that counts the values a logarithmic axis cannot show.
+NON_POSITIVE_NOTE_TAG = "_aw_distribution_non_positive_note"
+
+
+def non_positive_count(groups, exact) -> tuple[int, int]:
+    """``(values at or below zero, values)`` over the groups — every value's, when the groups are a sample."""
+    below = total = 0
+    for i, (_name, _color, vals) in enumerate(groups):
+        e = exact[i] if exact else None
+        if e is None:
+            arr = np.asarray(vals, dtype=float)
+            arr = arr[np.isfinite(arr)]
+            below += int((arr <= 0).sum())
+            total += int(arr.size)
+            continue
+        total += int(e.n)
+        if e.lo <= 0:
+            # Every value from the minimum up to zero, counted over the whole pool.
+            below += int(e.hist(np.array([e.lo, np.nextafter(0.0, 1.0)]))[0])
+    return below, total
+
+
+def non_positive_note(groups, exact, log_x: bool) -> str:
+    """The sentence a log-x figure carries when some of its values are at or below zero, else ``""``."""
+    if not log_x:
+        return ""
+    below, total = non_positive_count(groups, exact)
+    if below == 0:
+        return ""
+    share = 100.0 * below / total
+    return (f"{below:,} of {total:,} values ({share:.1f}%) are at or below zero "
+            "and are not on the logarithmic axis")
 
 
 def _has_on_cutoff(ctx) -> bool:
@@ -530,6 +575,8 @@ def _draw_distribution(ctx, canvas, groups, mode, bins, log_x, log_y, tp_h, layo
         ax.set_axis_on()
         _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, log_y=log_y, exact=exact)
     _note_sampled(ctx, groups, exact)
+    if mode not in PER_GROUP_MODES:                      # those put the value on y; Log X does not apply
+        _note_non_positive(ctx, groups, exact, log_x)
 
     # Re-apply theme text colours after the renderers set titles/labels.
     # `apply_axes_style` is called inside `_setup_axes` *before* the title
@@ -953,6 +1000,23 @@ def _note_sampled(ctx, groups, exact) -> None:
     # constrained layout an in-layout note shrinks the axes to fit it.
     note.set_in_layout(False)
     setattr(note, SAMPLED_NOTE_TAG, True)
+
+
+def _note_non_positive(ctx, groups, exact, log_x: bool) -> None:
+    """Say on the figure how many values a logarithmic x axis leaves off, when it leaves any."""
+    text = non_positive_note(groups, exact, log_x)
+    fig = ctx.widgets.get_or_none("_distribution_fig")
+    if not text or fig is None or not fig.axes:
+        return
+    from review.core.plot_style import follows_theme, tokens_for
+    ax = fig.axes[-1]
+    # Above the sampled-figure note when the figure carries both.
+    y = 0.06 if sampled_note(groups, exact) else 0.01
+    note = follows_theme(ax.text(0.01, y, text, transform=ax.transAxes, ha="left", va="bottom",
+                                 fontsize=7, color=tokens_for(ax)[2], zorder=6, clip_on=False,
+                                 wrap=True), muted=True)
+    note.set_in_layout(False)
+    setattr(note, NON_POSITIVE_NOTE_TAG, True)
 
 
 def _xlabel_for(ctx) -> str:

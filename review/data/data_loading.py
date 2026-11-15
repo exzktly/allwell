@@ -1294,6 +1294,36 @@ def threshold_free_arrays(
     return tp_arr, val_arr, fov_arr, on_arr, fov_trusted
 
 
+def on_population_values(
+    df: pd.DataFrame,
+    target_t: float,
+    *,
+    threshold: float,
+    tp_col: str = "timepoint_hours",
+    val_col: str = "gfp_mean_intensity",
+    fluor_gates: dict[str, float] | None = None,
+    ratios: dict[str, RatioMetric] | None = None,
+    on_col: str | None = None,
+) -> np.ndarray:
+    """The values of the cells the aggregate calls ON at *target_t* — its mean's own sample.
+
+    The cells are :func:`threshold_free_arrays`' (the population every
+    aggregate counts) and "on" is :func:`_aggregate_arrays`' rule: gate
+    membership when the thresholding on-column is in use, ``value > threshold``
+    otherwise. A test that compares two ON distributions cell by cell reads
+    them here, so its sample is the population the bar beside it is the mean
+    of rather than a second definition of ON.
+    """
+    arrays = threshold_free_arrays(df, tp_col=tp_col, val_col=val_col, fluor_gates=fluor_gates,
+                                   ratios=ratios, on_col=on_col)
+    if arrays is None:
+        return np.empty(0, dtype=float)
+    tp_arr, val_arr, _fov, on_arr, _trusted = arrays
+    at_t = tp_close_mask(tp_arr, target_t)
+    above = on_arr if on_arr is not None else (val_arr > threshold)
+    return np.asarray(val_arr[at_t & above], dtype=float)
+
+
 def _aggregate_arrays(
     tp_arr: np.ndarray,
     val_arr: np.ndarray,

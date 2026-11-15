@@ -29,6 +29,7 @@ a layer ran and found nothing.
 
 from __future__ import annotations
 
+from domain.image_identity import normalize_fov
 from review.data.cache_projectors import drop_verdict_column, project_verdict_column
 
 #: The verdict column this layer owns. 1 = the row's field was not excluded.
@@ -52,8 +53,22 @@ def _verdict(df, well: str, keys: set[tuple[str, str, str]]):
 
     fovs = text_column(df, "fov")
     tps = timepoint_text(df)
-    return pd.Series([0 if (str(well), f, t) in keys else 1
+    wanted = fov_normalised(keys)
+    return pd.Series([0 if (str(well), normalize_fov(f), t) in wanted else 1
                       for f, t in zip(fovs, tps, strict=True)], index=df.index)
+
+
+def fov_normalised(keys) -> set[tuple[str, str, str]]:
+    """*keys* with each field token in the form the loaded frames spell it.
+
+    A field is keyed by the run's **raw** filename token (``"01"``, or ``""`` on
+    a plate with no field slot), while ``load_well_csv`` normalises the frame's
+    ``fov`` column (``"01"`` -> ``"1"``, ``""`` -> ``"1"``). Joined as written,
+    a zero-padded or field-less plate matched nothing: the panel said a field
+    was excluded and every one of its cells stayed in. Both sides go through
+    :func:`domain.image_identity.normalize_fov`, the loader's own rule.
+    """
+    return {(str(w), normalize_fov(f), str(t)) for w, f, t in keys}
 
 
 def field_exclusions_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:

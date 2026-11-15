@@ -355,7 +355,7 @@ def qc_flag_counts(exclusions: pd.DataFrame) -> dict:
 
 def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: str, *, plate_id: str = "plate",
                       crop_path=None, value_column: str | None = None,
-                      value_reasons: pd.Series | None = None) -> pd.DataFrame:
+                      value_reasons: pd.Series | None = None, per_nanowell: bool = False) -> pd.DataFrame:
     """A per-nanowell table for :func:`prepare` from the Nanowells page's metrics (``series_compute.site_metrics``).
 
     One row per nanowell of every well *conditions* names (``{well: condition}``): ``n0`` is the count at the
@@ -365,10 +365,22 @@ def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: 
     *crop_path* is ``crop_path(well, q, r) -> str`` or ``None`` (no crop paths). *value_column* names the page's Metric
     column: its value at *final_timepoint* is the ``value`` the analysis tests (``None``: the count fold change).
     *value_reasons*, on *metrics*' index, says why a value is undefined where the caller knows (the moving average's
-    reasons): written as :data:`VALUE_REASON`, so the nanowell is excluded with that reason."""
-    final = metrics[(metrics["timepoint"] == final_timepoint) & metrics["well"].isin(list(conditions))].copy()
-    if final.empty:
-        raise ValueError(f"no nanowell of the named wells has a row at timepoint {final_timepoint!r}")
+    reasons): written as :data:`VALUE_REASON`, so the nanowell is excluded with that reason.
+
+    *per_nanowell* is for a *value_column* with one value per nanowell and none per timepoint (a growth rate, the
+    occupancy class). Such a metric has no state at a timepoint to be excluded by, so the rows are each well's first
+    timepoint — the rows every other Statistics test reads for these metrics (``distribution_compute``), whichever
+    timepoints a well was imaged at — *final_timepoint* is not read, and no ``qc_state`` is written: a nanowell is
+    left out only where the metric is undefined, under the reason *value_reasons* gives."""
+    named = metrics["well"].isin(list(conditions))
+    if per_nanowell:
+        final = metrics[named & metrics["tp_order"].eq(0)].copy()
+        if final.empty:
+            raise ValueError("no nanowell of the named wells has a row")
+    else:
+        final = metrics[named & (metrics["timepoint"] == final_timepoint)].copy()
+        if final.empty:
+            raise ValueError(f"no nanowell of the named wells has a row at timepoint {final_timepoint!r}")
     base_time = (metrics[metrics["timepoint"] == metrics["baseline_timepoint"]]
                  .set_index(["well", "nw_q", "nw_r"])["time_h"])
     keys = pd.MultiIndex.from_frame(final[["well", "nw_q", "nw_r"]])
@@ -391,7 +403,7 @@ def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: 
         if value_reasons is not None:
             out[VALUE_REASON] = value_reasons.reindex(final.index).fillna("").astype(str).to_numpy()
     state = final["state"].astype(str).to_numpy()
-    out["qc_state"] = np.where(np.isin(state, ["measured", "empty"]), "", state)
+    out["qc_state"] = "" if per_nanowell else np.where(np.isin(state, ["measured", "empty"]), "", state)
     for column, flag in SITE_QC_FLAGS.items():
         if column in final.columns:
             out[flag] = final[column].eq(True).to_numpy()            # NA is not a flag

@@ -162,6 +162,7 @@ from pipeline.io import (
     publish_scratch_args,
     scratch_base_for,
 )
+from pipeline.done_groups import withdraw_done_record
 from pipeline.fov_checkpoint import (
     _fov_stem,
     _load_fov_checkpoint,
@@ -600,7 +601,7 @@ def compute_shape_features(
             if key == "circularity":
                 area = float(table["area"][i])
                 per = float(table["perimeter"][i])
-                rec[feat.column] = float(4.0 * np.pi * area / (per * per)) if per > 0 else 0.0
+                rec[feat.column] = float(4.0 * np.pi * area / (per * per)) if per > 0 else None  # no perimeter: no value, not 0.0
             elif key == "centroid_row":
                 rec[feat.column] = float(table["centroid-0"][i])
             elif key == "centroid_col":
@@ -619,7 +620,7 @@ def compute_shape_features(
 # view). Imported under the original names so the rest of this module is
 # unchanged.
 from pipeline.flatfield import (
-    apply_flatfield,
+    apply_flatfield, apply_requested_flatfield,
     estimate_gaussian_flatfield,
 )
 
@@ -901,9 +902,9 @@ def _correct_image_group(
         _t = time.perf_counter()
         # Skip flat-field on the phase channel so its raw is left untouched.
         if not _is_phase(nuclear_token):
-            nir_raw = apply_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
+            nir_raw = apply_requested_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
         fluor_raws = [
-            f if _is_phase(tok) else apply_flatfield(f, _flatfield_for(tok, f))
+            f if _is_phase(tok) else apply_requested_flatfield(f, _flatfield_for(tok, f))
             for f, tok in zip(fluor_raws, fluor_tokens)
         ]
         log.info("  flatfield:   %.1f s  (mode=%s)", time.perf_counter() - _t, flatfield_mode)
@@ -975,14 +976,15 @@ def _segment_image_group(
 ):
     """Dispatch to the configured segmenter -> label image (+ watershed extras).
 
-    Returns ``(labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask)``;
-    the last three are ``None`` for every method except seeded-watershed cell.
+    Returns ``(labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask,
+    seed_nuclei)``; the last four are ``None`` except for seeded-watershed cell.
     """
     _t = time.perf_counter()
     labels: np.ndarray
     nuclear_points: np.ndarray | None = None
     cytoplasm_tophat: np.ndarray | None = None
     cytoplasm_binary_mask: np.ndarray | None = None
+    seed_nuclei: np.ndarray | None = None
     if segmentation_method == "stardist_seeded_watershed_cell":
         if not cytoplasm_token:
             raise ValueError(
@@ -993,7 +995,7 @@ def _segment_image_group(
                 f"Cytoplasm token '{cytoplasm_token}' is missing from fluor token list: {fluor_tokens}"
             )
         cyto_idx = fluor_tokens.index(cytoplasm_token)
-        labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask = (
+        labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, seed_nuclei = (
             _segment_stardist_seeded_watershed_cell(
                 nir_corr=nir_corr,
                 cytoplasm_raw=fluor_raws[cyto_idx],
@@ -1037,12 +1039,12 @@ def _segment_image_group(
         labels = _segment_stardist_nuclei(nir_corr)
         log.info("  stardist:    %.1f s  (%d nuclei detected)",
                  time.perf_counter() - _t, len(np.unique(labels)) - 1)
-    return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask
+    return labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, seed_nuclei
 
 
 def _quantify_image_group(
     *, labels, fluor_tophat, fluor_tokens, nir_corr, nuclear_path, schema, sep,
-    shape_features, measure_focus: bool = True,
+    shape_features, measure_focus: bool = True, focus_labels=None,
 ):
     """Per-nucleus intensity + shape/region quantification -> record dicts."""
     # Quantify each nucleus across all fluorescent channels.
@@ -1100,21 +1102,18 @@ def _quantify_image_group(
     # Cells the field of view cuts (imclearborder's rule); always emitted.
     border_ids = labels_touching_border(labels)
 
-    # Per-cell focus (always emitted), measured at each nucleus's own outline.
-    # It is the one focus number comparable between cells, fields, wells and
-    # plates — a transition WIDTH in pixels, so gain, pedestal, brightness and
-    # nucleus size barely move it, and only clipping moves it much. See
-    # ``pipeline.field_quality.edge_focus`` for the measured table, for why a
-    # score relative to its own frame cannot see a frame that is uniformly
-    # soft, and why every whole-image statistic confounds nucleus size with
-    # defocus. Measured on ``nir_corr``, the frame the labels were computed
-    # from, so the outline the estimator reads is the outline that was
-    # segmented.
+    # Per-cell focus (always emitted), measured at each nucleus's own outline
+    # on ``nir_corr``, the frame that outline was segmented from: a transition
+    # WIDTH in pixels, comparable between cells, fields, wells and plates, and
+    # moved much only by clipping (``field_quality.edge_focus``'s table). Under
+    # seeded watershed ``labels`` are cell outlines found on the cytoplasm
+    # frame, where the nuclear frame has no edge, so *focus_labels* carries the
+    # seed nuclei under the cells' ids and the outline read is still a nucleus's.
     # Off leaves the column out of the record entirely rather than filling it
     # with a placeholder: a run that did not measure focus and a run that
     # measured it and found nothing must not produce the same CSV.
-    focus_by_id = (_field_quality.cell_focus_by_label(nir_corr, labels)
-                   if measure_focus else {})
+    focus_by_id = (_field_quality.cell_focus_by_label(
+        nir_corr, labels if focus_labels is None else focus_labels) if measure_focus else {})
 
     for i, nid in enumerate(nuc_ids):
         rec: dict = {
@@ -1225,7 +1224,7 @@ def process_image_group(
         phase_token=phase_token,
     )
 
-    labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask = (
+    labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask, seed_nuclei = (
         _segment_image_group(
             segmentation_method=segmentation_method, nir_corr=nir_corr,
             fluor_raws=fluor_raws, fluor_tokens=fluor_tokens,
@@ -1267,14 +1266,14 @@ def process_image_group(
     records = _quantify_image_group(
         labels=labels, fluor_tophat=fluor_tophat, fluor_tokens=fluor_tokens,
         nir_corr=nir_corr, nuclear_path=nuclear_path, schema=schema, sep=sep,
-        shape_features=shape_features, measure_focus=measure_focus,
+        shape_features=shape_features, measure_focus=measure_focus, focus_labels=seed_nuclei,
     )
     parsed = parse_filename(nuclear_path, schema=schema, sep=sep)
     return records, _field_quality.group_record(
         acquisition=acquisition,
         labels=labels,
         corrected_image=nir_corr,
-        areas=[r["area"] for r in records if r.get("area") is not None],
+        areas=_field_quality.record_areas(records),
         cell_focus=([r.get(FOCUS_COLUMN) for r in records]
                     if measure_focus else None),
         fov=parsed.get("fov", ""),
@@ -1633,18 +1632,6 @@ _MAX_CONSECUTIVE_IO_FAILURES = 3
 # poison the per-well CSV.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def _prune_scratch_files(tmp_images: Path) -> None:
     """Remove ``__aw_tmp_*`` partials from a previous killed run.
 
@@ -1671,6 +1658,7 @@ def _process_groups_in_worker(
     settings_key: str = "",
     measured_of: int | None = None,
     open_image=None,
+    finished: list | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Process all image groups for one well within a single worker process.
@@ -1681,6 +1669,9 @@ def _process_groups_in_worker(
     *fov_threads* controls concurrent FOV processing via ThreadPoolExecutor.
     fov_threads=1 (default) is safe for any backend; >1 benefits multi-core CPU.
     *open_image* reaches :func:`process_image_group` (zip mode reads in place).
+    *finished*, when given, gains ``(nuclear file name, cell count)`` for each
+    group taken to the end — processed now or resumed from its checkpoint, never
+    one that failed: what ``pipeline.done_groups`` records as done.
 
     *errors_dir* is the persistent dataset output dir (NOT the ``tmp_images``
     staging dir); a per-FOV-group failure trace is written under
@@ -1707,6 +1698,7 @@ def _process_groups_in_worker(
 
     all_records: list[dict] = []
     failed:      list[str]  = []
+    finished = [] if finished is None else finished
 
     def _record_fov_failure(nuclear_path: Path, exc: BaseException) -> None:
         """Persist a per-FOV traceback + log it as an error the GUI surfaces."""
@@ -1757,6 +1749,7 @@ def _process_groups_in_worker(
                 "reprocessed on restart.", nuclear_path.name, ckpt_exc,
             )
         _note_quality(quality)
+        finished.append((nuclear_path.name, len(recs)))
         return recs
 
     def _note_quality(quality: dict | None) -> None:
@@ -1789,6 +1782,7 @@ def _process_groups_in_worker(
             # block, and a plate resumed once would be scored against a subset
             # chosen by wherever the previous run happened to be killed.
             _note_quality(quality)
+            finished.append((nuclear_path.name, len(records)))
             return records
         return _run_group(nuclear_path, fluor_paths)
 
@@ -2065,14 +2059,14 @@ def process_well_zip_task(
                         "Well %s — the recorded settings differ from this "
                         "run's; recomputing every FOV-group.", well_label)
                     prior = None
-                # CSV is the primary done-set; a processed well can have its
-                # <well>_out.zip without a sibling CSV (remote-only materialise /
-                # lost CSV) → recover done keys from the outputs too.
+                # The CSV's groups and the well's record of finished ones (pipeline.done_groups);
+                # a well written before that record → the CSV and, for a lost CSV /
+                # remote-only materialise, the keys recovered from its output images.
                 done, csv_done = ((set(), False) if prior is None else
                                   incremental_done_fov_keys(
                                       prior, well_label, csv_prefix=csv_prefix,
                                       safe_well=safe_well, schema=schema,
-                                      sep=sep))
+                                      sep=sep, settings_key=settings_key))
                 if done and not csv_done:
                     log.info("Well %s — no prior CSV; recovered %d done FOV-group(s) "
                              "from processed outputs.", well_label, len(done))
@@ -2090,14 +2084,17 @@ def process_well_zip_task(
                 # else: no prior CSV or out.zip → new well → process all (full).
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
+            done_kw = dict(processed=[], schema=schema, sep=sep, settings_key=settings_key, incremental=incremental)
             with ZipMemberReader(zip_path) as members:
                 records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                     groups, kwargs, well_label, errors_dir=output_dir,
-                    settings_key=settings_key, open_image=members.open,
+                    settings_key=settings_key, open_image=members.open, finished=done_kw["processed"],
                     measured_of=groups_in_input if incremental else None)
             if _suspended_before_any_group(well_label, records, failed):
                 return [], []
             withdraw_seal(output_dir, well_label)    # before the CSV / out.zip rewrite; raises if it cannot
+            if not incremental:
+                withdraw_done_record(output_dir, well_label)    # a whole-well rewrite starts its record again
 
             if incremental:
                 if records:
@@ -2109,7 +2106,7 @@ def process_well_zip_task(
                 record_well_completeness(
                     output_dir, well_label, groups_in_input, csv_path, failed,
                     aborted_reason=aborted_reason,
-                    not_attempted=not_attempted)
+                    not_attempted=not_attempted, **done_kw)
                 n_compressed = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_compressed, out_zip.name)
@@ -2122,7 +2119,7 @@ def process_well_zip_task(
                 record_well_completeness(
                     output_dir, well_label, groups_in_input, csv_path, failed,
                     aborted_reason=aborted_reason,
-                    not_attempted=not_attempted)
+                    not_attempted=not_attempted, **done_kw)
 
                 n_compressed = compress_images_to_zip(tmp_images, out_zip)
                 log.info("Well %s: %d image(s) -> %s", well_label, n_compressed, out_zip.name)

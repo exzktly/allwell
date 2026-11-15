@@ -137,12 +137,14 @@ def scope_to_only_wells(well_zips, only_wells, *, refuse, log, absent_ok: bool =
 def incremental_for_well(incremental: bool, well_label: str, forced) -> bool:
     """``incremental``, except for a well the caller asked to force.
 
-    An incremental run's done-set is the CSV's rows **unioned with the output
-    archive's members** — deliberate, so a well whose CSV was lost but whose
-    images survived is not needlessly re-segmented (the remote path relies on
-    it). The cost is that a well with images and no CSV looks complete to an
-    incremental run and is skipped, so the run can never regenerate the very
-    CSV that is missing. Forcing that well means running it as if the flag were
+    An incremental run's done-set is the CSV's rows **unioned with the well's
+    record of finished groups** (``pipeline.done_groups``) or, for a well
+    written before that record, **with the output archive's members** —
+    deliberate, so a well whose CSV was lost but whose images survived is not
+    needlessly re-segmented (the remote path relies on it). The cost is that a
+    well with a record or images and no CSV looks complete to an incremental
+    run and is skipped, so the run can never regenerate the very CSV that is
+    missing. Forcing that well means running it as if the flag were
     off: no done-set filter, a fresh CSV, a rewritten archive.
     """
     return incremental and _canonical_well_label(well_label) not in (forced or frozenset())

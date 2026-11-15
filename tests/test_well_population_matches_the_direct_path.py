@@ -28,10 +28,10 @@ VAL = "gfp_mean_intensity"
 
 def _messy(seed: int, *, n: int = 4000, fov_ok: bool = True) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
-    # 24.0 and 24.01 are distinct for the aggregate's exact partition but one
-    # timepoint for the extras' tolerance match (1e-3 relative), so the two
+    # 24.0 and 24.004 are distinct for the aggregate's exact partition but one
+    # timepoint for the extras' tolerance match (the rounding error of a 4-figure label, 0.005 h here), so the two
     # definitions disagree here and a population that shared them would fail.
-    tps = rng.choice([0.0, 24.0, 24.01, 48.0, np.nan], n, p=[0.3, 0.25, 0.1, 0.3, 0.05])
+    tps = rng.choice([0.0, 24.0, 24.004, 48.0, np.nan], n, p=[0.3, 0.25, 0.1, 0.3, 0.05])
     fov = rng.choice(["1", "2", "3", "4"], n) if fov_ok else np.full(n, "1")
     gfp = rng.lognormal(4, 1, n)
     gfp[rng.random(n) < 0.03] = np.nan
@@ -104,7 +104,7 @@ def test_the_extras_are_the_direct_ones_at_every_timepoint(seed, on_col):
     pop = build_population(df, tp_col="timepoint_hours", val_col=VAL, fluor_gates=gates,
                            ratios=None, on_col=on_col, per_fov=False, extra_inputs=inputs)
     times = np.unique(inputs[1][inputs[0]])
-    assert {24.0, 24.01} <= set(times.tolist())
+    assert {24.0, 24.004} <= set(times.tolist())
     for threshold in (20.0, 60.0, 200.0):
         table = extra_table(pop, threshold)
         for t in times:
@@ -112,7 +112,7 @@ def test_the_extras_are_the_direct_ones_at_every_timepoint(seed, on_col):
             got = table.get(float(t))
             assert got is not None
             assert np.allclose(got, want, rtol=0, atol=0, equal_nan=True), (t, threshold, got, want)
-    # 24.0's extras pool 24.01's cells (tolerance) while its aggregate does not.
+    # 24.0's extras pool 24.004's cells (tolerance) while its aggregate does not.
     agg = {p[0]: p for p in aggregate(pop, threshold=60.0, use_sem=False, per_fov_spread=False)}
     extra = pop.extras[24.0]
     assert extra.vals.size > agg[24.0][5], "the tolerance pooling was not exercised"
@@ -129,7 +129,7 @@ def test_a_frame_that_cannot_answer_the_extras_says_so():
 
 def test_shared_arrays_are_counted_once():
     df = _messy(0)
-    df["timepoint_hours"] = df["timepoint_hours"].replace(24.01, 24.0)
+    df["timepoint_hours"] = df["timepoint_hours"].replace(24.004, 24.0)
     # A NaN ``timepoint_hours`` is resolved from the text column by the
     # aggregate and dropped by the extras, so the two only agree without one.
     df = df[df["timepoint_hours"].notna()].reset_index(drop=True)

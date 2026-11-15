@@ -769,6 +769,9 @@ def _redraw(ctx) -> None:
     from review.core.plot_style import mark_style_view
 
     mark_style_view(ctx, fig, st.view)
+    # The width this draw is made for: every view breaks its captions to the figure's width, so a canvas that
+    # settles narrower afterwards has to be drawn again (``on_canvas_resized``).
+    fig._aw_nw_drawn_width = round(fig.get_figwidth(), 2)
     card = ctx.widgets.get_or_none("_nw_card")
     if card is not None and card.isHidden():
         # Phone layout gives the site detail the page while a nanowell is selected (``tab_view.show_detail``), and the
@@ -1752,8 +1755,9 @@ def _centre_array_goto(st, drawn) -> bool:
 
 def on_canvas_resized(ctx) -> None:
     """The page's canvas settled at a new size: redraw the Array view if its axes no longer have the size its region
-    was fitted to, and the Identity view's Diagnostics if its figure is no longer the size it was laid out for
-    (``_identity_controller.needs_relayout``). Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
+    was fitted to, the Identity view's Diagnostics if its figure is no longer the size it was laid out for
+    (``_identity_controller.needs_relayout``), and any other view whose figure is no longer the width its captions
+    were broken for. Without it the view kept the old fit — a resize squashed every nanowell into an oval, and a draw
     made while the canvas was still being laid out (a few pixels tall) showed one flattened row of the array.
 
     A canvas no longer on screen is left alone. The re-fit fires a moment after the resize, and by then the page may
@@ -1768,12 +1772,19 @@ def on_canvas_resized(ctx) -> None:
         if idc.needs_relayout(st.identity_drawn, ctx.widgets.get_or_none("_nw_fig")):
             redraw(ctx)
         return
-    if st.view == "statistics":                        # the rare page grew its canvas, or the window changed width
-        if rc.needs_relayout(ctx.widgets.get_or_none("_nw_fig")):
-            redraw(ctx)
+    fig = ctx.widgets.get_or_none("_nw_fig")
+    if st.view == "statistics" and rc.needs_relayout(fig):
+        redraw(ctx)                                    # the rare page grew its canvas, or the window changed width
         return
     drawn = st.drawn
     if st.view != "array" or drawn is None or drawn.ax is None or drawn.ax.figure is None:
+        # Every other view writes captions broken to the figure's width (``renderer._wrapped_to_figure``,
+        # ``_statistics_render``). A figure drawn while the page was wider — before Controls docked beside it on
+        # an unfolded phone, before a side panel opened — keeps lines broken for that width, which then run off
+        # the canvas. Only the width counts: a height change breaks no line, and the rare page changes its own.
+        made_for = getattr(fig, "_aw_nw_drawn_width", None)
+        if fig is not None and made_for is not None and made_for != round(fig.get_figwidth(), 2):
+            redraw(ctx)
         return
     box = drawn.ax.get_window_extent()
     if (max(int(round(box.width)), 1), max(int(round(box.height)), 1)) != tuple(drawn.size_px):

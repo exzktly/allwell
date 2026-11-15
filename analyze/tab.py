@@ -555,7 +555,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
             # event loop, so a click lands between slices rather than after the
             # flood — and at the idle cadence once it is drained.
             more = not self._log_q.empty()
-            QTimer.singleShot(0 if more else 80, self._poll_log)
+            QTimer.singleShot(0 if more else 80, self, self._poll_log)  # self: dropped when the tab is destroyed
 
     def closeEvent(self, event) -> None:
         if self._runner.is_running:

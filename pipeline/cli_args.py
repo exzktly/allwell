@@ -235,6 +235,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "directory and named here, which is what lets every "
                         "batch build the same correction from it. Defaults to "
                         "--input_dir.")
+    # The batched remote host's own flag: --background_dir is the app's copy of the input's blank, not a
+    # directory a person named, so it is not part of the settings (util.settings_digest).
+    p.add_argument("--background_dir_carried", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--background_dir_alias", action="append", default=None,
                    help="An earlier path the same blank was read from (repeatable). "
                         "Not part of the settings: a well's part-way checkpoints "
@@ -431,7 +434,8 @@ def build_parser() -> argparse.ArgumentParser:
                        "already-done set and re-segment from scratch, which is "
                        "the only way to regenerate a well whose measurements "
                        "CSV is missing while its <well>_out.zip survives: the "
-                       "archive's own members make that well look complete to "
+                       "well's record of finished groups, or the archive's own "
+                       "members, make that well look complete to "
                        "an incremental run, so it would otherwise be skipped "
                        "forever. Well labels are matched canonically, so C8 "
                        "and C08 name the same well."

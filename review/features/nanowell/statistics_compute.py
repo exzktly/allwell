@@ -43,7 +43,8 @@ import numpy as np
 
 from review.features.nanowell.summary_compute import timepoint_phrase, well_value
 from review.domain.stats_tests import (
-    BOOTSTRAP_RESAMPLES, EffectSize, Omnibus, dunnett_vs_control, effect_size, omnibus,
+    BOOTSTRAP_RESAMPLES, EffectSize, Omnibus, dunnett_vs_control, effect_size, omnibus, rank_sum_test,
+    T_INTERVAL_BELOW_N,
 )
 
 NANOWELLS, WELLS = "nanowells", "wells"
@@ -275,7 +276,13 @@ def pair_test(a: Sample, b: Sample, test: dict) -> Comparison:
         if test["key"] in ("welch", "student"):
             res = st.ttest_ind(a.values, b.values, equal_var=test["key"] == "student")
         elif test["key"] == "mannwhitney":
-            res = st.mannwhitneyu(a.values, b.values, alternative="two-sided")
+            # Exact when the two samples are small enough to enumerate, ties included: on the Groups unit a
+            # sample is a handful of per-well medians, often tied, and scipy's own choice there is the normal
+            # approximation (``stats_tests.rank_sum_test``).
+            rank = rank_sum_test(a.values, b.values)
+            if not rank.ok:
+                return Comparison(a.name, b.name, stat_name, undefined=rank.undefined)
+            return Comparison(a.name, b.name, stat_name, float(rank.u), float(rank.p))
         elif test["key"] == "ks":
             res = st.ks_2samp(a.values, b.values)
         else:
@@ -485,6 +492,7 @@ def report_lines(result: StatisticsResult) -> list[tuple[str, str]]:
     dunnett = result.test["kind"] == "dunnett"
     lines += [(GID_PAIR, comparison_text(c, dunnett=dunnett)) for c in result.comparisons]
     lines.append((GID_NOTE, family_text(result)))
-    lines.append((GID_NOTE, "g: Hedges' g. Δ: difference of means (first minus second), with a bootstrap interval."))
+    lines.append((GID_NOTE, "g: Hedges' g. Δ: difference of means (first minus second), with its interval "
+                            f"(Welch's t under {T_INTERVAL_BELOW_N} values a sample, a bootstrap from there)."))
     lines += [(GID_NOTE, note) for note in result.notes]
     return lines

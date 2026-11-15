@@ -2,7 +2,7 @@
 
 The reported failure: setting a channel's ⚙ render to **cell mask** made that row
 vanish from the Image Table entirely — not a row of placeholders, no row at all —
-while **≥ threshold** on the same channel worked.
+while **> threshold** on the same channel worked.
 
 That asymmetry was the whole diagnosis. ``ChannelSpec.axis_token`` appended
 ``" (binary)"`` for ``threshold`` and returned the bare channel token for every
@@ -153,7 +153,7 @@ def test_the_colours_do_not_move_between_redraws():
 
 
 def test_only_the_cells_in_the_mask_are_painted():
-    """A ≥threshold cell passes the label ids of the cells that cleared the gate;
+    """A >threshold cell passes the label ids of the cells that cleared the gate;
     everything else must stay black rather than picking up a colour."""
     mask = _labels()
     gated = np.where(mask == 2, mask, 0)             # only label 2 passes

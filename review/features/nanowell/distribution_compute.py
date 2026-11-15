@@ -468,10 +468,18 @@ def _time_panels(model, frame, column, reasons, groups, channels) -> None:
         model.panels.append(panel)
 
 
-def _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels) -> None:
+def drawn_timepoint(frame: pd.DataFrame, timepoint: str) -> str:
+    """The timepoint a comparison across wells is made at: the page's *timepoint* when the wells of *frame* have it,
+    else the latest they have (U13) — the page's one Timepoint serves every view, so it can name one chosen on a well
+    that is not drawn here. ``""`` for a frame with no rows. Every Statistics test resolves it through this, the
+    Rare responders test included (``_rare_controller.drawn_timepoint``)."""
     tps = _order(frame)
+    return timepoint if timepoint in tps else (tps[-1] if tps else "")
+
+
+def _wells_panel(model, frame, column, reasons, groups, timepoint, control, channels) -> None:
     if model.metric not in PER_NANOWELL:
-        timepoint = timepoint if timepoint in tps else (tps[-1] if tps else "")     # the latest by default (U13)
+        timepoint = drawn_timepoint(frame, timepoint)
         frame = frame[frame["timepoint"] == timepoint]
         reasons = reasons[frame.index]
     model.timepoint = timepoint if model.metric not in PER_NANOWELL else ""

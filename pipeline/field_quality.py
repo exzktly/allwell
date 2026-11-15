@@ -358,7 +358,43 @@ def saturated_fraction(image, *, dtype_max: float | None) -> float | None:
     arr = np.asarray(image)
     if arr.size == 0:
         return None
-    return float(np.count_nonzero(arr >= dtype_max) / arr.size)
+    return float(np.count_nonzero(arr >= sensor_ceiling(arr, dtype_max)) / arr.size)
+
+
+#: The shallowest bit depth read as a camera's ceiling. Below 8 bits a frame
+#: whose maximum is ``2**n - 1`` is a mask or a label image, not a clipped one.
+_MIN_SENSOR_BITS = 8
+
+
+def sensor_ceiling(image, dtype_max: float) -> float:
+    """The value a clipped pixel holds in this frame: the camera's, not the file's.
+
+    A 12-bit camera writes ``uint16`` files, so its clipped pixels sit at 4,095
+    and nothing ever reaches the file type's 65,535 — measured against that, a
+    frame with a ninth of its pixels clipped records a saturated fraction of
+    exactly zero. The file does not state the camera's bit depth, but a clipped
+    frame shows it: its maximum is ``2**n - 1`` for some ``n`` of at least
+    :data:`_MIN_SENSOR_BITS`. When the frame's maximum is such a value the
+    ceiling is that maximum; otherwise it is *dtype_max*, and a frame that
+    never reached any bit-depth ceiling measures zero as before.
+
+    No minimum share of pixels is asked for, on purpose. A frame from a true
+    16-bit camera whose brightest pixel happens to read 4,095 is counted as one
+    clipped pixel — 1 / N, about 4e-6 of a 512 x 512 frame, five hundred times
+    below the 0.002 Review flags at — while a floor on the share would record
+    0.0 for a frame that is clipped below it, which is the conflation of "none"
+    with "not counted" this module exists to avoid.
+    """
+    arr = np.asarray(image)
+    finite = arr[np.isfinite(arr)] if arr.dtype.kind == "f" else arr
+    if finite.size == 0:
+        return dtype_max
+    top = float(finite.max())
+    if top >= dtype_max or top != np.floor(top):
+        return dtype_max
+    whole = int(top)
+    is_bit_ceiling = whole >= 2 ** _MIN_SENSOR_BITS - 1 and (whole + 1) & whole == 0
+    return top if is_bit_ceiling else dtype_max
 
 
 def dynamic_range(image, *, lo_pct: float = 0.1, hi_pct: float = 99.9) -> float | None:
@@ -432,6 +468,17 @@ def field_metrics(nuclear_image, *, labels=None, dtype_max: float | None = None,
     }
 
 
+def record_areas(records) -> list[float]:
+    """Every quantified cell's area in pixels, for :func:`group_record`'s median.
+
+    Read from ``area_px``, the column the pipeline's quantification writes. The
+    caller used to read ``area``, a key no cell record carries, so the list was
+    always empty and ``nuc_area_median`` was ``None`` for every field of every
+    run — Review's "unlike nuclear sizes" check had nothing to compare.
+    """
+    return [float(r["area_px"]) for r in records if r.get("area_px") is not None]
+
+
 def group_record(*, acquisition: dict, labels, corrected_image, areas,
                  cell_focus=None, fov: str = "", timepoint: str = "") -> dict:
     """One FOV-group's quality record: the pre-correction half plus the rest.
@@ -464,7 +511,10 @@ def group_record(*, acquisition: dict, labels, corrected_image, areas,
     record = {
         "fov": str(fov or ""),
         "timepoint": str(timepoint or ""),
-        "nuc_count": (int(lab.max()) if lab is not None and lab.size else None),
+        # Distinct labels, not the largest one: seeded watershed leaves gaps in
+        # the ids (a marker whose basin falls outside the mask), and the largest
+        # id then counts cells that were never written.
+        "nuc_count": (int(np.count_nonzero(np.unique(lab))) if lab is not None and lab.size else None),
         "nuc_area_median": (float(np.median(np.asarray(vals, dtype=np.float64)))
                             if vals else None),
         "bg_level": background_level(corrected_image, lab),

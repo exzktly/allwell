@@ -31,7 +31,7 @@ def _fake_tab(q: queue.Queue, *, parse):
 def test_poll_log_rearms_after_handler_exception(monkeypatch):
     rearms: list[int] = []
     monkeypatch.setattr(at.QTimer, "singleShot",
-                        lambda _ms, _fn: rearms.append(1))
+                        lambda _ms, *_context_and_fn: rearms.append(1))
 
     q: queue.Queue = queue.Queue()
     q.put(("line", "[remote] ↓ A01: malformed drain line\n"))
@@ -47,7 +47,7 @@ def test_poll_log_rearms_after_handler_exception(monkeypatch):
 def test_poll_log_rearms_on_clean_drain(monkeypatch):
     rearms: list[int] = []
     monkeypatch.setattr(at.QTimer, "singleShot",
-                        lambda _ms, _fn: rearms.append(1))
+                        lambda _ms, *_context_and_fn: rearms.append(1))
 
     AnalyzeTab._poll_log(_fake_tab(queue.Queue(), parse=lambda _p: []))
     assert rearms == [1]

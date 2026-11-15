@@ -53,6 +53,19 @@ def position_columns(df) -> tuple[str, str, str] | None:
     return None
 
 
+def field_ids(df, unit: str) -> np.ndarray | None:
+    """Each row's field of view when positions are per-field pixels, else ``None``.
+
+    Pixel centroids are in their own field's frame, so cells of two fields of one well share coordinates without
+    being neighbours; ``spatial_compute`` keeps every neighbour search, Ripley's pair count and colony inside one
+    field when it is handed this. Positions in the well frame (µm) are one frame already, and a table with no
+    ``fov`` column is treated as one field.
+    """
+    if unit != "px" or "fov" not in df.columns:
+        return None
+    return df["fov"].astype(str).to_numpy()
+
+
 def _hours(df) -> np.ndarray:
     """Each row's timepoint in hours: ``timepoint_hours``, else the ``timepoint`` label read as hours (a nanowell
     run's cell table has only the label), through the loader's one resolver."""
@@ -134,6 +147,7 @@ def collect_spatial_frame(
     idx = np.flatnonzero(mask)
     points = np.column_stack([col[idx], row[idx]])
     ident = identity_arrays(df, idx)
+    fields = field_ids(df, unit)
     metric_out: np.ndarray | None = None
     if metric_vals is not None:
         metric_out = metric_vals[idx]
@@ -146,6 +160,8 @@ def collect_spatial_frame(
         "well": well_label,
         "n_cells": int(points.shape[0]),
         "unit": unit,
+        # The field each cell's neighbours are looked for in (``None``: one frame for the well).
+        "fields": fields[idx] if fields is not None else None,
         # Each drawn cell's field, timepoint token and nucleus id, so a click
         # on the map can open it (``core/cell_picking``).
         **ident,
@@ -339,6 +355,7 @@ def _summary_row(df, tps, metric_col, ratios, units: set, *, include_gate: bool,
             )
         except Exception:
             metric_vals = None
+    fields = field_ids(df, columns[2])
 
     for j, target in enumerate(tps):
         frame_mask = base_mask & tp_close_mask(tp_col, target)
@@ -351,6 +368,7 @@ def _summary_row(df, tps, metric_col, ratios, units: set, *, include_gate: bool,
             pts, metric=m,
             colony_method=colony_method,
             eps_mult=eps_mult, min_samples=min_samples,
+            fields=fields[idx] if fields is not None else None,
         )
     return out
 
@@ -378,6 +396,7 @@ def summary_matrix_to_csv_rows(payload: dict[str, Any]):
                 "timepoint_hours": float(t),
                 "n_cells": int(s.n_cells),
                 "n_colonies": int(s.n_colonies),
+                "n_colonies_with_hull": int(s.n_colonies_with_hull),
                 "nnd_median": s.nnd_median,
                 "knn5_mean_median": s.knn5_mean_median,
                 "local_density_median": s.local_density_median,

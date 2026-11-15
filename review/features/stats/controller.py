@@ -6,22 +6,18 @@ import math
 import statistics as _pystats
 
 import numpy as np
-import pandas as pd
 
 from review.data.data_loading import (
-    df_included_mask,
     get_rows,
     is_ratio_key,
-    resolve_value_series,
 )
 from core.safe import swallow
 from review.domain.significance import p_phrase, significance_stars
 from review.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
 )
-from review.domain.stats_compute import group_replicate_stats
+from review.domain.stats_compute import group_replicate_stats, on_cell_values
 from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
-from domain.tp_match import tp_close_mask
 
 
 #: Every entry the Test combo offers, in the order it offers them, with what
@@ -128,7 +124,13 @@ def collect_group_per_cell_values(
     ctx, grp, target_t: float, *, val_col: str | None = None,
     threshold: float | None = None,
 ) -> list[float]:
-    """Return per-cell values above threshold for KS-test (distribution comparison)."""
+    """The group's ON cells' values at *target_t*, for the KS test (distribution comparison).
+
+    The ON population is ``stats_compute.on_cell_values``' — the one the bar,
+    line and replicate statistics take their mean over: cells inside the
+    thresholding gate when scatter-gate thresholding is active, cells above
+    *threshold* otherwise.
+    """
     val_col = val_col or ctx.state.channel.active_val_col
     if threshold is None:
         try:
@@ -137,7 +139,6 @@ def collect_group_per_cell_values(
         except Exception:
             threshold = float(ctx.state.channel.threshold)
     threshold = float(threshold)
-    ratios = ctx.state.channel.ratio_index
     chunks: list[np.ndarray] = []
     for lbl in grp.wells:
         if lbl not in ctx.state.dataset.well_paths:
@@ -145,14 +146,9 @@ def collect_group_per_cell_values(
         df = get_rows(ctx, lbl)
         if df is None or df.empty or "timepoint_hours" not in df.columns:
             continue
-        mask = df_included_mask(df).to_numpy(copy=True)
-        tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
-        with np.errstate(invalid="ignore"):
-            mask &= np.isfinite(tp) & tp_close_mask(tp, target_t)
-        val = resolve_value_series(df, val_col, ratios).to_numpy()
-        mask &= np.isfinite(val) & (val > threshold)
-        if mask.any():
-            chunks.append(val[mask])
+        values = on_cell_values(ctx, df, target_t, val_col=val_col, threshold=threshold)
+        if values.size:
+            chunks.append(values)
     return np.concatenate(chunks).tolist() if chunks else []
 
 
@@ -216,20 +212,20 @@ def _bh_adjust(pair_results) -> dict:
     """Benjamini-Hochberg FDR-adjusted p-values keyed by pair index.
 
     ``pair_results`` items are ``(name_a, name_b, stat_name, stat_value, p, err)``
-    (``p`` at index 4). Returns ``{}`` when fewer than two valid p-values exist."""
-    valid_idx = [i for i, r in enumerate(pair_results) if r[4] is not None]
-    adjusted: dict = {}
-    if len(valid_idx) >= 2:
-        ranked = sorted(valid_idx, key=lambda i: pair_results[i][4])
-        m = len(ranked)
-        prev = 1.0
-        for rank_from_top, idx in enumerate(reversed(ranked)):
-            k = m - rank_from_top  # 1-based rank, largest p first
-            raw_p = pair_results[idx][4]
-            cand = raw_p * m / k
-            prev = min(prev, cand)
-            adjusted[idx] = min(1.0, prev)
-    return adjusted
+    (``p`` at index 4). Returns ``{}`` when fewer than two p-values exist, so a
+    single comparison is never labelled as adjusted.
+
+    The arithmetic is :func:`review.domain.stats_tests.bh_adjust` — the one
+    routine the Bar plot's ratio brackets and the Nanowells page also use. A
+    pair with no p (``None``, or a non-finite value) is not a member of the
+    family: charging the computable pairs for a comparison nobody could make
+    inflates every adjusted p beside it.
+    """
+    from review.domain.stats_tests import bh_adjust
+
+    adjusted = bh_adjust([r[4] for r in pair_results])
+    out = {i: float(p) for i, p in enumerate(adjusted) if p is not None}
+    return out if len(out) >= 2 else {}
 
 
 def _run_pair_tests(group_vals, test, is_ks):
@@ -251,12 +247,20 @@ def _run_pair_tests(group_vals, test, is_ks):
                 pooled = ("pooled" in test.lower()) or ("student" in test.lower())
                 res = _st.ttest_ind(vals_a, vals_b, equal_var=pooled)
                 stat_name = "t"
-            elif test.startswith("Wilcoxon"):
-                res = _st.ranksums(vals_a, vals_b)
-                stat_name = "W"
-            elif test.startswith("Mann"):
-                res = _st.mannwhitneyu(vals_a, vals_b, alternative="two-sided")
-                stat_name = "U"
+            elif test.startswith(("Wilcoxon", "Mann")):
+                # One test under two names, and one routine: exact whenever the
+                # arrangements can be enumerated (``rank_sum_test`` says why
+                # ``ranksums`` and ``mannwhitneyu`` are not used directly).
+                from review.domain.stats_tests import rank_sum_test
+                rank = rank_sum_test(vals_a, vals_b)
+                wilcoxon = test.startswith("Wilcoxon")
+                stat_name = "W" if wilcoxon else "U"
+                if not rank.ok:
+                    out.append((name_a, name_b, stat_name, None, None, rank.undefined))
+                    continue
+                out.append((name_a, name_b, stat_name,
+                            float(rank.w if wilcoxon else rank.u), float(rank.p), None))
+                continue
             elif is_ks:
                 res = _st.ks_2samp(vals_a, vals_b)
                 stat_name = "D"
@@ -265,6 +269,16 @@ def _run_pair_tests(group_vals, test, is_ks):
                 continue
             p = float(res.pvalue)
             stat_value = float(res.statistic)
+            if not math.isfinite(p):
+                # scipy answers NaN, without raising, for two groups that are
+                # each constant at the same value (a fraction saturated at 1.0
+                # in every well). That is a test that could not be computed, and
+                # carrying the NaN on gave the pair a finite *adjusted* p. Two
+                # groups constant at *different* values are left alone: scipy's
+                # p of 0 with an infinite statistic is the limit of a real test.
+                p = stat_value = None
+                err = ("the test returned no finite result — both groups hold "
+                       "the same constant value, so there is nothing to test")
         except Exception as exc:
             err = str(exc)
         out.append((name_a, name_b, stat_name, stat_value, p, err))
@@ -754,7 +768,8 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             if not vals:
                 app._stats_write_result(
                     f"Group '{g.name}' has no per-cell {channel_lbl} data "
-                    f"at t={tp_str} h above threshold ({threshold:.2f})."
+                    f"at t={tp_str} h in the ON population (inside the thresholding "
+                    f"gate, or above threshold {threshold:.2f})."
                 )
                 return
         else:

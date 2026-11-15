@@ -70,7 +70,7 @@ def fill_label_rgb(rgb, center, keep, label_colors: bool) -> None:
     """Paint the kept labels into *rgb* — one colour each, or all white.
 
     The single place the white-or-rainbow decision is made. The Playground's
-    binary view and the Image Table's cell-mask / ≥threshold cells both call it,
+    binary view and the Image Table's cell-mask / >threshold cells both call it,
     so a nucleus is the same colour in both panes and there is one palette to
     keep deterministic rather than two.
     """

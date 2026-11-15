@@ -298,7 +298,7 @@ def test_intensity_floors_are_listed_only_while_they_are_in_force(ctx):
     cg = ctx.state.cell_gating
     cg.fluor_gates = {"gfp": 120.0, "mcherry": 0.0}
     page = _page(ctx)
-    assert page.intensity.text() == "Intensity gates in force: GFP ≥ 120"
+    assert page.intensity.text() == "Intensity gates in force: GFP > 120"
     cg.use_scatter_gates = True                      # scatter gates replace the floors
     page.refresh()
     assert page.intensity.text() == "No intensity gate is in force."

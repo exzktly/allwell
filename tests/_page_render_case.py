@@ -77,7 +77,17 @@ def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     return pages
 
 
+#: Seconds into a case at which every thread's stack is written to stderr, once. The test that runs the cases
+#: gives each 1,500 s and then kills it; a case killed there left nothing to say where it had stopped, which is how
+#: one that ran to its limit on the slow lane's runner could not be told from a slow one. Well inside that limit,
+#: and well past the three minutes a case takes.
+STUCK_AFTER_S = 1200
+
+
 def main(argv: list[str]) -> int:
+    import faulthandler
+
+    faulthandler.dump_traceback_later(STUCK_AFTER_S, exit=False, file=sys.stderr)
     kind, screen, out = argv
     # A directory of its own for every run: the datasets are written with mkdir(parents=True), so one left over
     # from an earlier run (next to a reused output path) made the next run fail.

@@ -49,7 +49,7 @@ from review.core.plot_orchestrator import redraw_app
 from core.safe import swallow, swallowed
 from review.core.selection_controller import invalidate_stats_cache, invalidate_threshold_results
 from review.data.curation import apply_curation_to_cache
-from review.data.data_loading import get_rows, held_wells_note
+from review.data.data_loading import get_rows, held_wells_note, resolve_value_series
 from review.data.plate_scan import per_well
 from review.domain.gating_state import (
     default_thresh_count_on, default_thresh_frac_on, fluor_gate_for,
@@ -327,11 +327,10 @@ def _first_frame_values(df, channels, ratios) -> tuple | None:
         den_col = rm.denominator_col()
         if num_col not in frame_df.columns or den_col not in frame_df.columns:
             continue
-        num = pd.to_numeric(frame_df[num_col], errors="coerce").to_numpy()
-        den = pd.to_numeric(frame_df[den_col], errors="coerce").to_numpy()
-        eps = float(rm.epsilon or 0.0)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            ratio = num / (den + eps) if eps else np.where(den != 0, num / den, np.nan)
+        # The one ratio rule (``RatioMetric``: the denominator is clamped to
+        # epsilon, not shifted by it), so the curve a cutoff is read from holds
+        # the values the cutoff is then applied to.
+        ratio = resolve_value_series(frame_df, rm.key(), {rm.key(): rm}).to_numpy(dtype=float)
         keep = np.isfinite(ratio) & (ratio > 0)
         if keep.any():
             ratio_vals[rm.display_label()] = ratio[keep]

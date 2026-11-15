@@ -1103,8 +1103,8 @@ def _quantify_image_group(
 
     # Per-cell focus (always emitted), measured at each nucleus's own outline
     # on ``nir_corr``, the frame that outline was segmented from: a transition
-    # WIDTH in pixels, comparable between cells, fields, wells and plates
-    # (``pipeline.field_quality.edge_focus`` has the measured table). Under
+    # WIDTH in pixels, comparable between cells, fields, wells and plates, and
+    # moved much only by clipping (``field_quality.edge_focus``'s table). Under
     # seeded watershed ``labels`` are cell outlines found on the cytoplasm
     # frame, where the nuclear frame has no edge, so *focus_labels* carries the
     # seed nuclei under the cells' ids and the outline read is still a nucleus's.

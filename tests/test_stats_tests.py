@@ -570,7 +570,10 @@ def test_a_constant_paired_shift_says_which_degenerate_case_it_hit():
 
 
 def test_an_interval_asked_for_one_resample_says_one_not_zero():
-    result = st.effect_size([1.0, 2.0, 3.0], [4.0, 5.0, 6.0], resamples=1)
+    # Samples large enough to take the bootstrap: under ``T_INTERVAL_BELOW_N`` values the interval is
+    # Welch's and draws no resamples at all.
+    n = st.T_INTERVAL_BELOW_N
+    result = st.effect_size([float(i) for i in range(n)], [float(i) + 3.0 for i in range(n)], resamples=1)
 
     assert "2 or more resamples, not 1" in result.undefined
 

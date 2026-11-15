@@ -134,11 +134,16 @@ def test_pairwise_runs_for_two_solo_well_groups_in_fov_mode(ctx_with, statistic)
     })
     res = compute_pairwise(
         ctx, groups=[_group("Ctrl", ["A01"]), _group("Treated", ["B02"])],
-        target_t=0.0, val_col=VAL_COL, statistic=statistic, threshold=100.0,
+        # A cut inside the first well's distribution (its median is about 400), so the fraction above it
+        # varies from field to field. At 100 every field of both wells reads exactly 1.0, the two groups are
+        # the same constant, and Welch's test has no answer: the record this test used to find there carried
+        # a NaN p, which is a bracket for a comparison nobody could make.
+        target_t=0.0, val_col=VAL_COL, statistic=statistic, threshold=450.0,
         test="t-test", use_fov=True)
 
     assert res, "no pairwise result -> no significance brackets get drawn"
     assert len(res) == 1, "one pair compared -> exactly one bracket record"
+    assert np.isfinite(res[0]["p"]), "a bracket needs a p-value that was actually computed"
     # The record's internal shape is deliberately not asserted here: what the
     # brackets need is that a record EXISTS. Its layout is the renderer's
     # contract and is covered where that is tested.

@@ -6228,7 +6228,15 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
 sets — pairwise **t-tests** (Welch or Student), **Wilcoxon rank-sum**,
 **Mann-Whitney U** and a **KS** test with its CDF plot, plus four tests that
 answer a different question: **Dunnett** against one control group, a **paired
-t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**.
+t-test** and **Wilcoxon signed-rank**, and a **two-way ANOVA**. Wilcoxon rank-sum
+and Mann-Whitney U are one test under two names (the report prints *W* for one
+and *U* for the other), and its p is **exact** whenever the groups are small
+enough to count every arrangement, tied values included — so three wells against
+three can never read below p = 0.1, whichever name you pick. Each comparison's
+difference of means carries a 95% interval: Welch's *t* interval when a group
+holds fewer than 30 values, a bootstrap from there. A pair whose test cannot be
+computed (two groups that are the same constant) says so, and is left out of the
+Benjamini-Hochberg adjustment of the others.
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Home → Sample Map → Replicates](#replicates).
@@ -7170,7 +7178,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   many were computed, and whether anything was corrected. With three or more samples an omnibus (one-way
   ANOVA, or Kruskal-Wallis for the rank tests) is stated first. Each sample gets a line with its n, mean, sd,
   median and interquartile range (and a 95% interval on Groups); each comparison its statistic, p, stars, Hedges'
-  *g* and the difference of means with a bootstrap 95% interval. Above the report a box per sample (the dots
+  *g* and the difference of means with its 95% interval (Welch's *t* interval when a sample holds fewer than 30
+  values, a bootstrap from there). Mann-Whitney's p is exact whenever the two samples are small enough to count
+  every arrangement, tied values included. Above the report a box per sample (the dots
   over it, the mean as a diamond — with its 95% interval on Groups) shows what was compared, with a bracket and
   stars over each comparison below 0.05. A comparison that cannot be made says why in its row (fewer than two
   values, two samples holding the same constant), never a number. More than 15 comparisons are not run: choose

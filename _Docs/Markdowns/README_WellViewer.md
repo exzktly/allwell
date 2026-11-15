@@ -7272,7 +7272,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   other tests on this view take it, and the figure carries the *Moving average over N timepoints* tag. The Fixed
   cohort does not apply, and the report says so when it is ticked; *Compare* is hidden while this test is chosen,
   since it never applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
-  report. A group or control with fewer than two wells is not tested as a group, and the figure says so.
+  report. A Metric with one value per nanowell — the growth rate, the occupancy class — has no timepoint: the
+  Timepoint does not apply to it, and a nanowell is left out only where that Metric is undefined (a growth rate needs
+  three timepoints with cells), so the test is on the same nanowells the other tests on this view compare. A group or control with fewer than two wells is not tested as a group, and the figure says so.
 
   **Reading the figure.** For each treatment group, the answer comes first, in bold, in counts: for example *drug:
   rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its top 1%), against 0 of

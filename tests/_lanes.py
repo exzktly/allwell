@@ -303,6 +303,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_rare_responders_page.py": "the Rare responders test on the real Statistics view, its report and flagged crops",
     "test_nanowell_rare_moving_average.py": "the Rare responders test tests moving averages, excluding what the window leaves",
     "test_nanowell_rare_timepoint_is_the_views.py": "the Rare responders test resolves the page's Timepoint as the sample tests do",
+    "test_nanowell_rare_per_nanowell_metric.py": "the Rare responders test keeps the nanowells the sample tests keep for a per-nanowell metric",
     "test_nanowell_baseline_window_says_why.py": "a Baseline average that can never be complete says so on every view",
     "test_nanowell_subset.py": "The Nanowells page's *Subset*: any number of conditions — starting cells, a metric at a …",
     "test_nanowell_moving_average_is_said.py": "A figure of moving averages says so on its subset line, through the page's controls",

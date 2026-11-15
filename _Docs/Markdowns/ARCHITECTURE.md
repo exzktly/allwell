@@ -14136,7 +14136,13 @@ not confirmed). `compose(exclude_qc=)` drops every other flag's column from the 
 and each choice is keyed apart; an excluded flag that left nanowells out is counted on the figure, in a lead line that
 is never cut (`rc.qc_line`, from `rare_data_compute.qc_flag_counts`), and named in Details (`rc.excluded_note`). Every
 other view draws flagged nanowells, so this keeps the test's nanowells the ones they draw unless the user chooses
-otherwise — and keys the
+otherwise. **A Metric with one value per nanowell** (`distribution_compute.PER_NANOWELL`: the growth rate, the
+occupancy class) has no timepoint, so `compose` builds its table with `from_site_metrics(per_nanowell=True)`: the rows
+are each well's first timepoint, the rows `distribution_model` reads these metrics from for every other test (so a
+well imaged at other timepoints than the rest is still in), no `qc_state` is written, and a nanowell is left out only
+where the Metric is undefined, under `series_compute.exclusion_reason`'s reason carried as `VALUE_REASON` — the
+nanowells tested are the ones the sample tests compare. The Timepoint is not read, one result serves every
+Timepoint, and Details says so (`rc.VALUE_NOTE_PER_NANOWELL`). `compose` keys the
 result on a hash of that table, the parameters and the Metric's label,
 so a key cannot return a result computed for other numbers. **With the moving average on**, `_compose_statistics`
 passes `moving`, `baseline_moving` (already `moving_compute.baseline_window_for`'s) and `moving_centred` (0 for a

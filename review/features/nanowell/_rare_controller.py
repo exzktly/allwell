@@ -28,7 +28,7 @@ through ``controller._fetch`` while the figure says so, and the page redraws whe
 
 **Review by eye.** The nanowells the drawn result flagged — the treatment nanowells past the control cutoff — are
 kept on ``NanowellState.rare_flagged``, and the pop-out's **Show: Flagged** draws them as rows of
-crops over time, :data:`FLAGGED_PAGE` to a page, through the same crop cutting the Distribution window's rows use.
+crops over time, ``NanowellState.popout_rows`` to a page (the pop-out's **Grid** control), through the same crop cutting the Distribution window's rows use.
 
 Reaches ``controller`` the way ``_window_controller`` does, through :func:`_nwc`, because the controller imports this
 module.
@@ -48,8 +48,6 @@ from review.features.nanowell.rare_report_compute import RareResult, analyse
 from review.features.nanowell.renderer import Footer, render_message, render_site_rows
 from review.features.nanowell.summary_compute import timepoint_phrase
 
-#: Flagged nanowells the pop-out shows to a page, as the Distribution window's rows.
-FLAGGED_PAGE = 24
 #: Results kept at most: the one drawn and a few the user may step back to.
 RESULTS_KEPT = 4
 COMPUTING = "Testing"                                   # the start of every computing message (computing_text)
@@ -314,7 +312,7 @@ FLAGGED_NOT_RUN = ("Run the Rare responders test on the Statistics view: the nan
 
 
 def page_count(st) -> int:
-    return max(1, -(-len(st.rare_flagged) // FLAGGED_PAGE))
+    return max(1, -(-len(st.rare_flagged) // st.popout_rows))
 
 
 def open_flagged_popout(ctx) -> None:
@@ -361,8 +359,8 @@ def draw_flagged_popout(ctx, st, fig) -> None:
         render_message(fig, nwc.NO_TIMEPOINTS_SAID, gid="nw-popout-no-timepoints")
         return
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
-    first = st.window_page * FLAGGED_PAGE
-    shown = flagged[first:first + FLAGGED_PAGE]
+    first = st.window_page * st.popout_rows
+    shown = flagged[first:first + st.popout_rows]
     sites = [row["site"] for row in shown]
     timepoints = [str(tp) for tp in st.data.timepoints()]
     column = nwc.drawn_metric_column(ctx) or "count_fc"        # the Metric the test ran on, not a fixed one

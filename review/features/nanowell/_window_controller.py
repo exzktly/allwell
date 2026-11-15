@@ -34,10 +34,6 @@ from review.features.nanowell.state import POPOUT_LAYOUTS, POPOUT_SOURCES
 from review.features.nanowell.views_compute import numeric_values
 from review.features.nanowell.zoom_compute import notches, pan_limits, wheel_limits
 
-#: Rows of the window's nanowells the pop-out shows at a time.
-WINDOW_PAGE = 24
-
-
 def _nwc():
     return _controller
 
@@ -313,7 +309,7 @@ def use_window_as_subset(ctx) -> None:
 # ── the pop-out ──────────────────────────────────────────────────────────────
 def page_size(st) -> int:
     """How many of the window's nanowells a page holds: a page of rows, or a page of the composite's tiles."""
-    return cc.COMPOSITE_PAGE if st.popout_layout == "hex" else WINDOW_PAGE
+    return cc.COMPOSITE_PAGE if st.popout_layout == "hex" else st.popout_rows
 
 
 def page_count(st) -> int:
@@ -534,7 +530,7 @@ def step_window_page(ctx, delta: int) -> None:
 
 def draw_window_popout(ctx, st, fig) -> None:
     """The pop-out in Window mode: the nanowells inside the window, ranked as ``window_compute.members`` ranks them,
-    as rows of crops over time (a page of :data:`WINDOW_PAGE`) or as the hex composite (a page of
+    as rows of crops over time (a page of ``NanowellState.popout_rows``, the **Grid** control's choice) or as the hex composite (a page of
     ``composite_compute.COMPOSITE_PAGE`` tiles, drawn once per timepoint the **Timepoints** menu shows, side by side in
     one row, at the zoom the wheel left, ``NanowellState.composite_view``). With **Timepoints: None** it says that instead of drawing. The crops of the page are cut on
     a worker, all in one pass, and each row or tile says so until its crops arrive."""
@@ -573,8 +569,8 @@ def draw_window_popout(ctx, st, fig) -> None:
             labels=st.popout_labels)
         _nwc()._call(ctx, "_nw_popout_zoom_refresh")
         return
-    first = st.window_page * WINDOW_PAGE
-    shown = rows[first:first + WINDOW_PAGE]
+    first = st.window_page * st.popout_rows
+    shown = rows[first:first + st.popout_rows]
     sites = [row.site for row in shown]
     timepoints = [str(tp) for tp in st.data.timepoints()]
     columns = nwc.extremes_columns(timepoints, result.rank_key, st.popout_tps)

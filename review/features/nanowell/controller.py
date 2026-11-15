@@ -47,7 +47,9 @@ from review.features.nanowell.identity_compute import identity_note, marks_legen
 from review.features.nanowell import subset_compute as ss
 from review.features.nanowell import statistics_compute as sc
 from review.features.nanowell._statistics_render import render_statistics
-from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS, save_name, shown_channels
+from review.features.nanowell.crop_grid_compute import (
+    POPOUT_GRIDS, POPOUT_MAX_COLS, clamp_rows, first_row_page, save_name, shown_channels,
+)
 from review.features.nanowell.crop_cache_compute import CropCache, TimepointCropCache
 from review.features.nanowell.image_compute import Crop, crops_for_sites, read_montage, site_crops
 from review.features.nanowell.renderer import (
@@ -2315,6 +2317,17 @@ def set_popout_grid(ctx, grid: str, cols: int = 0) -> None:
         grid = "auto"
     cols = max(1, min(POPOUT_MAX_COLS, int(cols))) if grid == "columns" else 0
     _set_popout(ctx, popout_grid=grid, popout_cols=cols)
+
+
+def set_popout_rows(ctx, rows: int) -> None:
+    """**Grid** while the pop-out shows many nanowells: how many rows a page holds
+    (``crop_grid_compute.POPOUT_ROW_CHOICES``). The page moves to the one that holds the row at the top of the page on
+    screen, so the pager's **Page N of M** is recounted around what the user was looking at."""
+    st = _state(ctx)
+    if st is None:
+        return
+    rows = clamp_rows(rows)
+    _set_popout(ctx, popout_rows=rows, window_page=first_row_page(st.window_page, st.popout_rows, rows))
 
 
 def _set_popout(ctx, **values) -> None:

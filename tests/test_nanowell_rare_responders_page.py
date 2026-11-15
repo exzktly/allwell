@@ -448,3 +448,41 @@ def test_the_excluded_flags_are_saved_with_the_page_and_an_unknown_one_is_not_re
     assert again.rare_qc_excluded == ["edge"]
     again.apply_config({"rare_qc_excluded": "edge"})
     assert again.rare_qc_excluded == []
+
+
+def _grid_rows_entry(ctx, rows):
+    ctx.widgets.get("_nw_popout_grid_menu").aboutToShow.emit()           # what opening the Grid menu does
+    for action in ctx.widgets.get("_nw_popout_grid_menu").actions():
+        if action.data() == ("rows", rows):
+            return action
+    raise AssertionError(f"no {rows}-row entry in the Grid menu")
+
+
+def _drawn_rows(ctx):
+    fig = ctx.widgets.get("_nw_popout_fig")
+    return [t.get_text().split("\n")[0] for t in fig.texts if t.get_gid() == "nw-extremes-row"]
+
+
+def test_grid_sets_how_many_flagged_rows_a_page_holds_and_the_pager_follows(page, qtbot):
+    st = _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    qtbot.waitUntil(lambda: bool(st.rare_flagged), timeout=30000)
+    page.widgets.get("_nw_stats_flagged_btn").click()
+    n = len(st.rare_flagged)
+    assert n > 3, n                                         # enough flagged rows for a page of 2 to make 2+ pages
+    label, ahead = page.widgets.get("_nw_popout_page_label"), page.widgets.get("_nw_popout_page_next")
+    assert len(_drawn_rows(page)) == min(n, 24) and label.text() == f"Page 1 of {-(-n // 24)}"
+    _grid_rows_entry(page, 2).trigger()
+    assert st.popout_rows == 2 and page.widgets.get("_nw_popout_grid_btn").text() == "Grid: 2 rows a page"
+    assert label.text() == f"Page 1 of {-(-n // 2)}" and not ahead.isHidden()
+    assert _drawn_rows(page)[0].startswith("#1 ") and len(_drawn_rows(page)) == 2
+    ahead.click()
+    ahead.click()                                           # page 3 of 2 rows: rows 5 and 6 at the top
+    assert st.window_page == 2 and _drawn_rows(page)[0].startswith("#5 ")
+    _grid_rows_entry(page, 4).trigger()                     # the row at the top stays on the page shown: page 2 of 4
+    assert st.window_page == 1 and label.text() == f"Page 2 of {-(-n // 4)}"
+    assert _drawn_rows(page)[0].startswith("#5 ")
+    menu = page.widgets.get("_nw_popout_grid_menu")
+    menu.aboutToShow.emit()                                 # opened again, it ticks the choice in force alone
+    assert [a.data() for a in menu.actions() if a.isChecked()] == [("rows", 4)]

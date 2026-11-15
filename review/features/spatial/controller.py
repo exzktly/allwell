@@ -334,6 +334,7 @@ def _compute_frame_payload(ctx, st, well: str) -> dict:
         include_gate=True,
     )
     pts = frame["points"]
+    fields = frame.get("fields")
     n_cells = int(pts.shape[0])
     payload = {
         "well": well,
@@ -352,9 +353,9 @@ def _compute_frame_payload(ctx, st, well: str) -> dict:
     metrics = st.enabled_metrics
     try:
         if metrics.get("nnd", True):
-            payload["nnd"] = spc.nearest_neighbour_distance(pts)
+            payload["nnd"] = spc.nearest_neighbour_distance(pts, fields)
         if st.viz == sp_state.VIZ_RIPLEY and n_cells >= _MIN_CELLS_FOR_STATS:
-            payload["ripley"] = spc.ripley_l(pts)
+            payload["ripley"] = spc.ripley_l(pts, fields=fields)
 
         need_colonies = (st.level in (sp_state.LEVEL_COLONY, sp_state.LEVEL_INTRA)
                          or st.viz in (sp_state.VIZ_COLONY_SIZE,
@@ -366,6 +367,7 @@ def _compute_frame_payload(ctx, st, well: str) -> dict:
                 pts, method=st.colony_method,
                 eps_mult=st.colony_eps_mult,
                 min_samples=st.colony_min_samples,
+                fields=fields,
             )
             payload["colony_labels"] = colonies.labels
             payload["colony_eps"] = colonies.eps

@@ -295,7 +295,7 @@ def test_summarise_frame_icc_nan_when_no_metric():
 
 def test_summary_metrics_catalog_shape():
     keys = {k for k, _lbl, _u in spc.SUMMARY_METRICS}
-    fields = {"n_cells", "n_colonies", "nnd_median", "knn5_mean_median",
+    fields = {"n_cells", "n_colonies", "n_colonies_with_hull", "nnd_median", "knn5_mean_median",
               "local_density_median", "colony_size_mean", "hull_area_median",
               "packing_density_median", "icc"}
     assert keys == fields

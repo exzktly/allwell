@@ -6490,7 +6490,11 @@ The **Spatial** tab (under **Analysis** on the rail, next to Multivariate) analy
 positions in the well plane — the pipeline emits `shape_centroid_row` /
 `shape_centroid_col` for every segmented cell (in pixels of its field), and a
 nanowell run also each cell's position across the whole well in µm, which the
-tab then uses instead, labelling distances in µm. The tab uses them to
+tab then uses instead, labelling distances in µm. Where a well was imaged in
+several fields and positions are in pixels, a cell's neighbours are looked for
+in its own field only: distances, densities, Ripley's L and colonies never
+join cells of two fields, although the Spatial map draws the fields over one
+another. The tab uses them to
 answer questions the plotting and multivariate tabs can't: *"Do my cells
 form colonies, and are they growing or sparse?"*, *"Do edge cells behave
 differently from interior cells?"*, *"How much of the GFP variability is
@@ -6568,7 +6572,9 @@ timepoint, it walks every well in your plate selection × every loaded
 timepoint and computes a small dataclass (`FrameSummary`) of scalar
 summaries per frame — cell count, colony count, median NND, median k-NN
 mean distance, median local density, mean colony size, median hull area,
-median packing density, and (if you picked a per-cell Metric) the
+median packing density (both medians are over the colonies of three or more
+cells, which are the ones that have a hull; *Colonies with a hull* is how many
+that is), and (if you picked a per-cell Metric) the
 between-vs-within ICC on that column. Pick which one to plot from the
 **Summary metric** dropdown and choose *Heatmap* or *Line plot* from
 **Display**. **Save summary data…** writes every summary column at once (long

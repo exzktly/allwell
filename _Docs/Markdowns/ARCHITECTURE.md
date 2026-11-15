@@ -7823,7 +7823,17 @@ run's cell table states each cell's position in the well frame, `well_x_um` /
 carries `unit="µm"`. Otherwise the segmentation's centroid in its field's pixels
 (`unit="px"`), which places cells correctly only within one field — a nanowell
 well's tiles overlap in pixel space, so reading its centroids put cells from
-different tiles on top of one another. The renderer labels axes, nearest-neighbour
+different tiles on top of one another. A well imaged in several fields has the
+same property, so a pixel-frame payload also carries `fields`, each cell's
+field of view (`collect.field_ids`; `None` for the well frame), and
+`spatial_compute` keeps every neighbour question inside a field
+(`field_groups`): the nearest-neighbour and k-NN distances and the local
+density search a cell's own field, `detect_colonies` clusters each field on its
+own with the frame's one ε (from the within-field distances) and numbers the
+colonies on from field to field so a colony never spans two, and `ripley_l`
+estimates K(r) per field in that field's window and pools it weighted by cell
+count, drawing each simulated pattern the same way. The Spatial map still draws
+the fields over one another in one panel. The renderer labels axes, nearest-neighbour
 distances and Ripley's radius with the payload's unit (`renderer.in_unit`). A
 nanowell cell table has a `timepoint` label and no `timepoint_hours`, so
 `collect._hours`, the tab's timepoint list and the per-cell export
@@ -7855,6 +7865,10 @@ one-cell radial bin has no spread and gets `NaN` like an empty one, and
 envelope rather than the all-zero curve inside a zero-width envelope it used
 to — which drew as a frame measured to be *perfectly* random with no
 uncertainty at all, the strongest claim the function can make, from one cell.
+A colony with no convex hull — fewer than three cells, or collinear ones — has
+a `NaN` hull area and packing density rather than an area of `0.0`, so the
+frame's median hull area is over the colonies that have one and
+`FrameSummary.n_colonies_with_hull` says how many that is.
 The renderer follows: an empty boundary-or-interior partition is named on the
 axis rather than substituted with `[0.0]` and drawn as a violin sitting on
 zero with a mean marker on it. Colony detection's DBSCAN maintains its
@@ -7998,7 +8012,7 @@ whose only viz — *Summary panel* — walks the *whole* well selection ×
 every loaded timepoint and calls
 `spatial_compute.summarise_frame(points, metric, colony_params)` on each
 frame. Each call returns a `FrameSummary` dataclass of scalars: cell
-count, colony count, median NND, median k-NN mean distance, median local
+count, colony count, the count of colonies with a hull, median NND, median k-NN mean distance, median local
 density, mean colony size, median hull area, median packing density, and
 the between-vs-within ICC on the picked metric (`NaN` when no metric is
 selected). `collect.collect_summary_matrix` stacks those into a

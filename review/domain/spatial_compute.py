@@ -40,13 +40,52 @@ def _as_points(points) -> np.ndarray:
     return arr
 
 
-def nearest_neighbour_distance(points: np.ndarray) -> np.ndarray:
+def field_groups(n: int, fields) -> list[np.ndarray]:
+    """The row indices of each field of view, as one index array per field.
+
+    *fields* names the field each of the *n* cells was imaged in, and is given
+    when the positions are in each field's own pixels: two cells in different
+    fields then share coordinates without being anywhere near each other, so a
+    neighbour is only ever looked for inside a cell's own field. ``None`` (the
+    positions share one frame) or a single distinct value is one group holding
+    every row.
+    """
+    everything = [np.arange(n)]
+    if fields is None or n == 0:
+        return everything
+    ids = np.asarray(fields).astype(str)
+    if ids.shape != (n,):
+        raise ValueError("fields must name one field per point")
+    uniq, inverse = np.unique(ids, return_inverse=True)
+    if uniq.size <= 1:
+        return everything
+    return [np.flatnonzero(inverse == i) for i in range(uniq.size)]
+
+
+def _per_field(fn, pts: np.ndarray, fields) -> np.ndarray | None:
+    """*fn* applied inside each field and scattered back to the cells' order;
+    ``None`` when the points are one field, for the caller to compute directly."""
+    groups = field_groups(pts.shape[0], fields)
+    if len(groups) == 1:
+        return None
+    out = np.full(pts.shape[0], np.nan, dtype=float)
+    for idx in groups:
+        out[idx] = fn(pts[idx])
+    return out
+
+
+def nearest_neighbour_distance(points: np.ndarray, fields=None) -> np.ndarray:
     """Distance from every cell to its single nearest other cell.
 
     Returns an ``(N,)`` float array; ``NaN`` where a cell has no neighbour
     (N < 2). Uses ``scipy.spatial.cKDTree`` — O(N log N) for the whole array.
+    With *fields* (see :func:`field_groups`) the neighbour is the nearest cell
+    of the same field.
     """
     pts = _as_points(points)
+    split = _per_field(nearest_neighbour_distance, pts, fields)
+    if split is not None:
+        return split
     n = pts.shape[0]
     out = np.full(n, np.nan, dtype=float)
     if n < 2:
@@ -59,12 +98,16 @@ def nearest_neighbour_distance(points: np.ndarray) -> np.ndarray:
     return out
 
 
-def knn_mean_distance(points: np.ndarray, k: int = 5) -> np.ndarray:
+def knn_mean_distance(points: np.ndarray, k: int = 5, fields=None) -> np.ndarray:
     """Mean distance to the *k* nearest neighbours of each cell.
 
-    Robust local-density surrogate (less noisy than NND). ``NaN`` when N ≤ k.
+    Robust local-density surrogate (less noisy than NND). ``NaN`` when N ≤ k
+    (per field, with *fields*).
     """
     pts = _as_points(points)
+    split = _per_field(lambda block: knn_mean_distance(block, k), pts, fields)
+    if split is not None:
+        return split
     n = pts.shape[0]
     out = np.full(n, np.nan, dtype=float)
     if n <= k:
@@ -76,14 +119,18 @@ def knn_mean_distance(points: np.ndarray, k: int = 5) -> np.ndarray:
     return out
 
 
-def local_density(points: np.ndarray, k: int = 5) -> np.ndarray:
+def local_density(points: np.ndarray, k: int = 5, fields=None) -> np.ndarray:
     """Local cell density estimate — ``k / (π · d_k²)`` — in cells per pixel².
 
     ``d_k`` is the distance to the k-th nearest neighbour. Matches the
     intuitive Ripley scaling and is robust to isolated outliers. ``NaN`` when
-    N ≤ k.
+    N ≤ k. With *fields* the neighbours are the cell's own field's, so the
+    density is the field's and not that of several fields laid over each other.
     """
     pts = _as_points(points)
+    split = _per_field(lambda block: local_density(block, k), pts, fields)
+    if split is not None:
+        return split
     n = pts.shape[0]
     out = np.full(n, np.nan, dtype=float)
     if n <= k:
@@ -118,6 +165,7 @@ class RipleyResult:
 def ripley_l(
     points: np.ndarray,
     *,
+    fields=None,
     r_max: float | None = None,
     n_r: int = 40,
     n_sims: int = 20,
@@ -131,10 +179,18 @@ def ripley_l(
     read the envelope absorbs the bias). ``L(r) - r > 0`` reads as
     *clustered*, ``< 0`` as *dispersed*; the envelope shows the range
     consistent with complete spatial randomness at the same N.
+
+    With *fields* (see :func:`field_groups`) each field is its own pattern in
+    its own window: K(r) is estimated per field and pooled as the mean weighted
+    by each field's cell count, and every simulated pattern is drawn and pooled
+    the same way. Pairs are never counted across fields, whose coordinates do
+    not share a frame. A field with fewer than two cells contributes nothing.
     """
     pts = _as_points(points)
     n = pts.shape[0]
-    if n < 2:
+    blocks = [pts[idx] for idx in field_groups(n, fields)]
+    blocks = [b for b in blocks if b.shape[0] >= 2]
+    if not blocks:
         # Not zeros. A zero L(r) - r curve inside a zero-width CSR envelope
         # reads as a frame measured to be *perfectly* random with no
         # uncertainty at all — the strongest claim this function can make,
@@ -145,37 +201,40 @@ def ripley_l(
         return RipleyResult(r=r, L_minus_r=undefined,
                             csr_lo=undefined, csr_hi=undefined, n_points=n)
 
-    xmin, ymin = pts.min(axis=0)
-    xmax, ymax = pts.max(axis=0)
-    width = max(xmax - xmin, 1e-9)
-    height = max(ymax - ymin, 1e-9)
-    area = width * height
+    lows = [b.min(axis=0) for b in blocks]
+    highs = [b.max(axis=0) for b in blocks]
+    sides = [(max(hi[0] - lo[0], 1e-9), max(hi[1] - lo[1], 1e-9))
+             for lo, hi in zip(lows, highs)]
+    areas = [w * h for w, h in sides]
+    sizes = [b.shape[0] for b in blocks]
     if r_max is None:
-        r_max = 0.25 * min(width, height)
+        r_max = 0.25 * min(min(w, h) for w, h in sides)
     r_max = max(float(r_max), 1e-9)
     r = np.linspace(r_max / n_r, r_max, n_r)
 
-    def _l_minus_r(pattern: np.ndarray) -> np.ndarray:
+    def _k(pattern: np.ndarray, area: float) -> np.ndarray:
         from scipy.spatial import cKDTree
         tree = cKDTree(pattern)
-        counts = np.zeros_like(r, dtype=float)
         # ``count_neighbors`` returns pairs within r (self-pairs included);
         # subtract N per radius to remove them.
         pairs = tree.count_neighbors(tree, r=r)
-        counts[:] = pairs.astype(float) - pattern.shape[0]
-        with np.errstate(divide="ignore", invalid="ignore"):
-            k_r = area * counts / (pattern.shape[0] * (pattern.shape[0] - 1))
-            L_r = np.sqrt(k_r / np.pi)
-        return L_r - r
+        counts = pairs.astype(float) - pattern.shape[0]
+        return area * counts / (pattern.shape[0] * (pattern.shape[0] - 1))
 
-    sample = _l_minus_r(pts)
+    def _l_minus_r(patterns: list) -> np.ndarray:
+        pooled = sum(m * _k(pattern, area)
+                     for pattern, area, m in zip(patterns, areas, sizes)) / float(sum(sizes))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.sqrt(pooled / np.pi) - r
+
+    sample = _l_minus_r(blocks)
 
     rng = np.random.default_rng(seed)
     sim_L = np.empty((n_sims, n_r), dtype=float)
     for i in range(n_sims):
-        sim = rng.uniform(
-            low=(xmin, ymin), high=(xmax, ymax), size=(n, 2))
-        sim_L[i] = _l_minus_r(sim)
+        sim_L[i] = _l_minus_r([
+            rng.uniform(low=tuple(lo), high=tuple(hi), size=(m, 2))
+            for lo, hi, m in zip(lows, highs, sizes)])
     lo_q, hi_q = envelope
     csr_lo = np.quantile(sim_L, lo_q, axis=0)
     csr_hi = np.quantile(sim_L, hi_q, axis=0)
@@ -277,17 +336,23 @@ def detect_colonies(
     eps: float | None = None,
     eps_mult: float = 3.0,
     min_samples: int = 4,
+    fields=None,
 ) -> ColonyLabels:
     """Cluster centroids in physical space into colonies.
 
     ``eps`` defaults to ``eps_mult · median(NND)`` — the self-scaling ε that
     adapts to whatever density the dataset happens to have. ``min_samples``
     is ignored by ``METHOD_SINGLE_LINKAGE``.
+
+    With *fields* (see :func:`field_groups`) a colony never spans two fields:
+    each field is clustered on its own with the one ε of the frame (from the
+    within-field nearest-neighbour distances), and the colony ids run on from
+    one field to the next so each is unique in the frame.
     """
     pts = _as_points(points)
     n = pts.shape[0]
     if eps is None or eps <= 0:
-        nnd = nearest_neighbour_distance(pts)
+        nnd = nearest_neighbour_distance(pts, fields)
         finite = nnd[np.isfinite(nnd)]
         median = float(np.median(finite)) if finite.size else 1.0
         eps = float(eps_mult) * max(median, 1e-9)
@@ -295,6 +360,20 @@ def detect_colonies(
         return ColonyLabels(labels=np.array([], dtype=int), method=method,
                             eps=float(eps), min_samples=int(min_samples),
                             n_colonies=0)
+    groups = field_groups(n, fields)
+    if len(groups) > 1:
+        labels = np.full(n, -1, dtype=int)
+        next_id = 0
+        for idx in groups:
+            block = detect_colonies(pts[idx], method=method, eps=eps,
+                                    min_samples=min_samples).labels
+            found = block >= 0
+            labels[idx[found]] = block[found] + next_id
+            if found.any():
+                next_id += int(block.max()) + 1
+        unique = {int(v) for v in labels if int(v) >= 0}
+        return ColonyLabels(labels=labels, method=method, eps=float(eps),
+                            min_samples=int(min_samples), n_colonies=len(unique))
     if method == METHOD_SINGLE_LINKAGE:
         labels = _single_linkage_cut(pts, eps)
     else:
@@ -318,7 +397,7 @@ class ColonyStats:
 
     ids: np.ndarray                # (K,) int
     size: np.ndarray               # (K,) int — cell count
-    hull_area: np.ndarray          # (K,) float — pixels²; 0 when |colony| < 3
+    hull_area: np.ndarray          # (K,) float — pixels²; NaN where the colony has no hull
     packing_density: np.ndarray    # (K,) float — cells / hull_area (NaN for tiny)
     eccentricity: np.ndarray       # (K,) float — √(1 - λ_min/λ_max) of covariance
     orientation: np.ndarray        # (K,) float — angle of dominant eigenvector (rad)
@@ -326,16 +405,21 @@ class ColonyStats:
 
 
 def _hull_area(points: np.ndarray) -> float:
+    """The convex hull's area, or ``NaN`` for a colony that has no hull: one of
+    fewer than three cells, or of collinear ones. Not ``0.0`` — an area of zero
+    is a measurement, and under single linkage most colonies are one or two
+    cells, so their zeros were the median of the frame's hull areas."""
     if points.shape[0] < 3:
-        return 0.0
+        return float("nan")
     try:
         from scipy.spatial import ConvexHull
     except ImportError:  # pragma: no cover
-        return 0.0
+        return float("nan")
     try:
-        return float(ConvexHull(points).volume)  # ``volume`` = 2-D area
+        area = float(ConvexHull(points).volume)  # ``volume`` = 2-D area
     except Exception:  # pragma: no cover — degenerate (collinear)
-        return 0.0
+        return float("nan")
+    return area if area > 0 else float("nan")
 
 
 def _cov_shape(points: np.ndarray) -> tuple[float, float]:
@@ -372,7 +456,7 @@ def colony_stats(points: np.ndarray, labels: np.ndarray) -> ColonyStats:
             centroid=np.empty((0, 2), dtype=float),
         )
     size = np.zeros(ids.size, dtype=int)
-    hull = np.zeros(ids.size, dtype=float)
+    hull = np.full(ids.size, np.nan, dtype=float)
     density = np.full(ids.size, np.nan, dtype=float)
     ecc = np.zeros(ids.size, dtype=float)
     orient = np.zeros(ids.size, dtype=float)
@@ -384,7 +468,7 @@ def colony_stats(points: np.ndarray, labels: np.ndarray) -> ColonyStats:
         centroid[i] = block.mean(axis=0)
         area = _hull_area(block)
         hull[i] = area
-        if area > 0:
+        if np.isfinite(area):
             density[i] = size[i] / area
         ecc[i], orient[i] = _cov_shape(block)
     return ColonyStats(ids=ids, size=size, hull_area=hull,
@@ -651,6 +735,9 @@ class FrameSummary:
 
     n_cells: int
     n_colonies: int
+    #: Colonies the two hull medians below are over: those of three or more
+    #: cells that are not collinear. The rest have no hull and are left out.
+    n_colonies_with_hull: int
     nnd_median: float
     knn5_mean_median: float
     local_density_median: float
@@ -675,34 +762,41 @@ def summarise_frame(
     eps_mult: float = 3.0,
     min_samples: int = 4,
     knn_k: int = 5,
+    fields=None,
 ) -> FrameSummary:
     """Compute the per-frame scalar summaries of a single (well, timepoint).
 
     Runs the same colony detection the tab uses at Colony / Intra-colony
     level, so the Summary-panel matrix agrees with what the user sees when
-    they scrub through the well/timepoint pickers.
+    they scrub through the well/timepoint pickers. *fields* names each cell's
+    field of view when the positions are per-field pixels (see
+    :func:`field_groups`); every neighbour statistic and the colony detection
+    then stay inside a field.
     """
     pts = _as_points(points) if points is not None and len(points) else np.empty((0, 2))
     n_cells = int(pts.shape[0])
     if n_cells == 0:
         return FrameSummary(
-            n_cells=0, n_colonies=0,
+            n_cells=0, n_colonies=0, n_colonies_with_hull=0,
             nnd_median=float("nan"), knn5_mean_median=float("nan"),
             local_density_median=float("nan"), colony_size_mean=float("nan"),
             hull_area_median=float("nan"), packing_density_median=float("nan"),
             icc=float("nan"),
         )
 
-    nnd = nearest_neighbour_distance(pts)
-    knn = knn_mean_distance(pts, k=knn_k)
-    dens = local_density(pts, k=knn_k)
+    nnd = nearest_neighbour_distance(pts, fields)
+    knn = knn_mean_distance(pts, k=knn_k, fields=fields)
+    dens = local_density(pts, k=knn_k, fields=fields)
 
     colonies = detect_colonies(
         pts, method=colony_method, eps_mult=eps_mult, min_samples=min_samples,
+        fields=fields,
     )
     n_colonies = colonies.n_colonies
+    n_with_hull = 0
     if n_colonies:
         stats = colony_stats(pts, colonies.labels)
+        n_with_hull = int(np.isfinite(stats.hull_area).sum())
         colony_size_mean = float(np.mean(stats.size)) if stats.size.size else float("nan")
         hull_area_median = _finite_median(stats.hull_area)
         packing_density_median = _finite_median(stats.packing_density)
@@ -724,6 +818,7 @@ def summarise_frame(
     return FrameSummary(
         n_cells=n_cells,
         n_colonies=n_colonies,
+        n_colonies_with_hull=n_with_hull,
         nnd_median=_finite_median(nnd),
         knn5_mean_median=_finite_median(knn),
         local_density_median=_finite_median(dens),
@@ -739,6 +834,7 @@ def summarise_frame(
 SUMMARY_METRICS: tuple[tuple[str, str, str], ...] = (
     ("n_cells",                 "Cell count",              ""),
     ("n_colonies",              "Colony count",            ""),
+    ("n_colonies_with_hull",    "Colonies with a hull",    ""),
     ("nnd_median",              "Median NND",              "px"),
     ("knn5_mean_median",        "Median k-NN mean (k=5)",   "px"),
     ("local_density_median",    "Median local density",     "cells/px²"),
@@ -760,6 +856,7 @@ __all__ = [
     "VarianceDecomposition",
     "FrameSummary",
     "SUMMARY_METRICS",
+    "field_groups",
     "nearest_neighbour_distance",
     "knn_mean_distance",
     "local_density",

@@ -458,6 +458,8 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
     ax.set_ylabel(ylabel)
     low = min(0.0, min(tops, default=0.0))
     high = max(tops, default=1.0) or 1.0
+    if low < 0:                                      # a negative score (an HC peak) keeps its whole dot on the axes
+        low -= 0.06 * (high - low)
     # Each group's name is wrapped to its own width on the axes, so the names of narrow groups on a phone's figure
     # stack rather than run into one another; the dots get the height the tallest name leaves.
     pt = _TITLE_PT * 0.8
@@ -565,7 +567,9 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     params, units = result.prepared.params, result.units
     value_label = result.prepared.value_label
     log_axis = log_axis_for(result)
-    cols = columns_for(width)
+    # Never more columns than comparisons, but at least two when the width holds them: one comparison drawn a third
+    # of the width left two thirds of the row empty, and drawn the whole width its curves stretched flat.
+    cols = max(1, min(columns_for(width), max(len(units), min(columns_for(width), 2))))
     lines_of = -(-len(units) // cols) if units else 0
     step = _REPORT_PT * _LEADING / 72
     probe = fig.add_axes([0, 0, 0.001, 0.001], frameon=False)
@@ -627,6 +631,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
         draw = _small_panel(key, value_label, log_axis)
         if draw is None:
             continue
+        y += 0.12                                    # the captions clear the p line above them
         for i, unit in enumerate(units):
             line, col = divmod(i, cols)
             top = y + line * (CAPTION_IN + SMALL_IN)

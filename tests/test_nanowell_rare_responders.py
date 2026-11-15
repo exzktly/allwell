@@ -1151,3 +1151,28 @@ def test_what_qualifies_the_whole_result_is_drawn_at_the_top_not_below_the_fold(
     panels = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))]
     assert groups > texts[lead] > first_head > max(ax.get_position().y1 for ax in panels)
     assert texts["a line"] < min(ax.get_position().y0 for ax in panels)       # the rest stays under the rows
+
+
+def test_one_comparison_fills_half_the_row_and_nothing_on_it_overlaps():
+    """Seen retaking the tutorial on a plate with one comparison: its curve panel took a third of the row and left the
+    rest empty; the pooled row's caption sat on its p line, which has no shared panel between them; and a negative HC
+    peak was drawn half off its axes. One comparison now takes half the row, every caption clears its row's p line, and
+    every dot is inside its axes."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    fig = _laid_out(res, 12.6)
+    for key in ("exceedance", "hc", "pooled"):
+        assert _panel(fig, f"nw-rare-panel:{key}:0").get_position().width * 12.6 >= 0.4 * 12.6, key
+    renderer = FigureCanvasAgg(fig).get_renderer()
+    for key in ("exceedance", "hc", "pooled"):
+        p_box = next(t for t in fig.texts if t.get_gid() == f"nw-rare-test-p:{key}").get_window_extent(renderer)
+        caption = next(t for t in fig.texts if t.get_gid() == f"nw-rare-comparison:{key}:0")
+        # Clear by a visible space, not merely not overlapping: touching was what the tutorial showed.
+        assert p_box.y0 - caption.get_window_extent(renderer).y1 >= 6 / 72 * fig.dpi, key
+    hc_ax = _panel(fig, "nw-rare-shared:hc")
+    values = [res.units[0].hc[w.key].value for w in res.units[0].controls + res.units[0].treated]
+    assert min(values) < 0                                       # the fixture has a negative peak to place
+    low, high = hc_ax.get_ylim()
+    radius = (high - low) * 0.03
+    assert all(low + radius <= v <= high for v in values if math.isfinite(v))

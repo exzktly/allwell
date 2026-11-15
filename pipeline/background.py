@@ -17,7 +17,7 @@ import logging
 import numpy as np
 from scipy.ndimage import grey_opening
 
-from pipeline.flatfield import _FLATFIELD_SIGMA, apply_flatfield
+from pipeline.flatfield import _FLATFIELD_SIGMA, apply_requested_flatfield
 
 # The pipeline's logger, as in ``pipeline.stardist`` — a correction that could
 # not be computed has to reach the run log, because the array it returns is
@@ -491,14 +491,29 @@ def combined_empty_well_correct(image, bg_field, ff_field) -> np.ndarray:
     additive background **tracks the illumination** (true for media autofluor-
     escence under uneven excitation): then for ``raw = gain·signal + B`` with
     ``gain ∝ B`` it recovers ``signal``, and the empty well itself maps to ~0.
-    Each field no-ops when absent / shape-mismatched.
+    A field that is absent or of another shape is skipped, and each skip is
+    warned about: the frame is otherwise written under the usual corrected
+    filename with nothing to tell it from a corrected one.
     """
     img = np.asarray(image, dtype=np.float32)
-    if bg_field is not None:
+    if bg_field is None:
+        log.warning(
+            "Background: empty_well was requested but no background field "
+            "was built for this channel — the frame is NOT background-subtracted.",
+        )
+    else:
         b = np.asarray(bg_field, dtype=np.float32)
         if b.shape == img.shape:
             b = _match_background_scale(img, b)
             img = _floor_after_subtract(img - b)
-    return apply_flatfield(img, ff_field)
+        else:
+            log.warning(
+                "Background: the empty-well field is %s and this frame is %s, "
+                "so it cannot be subtracted — the frame is NOT "
+                "background-subtracted. A blank acquired at a different binning "
+                "or crop from the plate is the usual cause.",
+                b.shape, img.shape,
+            )
+    return apply_requested_flatfield(img, ff_field)
 
 

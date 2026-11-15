@@ -619,7 +619,7 @@ def compute_shape_features(
 # view). Imported under the original names so the rest of this module is
 # unchanged.
 from pipeline.flatfield import (
-    apply_flatfield,
+    apply_flatfield, apply_requested_flatfield,
     estimate_gaussian_flatfield,
 )
 
@@ -901,9 +901,9 @@ def _correct_image_group(
         _t = time.perf_counter()
         # Skip flat-field on the phase channel so its raw is left untouched.
         if not _is_phase(nuclear_token):
-            nir_raw = apply_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
+            nir_raw = apply_requested_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
         fluor_raws = [
-            f if _is_phase(tok) else apply_flatfield(f, _flatfield_for(tok, f))
+            f if _is_phase(tok) else apply_requested_flatfield(f, _flatfield_for(tok, f))
             for f, tok in zip(fluor_raws, fluor_tokens)
         ]
         log.info("  flatfield:   %.1f s  (mode=%s)", time.perf_counter() - _t, flatfield_mode)

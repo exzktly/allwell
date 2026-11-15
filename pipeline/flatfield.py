@@ -16,7 +16,13 @@ make sense.
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
+
+# The pipeline's logger, so the warnings land in the run log beside the
+# background step's (``pipeline.background`` uses the same name).
+log = logging.getLogger("process_microscopy")
 
 # Gaussian smoothing scale (px) for illumination estimation, and the min value
 # of a mean-1 field (caps img/ff amplification at 1/FLOOR = 10x so a near-zero
@@ -109,7 +115,13 @@ def estimate_basic_flatfield(stack, sigma: float = FLATFIELD_SIGMA) -> np.ndarra
 
 
 def apply_flatfield(image: np.ndarray, flatfield: np.ndarray | None) -> np.ndarray:
-    """Divide *image* by a mean-1 *flatfield* (no-op when None or shape-mismatched).
+    """Divide *image* by a mean-1 *flatfield*.
+
+    ``None`` is "no flat-field was asked for" and returns the frame as given,
+    silently — a caller that *did* ask for one goes through
+    :func:`apply_requested_flatfield`, which says so. A field of another shape
+    is never routine: the frame comes back as given and a warning names both
+    shapes.
 
     Returns float32; the mean-1 normalization keeps intensity magnitudes
     comparable to the uncorrected image so downstream gating thresholds still
@@ -120,11 +132,38 @@ def apply_flatfield(image: np.ndarray, flatfield: np.ndarray | None) -> np.ndarr
     img = np.asarray(image, dtype=np.float32)
     ff = np.asarray(flatfield, dtype=np.float32)
     if ff.shape != img.shape:
+        log.warning(
+            "Flat-field: the field is %s and this frame is %s, so it cannot be "
+            "divided out — the frame is left as it was and is NOT flat-field "
+            "corrected. A blank acquired at a different binning or crop from "
+            "the plate is the usual cause.",
+            ff.shape, img.shape,
+        )
         return image
     with np.errstate(divide="ignore", invalid="ignore"):
         out = img / ff
     out[~np.isfinite(out)] = 0.0
     return out
+
+
+def apply_requested_flatfield(image: np.ndarray, flatfield: np.ndarray | None) -> np.ndarray:
+    """:func:`apply_flatfield` for a caller whose run asked for a flat-field.
+
+    The pipeline reaches this only in a mode that needs a field (``empty_well``,
+    ``basic``, ``gaussian``), so a missing one is a correction that did not
+    happen. The run-level guards stop a run that built no model at all; this is
+    the per-channel gap they cannot see — a blank that holds the nuclear channel
+    and not this one — and without the warning the frame is written under the
+    usual corrected filename with nothing to tell it from a corrected one.
+    """
+    if flatfield is None:
+        log.warning(
+            "Flat-field: a flat-field was requested but no field was built for "
+            "this channel — the frame is left as it was and is NOT flat-field "
+            "corrected.",
+        )
+        return image
+    return apply_flatfield(image, flatfield)
 
 
 # Back-compat alias (``process_microscopy`` historically called the private name).

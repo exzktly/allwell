@@ -3582,6 +3582,22 @@ result to `_floor_after_subtract`, which zeroes non-finite pixels and clips
 negatives. The distinction only matters for a frame that already carries
 negatives or NaNs.
 
+**Every correction that is skipped per channel warns, and names what was not
+done.** The run-level guards (`_require_empty_well_models`,
+`require_grouped_models`) stop a run that built no model at all; what they cannot
+see is the per-channel gap — a blank at another binning, or one that holds the
+nuclear channel and not the channel being corrected. Three seams cover it, and
+between them no empty-well path returns a frame uncorrected in silence:
+`subtract_background`'s `empty_well` branch, `combined_empty_well_correct` (which
+warns separately for the background half and the flat-field half, since either
+can be skipped while the other runs), and
+`pipeline.flatfield.apply_requested_flatfield`, which is what the pipeline calls
+in any mode that needs a field. `apply_flatfield` itself stays quiet on `None`,
+because Review's flat-field validation view and the Playground pass `None` to
+mean "this mode has no field"; a field of the wrong *shape* is never routine and
+warns there too. `tests/test_a_skipped_correction_says_so.py` drives all five
+paths through `_correct_image_group` and asserts the wording.
+
 **Before a dataset is open, the page is not shown at all.** Home's body is
 wrapped in the shared `wrap_with_empty_state` stack like every other Review
 page, so the same "Load a directory." placeholder covers it and the same
@@ -15276,7 +15292,7 @@ channel-independent, so they bypass the per-channel intensity gate.
 
 **Quality-control stage.** Two optional QC steps run inside `process_image_group`.
 **Flat-field correction** (`--flatfield {none,empty_well,gaussian,basic}`, via
-`apply_flatfield` with a mean-1 field) runs *before* top-hat: `gaussian`
+`apply_requested_flatfield` with a mean-1 field) runs *before* top-hat: `gaussian`
 self-estimates per image, while `basic` (a **pure-numpy BaSiC** — median stack +
 smooth, no jax) and `empty_well` use a per-channel field precomputed once in
 `main()` by `build_flatfield_models`. **Debris removal** (`--qc_remove_debris` +

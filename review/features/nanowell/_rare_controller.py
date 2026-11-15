@@ -43,7 +43,7 @@ import pandas as pd
 from review.features.nanowell import controller as _controller
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import window_compute as wc
-from review.features.nanowell._rare_render import needed_height, render_rare_page
+from review.features.nanowell._rare_render import needed_height, needs_relayout, render_rare_page
 from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS, RareParams, from_site_metrics, qc_flag_counts
 from review.features.nanowell.rare_export_compute import report_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
@@ -290,6 +290,9 @@ def flagged_rows(result: RareResult) -> list[dict]:
         rows.append({"site": (str(row["well_id"]), q, r), "fc": float(row["fc"]), "why": why,
                      "unit": row["unit"]})
     return rows
+
+
+__all__ = ["needs_relayout"]       # the page's resize handler asks it through this module (``controller``)
 
 
 def fit_canvas_height(ctx) -> None:

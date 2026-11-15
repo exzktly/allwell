@@ -1767,9 +1767,7 @@ def on_canvas_resized(ctx) -> None:
             redraw(ctx)
         return
     if st.view == "statistics":                        # the rare page grew its canvas, or the window changed width
-        from review.features.nanowell._rare_render import needs_relayout
-
-        if needs_relayout(ctx.widgets.get_or_none("_nw_fig")):
+        if rc.needs_relayout(ctx.widgets.get_or_none("_nw_fig")):
             redraw(ctx)
         return
     drawn = st.drawn

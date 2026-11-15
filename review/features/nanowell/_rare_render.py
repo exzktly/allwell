@@ -473,10 +473,17 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
             x += 1
         groups.append((unit.label + (f"\n{p_of(unit)}" if p_of else ""), start, x - 1))
         x += 1
+    # Points of width each well has on the axes. Packed tightly (many wells on a phone), a count label ("15/150",
+    # about six characters) is wider than its well's slot, so it stands upright over its dot, a line's height wide;
+    # the well names stand upright too rather than slanting into their neighbours.
+    slot_pt = ax.get_position().width * ax.figure.get_figwidth() * 72 / max(x - 0.6, 1.0)
+    count_pt = _TITLE_PT * 0.65
+    upright = slot_pt < count_pt * 0.55 * 6 + 2
     for xi, value, text in labelled:
-        _ink(ax.annotate(text, (xi, value), textcoords="offset points", xytext=(0, 5), ha="center",
-                         fontsize=_TITLE_PT * 0.65, color=ink, gid=f"{gid}-count"))
-    ax.set_xticks(xs, ticks, rotation=60, fontsize=_TITLE_PT * 0.75)
+        _ink(ax.annotate(text, (xi, value), textcoords="offset points", xytext=(0, 5), ha="center", va="bottom",
+                         rotation=90 if upright else 0, fontsize=count_pt, color=ink, gid=f"{gid}-count"))
+    tick_pt = _TITLE_PT * 0.75
+    ax.set_xticks(xs, ticks, rotation=90 if slot_pt < tick_pt * 2.5 else 60, fontsize=tick_pt)
     ax.set_xlim(-0.7, x - 1.3)
     ax.set_ylabel(ylabel)
     low = min(0.0, min(tops, default=0.0))
@@ -493,7 +500,10 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
              for name, first, last in groups]
     tallest = max((len(n) for n in names), default=1)
     axes_in = max(ax.get_position().height * ax.figure.get_figheight(), 0.3)
-    share = min(0.7, (pt * _LEADING * tallest + 8) / 72 / axes_in)
+    # Above the highest dot: its count label (upright, as long as its text; else one line) and the group names.
+    longest = max((len(text) for _x, _v, text in labelled), default=0)
+    label_pt = (longest * count_pt * 0.6 if upright else count_pt * 1.3) + 5 if labelled else 0
+    share = min(0.75, (pt * _LEADING * tallest + 8 + label_pt) / 72 / axes_in)
     ax.set_ylim(low, low + (high - low) * 1.08 / (1 - share))
     for (_name, first, last), wrapped in zip(groups, names):
         if first:
@@ -549,6 +559,14 @@ SHARED_IN, SMALL_IN, CAPTION_IN, ROW_GAP_IN = 2.6, 2.5, 0.3, 0.3
 BLOCK_PAD_IN = 0.1
 #: Inches the block frame stands in from the figure's left and right edges, and the width of its role bar in points.
 _BLOCK_INSET_IN, _ROLE_BAR_PT = 0.06, 3.5
+#: Inches from the figure's left edge to where every line of text starts, and from there to a panel's y axis: the
+#: room its tick labels and its y label take. Both are in inches, not shares of the width, so a phone's figure keeps
+#: them as a desk's does: as shares, a 4 in figure left 0.08 in for text the role bar ends 0.11 in into.
+_CONTENT_IN, _AXIS_ROOM_IN = 0.3, 0.72
+#: How much larger than its drawn size an axes title is allowed for when it is wrapped to its axes' width, in
+#: points per character: the body face's average character is about half its size, and the page's style pass can
+#: enlarge titles after the draw.
+_TITLE_GROWTH = 0.62
 #: What of each height the axes leave to the text around them before their title is known, and the ticks and
 #: labels below; once drawn, the axes start under their title whatever its length.
 _ABOVE_IN, _BELOW_IN = 0.5, 0.62
@@ -645,7 +663,10 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     ink = _inks(probe)[1]
     y = _TOP_IN + (_STAMP_IN if stamped else 0.0)          # inches down from the figure's top
 
-    def text(content, pt, gid, *, bold=False, x=0.02, wrap=0.96) -> None:
+    content_x = _CONTENT_IN / width                   # every line of text starts here, clear of a block's role bar
+    content_w = 1.0 - 2 * content_x
+
+    def text(content, pt, gid, *, bold=False, x=content_x, wrap=content_w) -> None:
         nonlocal y
         wrapped = _wrapped(fig, [content], wrap, pt, "")
         _ink(fig.text(x, 1 - y / height, "\n".join(wrapped), fontsize=pt, fontweight="bold" if bold else "normal",
@@ -660,6 +681,12 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     def fit_title(ax, top: float, h: float) -> None:
         # The axes start under their own title, however many lines it took: a fixed allowance left an inch of
         # nothing over a one-line title and ran a four-line one into the caption above.
+        # Wrapped to the axes' own width first, at the size the page's style pass may draw it: a title one panel of
+        # three wide ran into its neighbour's, and on a phone off the figure.
+        if ax.get_title():
+            chars = max(16, int(ax.get_position().width * width * 72 / (ax.title.get_fontsize() * _TITLE_GROWTH)))
+            ax.title.set_text("\n".join(part for line in ax.get_title().split("\n")
+                                         for part in (textwrap.wrap(line, chars) or [""])))
         lines = ax.get_title().count("\n") + 1 if ax.get_title() else 0
         above = 0.12 + lines * _TITLE_PT * _LEADING / 72
         bottom = top + h - _BELOW_IN
@@ -670,8 +697,8 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
         text(rx.groups_line(result), _HEAD_PT, "nw-rare-groups", bold=True)
         y += 0.06
     for item in lead:                       # what qualifies the whole result: at the top, never below the fold
-        for part in _wrapped(fig, [item], 0.96):
-            _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
+        for part in _wrapped(fig, [item], content_w):
+            _ink(fig.text(content_x, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
             y += step
     if lead:
         y += 0.04
@@ -679,8 +706,8 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
         y += 0.04
         text(rx.comparison_title(result, i), _HEAD_PT, f"nw-rare-comparison-head:{i}", bold=True)
         text(rx.unit_text(result, unit)["headline"], _HEAD_PT, "nw-rare-unit")
-    left, gap = 0.75 / width, 0.85 / width
-    panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
+    left, gap, right = (_CONTENT_IN + _AXIS_ROOM_IN) / width, 0.85 / width, (_BLOCK_INSET_IN + 0.2) / width
+    panel_w = (1.0 - left - right - (cols - 1) * gap) / cols
     for key, *_rest in rx.TEST_ROWS if units else ():
         y += ROW_GAP_IN
         block_top = y
@@ -690,7 +717,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
              f"nw-rare-test-p:{key}")
         if key in SHARED_PANELS:
             value_of, ylabel, title, gid, label_of, missing = SHARED_PANELS[key]
-            ax = axes(left, y, 1.0 - left - 0.25 / width, SHARED_IN)
+            ax = axes(left, y, 1.0 - left - right, SHARED_IN)
             ax.set_gid(f"nw-rare-shared:{key}")
             _title(ax, title)
             fit_title(ax, y, SHARED_IN)
@@ -719,8 +746,8 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     caveats = [f"⚠ {rx.comparison_title(result, i).split(':', 1)[0]} ({u.label}): {c}"
                for i, u in enumerate(units) for c in rx.unit_text(result, u)["caveats"]]
     for item in [*caveats, *lines, *([note] if note else [])]:
-        for part in _wrapped(fig, [item], 0.96):
-            _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
+        for part in _wrapped(fig, [item], content_w):
+            _ink(fig.text(content_x, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
             y += step
     fig._aw_rare_laid_out = (round(width, 2), round(height, 2))
     fig._aw_rare_need_in = y + _TEXT_PAD_IN

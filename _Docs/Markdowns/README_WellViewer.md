@@ -3409,7 +3409,7 @@ choice applies once, when the menu closes.
   typing for a second — not as you type each digit — and one typed just before
   you close the window is saved with the dataset. Then
   choose the source of the inclusion decision —
-  the per-channel **intensity minimum** (the `Include ≥` column below), or the
+  the per-channel **intensity minimum** (the `Include >` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
   drawn a gate there, the scatter option is greyed out and says so. The two are
   alternatives: while the scatter gates decide inclusion the intensity minimums
@@ -3719,10 +3719,12 @@ choice applies once, when the menu closes.
   compute fraction-on from a different set.
 
   This question has **two** cutoffs per channel, because the answer depends on
-  what you are plotting. `ON ≥ (ThreshFracOn)` is the brightness a cell must
-  reach, and applies when the selected Property is an intensity.
-  `ON > (ThreshCountOn)` is the number of spots it must carry, and applies when
-  the Property is an smFISH Count. They are separate values on purpose: one asks
+  what you are plotting. `ON > (ThreshFracOn)` is the brightness a cell must
+  exceed, and applies when the selected Property is an intensity.
+  `ON > (ThreshCountOn)` is the number of spots it must exceed, and applies when
+  the Property is an smFISH Count. Every cutoff on this tab is read the way
+  its header is written, strictly above: at an `Include >` of 50 a cell
+  measuring exactly 50 is left out, and at an `ON >` of 50 it is not ON. They are separate values on purpose: one asks
   how *bright* a cell is, the other how many *spots* it holds, and the two live
   on scales that share no useful number. A channel with no spot-count column has
   no count cutoff to set, and shows an em-dash in that column.
@@ -3744,7 +3746,7 @@ readout channel's ON cutoff starts at 50; the nuclear (segmentation) channel
 starts at 0, because an ON/OFF brightness cut has no meaning for the channel
 nuclei are *found* with — every segmented cell is by construction a detection in
 it, so a non-zero cut there only hides nuclei from the Image Table's
-"≥ threshold" view. Whichever channel it is, a value you set yourself always wins
+"> threshold" view. Whichever channel it is, a value you set yourself always wins
 over the starting one.
 
 Two helpers sit beside the fraction-on section:
@@ -7777,7 +7779,7 @@ segmentation, the status line says so. Opening another dataset clears it.
   the intensity gate are told apart — the first is "deleted here", the second
   "below the intensity gate" — so a deletion you never made is never shown as
   yours. To bring back a cell another layer removed, raise that threshold or
-  switch that layer off. The overlay works in the binary (≥ threshold)
+  switch that layer off. The overlay works in the binary (> threshold)
   view too, which is usually where the question comes up, since a binary mask is
   already a picture of which cells counted.
 - **The status line says when it is showing you less than it was asked for.**
@@ -7785,7 +7787,7 @@ segmentation, the status line says so. Opening another dataset clears it.
   well's archive stopped part way, the line ends with **INCOMPLETE** and the
   reason — the FOV and timepoint menus above it are then shorter than the dataset
   actually is, which is otherwise indistinguishable from a well that holds that
-  few frames. And if you switch on the binary (≥ threshold) view for a field the
+  few frames. And if you switch on the binary (> threshold) view for a field the
   measurements do not cover — no rows for the well, or none for this
   FOV/timepoint — the binary view is declined rather than drawn: you get the
   ordinary intensity image and a line saying the threshold could not be measured
@@ -7914,7 +7916,7 @@ channel for every well).
   come from the sidebar plate; changing that selection — including **Select all /
   none** — re-runs the layout in place.
 - **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
-  Corrected**, **Mask**, **≥ threshold** (renders that channel's
+  Corrected**, **Mask**, **> threshold** (renders that channel's
   ON-cutoff binary — ThreshFracOn, or ThreshCountOn when the selected Property
   is a spot count — positive cells white), **Colour cells**, a **boundary** outline
   overlay, and a **colormap + LUT** min/max. The options travel with the channel
@@ -7928,14 +7930,14 @@ channel for every well).
 - **Cells the analysis has dropped are not drawn.** A cell you deleted on the
   Segmentation tab, one a crop excluded, one that failed the QC debris gate, and
   one outside your gating all get no outline when the table renders, and do not
-  appear in the **Mask** or **≥ threshold** views — the table shows the same
+  appear in the **Mask** or **> threshold** views — the table shows the same
   population every plot, statistic and export counts. A grid drawn *before* such
   an edit does not repaint itself (re-rendering a plate is seconds of work): the
   header cues **edited — press Generate**, and the grid is current again after
   that. The one place that still shows every segmented cell is the pipeline's
   own **NUC+SEG** overlay channel, whose boundaries are drawn into the saved
   image before All-Well ever sees it.
-- **Colour cells** — in the **Mask** and **≥ threshold** views, give every cell its
+- **Colour cells** — in the **Mask** and **> threshold** views, give every cell its
   own colour instead of painting them all white. Two nuclei that touch are
   otherwise a single white shape, which is exactly the mistake you are looking at a
   mask to catch. The colour is a fixed function of the cell's label id, so it does
@@ -8102,7 +8104,7 @@ channel for every well).
 - **Cells that can't be drawn say so** — a cell never shows a different picture
   than the one you asked for. `(no image)` means nothing decoded for that well /
   channel / timepoint / FOV; `(no mask)` means the cell's **Mask** or
-  **≥ threshold** view has no segmentation mask for that frame (the intensity
+  **> threshold** view has no segmentation mask for that frame (the intensity
   image is *not* shown in its place, so a threshold view is never half
   silhouettes and half pictures — and such a cell draws from its mask alone, so a
   missing fluorescence frame does not stop it); `(render failed)` means that one cell errored —

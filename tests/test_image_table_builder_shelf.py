@@ -195,7 +195,7 @@ def test_channel_menu_is_parented_and_lists_render_modes(qtbot):
     # QMenu is garbage-collected and the ⚙ opens nothing. It must be parented.
     assert menu.parent() is host
     labels = [a.text() for a in menu.actions()]
-    for mode in ("corrected", "raw", "cell mask", "≥ threshold"):
+    for mode in ("corrected", "raw", "cell mask", "> threshold"):
         assert mode in labels          # render modes one click from the chip
     assert "Boundary outline" in labels
 
@@ -227,7 +227,7 @@ def test_lut_box_shows_each_channel_once():
     # editing that row fans out to every instance.
     assert list(table.keys()) == ["GFP", "RFP"]
     assert len(table["GFP"]) == 2 and len(table["RFP"]) == 1
-    # A ≥Thresh binary of GFP does NOT add a second row: a binary render has no
+    # A >Thresh binary of GFP does NOT add a second row: a binary render has no
     # display range, so GFP stays a single LUT row (its fluorescence instances).
     spec.rows.channels.append(ChannelSpec("GFP", "threshold"))
     table2 = B._table_channels(spec)

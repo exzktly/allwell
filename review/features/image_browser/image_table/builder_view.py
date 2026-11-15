@@ -4,7 +4,7 @@ This is the primary authoring surface for the Image Table (replacing the old
 "Build Layout" dropdown strip). Each axis (Rows / Columns) is a small tree: a
 **root** facet dimension (Well / Timepoint / FOV) with **channels** nested,
 indented, under it. Each nested channel carries its own render options — raw /
-corrected · mask · ≥threshold, a boundary-outline toggle, colormap + LUT — set
+corrected · mask · >threshold, a boundary-outline toggle, colormap + LUT — set
 from a ⚙ menu on the chip. A derived **Fixed** panel lists every root dimension
 not on an axis, pinned to one value (drag it onto an axis to make it vary; an ×
 on a root drops it back). A root's channels get a **Separate ↔ Overlay** switch
@@ -70,8 +70,8 @@ _MIME = "application/x-aw-imgtable-token"
 _ROOT_DIMS = ("well", "timepoint", "fov")
 _ROOT_LABEL = {"well": "Well", "timepoint": "Timepoint", "fov": "FOV"}
 _RENDER_MODES = [("corrected", "corrected"), ("raw", "raw"),
-                 ("mask", "cell mask"), ("threshold", "≥ threshold")]
-_RENDER_SHORT = {"corrected": "corr", "raw": "raw", "mask": "mask", "threshold": "≥thr"}
+                 ("mask", "cell mask"), ("threshold", "> threshold")]
+_RENDER_SHORT = {"corrected": "corr", "raw": "raw", "mask": "mask", "threshold": ">thr"}
 
 # Colour swatch per root dimension + a rough colour per colormap (mirrors the
 # LUT the render actually applies; the chip swatch is a glanceable hint).
@@ -1368,7 +1368,7 @@ def _build_fixed(ctx, spec) -> None:
 def _has_display_range(cs) -> bool:
     """Whether *cs* renders a greyscale intensity image the LUT window applies to.
 
-    A binary render (``mask`` / ``≥threshold``) paints a black-and-white silhouette
+    A binary render (``mask`` / ``>threshold``) paints a black-and-white silhouette
     and the ``NUC+SEG`` channel is a pre-rendered RGB segmentation overlay; the
     render seam (``image_compose._compose_image_table_rgb``) passes both through
     without consulting the LUT window, colormap, or log flag. Neither has a display
@@ -1411,7 +1411,7 @@ def _table_channels(spec) -> dict:
 
     Keyed by the BASE channel (not ``axis_token``): a channel with no display range
     (:func:`_has_display_range`) never gets a LUT row, because editing one would
-    repaint nothing. A channel shown as both its fluorescence and its ≥Thresh binary
+    repaint nothing. A channel shown as both its fluorescence and its >Thresh binary
     therefore appears exactly once (its fluorescence instance drives the LUT); a
     channel shown only as binary/mask, or the ``NUC+SEG`` overlay, gets no LUT row.
 
@@ -1698,7 +1698,7 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     menu.clear()
     _add_baseline_choices(ctx, menu, cs)
 
-    # Render mode — corrected / raw / cell mask / ≥ threshold (radio-like).
+    # Render mode — corrected / raw / cell mask / > threshold (radio-like).
     hdr = menu.addAction("Render")
     hdr.setEnabled(False)
     for key, label in _RENDER_MODES:

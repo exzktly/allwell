@@ -71,6 +71,7 @@ from review.features.home.cell_gating.gating_compute import (
     _valid_values_for_channel,
     apply_fluor_gating,
     format_inclusion_counts,
+    gate_table_headers,
     format_inclusion_funnel,
     format_optimizer_result as _format_opt_result,
     inclusion_counts,
@@ -1788,24 +1789,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
         return
 
     include = kind == "include"
-    # Column headers name the layer each column feeds and the measurement it is
-    # made against. The fraction-on table carries two, because an intensity
-    # Property and an smFISH Count Property are cut against different units:
-    # ThreshFracOn is a brightness, ThreshCountOn a spot tally.
-    if include:
-        headers = [("Include \u2265\n(FluorGating, per-cell MFI)",
-                    "Cells whose mean fluorescence intensity in this channel is "
-                    "below the floor are excluded from analysis entirely.")]
-    else:
-        headers = [
-            ("ON \u2265\n(ThreshFracOn, per-cell MFI)",
-             "Included cells at or above this cut count as 'on' when the "
-             "selected Property is an intensity. It removes no cells."),
-            ("ON >\n(ThreshCountOn, spot count)",
-             "Included cells above this count as 'on' when the selected "
-             "Property is an smFISH Count. -1 counts every cell, including the "
-             "ones carrying no spots."),
-        ]
+    headers = gate_table_headers(kind)
 
     table = QWidget(host)
     grid = QGridLayout(table)

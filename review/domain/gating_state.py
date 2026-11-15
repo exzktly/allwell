@@ -350,6 +350,15 @@ def fluor_gate_for(cell_gating, channel: str) -> float:
     return 0.0 if val is None else float(val)
 
 
+#: How every cut on this tab is applied, and therefore how it is labelled: a
+#: cell passes a floor, and counts as ON, when its value is **strictly above**
+#: the number typed. The comparison is the established behaviour — every saved
+#: threshold was chosen against it — so the labels follow it rather than the
+#: other way round. On an integer-valued measurement (a spot count, a quantised
+#: intensity) "≥ 50" and "> 50" are different populations.
+CUT_SYMBOL = ">"
+
+
 def fluor_floors_in_force(cell_gating) -> bool:
     """Whether the per-channel intensity floors decide inclusion right now.
 

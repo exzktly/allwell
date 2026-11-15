@@ -1,4 +1,4 @@
-"""Segmentation 'Binary (≥ ON threshold)' must gate on the channel being VIEWED.
+"""Segmentation 'Binary (> ON threshold)' must gate on the channel being VIEWED.
 
 Regression guard: the binary mask keyed off the global plotting channel
 (active_val_col / active-channel threshold), so it binarised the wrong channel

@@ -39,7 +39,7 @@ from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
 )
 from review.data.data_loading import VERDICT_LAYERS, df_included_mask, resolve_value_series
 from domain.text_columns import fov_text, timepoint_text
-from review.domain.gating_state import active_fluor_gates
+from review.domain.gating_state import CUT_SYMBOL, active_fluor_gates
 # The one gate predicate, below the features: the Scatter tab and the Cell
 # Browser ask the same function, so a cell is inside a gate everywhere or nowhere.
 from review.domain.gates import compute_gate_inclusion
@@ -177,6 +177,35 @@ def format_inclusion_counts(
     if failed:
         return f"{text}  ·  last gating pass failed"
     return text
+
+
+def gate_table_headers(kind: str) -> list[tuple[str, str]]:
+    """``(header, tooltip)`` for each cutoff column of the Cell Gating table *kind* (``"include"`` or ``"on"``).
+
+    Column headers name the layer each column feeds and the measurement it is
+    made against. The fraction-on table carries two, because an intensity
+    Property and an smFISH Count Property are cut against different units:
+    ThreshFracOn is a brightness, ThreshCountOn a spot tally.
+
+    Every header carries ``CUT_SYMBOL`` and every tooltip says "above": each of
+    these cuts is applied as a strict ``>`` (:func:`apply_fluor_gating`,
+    ``data_loading._aggregate_arrays``), so a cell exactly at the number typed
+    is excluded, or OFF. Here rather than in the Qt builder so a test can hold
+    the words to the comparison.
+    """
+    if kind == "include":
+        return [(f"Include {CUT_SYMBOL}\n(FluorGating, per-cell MFI)",
+                 "Cells whose mean fluorescence intensity in this channel is "
+                 "at or below the floor are excluded from analysis entirely.")]
+    return [
+        (f"ON {CUT_SYMBOL}\n(ThreshFracOn, per-cell MFI)",
+         "Included cells above this cut count as 'on' when the "
+         "selected Property is an intensity. It removes no cells."),
+        (f"ON {CUT_SYMBOL}\n(ThreshCountOn, spot count)",
+         "Included cells above this count as 'on' when the selected "
+         "Property is an smFISH Count. -1 counts every cell, including the "
+         "ones carrying no spots."),
+    ]
 
 
 # ── Per-well fluorescence gating (GatingWorker core) ─────────────────────────

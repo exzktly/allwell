@@ -326,8 +326,8 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     layout.addWidget(_lead_in(frame, "Then include cells by (choose one):"))
     per_channel = _source_radio(
         frame, layout, "Per-channel intensity minimum (table below)",
-        "Exclude cells whose mean fluorescence intensity falls below the "
-        "channel's Include ≥ floor.")
+        "Exclude cells whose mean fluorescence intensity is at or below the "
+        "channel's Include > floor.")
 
     scatter = _gate_source_row(
         ctx, frame, "gating",
@@ -363,7 +363,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
     per_channel = _source_radio(
         frame, layout, "Per-channel ON cutoff (table below)",
         "Count an included cell as 'on' when its mean fluorescence intensity "
-        "reaches the channel's ON ≥ cutoff.")
+        "is above the channel's ON > cutoff.")
 
     scatter = _gate_source_row(
         ctx, frame, "thresh",

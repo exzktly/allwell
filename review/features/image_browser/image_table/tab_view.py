@@ -473,7 +473,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     _crop.set_status_widget(crop_btn, template="Crop view · {status}")
     tr.addWidget(crop_btn)
 
-    # ON/OFF intensity threshold quick-edit — drives the "≥ Thr" binary overlay.
+    # ON/OFF intensity threshold quick-edit — drives the "> Thr" binary overlay.
     # Inline, not behind a menu: it is adjusted constantly while reviewing, and
     # it belongs beside the images it thresholds. A channel dropdown chooses
     # which channel it applies to (its own ThreshFracOn, shared with the Cell
@@ -494,7 +494,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     if _it_edit is not None:
         _it_edit.setFocusPolicy(Qt.ClickFocus)
     thresh_stepper.setToolTip(
-        "ON/OFF intensity threshold for the chosen channel — drives its ≥ Thr "
+        "ON/OFF intensity threshold for the chosen channel — drives its > Thr "
         "binary overlay. Same value as the Cell Gating tab's ThreshFracOn and "
         "the plot tabs' Threshold quick-edit."
     )

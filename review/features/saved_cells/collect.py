@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from review.domain.gating_state import CUT_SYMBOL
+
 
 @dataclass(frozen=True)
 class SetRow:
@@ -195,6 +197,16 @@ def intensity_gates(ctx) -> list[tuple[str, float]]:
         return []
     return sorted((str(ch).upper(), float(v)) for ch, v in (cg.fluor_gates or {}).items()
                   if v and float(v) > 0)
+
+
+def intensity_gates_text(floors) -> str:
+    """The page's sentence for :func:`intensity_gates`' floors.
+
+    ``>``, not ``≥``: a floor keeps the cells strictly above it (``domain.gating_state.CUT_SYMBOL``).
+    """
+    if not floors:
+        return "No intensity gate is in force."
+    return "Intensity gates in force: " + ", ".join(f"{ch} {CUT_SYMBOL} {v:g}" for ch, v in floors)
 
 
 def gate_counts(ctx, gates=None) -> dict[str, tuple[int, int]]:

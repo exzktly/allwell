@@ -342,8 +342,13 @@ def _field_pass(df, well: str, flagged: set[tuple]):
         return pd.Series(1, index=df.index)
     fovs = text_column(df, "fov")
     tps = timepoint_text(df)
-    keys = [(str(well), f, t) for f, t in zip(fovs, tps, strict=True)]
-    return pd.Series([0 if k in flagged else 1 for k in keys], index=df.index)
+    # Both sides in the loader's spelling of a field (``fov_normalised`` says why).
+    from domain.image_identity import normalize_fov
+    from review.data.field_exclusions import fov_normalised
+
+    wanted = fov_normalised(flagged)
+    keys = [(str(well), normalize_fov(f), t) for f, t in zip(fovs, tps, strict=True)]
+    return pd.Series([0 if k in wanted else 1 for k in keys], index=df.index)
 
 
 def field_quality_input_columns(ctx, label: str | None = None) -> tuple[str, ...]:

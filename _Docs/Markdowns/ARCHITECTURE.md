@@ -14159,8 +14159,10 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   `/ N` it counted nothing, and whole-number fold changes left nothing to sum); NaN — undefined, never 0 — only for a
   pool of one value. The Scholz–Stephens k-sample test
   is reported as uncalibrated description only; the figure gives it a row of its own, headed as treating every
-  nanowell as independent, and shades the whole gap between its pooled cumulative curves
-  (`_rare_render._shade_gap`, gid `rare-pooled-gap:<stratum>`) — on both sides, since the test is two-sided.
+  nanowell as independent, which draws per comparison the gap between the pooled control's and the group's share
+  at or below each value (`_rare_render.gap_curve` / `draw_gap`, gids `rare-pooled-gap-line:<stratum>` and, shaded
+  to 0, `rare-pooled-gap:<stratum>`) — the difference this two-sided test squares and sums — rather than the two
+  cumulative curves again, which the exceedance row already draws.
   `tail_start` is the control median the per-well sum starts at.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
@@ -14256,11 +14258,16 @@ each headed by `test_heading` and the comparisons' p from `test_p` (gids `nw-rar
 count, each well's peak HC score, each well's A²_R) holds **every comparison on one axes** (`draw_well_dots`, axes
 gid `nw-rare-shared:<key>`): the control wells once as the band chance gives, then each group's wells, a rule between
 groups and each group's name and short p over them, wrapped to its own width; a well with no value is written in
-("no HC score"), never left out. A plot of curves (the cumulative shares with the cutoff, the HC curves, the pooled
-cumulative shares with their gap shaded) is drawn **once per comparison** (axes gid `nw-rare-panel:<key>:<i>`),
+("no HC score"), never left out. A plot of curves (the cumulative shares with the cutoff, the HC curves, the gap
+between the pooled cumulative shares) is drawn **once per comparison** (axes gid `nw-rare-panel:<key>:<i>`),
 captioned with the comparison's name and p, as many across as `columns_for` fits (at most `MAX_COLUMNS`, each at least
 `COLUMN_MIN_IN` wide, so one on a phone) and the rest wrapping below inside the same row — the figure never grows
-sideways. Each axes starts under its own title, however many lines it took. The lead — a control chosen by its name, nanowells the run's
+sideways. Each axes starts under its own title, however many lines it took. **Each test is one framed block**
+(`_draw_block`): a faint fill (gid `nw-rare-block:<key>`) and an outline in the secondary ink (figure lines tagged
+for the theme, gid `nw-rare-block-edge:<key>`) around its heading, its p line and every panel of its row, `ROW_GAP_IN`
+apart, with a bar down its left edge in its role's colour (`role_colour`: the accent for the test that decides,
+the warning amber for the description-only pooled test, the secondary ink for the supporting ones; gid
+`nw-rare-block-role:<key>`), so the plots of one test read as one unit. The lead — a control chosen by its name, nanowells the run's
 flags left out — sits under the groups line, at the top, since the figure scrolls; under the rows, each comparison's ⚠
 caveats, named by comparison, then the lines and the note (gid `nw-rare-line`). Nothing is cut and no
 comparison is left off: `render_rare_page` returns the height in inches the page needs at its width (also kept for

@@ -183,11 +183,10 @@ def _ecdf_colours(unit, stratum, strata, i, publication, muted):
     return colour, colour, pair
 
 
-def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool, *, cutoff: bool = True, gap: bool = False) -> None:
+def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool, *, cutoff: bool = True) -> None:
     """Every stratum on one axes (one, unstratified): control dotted, treatment solid, of the values as measured
     (``unit.sign`` undoes a bottom-tail analysis's negation). With *cutoff*, the exceedance test's cutoff dashed — the
-    panel of the exceedance row; with *gap*, the gap between the two curves shaded (:func:`_shade_gap`) — the panel of
-    the pooled shape test's row, which measures that gap."""
+    panel of the exceedance row."""
     strata = _strata(unit)
     publication = _is_publication(ax)
     _ground, ink, muted = _inks(ax)
@@ -205,8 +204,6 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool, *, cutoff: bool
                     _paired(line, pair)
                 elif colour == muted:
                     _ink(line, muted=True)
-        if gap:
-            _shade_gap(ax, unit, stratum, log_axis, treated_c)
         cut = _cut_x(unit, stratum, log_axis) if cutoff else math.nan
         if np.isfinite(cut):
             line = ax.axvline(cut, color=control_c if pair is not None else ink, linestyle="--", linewidth=0.8)
@@ -218,36 +215,62 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool, *, cutoff: bool
     ax.set_ylim(0, 1.01)
     _label_strata(ax, unit, strata, log_axis, publication, cutoff=cutoff)
     by = "" if strata == [ALL] else ", by starting cells"
-    keys = [f"solid: {unit.treatment}", "dotted: control", *(["dashed: the cutoff"] if cutoff else []),
-            *(["shaded: the gap the test measures"] if gap else [])]
+    keys = [f"solid: {unit.treatment}", "dotted: control", *(["dashed: the cutoff"] if cutoff else [])]
     _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\n{' · '.join(keys)}")
 
 
-def _shade_gap(ax, unit, stratum, log_axis: bool, colour) -> None:
-    """Shade the whole gap between the pooled control and treatment cumulative curves of *stratum*, wherever they
-    differ, on either side: what the pooled two-sided Anderson–Darling test (``rare_ad_compute.scholz_stephens``)
-    measures, a squared difference of the two curves at every value. Nothing when the curves never part."""
+def gap_curve(unit, stratum) -> tuple[np.ndarray, np.ndarray] | None:
+    """``(x, gap)`` of *stratum*: at every distinct value *x* (as measured, ``unit.sign`` undoing a bottom-tail
+    analysis's negation), the pooled control's share of nanowells at or below it minus the pooled treatment group's.
+    Above 0, more of the treatment group lies above that value than of the control. It is the difference the pooled
+    two-sided Anderson–Darling test (``rare_ad_compute.scholz_stephens``) squares and sums over every value, so its
+    row draws this rather than the two cumulative curves again — the exceedance row already draws those. ``None``
+    when either side has no nanowell in *stratum*."""
     parts = {side: [w.values[stratum] for w in group if stratum in w.values]
              for side, group in (("control", unit.controls), ("treated", unit.treated))}
     if not parts["control"] or not parts["treated"]:
-        return
-    sign = unit.sign
-    c = np.sort(sign * np.concatenate(parts["control"]))
-    t = np.sort(sign * np.concatenate(parts["treated"]))
+        return None
+    c = np.sort(unit.sign * np.concatenate(parts["control"]))
+    t = np.sort(unit.sign * np.concatenate(parts["treated"]))
     x = np.unique(np.concatenate([c, t]))
-    f0 = np.searchsorted(c, x, side="right") / len(c)
-    fn = np.searchsorted(t, x, side="right") / len(t)
-    differ = f0 != fn
-    if not differ.any():
-        return
-    if log_axis:
-        keep = x > 0
-        x, f0, fn, differ = np.log2(x[keep]), f0[keep], fn[keep], differ[keep]
-    # A step drawn "post" holds each value up to the next x, and fill_between fills a step only when both its ends
-    # are marked: mark each differing point's next one too, or the last step of each gap is left unshaded.
-    reach = differ | np.r_[False, differ[:-1]]
-    poly = ax.fill_between(x, f0, fn, where=reach, step="post", color=colour, alpha=0.28, linewidth=0, zorder=1)
-    poly.set_gid(f"rare-pooled-gap:{stratum}")
+    return x, np.searchsorted(c, x, side="right") / len(c) - np.searchsorted(t, x, side="right") / len(t)
+
+
+def draw_gap(ax, unit, value_label: str, log_axis: bool) -> None:
+    """The pooled shape test's panel: each stratum's :func:`gap_curve` as a step line, shaded between it and 0 (gids
+    ``rare-pooled-gap-line:<stratum>`` and ``rare-pooled-gap:<stratum>``), on the same x as the exceedance row's
+    cumulative panel, with symmetric y limits so a gap either way reads at its size."""
+    strata = _strata(unit)
+    publication = _is_publication(ax)
+    _ground, ink, muted = _inks(ax)
+    _ink(ax.axhline(0.0, color=muted, linewidth=0.8, gid="rare-pooled-gap-zero"), muted=True)
+    reach = 0.0
+    for i, stratum in enumerate(strata):
+        curve = gap_curve(unit, stratum)
+        if curve is None:
+            continue
+        x, gap = curve
+        if log_axis:
+            keep = x > 0
+            x, gap = np.log2(x[keep]), gap[keep]
+        if not len(x):
+            continue
+        colour, _control_c, pair = _ecdf_colours(unit, stratum, strata, i, publication, muted)
+        line = ax.step(x, gap, where="post", color=colour, linewidth=1.2)[0]
+        line.set_gid(f"rare-pooled-gap-line:{stratum}")
+        poly = ax.fill_between(x, 0.0, gap, step="post", color=colour, alpha=0.3, linewidth=0, zorder=1)
+        poly.set_gid(f"rare-pooled-gap:{stratum}")
+        if pair is not None:
+            _paired(line, pair)
+        reach = max(reach, float(np.abs(gap).max()))
+    ax.set_xlabel(_x_label(value_label, log_axis))
+    ax.set_ylabel("control − group share")
+    _fold_ticks(ax, log_axis, value_label)
+    limit = max(0.05, reach * 1.15)
+    ax.set_ylim(-limit, limit)
+    # Two short lines: the x axis already names the value, and the panel is a third of the row wide.
+    by = "" if strata == [ALL] else " · one line per starting count"
+    _title(ax, f"gap: control − {unit.treatment}{by}\nabove 0: more {unit.treatment} above · shaded: what the test sums")
 
 
 def _label_strata(ax, unit, strata, log_axis: bool, publication: bool, *, cutoff: bool = True) -> None:
@@ -510,7 +533,7 @@ def _small_panel(key: str, value_label: str, log_axis: bool) -> Callable[[object
     if key == "hc":
         return lambda ax, u: draw_hc(ax, u, heading=False)
     if key == "pooled":
-        return lambda ax, u: draw_ecdf_strata(ax, u, value_label, log_axis, cutoff=False, gap=True)
+        return lambda ax, u: draw_gap(ax, u, value_label, log_axis)
     return None
 
 
@@ -521,7 +544,11 @@ COLUMN_MIN_IN = 3.2
 MAX_COLUMNS = 3
 #: Heights, in inches: a shared one-dot-per-well panel with its group names, ticks and title; one per-comparison panel
 #: with its two-line title, ticks and labels; the caption above it; the gap after each test row.
-SHARED_IN, SMALL_IN, CAPTION_IN, ROW_GAP_IN = 2.6, 2.5, 0.3, 0.25
+SHARED_IN, SMALL_IN, CAPTION_IN, ROW_GAP_IN = 2.6, 2.5, 0.3, 0.3
+#: Inches between a test's block frame and what it holds, above its heading and below its last panel.
+BLOCK_PAD_IN = 0.1
+#: Inches the block frame stands in from the figure's left and right edges, and the width of its role bar in points.
+_BLOCK_INSET_IN, _ROLE_BAR_PT = 0.06, 3.5
 #: What of each height the axes leave to the text around them before their title is known, and the ticks and
 #: labels below; once drawn, the axes start under their title whatever its length.
 _ABOVE_IN, _BELOW_IN = 0.5, 0.62
@@ -533,6 +560,46 @@ _STAMP_IN = 0.2
 #: The headline's size: the figure's largest text, since it is the answer; a test row's heading is the next.
 _HEAD_PT = 9.0
 _TEST_PT = 8.5
+
+
+def role_colour(key: str) -> str:
+    """The colour of a test block's role bar (:func:`_draw_block`), from its role in ``rare_export_compute.TEST_ROWS``:
+    the accent for the test that decides the verdict, the warning amber for the one that is description only (it treats
+    nanowells as independent), the secondary ink for the supporting tests."""
+    from ui.theme import Colors
+
+    role = next(row[2] for row in rx.TEST_ROWS if row[0] == key)
+    if role.startswith("decides"):
+        return Colors.accent
+    if role.startswith("description"):
+        return Colors.warn
+    return Colors.text_secondary
+
+
+def _draw_block(fig, probe, key: str, top_in: float, bottom_in: float, width: float, height: float) -> None:
+    """Frame one test's block — its heading, its p line and every panel of its row — so the plots of one test read as
+    one unit and the next test's begin visibly apart: a faint fill (gid ``nw-rare-block:<key>``), an outline in the
+    secondary ink (figure lines tagged so a theme flip repaints them, gid ``nw-rare-block-edge:<key>``) and a bar down
+    its left edge in the test's role colour (:func:`role_colour`, gid ``nw-rare-block-role:<key>``). *top_in* and
+    *bottom_in* are inches down from the figure's top."""
+    from matplotlib.lines import Line2D
+    from matplotlib.patches import Rectangle
+
+    _ground, ink, muted = _inks(probe)
+    x0, x1 = _BLOCK_INSET_IN / width, 1.0 - _BLOCK_INSET_IN / width
+    y0, y1 = 1.0 - bottom_in / height, 1.0 - top_in / height
+    fill = Rectangle((x0, y0), x1 - x0, y1 - y0, transform=fig.transFigure, facecolor=ink, alpha=0.045,
+                     edgecolor="none", zorder=-10, gid=f"nw-rare-block:{key}")
+    fig.patches.append(fill)
+    fill.set_figure(fig)
+    edge = Line2D([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0], transform=fig.transFigure, color=muted,
+                  linewidth=0.8, alpha=0.7, zorder=-9, gid=f"nw-rare-block-edge:{key}")
+    bar = Line2D([x0, x0], [y0, y1], transform=fig.transFigure, color=role_colour(key), linewidth=_ROLE_BAR_PT,
+                 solid_capstyle="butt", zorder=-8, gid=f"nw-rare-block-role:{key}")
+    for line in (edge, bar):
+        line.set_figure(fig)
+        fig.lines.append(line)
+    _ink(edge, muted=True)
 
 
 def columns_for(width_in: float) -> int:
@@ -616,6 +683,8 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
     for key, *_rest in rx.TEST_ROWS if units else ():
         y += ROW_GAP_IN
+        block_top = y
+        y += BLOCK_PAD_IN
         text(rx.test_heading(key, params), _TEST_PT, f"nw-rare-test:{key}", bold=True)
         text("   ".join(f"{u.label}: {rx.test_p(u, key, params, len(units))}" for u in units), _REPORT_PT,
              f"nw-rare-test-p:{key}")
@@ -629,22 +698,23 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
                            p_of=lambda u, k=key: rx.test_p(u, k, params, len(units), short=True))
             y += SHARED_IN
         draw = _small_panel(key, value_label, log_axis)
-        if draw is None:
-            continue
-        y += 0.12                                    # the captions clear the p line above them
-        for i, unit in enumerate(units):
-            line, col = divmod(i, cols)
-            top = y + line * (CAPTION_IN + SMALL_IN)
-            x0 = left + col * (panel_w + gap)
-            caption = f"{rx.comparison_title(result, i)} · {rx.test_p(unit, key, params, len(units))}"
-            short = _wrapped(fig, [caption], panel_w + gap * 0.8, _REPORT_PT, "")[:2]
-            _ink(fig.text(x0 - 0.45 / width, 1 - top / height, "\n".join(short), fontsize=_REPORT_PT,
-                          fontweight="bold", va="top", color=ink, gid=f"nw-rare-comparison:{key}:{i}"))
-            ax = axes(x0, top + CAPTION_IN, panel_w, SMALL_IN)
-            ax.set_gid(f"nw-rare-panel:{key}:{i}")
-            draw(ax, unit)
-            fit_title(ax, top + CAPTION_IN, SMALL_IN)
-        y += lines_of * (CAPTION_IN + SMALL_IN)
+        if draw is not None:
+            y += 0.12                                    # the captions clear the p line above them
+            for i, unit in enumerate(units):
+                line, col = divmod(i, cols)
+                top = y + line * (CAPTION_IN + SMALL_IN)
+                x0 = left + col * (panel_w + gap)
+                caption = f"{rx.comparison_title(result, i)} · {rx.test_p(unit, key, params, len(units))}"
+                short = _wrapped(fig, [caption], panel_w + gap * 0.8, _REPORT_PT, "")[:2]
+                _ink(fig.text(x0 - 0.45 / width, 1 - top / height, "\n".join(short), fontsize=_REPORT_PT,
+                              fontweight="bold", va="top", color=ink, gid=f"nw-rare-comparison:{key}:{i}"))
+                ax = axes(x0, top + CAPTION_IN, panel_w, SMALL_IN)
+                ax.set_gid(f"nw-rare-panel:{key}:{i}")
+                draw(ax, unit)
+                fit_title(ax, top + CAPTION_IN, SMALL_IN)
+            y += lines_of * (CAPTION_IN + SMALL_IN)
+        y += BLOCK_PAD_IN
+        _draw_block(fig, probe, key, block_top, y, width, height)
     y += _TEXT_PAD_IN
     caveats = [f"⚠ {rx.comparison_title(result, i).split(':', 1)[0]} ({u.label}): {c}"
                for i, u in enumerate(units) for c in rx.unit_text(result, u)["caveats"]]

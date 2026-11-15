@@ -9647,7 +9647,9 @@ on the plate rather than supplying it.
 
    **Timepoints**, beside it, picks *which* timepoints to convert. Its menu
    lists every timepoint the file holds, by the name it will be written under
-   (`0h`, `24h`, … or `t0`, `t1`, …), all ticked to begin with; untick the
+   (`0h`, `24h`, … or `t0`, `t1`, …), all ticked to begin with — listed as
+   soon as the file has been read, even while the verdict below still refuses
+   the plate for something you have yet to fix on this page; untick the
    ones to leave out, or use **All** / **None**. The stride then keeps every
    Nth of the *ticked* ones, counting from the first ticked — so ticking
    `t1`, `t2` and `t4` with a stride of 2 converts `t1` and `t4`. The kept

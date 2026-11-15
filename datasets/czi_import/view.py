@@ -925,6 +925,11 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._update_run_gate(False)
             return
 
+        # Listed from the read, not from the plan: the timepoints are a fact
+        # about the files, and every refusal below (a grid field, a plate
+        # whose scenes name no wells) is one the user fixes *on this page* —
+        # with the picker empty they could not see what the source held.
+        self._timepoint_pick.set_source_tokens(czi_set.timepoint_tokens)
         details = czi_set.describe() + "\n" + source_metadata_summary(czi_set)
         if self._dashboard.outcome() == "done":
             details += "\n" + recorded_metadata_summary(self.destination_path())
@@ -938,13 +943,10 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         try:
             plan = plan_conversion(czi_set, self.params())
         except CziImportError as exc:
-            if exc.source_timepoint_tokens:          # a ticked timepoint the source lacks is then marked missing
-                self._timepoint_pick.set_source_tokens(exc.source_timepoint_tokens)
             self._set_verdict(str(exc), "error")
             self._dashboard.set_wells([])
             self._update_run_gate(False)
             return
-        self._timepoint_pick.set_source_tokens(plan.source_timepoint_tokens)
 
         note = ""
         dest = self.destination_path()

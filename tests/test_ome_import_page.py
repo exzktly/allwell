@@ -1599,3 +1599,24 @@ def test_the_stride_round_trips_through_a_queued_job(qapp, tmp_path):
         for c in (ctrl, other):
             c.shutdown()
             c.page.deleteLater()
+
+
+def test_the_timepoints_are_listed_when_a_grid_field_is_refused(qapp, tmp_path):
+    """The Convert CZI report, on its sibling: a stack of positions names its own timepoints, and they were listed
+    only once the whole plan succeeded — so a grid field the page refuses left the picker empty while the user fixed
+    it. Listed from the read now. (A single packed image's timepoints are frames the grid splits, so only a plan can
+    count those, and that case is unchanged.)"""
+    from datasets.ome_import.controller import OmeImportController
+
+    path = tmp_path / "m.ome.tif"
+    with tifffile.TiffWriter(str(path), ome=True) as tw:
+        for _ in range(2):
+            tw.write(np.zeros((3, 1, 6, 6), np.uint16),
+                     metadata={"axes": "TCYX", "Channel": {"Name": ["GFP"]}})
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    page._rows_edit.setText("x")                     # a grid field the page refuses
+    page._src_field.set_path(str(path))
+    page._on_source_changed()
+    assert not page._run_btn.isEnabled()
+    assert page._timepoint_pick.source_tokens() == ["t0", "t1", "t2"]

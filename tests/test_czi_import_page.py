@@ -1109,3 +1109,19 @@ def test_completed_conversion_exposes_actual_acquisition_coverage(controller, tm
     assert "Shared starts: 0/1 timepoints" in page._readout.text()
     # The start itself is reported as unknown above; the single frame's name (0h) is not degraded.
     assert "Some shared acquisition starts are unknown" not in page._readout.text()
+
+
+def test_the_timepoints_are_listed_when_the_plan_refuses_the_plate(controller, tmp_path):
+    """Reported: the timepoint dropdown listed nothing. The page listed the source's timepoints only once the whole
+    conversion plan succeeded, so any refusal it is the page's job to explain — here a plate whose scenes name no
+    wells, still on "wells from the file" — left the picker empty while the read had found three timepoints. The
+    timepoints are a fact about the files: listed from the read, whatever the plan says."""
+    page = controller.page
+    src = tmp_path / "src"
+    src.mkdir()
+    bare = write_czi(src / "bare.czi", plate_tiles(wells=4, fovs=1, timepoints=3, channels=1))
+    _set_source(page, bare, tmp_path)
+    assert "No well is named" in page._verdict.text(), page._verdict.text()   # the plan did refuse
+    assert page._timepoint_pick.source_tokens() == ["t0", "t1", "t2"]
+    assert page._timepoint_pick.count() == 3
+    assert page._timepoint_pick.checkedLabels() == ["t0", "t1", "t2"]   # what the dropdown shows, all ticked

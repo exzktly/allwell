@@ -855,6 +855,13 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         if hasattr(self, "_channels_host"):
             self._rebuild_channels(layout.channel_names if layout else [])
         self._refresh_suggestion(layout)
+        # A stack of positions names its timepoints itself, so they are listed
+        # from the read rather than from the plan — a grid field refused below
+        # is fixed on this page, and an empty picker hid what the file held
+        # while the user did it. A single image's timepoints are frames split
+        # by the grid, so only a plan can count those (``plan_conversion``).
+        if layout is not None and not layout.single_image:
+            self._timepoint_pick.set_source_tokens(layout.timepoint_tokens)
         problems = fields.problems()
         dest_problem = destination_problem(
             self._dest_field.path(), src, fields.to_params())

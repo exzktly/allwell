@@ -65,7 +65,7 @@ from datasets.nd2_import.nd2_import_compute import (
     read_source,
     resume_state,
 )
-from pipeline.nd2_explode import WELL_SOURCES
+from pipeline.nd2_explode import WELL_SOURCES, timepoint_tokens
 from pipeline.nd2_read import Nd2Layout
 from ui import theme
 from widgets._support import set_variant
@@ -763,6 +763,10 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
         self._readout.setText(_describe(layout))
         self._rebuild_channels(list(layout.channel_names))
+        # Listed from the read, not from the plan: a grid field or a well
+        # mapping refused below is fixed on this page, and an empty picker
+        # hid what the file held while the user did it.
+        self._timepoint_pick.set_source_tokens(timepoint_tokens(layout)[0])
         if problems:
             self._set_verdict(" ".join(problems), "error")
             self._dashboard.set_wells([])
@@ -771,13 +775,10 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         try:
             plan = plan_conversion(layout, self.params())
         except Nd2ImportError as exc:
-            if exc.source_timepoint_tokens:          # a ticked timepoint the source lacks is then marked missing
-                self._timepoint_pick.set_source_tokens(exc.source_timepoint_tokens)
             self._set_verdict(str(exc), "error")
             self._dashboard.set_wells([])
             self._update_run_gate(False)
             return
-        self._timepoint_pick.set_source_tokens(plan.source_timepoint_tokens)
 
         note = ""
         dest = self.destination_path()

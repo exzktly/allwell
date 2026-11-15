@@ -7211,35 +7211,43 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   since it never applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
   report. A group or control with fewer than two wells is not tested as a group, and the figure says so.
 
-  **Reading the figure.** For each treatment group, the answer comes first, in bold, in counts: for example *drug:
-  rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its top 1%), against 0 of
-  180 control nanowells (0.0%) · 2 drug vs 3 control wells.* Under it, three panels (stacked one above the other on a
-  phone):
-  1. **The Metric's distribution** (titled with the Metric) — for each value along the bottom (2×, 4×, 8×… for a
-     fold change), the share of nanowells at or below it: the treatment group solid in its plate colour and labelled
-     on its curve, control dotted, the control cutoff dashed and labelled at its foot. Responders higher show as the
-     solid curve matching the dotted one and then stopping short of the top, past the cutoff; responders lower as it
-     rising early, before the cutoff; a whole curve moved sideways is a general shift instead. The title says which
-     mark belongs to which test: the dashed cutoff is the **exceedance test's** (the one that decides), and the
-     **shaded** area between the curves is what the **upper-tail shape test** counts — past the control median, on
-     the side the test looks (above it for *Responders higher*, below it for *lower*), wherever the treatment group
-     has more of its nanowells beyond a value than the control does. The shape test scores each treatment well on its
-     own and gives more weight to gaps near the top, so the shading shows where it looks and which way, not its
-     value; its p is in the line under the panels.
-  2. **Share of each well's nanowells past the cutoff** — one dot per well with its count (*4/60*): control wells in
-     grey, the shaded band the range they span (what chance gives on this plate), treatment wells in their plate
-     colours. A treatment dot above the band is the effect.
-  3. **Higher Criticism** — each well's excess score over its nanowells, most extreme first; treatment wells in
-     colour, control wells in grey, the group p in the title (marked when it is the lowest the design allows).
+  **Reading the figure.** The figure's first line says how its plots are grouped: how many groups were tested,
+  each with its wells, and the comparisons that makes — each group against the control (for example *4 groups
+  tested: control DMSO (A01, A02, A03) · Drug X (B01, B02, B03) · … → 3 comparisons, each against DMSO*). Then each
+  comparison's answer, under its name (*Comparison 1 of 3: Drug X vs DMSO*), in counts — and when it is *cannot be
+  decided*, why, on the same line (for example *— the deciding test needs at least 3 control wells (this design has
+  2)*): for example *drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its
+  top 1%), against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells.*
 
-  Under the panels: the deciding test's p (and, with several groups, its q, corrected across them); then every
-  **⚠ caveat** that limits the verdict — too few wells for the supporting tests to reach significance at all, no
-  control nanowell past the cutoff (so the spread between wells could not be estimated and the exceedance p treats
-  nanowells as independent, which overstates the evidence), or nanowells too extreme for Higher Criticism to see —
-  then the supporting tests. A figure too short for all of it draws the most important first and counts the rest.
-  "Not detected" is not evidence that there is no effect: read it with the caveats. The full report — every
-  statistic, interval and q, each well's own count and p, the comparison tests that treat nanowells as independent,
-  and every note — is in **Details ▸** under the figure.
+  Then **one row per test**, each headed by the test's name, whether it decides the verdict, what it asks, and every
+  comparison's p:
+  1. **Exceedance test — decides the verdict.** Every well's share of nanowells past the control cutoff, with its
+     count (*4/60*), all comparisons on one plot: the control wells in grey, the shaded band the range they span
+     (what chance gives on this plate), then each group's wells in their plate colours, with the group's name and p
+     over them. A treatment dot above the band is the effect. Under it, one plot per comparison of the Metric's
+     distribution (titled with the Metric): for each value along the bottom (2×, 4×, 8×… for a fold change), the
+     share of nanowells at or below it — the group solid in its plate colour, control dotted, the cutoff dashed.
+     Responders higher show as the solid curve stopping short of the top, past the cutoff; responders lower as it
+     rising early; a whole curve moved sideways is a general shift instead.
+  2. **Higher Criticism — supporting.** Every well's highest excess score on one plot, then one plot per comparison
+     of each well's excess score over its nanowells, most extreme first. A well whose most extreme nanowells are all
+     past every control value gets **no HC score** — Higher Criticism leaves those out by definition — and is
+     marked so on both plots rather than left out.
+  3. **Shape test — supporting.** Every well's upper-tail Anderson–Darling score against the control wells, on one
+     plot, wells as the units like the two above.
+  4. **Pooled shape test — description only.** One plot per comparison of all its nanowells against all the
+     control's, with the whole gap between the two curves shaded — what this two-sided test measures. Its heading
+     says it treats every nanowell as **independent**, so its p is not calibrated: nanowells of one well are not
+     independent, and this p overstates the evidence. It can never change the verdict.
+
+  The plots of one comparison sit side by side as far as the width allows (one across on a phone) and continue
+  below inside the same row; no comparison is ever left off, and the page scrolls when the figure is taller than
+  the window. Under the rows, every **⚠ caveat**, named by its comparison — too few wells for the supporting tests
+  to reach significance at all, no control nanowell past the cutoff (so the spread between wells could not be
+  estimated and the exceedance p treats nanowells as independent, which overstates the evidence), or nanowells too
+  extreme for Higher Criticism to see. "Not detected" is not evidence that there is no effect: read it with the
+  caveats. The full report — every statistic, interval and q, each well's own count and p, the comparison tests
+  that treat nanowells as independent, and every note — is in **Details ▸** under the figure.
 
   The tests run in the background; the figure says what is being tested against what meanwhile. **Review flagged
   crops** opens the pop-out on the nanowells that grew past the control cutoff — the ones the verdict is counted
@@ -11301,30 +11309,33 @@ with whole-number fold changes (2×, 3×, 4×). It is undefined only when the co
 ### Reading the figure, the report and the crops
 
 On the **Statistics** view, choose **Test: Rare responders (vs control, wells as units)**, then the control
-group under **Control**. The tests run in the background; the figure says what is being tested until they finish. Each
-treatment group then gets its answer in bold — the verdict and the counts behind it — and one row of three panels
-(up to three groups, and as many as the window's height fits; the report covers all of them). On a phone, or in a
-window too narrow for three panels side by side, each group's three panels are stacked one above the other:
+group under **Control**. The tests run in the background; the figure says what is being tested until they finish.
+The figure then reads from the top:
 
-1. **The Metric's distribution**, titled with the Metric — the treatment group solid in its plate colour and
-   labelled on its curve, control dotted in grey, the control cutoff dashed, the values as measured on a log axis
-   when they are all positive (marked 2×, 4×, 8× for a fold change). When strata are set (an analysis run outside
-   the page), one shade per number of starting cells, from the occupancy ramp. Responders higher show as the
-   treatment curve stopping short of the top only at its right, responders lower as it rising early at its left; a
-   general shift shows as the whole curve displaced.
-2. **Share of each well's nanowells past the cutoff** — every well's count (*4/60*) and share. Control wells (each
-   scored leave-one-out) are grey dots; the shaded band spans them and the dotted line is their mean. Treatment
-   wells are drawn in their colour on the plate, outlined so a dark one shows on the dark card. A treatment well
-   above the band is unusual for this plate. Each treatment well's own p is in the report: with 3 control wells
-   it cannot go below 0.25.
-3. **Higher Criticism** — each well's excess score over its nanowells, most extreme first; control wells grey,
-   treatment wells in their plate colours with a dot at the peak, the group p in the title (marked when it is the
-   lowest possible). A treatment curve that rises well above the grey bundle near the left edge is a sparse
-   excess.
+1. **The groups tested and the comparisons they make**, each group with its wells — so you know how the plots are
+   grouped before reading any.
+2. **Each comparison's answer**, under its name (*Comparison 1 of 3: Drug X vs DMSO*): the verdict in bold and the
+   counts behind it.
+3. **One row per test**, headed by the test, its role and every comparison's p. A plot of one dot per well holds
+   every comparison on one set of axes — control wells once, in grey with the band they span, then each group's
+   wells in their plate colours with the group's name and p over them. A plot of curves is drawn once per
+   comparison and captioned with it, side by side as far as the width allows and continuing below inside the same
+   row (one across on a phone):
+   * **Exceedance test** (decides): each well's share past the cutoff with its count (*4/60*; control wells scored
+     leave-one-out, so each treatment well's own p — in the report — cannot go below 0.25 with 3 control wells);
+     then each comparison's distribution of the Metric — group solid, control dotted, the cutoff dashed, on a log
+     axis marked 2×, 4×, 8× for a fold change. When strata are set (an analysis run outside the page), one shade
+     per number of starting cells, from the occupancy ramp.
+   * **Higher Criticism** (supporting): each well's highest score, then each comparison's curves, most extreme
+     nanowells first. A curve rising well above the grey bundle near the left edge is a sparse excess. A well whose
+     most extreme nanowells are all past every control value has **no HC score**, said on both plots.
+   * **Shape test** (supporting): each well's upper-tail Anderson–Darling score.
+   * **Pooled shape test** (description only): each comparison's pooled nanowells against the control's, the gap
+     between the curves shaded. It treats every nanowell as independent, says so in its heading, and its p is not
+     calibrated.
+4. **The caveats**, each named by its comparison, and the notes.
 
-Under the panels: the deciding test's p, every ⚠ caveat that applies, then the supporting tests' p (each marked
-when it is the lowest possible). A figure too short for all of it keeps the deciding line and the caveats first,
-and counts what it left for Details.
+Nothing is left off the figure: it is as tall as it needs, and the page scrolls.
 
 The full **report** is in **Details ▸** under the figure. It says what each test asks, and per group: the verdict;
 the exceedance test's counts, odds ratio with its 95 % interval, ρ, p and q, with the anti-conservative Fisher

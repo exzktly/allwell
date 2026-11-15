@@ -70,6 +70,22 @@ class HC:
     reason: str = ""
 
 
+#: Why a well has no HC score when its most extreme nanowells are all at p ≤ 1/n — past (nearly) every control value,
+#: the strongest responders there are. HC+ leaves those out by definition, so the figure marks the well with this
+#: rather than leaving it undrawn.
+BEYOND_CONTROLS = "no HC score: its most extreme nanowells are past every control value, and HC leaves out p ≤ 1/n"
+
+
+def unscored_reason(ps: np.ndarray, alpha0: float) -> str:
+    """Why no index of the sorted p-values *ps* qualifies for HC+: :data:`BEYOND_CONTROLS` when the top
+    ``alpha0·n`` are all at or below 1/n, else that none of them is below 1 (nothing extreme to score)."""
+    n = len(ps)
+    top = ps[: max(1, int(alpha0 * n))]
+    if (top <= 1.0 / n).all():
+        return BEYOND_CONTROLS
+    return f"no HC score: none of its {int(alpha0 * n)} most extreme nanowells has 1/n < p < 1"
+
+
 def hc_plus(p: np.ndarray, alpha0: float) -> tuple[float, int, float, np.ndarray, np.ndarray, str]:
     """HC+ of the p-values *p*: ``(value, i*, p_(i*), i/n, HC_i, reason)``."""
     n = len(p)
@@ -79,8 +95,7 @@ def hc_plus(p: np.ndarray, alpha0: float) -> tuple[float, int, float, np.ndarray
     i = np.arange(1, n + 1)
     ok = (ps > 1.0 / n) & (ps < 1.0) & (i <= alpha0 * n)
     if not ok.any():
-        return math.nan, 0, math.nan, np.array([]), np.array([]), (
-            f"no index i <= alpha0·n = {alpha0 * n:g} has 1/n < p_(i) < 1")
+        return math.nan, 0, math.nan, np.array([]), np.array([]), unscored_reason(ps, alpha0)
     idx = np.flatnonzero(ok)
     q = ps[idx]
     curve = np.sqrt(n) * (i[idx] / n - q) / np.sqrt(q * (1.0 - q))

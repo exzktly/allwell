@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -30,7 +31,7 @@ import numpy as np
 from review.features.nanowell import rare_hc_compute as hc
 from review.features.nanowell.rare_exceedance_compute import BB_LABEL, FISHER_LABEL
 from review.features.nanowell.rare_null_compute import pool
-from review.features.nanowell.rare_report_compute import significant
+from review.features.nanowell.rare_report_compute import UNDECIDED, significant
 from review.features.nanowell.rare_ad_compute import SCHOLZ_LABEL
 from util.json_write import write_json_atomic
 
@@ -210,8 +211,21 @@ def headline(unit, params, value_label: str = "") -> str:
     against = (f"against {kc} of {nc} control nanowells ({_pct(kc, nc)})" if len(unit.controls) >= 2 else
                "with no control null to set it against (a single control well has no other control wells to be "
                "scored against)")
-    return (f"{unit.label}: {unit.interpretation}. {kt} of {nt} {unit.treatment} nanowells ({_pct(kt, nt)}) "
-            f"{past(params)} {cutoff_name(params)}{on}, {against} · {wells}.")
+    why = why_undecided(unit, params)
+    return (f"{unit.label}: {unit.interpretation}{f' — {why}' if why else ''}. {kt} of {nt} {unit.treatment} "
+            f"nanowells ({_pct(kt, nt)}) {past(params)} {cutoff_name(params)}{on}, {against} · {wells}.")
+
+
+def why_undecided(unit, params) -> str:
+    """Why *unit*'s verdict is "cannot be decided", for the headline itself — the verdict must not stand without its
+    reason, which used to be only in the line under the panels; ``""`` for any other verdict."""
+    if unit.interpretation != UNDECIDED:
+        return ""
+    if unit.exceedance and not math.isfinite(unit.primary.p):
+        need = needs(unit, params)
+        return ("the deciding test " + need[len("it "):].rstrip(".") if need.startswith("it needs ")
+                else "the deciding test's regression could not be fitted")
+    return "the control cutoff sits on a tie, so no nanowell could be counted past it"
 
 
 def _floor_note(perm) -> str:
@@ -342,3 +356,84 @@ def verdict_lines(result, units=None) -> list[str]:
         text = unit_text(result, unit)
         lines += [text["headline"], *text["lines"], *[f"⚠ {c}" for c in text["caveats"]]]
     return lines
+
+
+#: The Rare responders figure's test rows, in order: ``(key, name, role, what it asks)``. Each row of the figure holds
+#: the plots of one test only, headed by these words, so a reader always knows which test a plot belongs to and
+#: whether it decides the verdict. The pooled shape test is the one that treats every nanowell as independent: its p
+#: is description, never inference, and its row says so in its heading.
+TEST_ROWS = (
+    ("exceedance", "Exceedance test", "decides the verdict",
+     "the share of each well's nanowells past {cutoff}, wells as the units"),
+    ("hc", "Higher Criticism", "supporting, not deciding",
+     "an excess of extreme nanowells in each well, with no fixed cutoff, wells as the units"),
+    ("shape", "Shape test", "supporting, not deciding",
+     "upper-tail Anderson–Darling of each well against the control wells, wells as the units"),
+    ("pooled", "Pooled shape test", "description only",
+     "every nanowell pooled and treated as INDEPENDENT, so its p is not calibrated — two-sided k-sample "
+     "Anderson–Darling of all the group's nanowells against all the control's"),
+)
+
+
+def test_heading(key: str, params) -> str:
+    """The figure's heading for the test row *key* (:data:`TEST_ROWS`): its name, its role, what it asks."""
+    _key, name, role, asks = next(row for row in TEST_ROWS if row[0] == key)
+    return f"{name} — {role}: {asks.format(cutoff=cutoff_name(params))}"
+
+
+def test_p(unit, key: str, params, n_units: int, *, short: bool = False) -> str:
+    """*unit*'s result in the test row *key*, as its heading lists it: ``p = …`` (with q when several groups were
+    tested, and marked when it is the lowest the wells allow), or why there is none. *short* is the form written over
+    a group on a shared panel, where the room is a group's width: the same numbers, in fewer words."""
+    full = _test_p(unit, key, params, n_units)
+    if not short:
+        return full
+    return (full.replace(" (the lowest possible with these wells)", " (lowest possible)")
+            .replace(" (scipy reports no p outside 0.001–0.25)", "").replace(", uncalibrated", ""))
+
+
+def _test_p(unit, key: str, params, n_units: int) -> str:
+    if key == "exceedance":
+        line = deciding_line(unit, n_units, params)
+        line = line[len("Deciding: "):].removeprefix(f"{NAME_A.lower()} ").rstrip(".")
+        return re.sub(r" \(q = ([^ ]+) across the \d+ groups tested\)", r", q = \1", line)
+    if key == "pooled":
+        stat, p, note = unit.scholz
+        if not math.isfinite(p):
+            return f"no p — {note}" if note else "no p"
+        capped = " (scipy reports no p outside 0.001–0.25)" if note else ""
+        return f"p = {_num(p)}{capped}, uncalibrated"
+    if not unit.group_allowed:
+        return "not run"
+    if key == "hc":
+        return _support_part("", unit.hc_perm, "not computable").strip()
+    return _support_part("", unit.a2_perm, C_UNDEFINED).strip()
+
+
+def groups_line(result) -> str:
+    """The figure's first line: how many groups were tested, each with its wells, and how many comparisons that makes
+    — each group against the control — so the reader knows how the plots below are grouped before reading any."""
+    units = result.units
+    if not units:
+        return ""
+    plates = {w.plate for u in units for w in u.controls + u.treated}
+
+    def wells(group) -> str:
+        names = [w.key if len(plates) > 1 else w.key.split(":", 1)[-1] for w in group]
+        return ", ".join(dict.fromkeys(names))
+
+    control = result.prepared.params.control
+    treated = {}
+    for u in units:
+        treated.setdefault(u.treatment, []).extend(u.treated)
+    controls = [w for u in units for w in u.controls]
+    parts = [f"control {control} ({wells(controls)})", *[f"{name} ({wells(group)})" for name, group in treated.items()]]
+    n = len(units)
+    return (f"{len(treated) + 1} groups tested: {' · '.join(parts)} → {n} comparison{'s' if n != 1 else ''}, "
+            f"each against {control}")
+
+
+def comparison_title(result, i: int) -> str:
+    """``Comparison i of n: <group> vs <control>`` — the label every plot of one comparison carries."""
+    unit = result.units[i]
+    return f"Comparison {i + 1} of {len(result.units)}: {unit.label} vs {result.prepared.params.control}"

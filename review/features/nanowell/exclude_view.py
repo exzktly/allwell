@@ -44,6 +44,9 @@ def build_exclude_controls(ctx, well_cb) -> ExcludeControls:
     ctx.widgets.register("_nw_exclude_well_btn", exclude)
     excluded = QToolButton()
     excluded.setPopupMode(QToolButton.InstantPopup)
+    # The theme's one shared chevron (``hasMenu``) is this button's only arrow, so its text carries no "▾": a caret in
+    # the label beside the indicator Qt draws for any button with a menu is two arrows, one large and one small.
+    excluded.setProperty("hasMenu", True)
     excluded.setToolTip(_EXCLUDED_TIP)
     excluded.setMenu(QMenu(excluded))
     ctx.widgets.register("_nw_excluded_wells_btn", excluded)
@@ -52,7 +55,7 @@ def build_exclude_controls(ctx, well_cb) -> ExcludeControls:
 
 def fill_excluded(button, wells, ctx) -> None:
     """*Excluded (n)*: one entry per excluded well that brings it back, and one that brings back all of them."""
-    button.setText(f"Excluded ({len(wells)}) ▾")
+    button.setText(f"Excluded ({len(wells)})")
     menu = button.menu()
     menu.clear()
     for well in wells:

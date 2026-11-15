@@ -603,6 +603,10 @@ function, remove its stale allowlist entry (the test fails until you do).
   `swallowed()` on the GUI side, `util.aw_safe` equivalents on the pipeline /
   `services` side. Two near-identical helpers exist because the pipeline may not
   import `review`.
+- **A menu button draws one arrow.** Mark it `setProperty("hasMenu", True)` and
+  leave "▾" out of its text, or build it with `make_action_menu_button` /
+  `make_popover_button`, which put the caret in the label and switch Qt's
+  indicator off. Never both, never neither — §7.12.
 - **Never hardcode colours or pixel sizes.** `ui.theme.Colors.*`, `ui.theme.get_color`,
   or QSS object names.
 - **Never block the UI thread.** Heavy work goes to a worker (`features/smfish/worker.py`,
@@ -1709,3 +1713,58 @@ Each step was locally reasonable, and that is the pattern to recognise.
    ignores it. For each control the sibling paths honour, one test sets it and
    asserts the new path's output changed the way the siblings' would
    (`tests/test_nanowell_rare_moving_average.py` is the shape).
+
+
+## 7.12 Two arrows on a menu button, the fix that keeps being made once
+
+The Nanowells page's *Excluded (n)* drew two downward arrows, one large and one
+small. It was at least the fourth button fixed for exactly this —
+the queued-output button on Analyze (`analyze/run_spec.py`), the phone layout's
+page buttons (`ui/theme.py`'s `PhonePageButton` rule), the split Browse button
+(`widgets/path_field.py`) — and each fix was a correct repair of one button that
+left the next one to be found by the user.
+
+**The mechanism.** Qt paints a menu indicator on any `QToolButton` or
+`QPushButton` that has a menu, unless a style sheet switches it off. Writing
+`"… ▾"` into such a button's text adds a second arrow beside it. Whether the
+indicator is drawn is decided in five places — the class, the popup mode, the
+theme's `QToolButton[hasMenu="true"]` rule (which draws a chevron, so it is an
+indicator too), a `::menu-indicator` rule in the button's own sheet or an
+ancestor's, and the application sheet — so reading the code at the one site
+being written never tells you the answer. Here the caret was added in
+`fill_excluded`, a different function from the one that made the button a menu
+button, which is why it looked like a label and nothing more.
+
+**The rule.** One arrow, from exactly one of two sources:
+
+- `button.setProperty("hasMenu", True)` and **no "▾" in the text** — the
+  theme's shared chevron is the arrow. This is what every Nanowells band menu
+  uses.
+- `make_action_menu_button` / `make_popover_button` — they append the caret to
+  the label and hide the native indicator. Use them for a new menu button
+  rather than hand-building one.
+
+A "▾" in the text is right only on a button with **no menu** (a disclosure
+toggle such as *Details ▾*, which Qt gives no indicator).
+
+**The check, and why it is pixels.** `tests/_layout_checks.py::draws_menu_indicator`
+renders the button, switches its indicator off, renders it again and compares;
+`draws_two_carets` is that plus a "▾" in the text. It is measured rather than
+inferred because inference over the five places above is the very thing that
+failed four times. It runs in two places:
+
+- `double_carets` in the every-page render test, over every visible button on
+  every page and screen.
+- `tests/test_a_menu_button_draws_one_arrow.py`, in the fast lane and in CI,
+  over the shared factories and over buttons that are hidden until used —
+  *Excluded (n)* is shown only once a well is excluded, so no page tour ever
+  saw it (§7.10 #1). A new menu button that appears only after a control is
+  pressed gets a case there.
+
+**The general lesson.** When the same visual defect is fixed a third time, the
+fix is no longer the button — it is a check that measures the defect itself,
+across every instance, in the form the user sees it. Fixing the reported site
+and writing the convention down beside it is what the three earlier fixes did,
+and the convention was correct each time. What was missing was anything that
+fails when the next site breaks it.
+

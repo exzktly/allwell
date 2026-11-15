@@ -1182,7 +1182,10 @@ def test_a_well_excluded_on_the_band_leaves_every_figure_and_comes_back(page, qt
     assert st.identity_drawn.pair.well == "A01"
     footer = " ".join(_page_texts(ctx, "nw-identity-footer"))
     assert "Excluded on this page: A02 (restore from Excluded on the band)." in footer
-    assert excluded_btn.isVisibleTo(ctx.window) and excluded_btn.text() == "Excluded (1) ▾"
+    assert excluded_btn.isVisibleTo(ctx.window) and excluded_btn.text() == "Excluded (1)"
+    # One arrow, the theme's: a "▾" in the text beside Qt's menu indicator drew two, one large and one small.
+    from tests._layout_checks import draws_menu_indicator, draws_two_carets
+    assert draws_menu_indicator(excluded_btn) and not draws_two_carets(excluded_btn)
     assert st.to_config()["excluded_wells"] == ["A02"]
     # Excluding the last one empties the page and says why.
     ctx.widgets.get("_nw_exclude_well_btn").click()

@@ -15,12 +15,38 @@ folded section, leaves no visible trace of having happened at all.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from widgets.separator import build_hline_separator
+
+
+class _WidthWatcher(QObject):
+    """Calls back whenever the widget it is installed on changes width.
+
+    A folded section's summary is cut to the room its header leaves it, and that
+    room is not settled when the text is first set: the header is laid out, a
+    scroll bar appears, the window is resized. Elided once, the text kept the
+    cut made for the earlier width and ran past a label that had since narrowed
+    (98 px of text in 86 px, on the slow lane's runner). The label's size policy
+    ignores its text, so setting the text again cannot change its width and
+    start over.
+
+    An event filter rather than a ``QLabel`` subclass, so the label stays the
+    plain ``QLabel#Muted`` every style rule and layout record names.
+    """
+
+    def __init__(self, label, on_width_changed) -> None:
+        super().__init__(label)
+        self._on_width_changed = on_width_changed
+        label.installEventFilter(self)
+
+    def eventFilter(self, _watched, event) -> bool:  # noqa: N802 - Qt's name
+        if event.type() == QEvent.Resize and event.size().width() != event.oldSize().width():
+            self._on_width_changed()
+        return False
 
 
 class AnalyzeFormChromeMixin:
@@ -76,6 +102,7 @@ class AnalyzeFormChromeMixin:
             switch.setParent(header)
             hl.addWidget(switch)
         summary_lbl = QLabel("", header)
+        _WidthWatcher(summary_lbl, lambda _title=title: self._refresh_section_summary(_title))
         summary_lbl.setObjectName("Muted")
         summary_lbl.setContentsMargins(6, 6, 0, 2)
         summary_lbl.setMinimumWidth(0)
@@ -144,7 +171,9 @@ class AnalyzeFormChromeMixin:
                 text = summary() or ""
         # Elided to the width the header leaves it: a schema or a well list
         # can be longer than the panel, and a clipped word reads as a typo.
-        width = label.width()
+        # The room is the label's contents rectangle, not its width: the label
+        # carries a left margin, and text elided to the full width overran it.
+        width = label.contentsRect().width()
         shown = (label.fontMetrics().elidedText(text, Qt.ElideRight, width)
                  if text and width > 40 else text)
         label.setText(shown)

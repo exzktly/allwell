@@ -105,3 +105,25 @@ def test_a_re_fit_that_fires_after_the_page_is_closed_draws_nothing(page, qtbot,
     page.window.close()
     page.widgets.get("_nw_refit_timer").timeout.emit()                      # the pending re-fit firing after it
     assert calls == []
+
+
+@pytest.mark.parametrize("view", ["position", "extremes", "statistics"])
+def test_a_view_s_captions_are_broken_again_when_its_figure_narrows(page, qtbot, view):  # noqa: F811
+    """Every view breaks its captions to the figure's width when it draws. On an unfolded phone the Controls dock
+    beside the page after that, the canvas narrows, and the lines kept the breaks of the wider figure: a caption
+    ran to 1,185 px of an 859 px canvas, on Position, Extremes and Statistics (the slow lane's every-page test)."""
+    from tests._layout_checks import figure_text_outside
+
+    _loaded(qtbot, page)
+    page.window.resize(1400, page.window.height())
+    nwc.set_view(page, view)
+    canvas = page.widgets.get("_nw_canvas")
+    qtbot.waitUntil(lambda: canvas.width() > 900, timeout=5000)
+    qtbot.wait(500)
+    nwc.redraw(page)                                                            # drawn for the wide figure
+    assert figure_text_outside(page.window) == []
+    wide = canvas.width()
+    page.window.resize(1000, page.window.height())                              # about the share a docked panel takes
+    qtbot.waitUntil(lambda: canvas.width() < wide - 300, timeout=5000)
+    qtbot.wait(600)                                                             # past the re-fit's settling delay
+    assert figure_text_outside(page.window) == []

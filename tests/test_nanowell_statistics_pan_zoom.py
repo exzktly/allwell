@@ -22,6 +22,30 @@ def _card_toolbar(page):  # noqa: F811
     return next(w for w in page.window.findChildren(PlotCard) if getattr(w, "canvas", None) is canvas).toolbar.nav
 
 
+def _settled_axes(qtbot, fig, quiet_ms=400, rounds=40):
+    """The figure's drawn axes, once the page has stopped redrawing it.
+
+    A result's first draw is not always its last: after the result appears the page can draw the figure once
+    more, with new axes, and that draw is queued, so how long after the first it lands depends on how busy the
+    machine is. A fixed 300 ms was enough on a quiet one and not on a loaded CI runner, where the redraw arrived
+    after the drag and the test read the fresh, empty axes as the pan being thrown away (one run in four to eight
+    under load, on this test's own branch and on the one it was merged into). So wait for two consecutive quiet
+    intervals with the same axes object, rather than for a time.
+    """
+    def drawn():
+        return next((a for a in fig.axes if a.axison), None)
+
+    seen, quiet = drawn(), 0
+    for _ in range(rounds):
+        qtbot.wait(quiet_ms)
+        now = drawn()
+        quiet = quiet + 1 if now is seen and now is not None else 0
+        seen = now
+        if quiet >= 2:
+            return seen
+    raise AssertionError("the Statistics figure never stopped redrawing")
+
+
 def _drag(canvas, ax, dx=80, dy=40):
     from matplotlib.backend_bases import MouseEvent
 
@@ -40,8 +64,7 @@ def test_a_pan_or_zoom_on_the_statistics_figure_stays(page, qtbot, test, tool): 
         _choose(page, "_nw_control_cb", "ctrl")
         qtbot.waitUntil(lambda: st.rare_footer is not None, timeout=30000)
     fig = page.widgets.get("_nw_fig")
-    qtbot.wait(300)
-    ax = next(a for a in fig.axes if a.axison)
+    ax = _settled_axes(qtbot, fig)
     before = ax.get_xlim(), ax.get_ylim()
     nav = _card_toolbar(page)
     getattr(nav, tool)()

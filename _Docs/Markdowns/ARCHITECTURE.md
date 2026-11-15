@@ -20903,7 +20903,16 @@ destroys with its unconditional `float32` cast — "at the dtype maximum" would
 then mean "at 3.4e38", identically zero for every field of every plate, for
 ever — so `load_2d_gray_with_ceiling` hands that number back alongside an
 identical array, and the old function is a wrapper over the new one so the two
-cannot drift. `dyn_range` is measured **before correction**, in
+cannot drift. That number is the *file type's* ceiling, which is what
+`pipeline.output_images.storage_array` needs and not what a clipped pixel
+holds: a 12-bit camera writes `uint16` files and clips at 4,095. So
+`saturated_fraction` counts against `field_quality.sensor_ceiling` — the
+frame's own maximum when that is `2**n − 1` for `n ≥ 8`, the file type's
+otherwise. A frame that reached no bit-depth ceiling measures zero; a mask or
+label image (a maximum of 1 or 127) is not read as clipped; and no minimum
+share is asked for, so a coincidental 4,095 in a true 16-bit frame costs one
+pixel in N rather than a floor recording 0.0 for a frame clipped below it
+(`tests/test_saturation_reads_the_cameras_ceiling.py`). `dyn_range` is measured **before correction**, in
 `_load_image_group`, because the flat-field division and the background
 subtraction both reshape the frame's spread. The remaining three need the
 segmentation and are measured after it, in `field_quality.group_record`.

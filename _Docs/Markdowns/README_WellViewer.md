@@ -3469,8 +3469,9 @@ choice applies once, when the menu closes.
   **Exclude fields the run flagged** sits under the debris gate and works on
   whole fields of view rather than on single cells. While a run processes a
   plate it measures six things about every field it looks at — how sharply
-  focused it is, how much of it is clipped at the sensor's maximum, how much
-  contrast it has, how many nuclei it found, how large they are, and how bright
+  focused it is, how much of it is clipped at the sensor's maximum (the
+  camera's own: a 12-bit camera saved as 16-bit files clips at 4,095, and that
+  is where it is counted), how much contrast it has, how many nuclei it found, how large they are, and how bright
   the background is — and afterwards compares each field with the rest of the
   plate. The first three are compared plate-wide, within a timepoint, because a
   well-run plate should be uniform in them. The last three are compared only

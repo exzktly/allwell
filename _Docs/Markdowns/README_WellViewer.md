@@ -5487,6 +5487,11 @@ two-well set of 5 events each plots 5, not 10. The Bar Plots tab reports the
 same number, so the two tabs can be compared directly; the cross-well total is
 still exported (see below).
 
+A timepoint at which no cell is above the ON cutoff is drawn at zero on the
+fraction and N events panels, for a well and for a replicate set alike: nothing
+ON is a measurement. The mean panel has no point there, because the mean is the
+average intensity of the ON cells and there are none to average.
+
 - **Needs** — selected wells spanning more than one timepoint to see a trend
   (single-timepoint data draws a single point).
 - **Controls** (under **Display ▾**) — the **error band** (SEM / SD); the

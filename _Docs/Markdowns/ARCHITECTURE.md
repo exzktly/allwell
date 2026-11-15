@@ -22490,6 +22490,14 @@ Line tab — lineplot_controller.redraw_line_plots(…) →
       ``collect_bar_items``. Each member becomes a ``LineSeries``
       with a list of ``LinePoint``s (full AggPoint shape so the
       renderer and CSV writers consume the same record).
+      Each panel judges its own value. A timepoint where no cell is
+      above the ON cutoff has no mean (the mean is of the ON cells),
+      a fraction of 0.0 and an event count of 0: the Mean panel leaves
+      it out and the Fraction and Events panels draw the zero
+      (``_events_points`` keys on the count, as the Bar tab's Events
+      bars do). A replicate set keeps a timepoint whenever it has a
+      mean or a fraction there (``set_measured_at``, which the batch
+      line runner shares) and drops it only when it holds no cell.
    2. ``fold_change_pairing.control_denominators(…)`` builds one
       ``ControlDenominators`` for the pass; ``denoms.series_for(member)``
       then answers with that member's control, its outcome, and the

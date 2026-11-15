@@ -74,7 +74,7 @@ def stubbed_segmenter(monkeypatch):
     from pipeline.field_quality import FOCUS_COLUMN
     monkeypatch.setattr(
         pm, "_quantify_image_group",
-        lambda **k: [{"nucleus_id": i, "area": 100.0 * i,
+        lambda **k: [{"nucleus_id": i, "area_px": 100.0 * i,
                       FOCUS_COLUMN: 0.30 + 0.01 * i} for i in (1, 2, 3)])
     return labels
 
@@ -175,7 +175,7 @@ def test_the_focus_column_is_absent_rather_than_zero_where_unmeasurable(
 
     monkeypatch.setattr(
         pm, "_quantify_image_group",
-        lambda **k: [{"nucleus_id": i, "area": 100.0, FOCUS_COLUMN: None}
+        lambda **k: [{"nucleus_id": i, "area_px": 100.0, FOCUS_COLUMN: None}
                      for i in (1, 2, 3)])
     nuc, flu = _write_group(tmp_path)
     out = tmp_path / "out"

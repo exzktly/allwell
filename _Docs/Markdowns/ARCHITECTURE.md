@@ -8569,7 +8569,7 @@ same function `refuse_non_zip_input` stops the pipeline on and
 folder the readout calls runnable is one neither the local nor the remote run
 will refuse, and the readout, the run-time error (`_layout_error`) and the two
 refusals all name the same remedy sentence, `ZIP_LOOSE_FOLDER_REMEDY`
-(Datasets → Zip loose folder). The verdict has four parts (`NonZipInput`):
+(Datasets → Zip loose folder). A well that **more than one archive names** (`A1.zip` beside `A01.zip`; `NonZipInput.duplicates`) is refused by the same three callers: each archive would be run as that well and each would write the well's one CSV, so the last to finish would replace the others' rows while the report counted the well complete. Beyond that the verdict has four parts (`NonZipInput`):
 *loose* input images at the top level of the folder, *stranded* well-named
 folders that hold images and have no `<WELL>.zip` beside them, *nested*
 folders whose name is not a well and that hold images (a `TimePoint_1/`
@@ -20858,7 +20858,7 @@ segmentation and are measured after it, in `field_quality.group_record`.
 `review/domain/field_quality_scores.py` scores the *acquisition* metrics
 (`focus`, `sat_frac`, `dyn_range`) as a robust z **within a timepoint, across
 the plate**, because those are properties a plate should hold constant by
-design. The *biological* ones (`nuc_count`, `nuc_area_median`, `bg_level`) are
+design. The *biological* ones (`nuc_count`, the number of distinct labels, so the gaps seeded watershed leaves in the ids are not counted; `nuc_area_median`, over the `area_px` of the cells written, through `field_quality.record_areas`; `bg_level`) are
 scored **within a well, across its own fields**, where the fields are technical
 replicates of one biology and disagreement really is a technical fault. Scored
 plate-wide they would flag the biology: a cytotoxic compound drops the nucleus

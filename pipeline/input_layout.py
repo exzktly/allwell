@@ -201,16 +201,26 @@ class NonZipInput(NamedTuple):
     #: describe only the part it reached. No plate's input holds that many folders; a walk that hits the bound
     #: is a mistaken root (a home folder, a whole volume), and it is refused rather than reported as partial.
     too_large: bool = False
+    #: Wells that more than one archive names, as ``(well, [archive names])``: ``A1.zip`` beside ``A01.zip``.
+    #: Each archive is run as that well and each run writes the well's one CSV, so the last to finish replaces
+    #: the others' rows while the report counts the well complete — which half survives depends on the worker
+    #: count. Refused rather than merged: nothing says the two hold the same acquisition.
+    duplicates: list[tuple[str, list[str]]] = []
 
     @property
     def refused(self) -> bool:
-        return bool(self.loose or self.stranded or self.nested or self.too_large)
+        return bool(self.loose or self.stranded or self.nested or self.too_large or self.duplicates)
 
     def problems(self) -> list[str]:
         """One line per refused kind, naming the files."""
         out = []
         if self.too_large:
             out.append("more folders below it than one plate's input holds, so it was not walked to the end")
+        if self.duplicates:
+            wells = [f"{well} ({', '.join(names)})" for well, names in self.duplicates]
+            out.append(f"{len(self.duplicates)} well(s) named by more than one archive: {_names(wells)} — each "
+                       "would be run as that well and the last to finish would replace the others' results; "
+                       "keep one archive per well")
         if self.loose:
             out.append(f"{len(self.loose)} loose image(s) at the top level: {_names(self.loose)}")
         if self.stranded:
@@ -246,7 +256,12 @@ def non_zip_input(input_dir: Path, well_zips, *, max_folders: int | None = None)
     :data:`PLANNER_MAX_FOLDERS`; the pipeline passes nothing and walks it all.
     """
     budget = _FolderBudget(max_folders) if max_folders is not None else None
+    well_zips = list(well_zips)
     zip_by_well = {str(w): Path(p) for w, p in well_zips}
+    archives_of: dict[str, list[str]] = {}
+    for w, p in well_zips:
+        archives_of.setdefault(str(w), []).append(Path(p).name)
+    duplicates = sorted((w, sorted(names)) for w, names in archives_of.items() if len(names) > 1)
     try:
         loose = sorted(p.name for p in files_in(input_dir) if is_run_input_member(p.name))
     except OSError:
@@ -269,7 +284,8 @@ def non_zip_input(input_dir: Path, well_zips, *, max_folders: int | None = None)
         else:
             twins.append((well, folder, archive))
     twins.sort(key=lambda t: t[0])
-    return NonZipInput(loose, stranded, twins, nested, too_large=budget is not None and budget.spent)
+    return NonZipInput(loose, stranded, twins, nested, too_large=budget is not None and budget.spent,
+                       duplicates=duplicates)
 
 
 def refuse_non_zip_input(input_dir: Path, well_zips) -> None:

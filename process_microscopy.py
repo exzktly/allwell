@@ -600,7 +600,7 @@ def compute_shape_features(
             if key == "circularity":
                 area = float(table["area"][i])
                 per = float(table["perimeter"][i])
-                rec[feat.column] = float(4.0 * np.pi * area / (per * per)) if per > 0 else 0.0
+                rec[feat.column] = float(4.0 * np.pi * area / (per * per)) if per > 0 else None  # no perimeter: no value, not 0.0
             elif key == "centroid_row":
                 rec[feat.column] = float(table["centroid-0"][i])
             elif key == "centroid_col":
@@ -1274,7 +1274,7 @@ def process_image_group(
         acquisition=acquisition,
         labels=labels,
         corrected_image=nir_corr,
-        areas=[r["area"] for r in records if r.get("area") is not None],
+        areas=_field_quality.record_areas(records),
         cell_focus=([r.get(FOCUS_COLUMN) for r in records]
                     if measure_focus else None),
         fov=parsed.get("fov", ""),

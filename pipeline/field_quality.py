@@ -432,6 +432,17 @@ def field_metrics(nuclear_image, *, labels=None, dtype_max: float | None = None,
     }
 
 
+def record_areas(records) -> list[float]:
+    """Every quantified cell's area in pixels, for :func:`group_record`'s median.
+
+    Read from ``area_px``, the column the pipeline's quantification writes. The
+    caller used to read ``area``, a key no cell record carries, so the list was
+    always empty and ``nuc_area_median`` was ``None`` for every field of every
+    run — Review's "unlike nuclear sizes" check had nothing to compare.
+    """
+    return [float(r["area_px"]) for r in records if r.get("area_px") is not None]
+
+
 def group_record(*, acquisition: dict, labels, corrected_image, areas,
                  cell_focus=None, fov: str = "", timepoint: str = "") -> dict:
     """One FOV-group's quality record: the pre-correction half plus the rest.
@@ -464,7 +475,10 @@ def group_record(*, acquisition: dict, labels, corrected_image, areas,
     record = {
         "fov": str(fov or ""),
         "timepoint": str(timepoint or ""),
-        "nuc_count": (int(lab.max()) if lab is not None and lab.size else None),
+        # Distinct labels, not the largest one: seeded watershed leaves gaps in
+        # the ids (a marker whose basin falls outside the mask), and the largest
+        # id then counts cells that were never written.
+        "nuc_count": (int(np.count_nonzero(np.unique(lab))) if lab is not None and lab.size else None),
         "nuc_area_median": (float(np.median(np.asarray(vals, dtype=np.float64)))
                             if vals else None),
         "bg_level": background_level(corrected_image, lab),

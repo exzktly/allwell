@@ -196,7 +196,8 @@ figures are exported in, are the same in either.
 The pipeline alone (no GUI) can be invoked directly — useful for CI or
 batch processing on headless workers. `--input_dir` must hold one `<WELL>.zip`
 per well; the pipeline refuses loose images and per-well folders, naming them,
-exactly as Analyze does:
+exactly as Analyze does, and refuses two archives that name the same well
+(`A1.zip` beside `A01.zip`):
 
 ```sh
 python process_microscopy.py --help

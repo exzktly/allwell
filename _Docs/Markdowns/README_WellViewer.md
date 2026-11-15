@@ -10396,6 +10396,11 @@ by well only is the fastest case — nothing inside those wells' archives has
 to be touched at all — and narrowing by timepoint or FOV costs roughly in
 proportion to how much you keep.
 
+A well archive need not be flat. One made with Finder's **Compress**, which
+holds each image inside a folder named for the well beside macOS's hidden
+`__MACOSX` copies, is subset like any other: members keep the names they have,
+and each kept measurement row is checked against the images by filename.
+
 A dataset that spells one well two ways (`in/A1.zip` beside `in/A01.zip`, say)
 is refused before anything is copied, for the reason given under
 [Concatenate datasets](#concatenate-datasets).

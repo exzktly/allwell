@@ -6055,6 +6055,13 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
   wells, or *Faceted (one per group)*); **Bins** count; **log x** / **log y**
   toggles; **Pool replicates**; the timepoint picker; the channel-wide
   threshold reference line.
+- **log x and values at or below zero** — a logarithmic axis cannot show a value
+  at or below zero, which a background-subtracted intensity often is. With
+  **log x** on, the histogram's bins are log-spaced over the positive values, so
+  the bars are equally wide on the axis, and the figure says how many values it
+  leaves off (*"117 of 500 values (23.4%) are at or below zero and are not on
+  the logarithmic axis"*). The counts in the legend and title still count every
+  value, and the CSV export keeps them all.
 - **Pool replicates** — with replicate groups defined, clicking a well on the
   plate shows its whole group. Ticked (the default), each group is drawn as one
   series of all its wells' cells. Unticked, every well of the shown groups is

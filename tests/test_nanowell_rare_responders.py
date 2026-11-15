@@ -842,7 +842,9 @@ def test_a_design_too_small_for_the_deciding_test_cannot_be_decided_rather_than_
     unit = spiked.units[0]
     assert unit.interpretation == rr.UNDECIDED
     text = rx.unit_text(spiked, unit)
-    assert text["headline"].startswith("drug: cannot be decided with these wells. 8 of 120 drug nanowells (6.7%)")
+    # Asked for: the headline says why, not only the line under the panels.
+    assert text["headline"].startswith("drug: cannot be decided with these wells — the deciding test needs at least 3 "
+                                       "control wells (this design has 2). 8 of 120 drug nanowells (6.7%)")
     assert text["lines"][0] == ("Deciding: exceedance test has no group p — it needs at least 3 control wells (this "
                                 "design has 2). With fewer, it gives each well's own p only (Details).")
     null = rr.analyse(_small_plate(spiked=False, n_ctrl=2), rr.RareParams(control="ctrl")).units[0]

@@ -7211,7 +7211,7 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   since it never applies. Nanowells with no cell at the start, or not measurable at the timepoint, are left out and counted in the
   report. A group or control with fewer than two wells is not tested as a group, and the figure says so.
 
-  **Reading the figure.** For each treatment group, the answer comes first, in bold, in counts: for example *drug:
+  **Reading the figure.** For each treatment group, the answer comes first, in bold, in counts — and when it is *cannot be decided*, why, on the same line (for example *— the deciding test needs at least 3 control wells (this design has 2)*): for example *drug:
   rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its top 1%), against 0 of
   180 control nanowells (0.0%) · 2 drug vs 3 control wells.* Under it, three panels (stacked one above the other on a
   phone):
@@ -7226,9 +7226,10 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
      has more of its nanowells beyond a value than the control does. The shape test scores each treatment well on its
      own and gives more weight to gaps near the top, so the shading shows where it looks and which way, not its
      value; its p is in the line under the panels.
-  2. **Share of each well's nanowells past the cutoff** — one dot per well with its count (*4/60*): control wells in
-     grey, the shaded band the range they span (what chance gives on this plate), treatment wells in their plate
-     colours. A treatment dot above the band is the effect.
+  2. **Exceedance test: share of each well's nanowells past the cutoff** — the deciding test's own numbers: one dot
+     per well with its count (*4/60*) past panel 1's dashed cutoff: control wells in grey, the shaded band the range
+     they span (what chance gives on this plate), treatment wells in their plate colours. A treatment dot above the
+     band is the effect.
   3. **Higher Criticism** — each well's excess score over its nanowells, most extreme first; treatment wells in
      colour, control wells in grey, the group p in the title (marked when it is the lowest the design allows).
 

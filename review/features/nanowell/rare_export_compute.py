@@ -30,7 +30,7 @@ import numpy as np
 from review.features.nanowell import rare_hc_compute as hc
 from review.features.nanowell.rare_exceedance_compute import BB_LABEL, FISHER_LABEL
 from review.features.nanowell.rare_null_compute import pool
-from review.features.nanowell.rare_report_compute import significant
+from review.features.nanowell.rare_report_compute import UNDECIDED, significant
 from review.features.nanowell.rare_ad_compute import SCHOLZ_LABEL
 from util.json_write import write_json_atomic
 
@@ -210,8 +210,21 @@ def headline(unit, params, value_label: str = "") -> str:
     against = (f"against {kc} of {nc} control nanowells ({_pct(kc, nc)})" if len(unit.controls) >= 2 else
                "with no control null to set it against (a single control well has no other control wells to be "
                "scored against)")
-    return (f"{unit.label}: {unit.interpretation}. {kt} of {nt} {unit.treatment} nanowells ({_pct(kt, nt)}) "
-            f"{past(params)} {cutoff_name(params)}{on}, {against} · {wells}.")
+    why = why_undecided(unit, params)
+    return (f"{unit.label}: {unit.interpretation}{f' — {why}' if why else ''}. {kt} of {nt} {unit.treatment} "
+            f"nanowells ({_pct(kt, nt)}) {past(params)} {cutoff_name(params)}{on}, {against} · {wells}.")
+
+
+def why_undecided(unit, params) -> str:
+    """Why *unit*'s verdict is "cannot be decided", for the headline itself — the verdict must not stand without its
+    reason, which used to be only in the line under the panels; ``""`` for any other verdict."""
+    if unit.interpretation != UNDECIDED:
+        return ""
+    if unit.exceedance and not math.isfinite(unit.primary.p):
+        need = needs(unit, params)
+        return ("the deciding test " + need[len("it "):].rstrip(".") if need.startswith("it needs ")
+                else "the deciding test's regression could not be fitted")
+    return "the control cutoff sits on a tie, so no nanowell could be counted past it"
 
 
 def _floor_note(perm) -> str:

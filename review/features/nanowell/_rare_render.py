@@ -324,7 +324,7 @@ def draw_exceedance(ax, unit) -> None:
     rates = [c.rate * 100 for c in counts if np.isfinite(c.rate)]
     ax.set_ylim(0, max(1.0, max(rates, default=0) * 1.05))       # a share is never negative, and an all-zero plate
     _headroom(ax, rates)                                           # keeps its dots on the floor, not mid-panel
-    _title(ax, "Share of each well's nanowells past the cutoff")
+    _title(ax, "Exceedance test: share of each well's nanowells past the cutoff")
 
 
 def draw_hc(ax, unit) -> None:

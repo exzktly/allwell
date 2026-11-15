@@ -42,7 +42,7 @@ from review.features.nanowell import controller as _controller
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._rare_render import render_rare_page
-from review.features.nanowell.rare_data_compute import RareParams, from_site_metrics
+from review.features.nanowell.rare_data_compute import SITE_QC_FLAGS, RareParams, from_site_metrics
 from review.features.nanowell.rare_export_compute import report_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
 from review.features.nanowell.renderer import Footer, render_message, render_site_rows
@@ -56,6 +56,8 @@ COMPUTING = "Testing"                                   # the start of every com
 NO_CONTROL = ("Rare responders test each group of wells against a control group: choose the control group under "
               "Control, above.")
 NOT_APPLIED = "The Fixed cohort does not apply to the rare-responder tests."
+KEPT_DISAGREEING = ("Count-disagreeing nanowells are kept and tested as counted (Compare row): a clump segmented as "
+                    "one cell counts as one.")
 UNIT_IGNORED = ("The rare-responder tests always compare groups with wells as the units; Compare does not apply.")
 VALUE_NOTE = "Values: the page's Metric at its Timepoint, each nanowell on its own; no strata."
 #: :data:`VALUE_NOTE` while the moving average is on: the values tested are averages, and the cutoff is theirs.
@@ -138,12 +140,16 @@ def windowed(metrics: pd.DataFrame, wells, column: str, *, moving: int, baseline
 def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: str = "", store: dict | None,
             request, moving: int = 0, baseline_moving: int = 0, moving_centred: bool = False, cohort: bool = False,
             unit_set: bool = False, hidden: dict | None = None, guessed: str = "", column: str = "",
-            value_label: str = "", direction: str = "higher", stamped: bool = False) -> RareResult | None:
+            value_label: str = "", direction: str = "higher", stamped: bool = False,
+            keep_disagreeing: bool = False) -> RareResult | None:
     """Draw the Rare responders test into *fig*: its result when *store* holds it, else a sentence while *request*
     (``request(key, job)``) has it computed, or one saying why it cannot run. Returns the result drawn, or ``None``.
 
     *moving* (0 or 1: off), *baseline_moving* and *moving_centred* are the moving average the page's other Statistics
-    tests apply (:func:`windowed`); the caller passes 0 for a metric with one value per nanowell."""
+    tests apply (:func:`windowed`); the caller passes 0 for a metric with one value per nanowell. *keep_disagreeing*
+    (the band's *Count-disagreeing: kept*) tests a nanowell whose count disagrees with its area estimate as counted,
+    rather than leaving it out with the other QC flags; the table then has no such column, so its result is keyed
+    apart."""
     timepoint = drawn_timepoint(metrics, groups, timepoint)
     reason = why_not(groups, control, metrics, timepoint, hidden, column)
     if reason:
@@ -168,6 +174,8 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     except ValueError as exc:
         render_message(fig, str(exc), gid="nw-rare-why")
         return None
+    if keep_disagreeing:
+        table = table.drop(columns=[SITE_QC_FLAGS["count_disagreement"]], errors="ignore")
     params = RareParams(control=control, direction=direction)
     key = (*result_key(table, params), value_label)      # the label is in the result's sentences
     held = (store or {}).get(key)
@@ -182,6 +190,7 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     values = VALUE_NOTE_MOVING if averaging else VALUE_NOTE
     notes = [f"{values} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.",
              *([mvc.describe(moving, column, baseline_moving, moving_centred)] if averaging else []),
+             *([KEPT_DISAGREEING] if keep_disagreeing else []),
              *([NOT_APPLIED] if cohort else []), *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
     render_rare_page(fig, held, note=DETAILS_POINTER, stamped=stamped,
@@ -243,7 +252,7 @@ def hook(ctx, st) -> dict:
         _nwc()._fetch(ctx, "rare_results", key, job,
                       failed=lambda message: f"The rare-responder tests could not be run: {message}")
     return {"store": st.rare_results, "request": request, "guessed": st.control_guessed,
-            "direction": st.rare_direction}
+            "direction": st.rare_direction, "keep_disagreeing": st.rare_disagreeing == "keep"}
 
 
 def flagged_rows(result: RareResult) -> list[dict]:

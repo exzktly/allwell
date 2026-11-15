@@ -11023,6 +11023,14 @@ in the report — when:
 - the run flagged it as **fused**, **partly visible** (an edge nanowell) or **count-disagreeing**, or the
   **identity check** could not confirm it is the same nanowell over time.
 
+A nanowell is **count-disagreeing** when its segmented cell count and the estimate from its foreground area differ
+by more than 30 % and by at least one cell — often a clump segmented as one cell, which is common in crowded wells
+at late timepoints. The Distribution view draws such nanowells; the Rare responders test leaves them out by default,
+since a miscount can hide or fake a responder. **Count-disagreeing: excluded / kept**, beside *Responders higher /
+lower*, chooses: *kept* tests them as counted, and Details says so. The choice is saved with the page. If the test
+says a treatment group lost every nanowell to *QC: count_disagreement* while the Distribution view shows them, this
+is why.
+
 When these leave the control group, every treatment group, or every group with no nanowell at all, the test does
 not run and the figure says, for each group, how many nanowells were excluded and why; a treatment group they empty
 while others remain is left out of the test and named among the warnings (for example *every one of the 40 nanowells was excluded before

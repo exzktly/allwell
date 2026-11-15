@@ -20,6 +20,9 @@ from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
 
 #: The Rare responders test's directions (``NanowellState.rare_direction``).
 RARE_DIRECTIONS = ("higher", "lower")
+#: What the Rare responders test does with a nanowell whose count disagrees with its area estimate
+#: (``NanowellState.rare_disagreeing``): leave it out, the default, or test it as counted.
+RARE_DISAGREEING = ("exclude", "keep")
 
 
 def _one_of(value, allowed, default):
@@ -256,6 +259,11 @@ class NanowellState:
     #: The Rare responders test's direction: "higher" looks for responders in the top tail of the Metric, "lower"
     #: in the bottom tail (cell death, a loss of signal). Saved with the page.
     rare_direction: str = "higher"
+    #: Whether the Rare responders test leaves out a nanowell the run flagged as count-disagreeing (its segmented count
+    #: and its area estimate differ by more than 30 % and a cell) — "exclude", the default, since a clump counted as
+    #: one cell can hide or fake a responder — or tests it as counted ("keep"), as the Distribution view draws it.
+    #: Saved with the page.
+    rare_disagreeing: str = "exclude"
     #: The value label of the Rare responders result drawn (the Metric it ran on), for the flagged-crops pop-out.
     rare_value_label: str = ""
     #: The QC view's *Wells* (:data:`QC_WELLS`).
@@ -451,7 +459,7 @@ class NanowellState:
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
                 "stats_unit": self.stats_unit, "stats_test": self.stats_test, "rare_direction": self.rare_direction,
-                "qc_wells": self.qc_wells,
+                "rare_disagreeing": self.rare_disagreeing, "qc_wells": self.qc_wells,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -482,6 +490,7 @@ class NanowellState:
         self.stats_unit = unit if unit in STATS_UNITS else fresh.stats_unit
         self.stats_test = test if test in STATS_TESTS else fresh.stats_test
         self.rare_direction = _one_of(config.get("rare_direction"), RARE_DIRECTIONS, fresh.rare_direction)
+        self.rare_disagreeing = _one_of(config.get("rare_disagreeing"), RARE_DISAGREEING, fresh.rare_disagreeing)
         self.qc_wells = config.get("qc_wells") if config.get("qc_wells") in QC_WELLS else fresh.qc_wells
         self.subset = _subset_from(config)
         self.saved_subsets = saved_from_config(config.get("saved_subsets"))

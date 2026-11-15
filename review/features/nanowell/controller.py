@@ -54,7 +54,7 @@ from review.features.nanowell.renderer import (
     redraw_selection_rings, render_position, render_site_detail, render_trajectories, stamp_subset,
 )
 from review.features.nanowell.state import (
-    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, RARE_DIRECTIONS, ArrayLayers, COLOURINGS, POSITIONS,
+    IDENTITY_COLOURS, IDENTITY_MODES, IMAGES, LAYER_SWITCHES, RARE_DIRECTIONS, RARE_DISAGREEING, ArrayLayers, COLOURINGS, POSITIONS,
 )
 from review.features.nanowell.series_compute import (crop_metric_lines, long_format, metric_kinds, rim_focus_text,
                                                      site_metrics, site_series)
@@ -2945,6 +2945,12 @@ def set_stats_test(ctx, test: str) -> None:
             st.control, st.control_guessed = guess, guess
             _call(ctx, "_nw_refresh_controls")
     _set(ctx, "stats_test", test)
+
+
+def set_rare_disagreeing(ctx, choice: str) -> None:
+    """Whether the Rare responders test leaves out count-disagreeing nanowells (``NanowellState.rare_disagreeing``)."""
+    if choice in RARE_DISAGREEING:
+        _set(ctx, "rare_disagreeing", choice)
 
 
 def set_rare_direction(ctx, direction: str) -> None:

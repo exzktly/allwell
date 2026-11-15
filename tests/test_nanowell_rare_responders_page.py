@@ -376,3 +376,40 @@ def test_the_control_curve_is_dotted_on_the_page_as_its_title_says(page, qtbot):
     assert [c.get_gid() for ax in fig.axes for c in ax.collections if c.get_gid() == "rare-ad-excess:all"] == [
         "rare-ad-excess:all"]
     assert any("dotted: control" in t.get_text() for ax in fig.axes for t in ax.texts + [ax.title])
+
+
+def test_count_disagreeing_nanowells_are_excluded_by_default_and_kept_by_choice(page, qtbot):
+    """Reported: the Rare responders test emptied both treatment groups on a plate whose Distribution view drew
+    their nanowells. The test leaves out a nanowell the run flagged as count-disagreeing; Distribution draws it. User
+    decision: a choice on the page, beside the direction. Here every drug nanowell is flagged at the Timepoint."""
+    st = _open(qtbot, page)
+    drug = st.metrics["well"].isin(["B01", "B02"]) & (st.metrics["timepoint"] == "t_a")
+    st.metrics.loc[drug, "count_disagreement"] = True
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    choice = page.widgets.get("_nw_rare_disagreeing_cb")
+    assert choice.isVisibleTo(page.window) and choice.currentData() == "exclude" == st.rare_disagreeing
+    why = "nw-rare-why"
+    qtbot.waitUntil(lambda: any("no treatment group has a nanowell left to test" in t for t in _texts(page, why)),
+                    timeout=30000)
+    assert any("drug: every one of its 120 nanowells was excluded before testing (QC: count_disagreement: 120)"
+               in t for t in _texts(page, why))
+    _choose(page, "_nw_rare_disagreeing_cb", "keep")
+    assert st.rare_disagreeing == "keep"
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-unit")), timeout=30000)
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders detected.")
+    assert rc.KEPT_DISAGREEING in st.rare_footer.notes
+    _choose(page, "_nw_stats_test_cb", "welch")
+    assert not choice.isVisibleTo(page.window)
+
+
+def test_the_count_disagreeing_choice_is_saved_with_the_page_and_a_bad_one_is_not_restored():
+    from review.features.nanowell.state import NanowellState
+
+    st = NanowellState()
+    st.rare_disagreeing = "keep"
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.rare_disagreeing == "keep"
+    again.apply_config({"rare_disagreeing": "maybe"})
+    assert again.rare_disagreeing == "exclude"

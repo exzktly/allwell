@@ -42,6 +42,12 @@ STATS_CONTROL_TIP = ("Compare each sample with this one only — fewer compariso
 
 #: The Rare responders test's direction choices, as the band offers them: ``(label, NanowellState.rare_direction)``.
 DIRECTIONS = (("Responders higher", "higher"), ("Responders lower", "lower"))
+#: What the Rare responders test does with count-disagreeing nanowells: ``(label, NanowellState.rare_disagreeing)``.
+DISAGREEING = (("Count-disagreeing: excluded", "exclude"), ("Count-disagreeing: kept", "keep"))
+_DISAGREEING_TIP = ("A nanowell is count-disagreeing when its segmented cell count and its foreground area's estimate\n"
+                    "differ by more than 30% and a cell — often a clump segmented as one cell, in a crowded well.\n"
+                    "Excluded: left out of the test, as fused and edge nanowells are, since a miscount can hide or\n"
+                    "fake a responder. Kept: tested as counted, as the Distribution view draws them.")
 _DIRECTION_TIP = ("Which tail of the Metric a rare responder is in. Higher: a few nanowells far above anything the\n"
                   "control wells reach (growth, a rise in signal). Lower: far below (death, a loss of signal).")
 
@@ -53,10 +59,11 @@ class StatisticsControls:
     group: object
     flagged: object = None
     direction: object = None
+    disagreeing: object = None
 
     @property
     def signalling(self) -> tuple:
-        return tuple(w for w in (self.unit, self.test, self.direction) if w is not None)
+        return tuple(w for w in (self.unit, self.test, self.direction, self.disagreeing) if w is not None)
 
 
 def build_statistics_controls(ctx, band) -> StatisticsControls:
@@ -83,8 +90,15 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     direction.setToolTip(_DIRECTION_TIP)
     direction.currentIndexChanged.connect(lambda _i: nwc.set_rare_direction(ctx, direction.currentData() or "higher"))
     ctx.widgets.register("_nw_rare_direction_cb", direction)
-    group = band.add_scope("Compare", unit, test, direction, flagged)
-    return StatisticsControls(unit, test, group, flagged, direction)
+    disagreeing = QComboBox()
+    for label, key in DISAGREEING:
+        disagreeing.addItem(label, key)
+    disagreeing.setToolTip(_DISAGREEING_TIP)
+    disagreeing.currentIndexChanged.connect(
+        lambda _i: nwc.set_rare_disagreeing(ctx, disagreeing.currentData() or "exclude"))
+    ctx.widgets.register("_nw_rare_disagreeing_cb", disagreeing)
+    group = band.add_scope("Compare", unit, test, direction, disagreeing, flagged)
+    return StatisticsControls(unit, test, group, flagged, direction, disagreeing)
 
 
 def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool) -> None:
@@ -94,11 +108,12 @@ def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool)
     # Hidden, not greyed: the rare-responder tests always take wells as the units, so the choice never applies to
     # them, and a greyed control the user cannot use reads as one they must first unlock.
     controls.unit.setVisible(not rare)
-    if controls.direction is not None:
-        controls.direction.setVisible(rare)
-        index = controls.direction.findData(st.rare_direction)
-        if index >= 0:
-            controls.direction.setCurrentIndex(index)
+    for combo, value in ((controls.direction, st.rare_direction), (controls.disagreeing, st.rare_disagreeing)):
+        if combo is not None:
+            combo.setVisible(rare)
+            index = combo.findData(value)
+            if index >= 0:
+                combo.setCurrentIndex(index)
     if controls.flagged is not None:
         controls.flagged.setVisible(rare)
         ready = bool(st.rare_flagged)

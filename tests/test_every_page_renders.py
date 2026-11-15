@@ -84,11 +84,32 @@ def _run_case(kind: str, screen: str, root: Path) -> list[dict]:
                ALLWELL_STATE_DIR=str(root / f"{kind}-{screen}-state"),
                ALLWELL_SCRATCH_DIR=str(root / f"{kind}-{screen}-scratch"),
                PYTHONPATH=str(REPO_ROOT))
-    done = subprocess.run([sys.executable, "-m", "tests._page_render_case", kind, screen, str(out)],
-                          cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=CASE_TIMEOUT_S)
+    try:
+        done = subprocess.run([sys.executable, "-m", "tests._page_render_case", kind, screen, str(out)],
+                              cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=CASE_TIMEOUT_S)
+    except subprocess.TimeoutExpired as stuck:
+        # The case writes every thread's stack to stderr before this limit (``_page_render_case.STUCK_AFTER_S``).
+        stderr = stuck.stderr.decode("utf-8", "replace") if isinstance(stuck.stderr, bytes) else (stuck.stderr or "")
+        raise RuntimeError(f"{kind} on {screen} was still running after {CASE_TIMEOUT_S} s:\n{stderr[-6000:]}"
+                           f"{_boot_log_tail(root, kind, screen)}") from stuck
     if done.returncode != 0 or not out.exists():
-        raise RuntimeError(f"{kind} on {screen} exited {done.returncode}:\n{done.stderr[-3000:]}")
+        raise RuntimeError(f"{kind} on {screen} exited {done.returncode}:\n{done.stderr[-3000:]}"
+                           f"{_boot_log_tail(root, kind, screen)}")
     return json.loads(out.read_text(encoding="utf-8"))
+
+
+def _boot_log_tail(root: Path, kind: str, screen: str) -> str:
+    """The end of the case's boot log, where a native crash leaves its stack (``startup.boot_diag``).
+
+    The case's stderr ends at the last line the app logged; ``faulthandler`` writes the C stack of a segmentation
+    fault to the boot log in the case's own state folder, which is gone with the runner. A case that exited -11
+    reported nothing but its start-up lines, so there was no stack to read.
+    """
+    log = root / f"{kind}-{screen}-state" / "allwell-boot.log"
+    try:
+        return f"\n--- {log.name} (tail) ---\n{log.read_text(encoding='utf-8', errors='replace')[-6000:]}"
+    except OSError as exc:
+        return f"\n--- no boot log could be read: {exc} ---"
 
 
 @pytest.fixture(scope="module")

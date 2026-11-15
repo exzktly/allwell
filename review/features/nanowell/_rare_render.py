@@ -3,31 +3,31 @@ Higher Criticism curves, the report, and the image crops of every flagged nanowe
 
 Pure matplotlib onto a figure it is handed; every number comes from ``rare_report_compute`` and is only drawn here.
 :func:`render_rare_page` is what the Nanowells page's Statistics view draws for the *Rare responders* test: one row
-of the three panels per treatment (at most :data:`MAX_UNIT_ROWS`), the report's lines beneath. The single-panel
-functions draw one of them onto a whole figure. Each artist that carries a result has a gid (``rare-…``), so a test
-reads the figure back rather than the result. Control wells are drawn in the secondary ink, each treatment well in
-its own colour on the plate (``selections_model.color_for_well``), every text in the plot tokens' inks with the theme
-tag, so it repaints on a theme flip. The loading strata are a magnitude, not an identity, so they are drawn in the
-page's occupancy ramp (the colours the Distribution view gives a nanowell's cell count) rather than in well colours a
-reader would take for wells: its screen / publication pair, marked so a capture repaints it.
+per test, each holding only that test's plots — a plot of one dot per well with every comparison on one axes, a plot
+of curves once per comparison, wrapping at the figure's width — and every comparison drawn, the figure as tall as it
+needs. The single-panel functions draw one of them onto a whole figure. Each artist that carries a result has a gid
+(``rare-…``), so a test reads the figure back rather than the result. Control wells are drawn in the secondary ink,
+each treatment well in its own colour on the plate (``selections_model.color_for_well``), every text in the plot
+tokens' inks with the theme tag, so it repaints on a theme flip. The loading strata are a magnitude, not an identity,
+so they are drawn in the page's occupancy ramp (the colours the Distribution view gives a nanowell's cell count)
+rather than in well colours a reader would take for wells: its screen / publication pair, marked so a capture
+repaints it.
 """
 
 from __future__ import annotations
 
 import math
 import textwrap
+from collections.abc import Callable
 
 import numpy as np
 
-from review.features.nanowell import rare_ad_compute as ad
 from review.features.nanowell.rare_data_compute import ALL
-from review.features.nanowell.rare_export_compute import unit_text
+from review.features.nanowell import rare_export_compute as rx
 from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
 
 #: Crops drawn at most per figure; the rest are counted in its title.
 MAX_CROPS = 48
-#: Treatments drawn as panels on the Statistics view; the report below covers every one.
-MAX_UNIT_ROWS = 3
 _TITLE_PT = 8.0
 _REPORT_PT = 6.5
 _LEADING = 1.45
@@ -183,9 +183,11 @@ def _ecdf_colours(unit, stratum, strata, i, publication, muted):
     return colour, colour, pair
 
 
-def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
-    """Every stratum on one axes (one, unstratified): control dotted, treatment solid, the cutoff dashed, of the values
-    as measured (``unit.sign`` undoes a bottom-tail analysis's negation)."""
+def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool, *, cutoff: bool = True, gap: bool = False) -> None:
+    """Every stratum on one axes (one, unstratified): control dotted, treatment solid, of the values as measured
+    (``unit.sign`` undoes a bottom-tail analysis's negation). With *cutoff*, the exceedance test's cutoff dashed — the
+    panel of the exceedance row; with *gap*, the gap between the two curves shaded (:func:`_shade_gap`) — the panel of
+    the pooled shape test's row, which measures that gap."""
     strata = _strata(unit)
     publication = _is_publication(ax)
     _ground, ink, muted = _inks(ax)
@@ -203,8 +205,9 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
                     _paired(line, pair)
                 elif colour == muted:
                     _ink(line, muted=True)
-        _shade_shape_test(ax, unit, stratum, log_axis, treated_c)
-        cut = _cut_x(unit, stratum, log_axis)
+        if gap:
+            _shade_gap(ax, unit, stratum, log_axis, treated_c)
+        cut = _cut_x(unit, stratum, log_axis) if cutoff else math.nan
         if np.isfinite(cut):
             line = ax.axvline(cut, color=control_c if pair is not None else ink, linestyle="--", linewidth=0.8)
             line.set_gid(f"rare-threshold:{stratum}")
@@ -213,37 +216,41 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     ax.set_ylabel("share of nanowells at or below")
     _fold_ticks(ax, log_axis, value_label)
     ax.set_ylim(0, 1.01)
-    _label_strata(ax, unit, strata, log_axis, publication)
+    _label_strata(ax, unit, strata, log_axis, publication, cutoff=cutoff)
     by = "" if strata == [ALL] else ", by starting cells"
-    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\nsolid: {unit.treatment} · dotted: control\n"
-               f"dashed: exceedance test's cutoff · shaded: what the shape test counts")
+    keys = [f"solid: {unit.treatment}", "dotted: control", *(["dashed: the cutoff"] if cutoff else []),
+            *(["shaded: the gap the test measures"] if gap else [])]
+    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\n{' · '.join(keys)}")
 
 
-def _shade_shape_test(ax, unit, stratum, log_axis: bool, colour) -> None:
-    """Shade, between the two cumulative curves, where the upper-tail shape test counts
-    (``rare_ad_compute.drawn_excess``): past the control median, on the side the analysis looks, wherever the treated
-    nanowells have more mass beyond a value than the controls. Nothing when there is no such place."""
+def _shade_gap(ax, unit, stratum, log_axis: bool, colour) -> None:
+    """Shade the whole gap between the pooled control and treatment cumulative curves of *stratum*, wherever they
+    differ, on either side: what the pooled two-sided Anderson–Darling test (``rare_ad_compute.scholz_stephens``)
+    measures, a squared difference of the two curves at every value. Nothing when the curves never part."""
     parts = {side: [w.values[stratum] for w in group if stratum in w.values]
              for side, group in (("control", unit.controls), ("treated", unit.treated))}
     if not parts["control"] or not parts["treated"]:
         return
     sign = unit.sign
-    x, f0, fn, excess = ad.drawn_excess(sign * np.concatenate(parts["control"]),
-                                        sign * np.concatenate(parts["treated"]), sign)
-    if not excess.any():
+    c = np.sort(sign * np.concatenate(parts["control"]))
+    t = np.sort(sign * np.concatenate(parts["treated"]))
+    x = np.unique(np.concatenate([c, t]))
+    f0 = np.searchsorted(c, x, side="right") / len(c)
+    fn = np.searchsorted(t, x, side="right") / len(t)
+    differ = f0 != fn
+    if not differ.any():
         return
     if log_axis:
         keep = x > 0
-        x, f0, fn, excess = np.log2(x[keep]), f0[keep], fn[keep], excess[keep]
+        x, f0, fn, differ = np.log2(x[keep]), f0[keep], fn[keep], differ[keep]
     # A step drawn "post" holds each value up to the next x, and fill_between fills a step only when both its ends
-    # are marked: mark each excess point's next one too, or the last step — mass beyond the controls' top value, the
-    # heaviest the test weighs — is left unshaded.
-    reach = excess | np.r_[False, excess[:-1]]
+    # are marked: mark each differing point's next one too, or the last step of each gap is left unshaded.
+    reach = differ | np.r_[False, differ[:-1]]
     poly = ax.fill_between(x, f0, fn, where=reach, step="post", color=colour, alpha=0.28, linewidth=0, zorder=1)
-    poly.set_gid(f"rare-ad-excess:{stratum}")
+    poly.set_gid(f"rare-pooled-gap:{stratum}")
 
 
-def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:
+def _label_strata(ax, unit, strata, log_axis: bool, publication: bool, *, cutoff: bool = True) -> None:
     """Label the lines on the panel itself rather than in a key: each stratum's treatment curve where it crosses its
     own height (staggered, since every cumulative curve ends at the same top right corner, where labels at the ends
     would pile up), with a dot in the stratum's shade — unstratified, the treatment curve named by its group — and
@@ -262,7 +269,7 @@ def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:
         name = unit.treatment if stratum == ALL else _stratum_name(stratum)
         _ink(ax.annotate(name, (x, level), textcoords="offset points", xytext=(6, 0), va="center",
                          fontsize=_TITLE_PT * 0.75, color=ink, gid=f"rare-ecdf-label:{stratum}"))
-    cuts = [c for c in (_cut_x(unit, s, log_axis) for s in strata) if np.isfinite(c)]
+    cuts = [c for c in (_cut_x(unit, s, log_axis) for s in strata) if np.isfinite(c)] if cutoff else []
     if cuts:
         # At the foot of the dashed line, clear of the stratum labels, which sit at mid-height.
         _ink(ax.annotate("control cutoff", (max(cuts) if unit.sign > 0 else min(cuts), 0.02), textcoords="offset points",
@@ -327,10 +334,11 @@ def draw_exceedance(ax, unit) -> None:
     _title(ax, "Exceedance test: share of each well's nanowells past the cutoff")
 
 
-def draw_hc(ax, unit) -> None:
+def draw_hc(ax, unit, *, heading: bool = True) -> None:
     """The HC curve over each well's nanowells, most extreme first: control wells (leave-one-out) in the secondary
     ink, treatment wells in their plate colours, a dot at each curve's peak. A treatment well with no curve (HC
-    undefined for it) is named in the title rather than silently missing."""
+    undefined for it) is named in the title with why, rather than silently missing. *heading* off leaves the test's
+    name and p out of the title, for the page, whose row heading and caption say them."""
     _ground, _ink_colour, muted = _inks(ax)
     for w in unit.controls:
         h = unit.hc[w.key]
@@ -343,7 +351,8 @@ def draw_hc(ax, unit) -> None:
             ax.plot(h.curve_x, h.curve_y, color=colour, linewidth=1.3, gid=f"rare-hc-treated:{w.key}")
             ax.scatter([h.i_star / h.n], [h.value], color=colour, zorder=4, gid=f"rare-hc-istar:{w.key}")
         else:
-            missing.append(w.key.split(":", 1)[-1])
+            missing.append(f"{w.key.split(':', 1)[-1]} ({h.reason.removeprefix('no HC score: ')})" if h.reason
+                           else w.key.split(":", 1)[-1])
     ax.set_xlabel("share of the well's nanowells, most extreme first")
     ax.set_ylabel("excess score")
     perm = unit.hc_perm
@@ -353,9 +362,10 @@ def draw_hc(ax, unit) -> None:
         head = f"Higher Criticism: p = {p:.3g}{floor}"
     else:
         head = "Higher Criticism: no group p"
-    sub = f"colour: {unit.treatment} wells · grey: control" + (
-        f" · not drawn: {', '.join(missing)}" if missing else "")
-    _title(ax, f"{head}\n{sub}")
+    sub = f"colour: {unit.treatment} wells · grey: control"
+    lines = [*([head] if heading else []), sub,
+             *(textwrap.wrap(f"no HC score: {'; '.join(missing)}", 70) if missing else [])]
+    _title(ax, "\n".join(lines))
 
 
 def render_ecdf(fig, unit, value_label: str, *, log_axis: bool = True) -> None:
@@ -385,121 +395,276 @@ def _wrapped(fig, lines, width_frac: float, pt: float = None, indent: str = "   
     return [part for line in lines for part in (textwrap.wrap(line, chars, subsequent_indent=indent) or [""])]
 
 
-#: The height one row of panels needs to be read, in inches: its two-line title, ticks and labels take 1.2 of it.
-ROW_MIN_IN = 2.5
-#: Below this figure width, in inches, a treatment's three panels are stacked in one column rather than laid side by
-#: side: under it each of three panels is less than about 1.25 in across once the y labels and gaps are taken, and
-#: its tick labels run together. A phone's figure is about 4 in wide; a desk window's, 7 in and over.
-STACK_BELOW_IN = 6.5
-#: A stacked panel's least height, in inches: lower than :data:`ROW_MIN_IN` so one treatment's three panels and its
-#: verdict fit a phone's figure (about 7.3 in tall) without running off its bottom.
-STACKED_ROW_MIN_IN = 1.9
-#: Inches: the figure's top margin, the space a row's x labels and two-line title take beyond its axes, the pad
-#: around the text under the panels, and the gap under a headline.
-_TOP_IN, _ROW_PAD_IN, _TEXT_PAD_IN, _HEAD_GAP_IN = 0.12, 1.2, 0.12, 0.1
-#: Inches the first headline moves down when the figure carries a label at its top left (``renderer.stamp_subset``,
+def _shared_controls(result) -> list:
+    """The control wells of every comparison, each once, in the order the comparisons name them."""
+    seen = {}
+    for unit in result.units:
+        for w in unit.controls:
+            seen.setdefault(w.key, (unit, w))
+    return list(seen.values())
+
+
+def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None, missing: str = "no value",
+                   p_of=None) -> None:
+    """One dot per well for every comparison on one axes: the control wells once, as the grey band chance gives, then
+    each group's wells in their plate colours, a thin rule between groups and the group's name — with its p, from
+    *p_of* — over them. *value_of(unit, well)* is the dot's height; a well it has no value for (NaN) is written in as
+    *missing* at the axis' foot rather than left out; *label_of(unit, well)*, when given, labels each dot (the
+    exceedance counts). Each dot's gid is ``<gid>-control`` / ``<gid>-treated:<well key>``."""
+    from widgets.plot_card import plot_tokens
+
+    _ground, ink, muted = _inks(ax)
+    publication = _is_publication(ax)
+    outline = {mode: plot_tokens(mode)[1] for mode in ("screen", "publication")}
+    controls = _shared_controls(result)
+    ctrl = np.array([value_of(u, w) for u, w in controls], dtype=float)
+    finite = ctrl[np.isfinite(ctrl)]
+    if finite.size:
+        ax.axhspan(finite.min(), finite.max(), color=muted, alpha=0.15).set_gid(f"{gid}-band")
+    xs = list(range(len(controls)))
+    ax.scatter(xs, ctrl, color=muted, zorder=3, gid=f"{gid}-control")
+    ticks = [w.key.split(":", 1)[-1] for _u, w in controls]
+    labelled = [(x, v, label_of(u, w)) for x, v, (u, w) in zip(xs, ctrl, controls)] if label_of else []
+    control = result.prepared.params.control
+    groups = [(control if "control" in control.lower() else f"{control} (control)", 0, len(controls) - 1)]
+    tops = list(finite)
+    x = len(controls) + 1
+    for unit in result.units:
+        start = x
+        for w in unit.treated:
+            value, colour = float(value_of(unit, w)), _well_colour(w.key)
+            if math.isfinite(value):
+                dot = ax.scatter([x], [value], color=colour, edgecolors=outline["publication" if publication
+                                                                               else "screen"],
+                                 linewidths=0.8, zorder=4, gid=f"{gid}-treated:{w.key}")
+                _paired(dot, ((colour, outline["screen"]), (colour, outline["publication"])))
+                tops.append(value)
+                if label_of:
+                    labelled.append((x, value, label_of(unit, w)))
+            else:
+                _ink(ax.annotate(missing, (x, 0), xycoords=("data", "axes fraction"), textcoords="offset points",
+                                 xytext=(0, 3), rotation=90, ha="center", va="bottom", fontsize=_TITLE_PT * 0.7,
+                                 color=ink, gid=f"{gid}-missing:{w.key}"))
+            xs.append(x)
+            ticks.append(w.key.split(":", 1)[-1])
+            x += 1
+        groups.append((unit.label + (f"\n{p_of(unit)}" if p_of else ""), start, x - 1))
+        x += 1
+    for xi, value, text in labelled:
+        _ink(ax.annotate(text, (xi, value), textcoords="offset points", xytext=(0, 5), ha="center",
+                         fontsize=_TITLE_PT * 0.65, color=ink, gid=f"{gid}-count"))
+    ax.set_xticks(xs, ticks, rotation=60, fontsize=_TITLE_PT * 0.75)
+    ax.set_xlim(-0.7, x - 1.3)
+    ax.set_ylabel(ylabel)
+    low = min(0.0, min(tops, default=0.0))
+    high = max(tops, default=1.0) or 1.0
+    # Each group's name is wrapped to its own width on the axes, so the names of narrow groups on a phone's figure
+    # stack rather than run into one another; the dots get the height the tallest name leaves.
+    pt = _TITLE_PT * 0.8
+    per_slot_in = ax.get_position().width * ax.figure.get_figwidth() / max(x - 0.6, 1.0)
+    names = [[part for line in name.split("\n")
+              for part in textwrap.wrap(line, max(6, int((last - first + 1.6) * per_slot_in * 72 / (pt * 0.55))),
+                                        break_long_words=False)]
+             for name, first, last in groups]
+    tallest = max((len(n) for n in names), default=1)
+    axes_in = max(ax.get_position().height * ax.figure.get_figheight(), 0.3)
+    share = min(0.7, (pt * _LEADING * tallest + 8) / 72 / axes_in)
+    ax.set_ylim(low, low + (high - low) * 1.08 / (1 - share))
+    for (_name, first, last), wrapped in zip(groups, names):
+        if first:
+            ax.axvline(first - 1, color=muted, linewidth=0.6, alpha=0.6).set_gid(f"{gid}-rule")
+        _ink(ax.text((first + last) / 2, 0.98, "\n".join(wrapped), transform=ax.get_xaxis_transform(), ha="center",
+                     va="top", fontsize=pt, fontweight="bold", color=ink, linespacing=_LEADING, gid=f"{gid}-group"))
+
+
+def _count_rate(unit, well) -> float:
+    count = next((c for c in unit.primary.counts if c.key == well.key), None)
+    return count.rate * 100 if count is not None else math.nan
+
+
+def _count_label(unit, well) -> str:
+    count = next((c for c in unit.primary.counts if c.key == well.key), None)
+    return f"{count.k}/{count.n}" if count is not None else ""
+
+
+#: The shared panel of each test row whose plot is one dot per well: ``(value of a well, y label, title, gid, label
+#: of a dot, what a well with no value is marked)``. A row not here has no shared panel.
+SHARED_PANELS = {
+    "exceedance": (_count_rate, "% of nanowells past the cutoff",
+                   "each well's share past the cutoff · grey band: the control wells", "rare-exceed", _count_label,
+                   "no count"),
+    "hc": (lambda u, w: u.hc[w.key].value, "peak excess score",
+           "each well's highest Higher Criticism score (the dot on its curve) · grey band: the control wells",
+           "rare-hc-peak", None, "no HC score"),
+    "shape": (lambda u, w: u.a2[w.key][0], "upper-tail A²",
+              "each well's shape score · grey band: the control wells", "rare-a2", None, "no score"),
+}
+
+
+def _small_panel(key: str, value_label: str, log_axis: bool) -> Callable[[object, object], None] | None:
+    """The per-comparison panel of the test row *key*, or ``None`` when the row has none."""
+    if key == "exceedance":
+        return lambda ax, u: draw_ecdf_strata(ax, u, value_label, log_axis, cutoff=True)
+    if key == "hc":
+        return lambda ax, u: draw_hc(ax, u, heading=False)
+    if key == "pooled":
+        return lambda ax, u: draw_ecdf_strata(ax, u, value_label, log_axis, cutoff=False, gap=True)
+    return None
+
+
+#: The least width of one per-comparison panel, in inches: a figure holds as many side by side as fit, at most
+#: :data:`MAX_COLUMNS`, and the rest wrap to the next line of the same test row — so the figure never grows sideways,
+#: whatever the number of comparisons. A phone's figure (about 4 in) holds one.
+COLUMN_MIN_IN = 3.2
+MAX_COLUMNS = 3
+#: Heights, in inches: a shared one-dot-per-well panel with its group names, ticks and title; one per-comparison panel
+#: with its two-line title, ticks and labels; the caption above it; the gap after each test row.
+SHARED_IN, SMALL_IN, CAPTION_IN, ROW_GAP_IN = 2.6, 2.5, 0.3, 0.25
+#: What of each height the axes leave to the text around them before their title is known, and the ticks and
+#: labels below; once drawn, the axes start under their title whatever its length.
+_ABOVE_IN, _BELOW_IN = 0.5, 0.62
+#: Inches: the figure's top margin, and the pad around the text under the panels.
+_TOP_IN, _TEXT_PAD_IN = 0.12, 0.12
+#: Inches the first line moves down when the figure carries a label at its top left (``renderer.stamp_subset``,
 #: one line of ``renderer.FOOTER_PT`` from the figure's top edge), so the two never share a line.
 _STAMP_IN = 0.2
-#: The headline's size: the figure's largest text, since it is the answer.
+#: The headline's size: the figure's largest text, since it is the answer; a test row's heading is the next.
 _HEAD_PT = 9.0
+_TEST_PT = 8.5
 
 
-def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped: bool = False) -> None:
-    """The Statistics view's figure for the rare-responder tests. For each treatment, **the answer first**: its headline
-    (``rare_export_compute.headline`` — the verdict and the counts behind it, gid ``nw-rare-unit``) above its row of
-    panels — how far nanowells grew, the share of each well past the cutoff, Higher Criticism. Under the panels, each
-    treatment's deciding and supporting tests and its caveats (``unit_text``; each line gid ``nw-rare-line``, a
-    caveat marked ⚠), then any extra *lines* and *note*. *lead* is drawn before all of it and never cut (a control
-    chosen by its name says so there). The full report is not drawn here: the page shows it under
-    the figure (Details).
+def columns_for(width_in: float) -> int:
+    """How many per-comparison panels a figure *width_in* wide holds side by side."""
+    return max(1, min(MAX_COLUMNS, int(width_in // COLUMN_MIN_IN)))
 
-    **The panels are laid out first, in inches.** Each row gets at least :data:`ROW_MIN_IN`; the text takes only what
-    its lines need, and as many treatments are drawn as their rows fit — the rest named in a line — so a long report
-    or a short window never squeezes the panels below legibility. A figure narrower than :data:`STACK_BELOW_IN` (a
-    phone's) stacks each treatment's three panels in a column, each at least :data:`STACKED_ROW_MIN_IN` tall:
-    side by side at that width each panel was about an inch across, its axis labels run into its neighbours.
+
+def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped: bool = False) -> float:
+    """The Statistics view's figure for the rare-responder tests, **one row per test**, and returns the height in
+    inches it needs to hold all of it at the figure's width — the page grows the canvas to that and scrolls, so no
+    comparison and no test is ever left off the figure.
+
+    From the top: the groups tested and the comparisons they make (``rare_export_compute.groups_line``, gid
+    ``nw-rare-groups``); each comparison's headline — its verdict and the counts behind it — under its name
+    (``Comparison i of n: <group> vs <control>``, gid ``nw-rare-comparison-head:<i>``; the headline's gid
+    ``nw-rare-unit``); then one row per test
+    (``rare_export_compute.TEST_ROWS``), headed by the test's name, its role and what it asks (gid
+    ``nw-rare-test:<key>``) and each comparison's p (gid ``nw-rare-test-p:<key>``). In a row, a panel that plots one
+    dot per well holds every comparison on one axes (:func:`draw_well_dots`); a panel that plots curves is drawn once
+    per comparison, captioned with the comparison's name and p (gid ``nw-rare-comparison:<key>:<i>``; the axes'
+    ``nw-rare-panel:<key>:<i>``, a shared panel's ``nw-rare-shared:<key>``), as many side
+    by side as the width holds (:func:`columns_for`) and the rest wrapping below in the same row. Under the rows: each
+    comparison's caveats (marked ⚠), *lead* (never cut), then *lines* and *note* (gid ``nw-rare-line``).
 
     *stamped* says a label (a saved subset's name, the moving average) is written at the figure's top left once the
-    page is drawn (``renderer.stamp_subset``): the first headline then starts :data:`_STAMP_IN` lower, below it."""
+    page is drawn (``renderer.stamp_subset``): the first line then starts :data:`_STAMP_IN` lower, below it."""
+
     fig.clear()
-    top_in = _TOP_IN + (_STAMP_IN if stamped else 0.0)
     width, height = max(fig.get_figwidth(), 1.0), max(fig.get_figheight(), 1.0)
-    stacked = width < STACK_BELOW_IN
-    per_unit, cols = (3, 1) if stacked else (1, 3)      # rows of panels per treatment, panels per row
-    row_min = STACKED_ROW_MIN_IN if stacked else ROW_MIN_IN
-    step_in = _REPORT_PT * _LEADING / 72
-    head_step = _HEAD_PT * _LEADING / 72
-    texts = [unit_text(result, u) for u in result.units]
-    heads = [_wrapped(fig, [t["headline"]], 0.96, _HEAD_PT, "") for t in texts]
-    head_in = [len(h) * head_step + _HEAD_GAP_IN for h in heads]
-    # The deciding test, then the caveats — what undermines the verdict — then the supporting tests: when a short figure
-    # cannot hold them all, it is the supporting tests that go to Details first.
-    body = [[t["lines"][0], *[f"⚠ {c}" for c in t["caveats"]], *t["lines"][1:]] for t in texts]
-    room = 0
-    used = top_in + (len(body[0]) if body else 0) * step_in + 2 * _TEXT_PAD_IN
-    for h in head_in[:MAX_UNIT_ROWS]:
-        if room and used + h + per_unit * row_min > height:
-            break
-        used += h + per_unit * row_min
-        room += 1
-    n_units = max(1, room) if result.units else 0
-    units, heads, head_in = result.units[:n_units], heads[:n_units], head_in[:n_units]
-    extra = len(result.units) - len(units)
-    items = [*[line for b in body[:n_units] for line in b], *lines]
-    # Always drawn, whatever else is cut: the first treatment's deciding test, and that some treatments are not drawn.
-    must = _wrapped(fig, [f"{extra} more treatment(s) are not drawn: each is in Details, below the figure."], 0.96) \
-        if extra else []
-    first = _wrapped(fig, list(lead), 0.96)
-    # The text takes what the panels leave, never more. It is cut between sentences, never inside one — a caveat cut
-    # half way reads as a different sentence — and what is left out is counted; Details holds it all.
-    fits = max(1, int((height - top_in - sum(head_in) - len(units) * per_unit * row_min - 2 * _TEXT_PAD_IN)
-                      // step_in))
-    tail = _wrapped(fig, [note], 0.96) if note else []
-    text, left_out = list(first), 0
-    for i, item in enumerate(items):
-        wrapped = _wrapped(fig, [item], 0.96)
-        if i and (left_out or len(text) + len(wrapped) + len(must) + 1 > fits):
-            left_out += 1
-            continue
-        text += wrapped
-    text += must
-    if left_out:                                   # one pointer to Details, not two
-        text.append(f"… {left_out} more, and the full report: Details ▸ under the figure.")
-    else:
-        text += tail
-    text_in = len(text) * step_in + 2 * _TEXT_PAD_IN
-    band_in = max(row_min, (height - top_in - text_in - sum(head_in)) / max(1, len(units) * per_unit))
+    params, units = result.prepared.params, result.units
+    value_label = result.prepared.value_label
     log_axis = log_axis_for(result)
+    cols = columns_for(width)
+    lines_of = -(-len(units) // cols) if units else 0
+    step = _REPORT_PT * _LEADING / 72
+    probe = fig.add_axes([0, 0, 0.001, 0.001], frameon=False)
+    probe.axis("off")
+    probe.set_gid(PAGE_MARK)            # the page's figure holds the rare page while this axes is on it
+    ink = _inks(probe)[1]
+    y = _TOP_IN + (_STAMP_IN if stamped else 0.0)          # inches down from the figure's top
+
+    def text(content, pt, gid, *, bold=False, x=0.02, wrap=0.96) -> None:
+        nonlocal y
+        wrapped = _wrapped(fig, [content], wrap, pt, "")
+        _ink(fig.text(x, 1 - y / height, "\n".join(wrapped), fontsize=pt, fontweight="bold" if bold else "normal",
+                      va="top", color=ink, linespacing=_LEADING, gid=gid))
+        y += len(wrapped) * pt * _LEADING / 72
+
+    def axes(x0: float, top: float, w: float, h: float):
+        ax = fig.add_axes([x0, 1 - (top + h - _BELOW_IN) / height, w, (h - _ABOVE_IN - _BELOW_IN) / height])
+        _prepare_axes(ax, GRID_TYPE_SCALE)
+        return ax
+
+    def fit_title(ax, top: float, h: float) -> None:
+        # The axes start under their own title, however many lines it took: a fixed allowance left an inch of
+        # nothing over a one-line title and ran a four-line one into the caption above.
+        lines = ax.get_title().count("\n") + 1 if ax.get_title() else 0
+        above = 0.12 + lines * _TITLE_PT * _LEADING / 72
+        bottom = top + h - _BELOW_IN
+        ax.set_position([ax.get_position().x0, 1 - bottom / height, ax.get_position().width,
+                         max(bottom - top - above, 0.3) / height])
+
+    if units:
+        text(rx.groups_line(result), _HEAD_PT, "nw-rare-groups", bold=True)
+        y += 0.06
+    for i, unit in enumerate(units):
+        y += 0.04
+        text(rx.comparison_title(result, i), _HEAD_PT, f"nw-rare-comparison-head:{i}", bold=True)
+        text(rx.unit_text(result, unit)["headline"], _HEAD_PT, "nw-rare-unit")
     left, gap = 0.75 / width, 0.85 / width
     panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
-    axes_h = band_in - _ROW_PAD_IN
-    cursor = height - top_in
-    probe = None
-    for unit, head, h_in in zip(units, heads, head_in):
-        head_top = cursor
-        cursor -= h_in
-        panels = (lambda ax, u=unit: draw_ecdf_strata(ax, u, result.prepared.value_label, log_axis),
-                  lambda ax, u=unit: draw_exceedance(ax, u), lambda ax, u=unit: draw_hc(ax, u))
-        for c, draw in enumerate(panels):
-            row = c if stacked else 0
-            bottom = cursor - (row + 1) * band_in + 0.62      # the x labels sit below the axes
-            ax = fig.add_axes([left + (0 if stacked else c) * (panel_w + gap), bottom / height, panel_w,
-                               axes_h / height])
-            _prepare_axes(ax, GRID_TYPE_SCALE)
-            draw(ax)
-            probe = probe or ax
-        cursor -= per_unit * band_in
-        ink = _inks(probe)[1]
-        _ink(fig.text(0.02, head_top / height, "\n".join(head), fontsize=_HEAD_PT, fontweight="bold", va="top",
-                      color=ink, linespacing=_LEADING, gid="nw-rare-unit"))
-    if probe is None:
-        probe = fig.add_axes([0, 0, 0.001, 0.001], frameon=False)
-        probe.axis("off")
-    ink = _inks(probe)[1]
-    y0 = (text_in - _TEXT_PAD_IN) / height
-    for i, line in enumerate(text):
-        _ink(fig.text(0.02, y0 - i * step_in / height, line, fontsize=_REPORT_PT, va="top",
-                      color=ink, gid="nw-rare-line"))
+    for key, *_rest in rx.TEST_ROWS if units else ():
+        y += ROW_GAP_IN
+        text(rx.test_heading(key, params), _TEST_PT, f"nw-rare-test:{key}", bold=True)
+        text("   ".join(f"{u.label}: {rx.test_p(u, key, params, len(units))}" for u in units), _REPORT_PT,
+             f"nw-rare-test-p:{key}")
+        if key in SHARED_PANELS:
+            value_of, ylabel, title, gid, label_of, missing = SHARED_PANELS[key]
+            ax = axes(left, y, 1.0 - left - 0.25 / width, SHARED_IN)
+            ax.set_gid(f"nw-rare-shared:{key}")
+            _title(ax, title)
+            fit_title(ax, y, SHARED_IN)
+            draw_well_dots(ax, result, value_of, ylabel, gid, label_of=label_of, missing=missing,
+                           p_of=lambda u, k=key: rx.test_p(u, k, params, len(units), short=True))
+            y += SHARED_IN
+        draw = _small_panel(key, value_label, log_axis)
+        if draw is None:
+            continue
+        for i, unit in enumerate(units):
+            line, col = divmod(i, cols)
+            top = y + line * (CAPTION_IN + SMALL_IN)
+            x0 = left + col * (panel_w + gap)
+            caption = f"{rx.comparison_title(result, i)} · {rx.test_p(unit, key, params, len(units))}"
+            short = _wrapped(fig, [caption], panel_w + gap * 0.8, _REPORT_PT, "")[:2]
+            _ink(fig.text(x0 - 0.45 / width, 1 - top / height, "\n".join(short), fontsize=_REPORT_PT,
+                          fontweight="bold", va="top", color=ink, gid=f"nw-rare-comparison:{key}:{i}"))
+            ax = axes(x0, top + CAPTION_IN, panel_w, SMALL_IN)
+            ax.set_gid(f"nw-rare-panel:{key}:{i}")
+            draw(ax, unit)
+            fit_title(ax, top + CAPTION_IN, SMALL_IN)
+        y += lines_of * (CAPTION_IN + SMALL_IN)
+    y += _TEXT_PAD_IN
+    caveats = [f"⚠ {rx.comparison_title(result, i).split(':', 1)[0]} ({u.label}): {c}"
+               for i, u in enumerate(units) for c in rx.unit_text(result, u)["caveats"]]
+    for item in [*lead, *caveats, *lines, *([note] if note else [])]:
+        for part in _wrapped(fig, [item], 0.96):
+            _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
+            y += step
+    fig._aw_rare_laid_out = (round(width, 2), round(height, 2))
+    fig._aw_rare_need_in = y + _TEXT_PAD_IN
+    return fig._aw_rare_need_in
+
+
+#: The gid of an invisible axes :func:`render_rare_page` puts on its figure: while it is there, the figure holds the
+#: rare page, and :func:`needed_height` reads the height that page asked for. Any other view clears the figure, and
+#: the mark with it.
+PAGE_MARK = "nw-rare-page"
+
+
+def needed_height(fig) -> float | None:
+    """The height in inches the rare page on *fig* needs at its laid-out width, or ``None`` when *fig* holds no rare
+    page (another view, or a message)."""
+    if not any(ax.get_gid() == PAGE_MARK for ax in fig.axes):
+        return None
+    return getattr(fig, "_aw_rare_need_in", None)
+
+
+def needs_relayout(fig) -> bool:
+    """Whether the rare page on *fig* was laid out for another size than the figure now has — the canvas grew to the
+    height the page asked for, or the window was resized — and must be drawn again."""
+    laid = getattr(fig, "_aw_rare_laid_out", None)
+    if needed_height(fig) is None or laid is None:
+        return False
+    return laid != (round(fig.get_figwidth(), 2), round(fig.get_figheight(), 2))
 
 
 def render_crops(fig, responders, load, *, max_crops: int = MAX_CROPS) -> None:

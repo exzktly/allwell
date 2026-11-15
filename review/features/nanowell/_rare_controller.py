@@ -36,12 +36,14 @@ module.
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 from review.features.nanowell import controller as _controller
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import window_compute as wc
-from review.features.nanowell._rare_render import render_rare_page
+from review.features.nanowell._rare_render import needed_height, render_rare_page
 from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS, RareParams, from_site_metrics, qc_flag_counts
 from review.features.nanowell.rare_export_compute import report_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
@@ -288,6 +290,20 @@ def flagged_rows(result: RareResult) -> list[dict]:
         rows.append({"site": (str(row["well_id"]), q, r), "fc": float(row["fc"]), "why": why,
                      "unit": row["unit"]})
     return rows
+
+
+def fit_canvas_height(ctx) -> None:
+    """Make the page's canvas as tall as the figure on it needs: the rare page's height at its width
+    (``_rare_render.needed_height``) — the canvas sits in a scroll area, so a figure taller than the window scrolls
+    and every comparison stays on it — and no minimum at all for any other view, which fills the window as before."""
+    fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
+    if fig is None or canvas is None:
+        return
+    need = needed_height(fig)
+    ratio = getattr(canvas, "device_pixel_ratio", 1.0) or 1.0
+    px = int(math.ceil(need * fig.dpi / ratio)) if need else 0
+    if canvas.minimumHeight() != px:
+        canvas.setMinimumHeight(px)
 
 
 def after_draw(ctx, st, model) -> None:

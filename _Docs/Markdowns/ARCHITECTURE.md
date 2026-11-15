@@ -13979,16 +13979,19 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 * `rare_hc_compute` (Test B) — per-nanowell p-values against the stratum's pool, the HC+ statistic over
   `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when
   the pool cannot resolve the `1/n` scale (two or fewer control wells, or a pool under three times a well's size).
+  A well with no qualifying index says why in plain words (`unscored_reason`): `BEYOND_CONTROLS` when its top
+  `alpha0·n` nanowells are all at p ≤ 1/n — past every control value, since an empirical p's floor 1/(N+1) is
+  below 1/n whenever the pool is larger than the well — which are the strongest responders there are. HC+ keeps
+  its definition; the figure marks such a well "no HC score" with that reason rather than leaving it undrawn.
 * `rare_ad_compute` (Test C) — the one-sided, upper-tail-weighted Anderson–Darling `A²_R` per stratum, combined by
   nanowell share over the strata where it is defined, summed over the control values at or above the median with
   `F0 = #{control ≤ u} / (N + 1)`, so the pool's top value carries weight and mass beyond every control counts (with
   `/ N` it counted nothing, and whole-number fold changes left nothing to sum); NaN — undefined, never 0 — only for a
   pool of one value. The Scholz–Stephens k-sample test
-  is reported as uncalibrated description only. `tail_start` is the control median the sum starts at, and
-  `drawn_excess` gives the figure the same region over the pooled values as drawn (`_rare_render._shade_shape_test`
-  shades it between the two cumulative curves, gid `rare-ad-excess:<stratum>`, on the analysed tail's side, so
-  *Responders lower* is shaded below the median); the panel's title names the dashed cutoff as the exceedance
-  test's and the shading as the shape test's.
+  is reported as uncalibrated description only; the figure gives it a row of its own, headed as treating every
+  nanowell as independent, and shades the whole gap between its pooled cumulative curves
+  (`_rare_render._shade_gap`, gid `rare-pooled-gap:<stratum>`) — on both sides, since the test is two-sided.
+  `tail_start` is the control median the per-well sum starts at.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
   shown), Benjamini–Hochberg across units for each test, `interpret` (the exceedance test alone decides the verdict;
@@ -14063,19 +14066,31 @@ above the FDR, an exceedance regression with no control nanowell past the cutoff
 effectively nanowell-level, with the floor of a whole-well test beside it), and nanowells beyond Higher
 Criticism's reach (HC+ drops p ≤ 1/n, which with a control pool larger than a well are the most extreme ones) —
 gathered by `unit_text`; `report_lines`, the Details report, uses the same test names (`NAME_A/B/C`).
-`_rare_render.render_rare_page` draws, per treatment, its headline above its row of panels (gid `nw-rare-unit`) —
-how far nanowells grew (fold-change ticks `2×`, `4×` from `_fold_ticks`, a cutoff ≤ 0 not drawn on the log axis,
-each stratum labelled on its treatment curve by `_label_strata` — at staggered heights, since every cumulative curve
-ends at the same top right corner — with a dot in its paired shade, and the dashed line labelled at its foot),
-each well's share past the cutoff labelled with its count, Higher Criticism — and under the panels each treatment's
-deciding line, its ⚠ caveats, then its supporting line (gid `nw-rare-line`). It lays the figure out in inches,
-panels first: each row gets at least `ROW_MIN_IN`, as many treatments are drawn as fit (at most `MAX_UNIT_ROWS`,
-the rest named in a line that is always drawn), and the text takes only what the rows and headlines leave. Text
-that does not fit is cut **between sentences**, never inside one, after the first deciding line, which is always
-drawn; what is left out is counted in one pointer to Details. A figure
-narrower than `STACK_BELOW_IN` (a phone's, about 4 in) stacks each treatment's three panels in one column, each at
-least `STACKED_ROW_MIN_IN` tall: side by side there each panel was about an inch across and its labels ran into its
-neighbours'. The exceedance panel starts its y axis at 0 and raises its top by the height of a dot's count label in
+`_rare_render.render_rare_page` draws **one row per test**, so every plot on it belongs to exactly one test and
+says which. From the top: the groups tested, each with its wells, and the comparisons they make
+(`rare_export_compute.groups_line`, gid `nw-rare-groups`); each comparison's name
+(`comparison_title`, *Comparison i of n: group vs control*) over its headline (gid `nw-rare-unit`); then the four
+rows of `rare_export_compute.TEST_ROWS` — the exceedance test (which decides), Higher Criticism and the shape test
+(supporting), and the pooled shape test (description only, its heading saying it treats nanowells as independent) —
+each headed by `test_heading` and the comparisons' p from `test_p` (gids `nw-rare-test:<key>`,
+`nw-rare-test-p:<key>`). In a row, a plot of one dot per well (each well's share past the cutoff labelled with its
+count, each well's peak HC score, each well's A²_R) holds **every comparison on one axes** (`draw_well_dots`, axes
+gid `nw-rare-shared:<key>`): the control wells once as the band chance gives, then each group's wells, a rule between
+groups and each group's name and short p over them, wrapped to its own width; a well with no value is written in
+("no HC score"), never left out. A plot of curves (the cumulative shares with the cutoff, the HC curves, the pooled
+cumulative shares with their gap shaded) is drawn **once per comparison** (axes gid `nw-rare-panel:<key>:<i>`),
+captioned with the comparison's name and p, as many across as `columns_for` fits (at most `MAX_COLUMNS`, each at least
+`COLUMN_MIN_IN` wide, so one on a phone) and the rest wrapping below inside the same row — the figure never grows
+sideways. Each axes starts under its own title, however many lines it took. Under the rows, each comparison's ⚠
+caveats, named by comparison, then the lead, the lines and the note (gid `nw-rare-line`). Nothing is cut and no
+comparison is left off: `render_rare_page` returns the height in inches the page needs at its width (also kept for
+`needed_height`, marked by an invisible axes gid `nw-rare-page`), and the page's figure card sits in a vertical
+scroll area (`tab_view`, `_nw_figure_scroll`): after every redraw `_rare_controller.fit_canvas_height` sets the
+canvas' minimum height to that need — and to none on any other view, which fills the window as it always did —
+and `controller.on_canvas_resized` draws the page again once the canvas has grown (`needs_relayout`). The wheel over
+the canvas scrolls the area only while there is somewhere to scroll (`install_canvas_wheel_scroll`), so the Array
+view's wheel zoom is untouched. The single-panel functions (`draw_exceedance`, `draw_hc`, `draw_ecdf_strata`) still
+draw one comparison's panel each. The single exceedance panel starts its y axis at 0 and raises its top by the height of a dot's count label in
 points (`_headroom`), so a dot at the top of a short panel keeps its label inside the axes rather than over the
 title; a treatment dot is outlined in the plot ink (paired for the publication ground), so a dark plate colour
 shows on the dark card. Each treatment well's own empirical p is in Details, not on the panel: its floor is

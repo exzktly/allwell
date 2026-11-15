@@ -732,6 +732,7 @@ def redraw(ctx) -> None:
     drawing from before; most callers reach this inside a ``swallow``, which would otherwise log it and nothing more."""
     try:
         _redraw(ctx)
+        rc.fit_canvas_height(ctx)          # the rare page's canvas as tall as it needs; every other view, no minimum
     except Exception as exc:
         log.exception("Nanowells: the page could not be drawn")
         from review.core.plot_failure import show_redraw_failed
@@ -1763,6 +1764,12 @@ def on_canvas_resized(ctx) -> None:
         return
     if st.view == "identity":                          # Diagnostics is laid out for the figure's size: lay it out again
         if idc.needs_relayout(st.identity_drawn, ctx.widgets.get_or_none("_nw_fig")):
+            redraw(ctx)
+        return
+    if st.view == "statistics":                        # the rare page grew its canvas, or the window changed width
+        from review.features.nanowell._rare_render import needs_relayout
+
+        if needs_relayout(ctx.widgets.get_or_none("_nw_fig")):
             redraw(ctx)
         return
     drawn = st.drawn

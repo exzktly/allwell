@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 
 import process_microscopy as pm
+from util.schema import DEFAULT_SCHEMA, parse_schema
 from pipeline.empty_well import _POOLED_TP
 
 _NOT_BG = "NOT background-subtracted"
@@ -33,7 +34,7 @@ _FF_DAPI_ONLY = {"dapi": {_POOLED_TP: np.ones((64, 64), np.float32)}}
 
 def _correct_gfp(flatfield_mode, background_method, ff_models, bg_models):
     """The GFP frame as ``_correct_image_group`` — the pipeline's own caller — returns it."""
-    schema = pm.parse_schema(pm.DEFAULT_SCHEMA)
+    schema = parse_schema(DEFAULT_SCHEMA)
     _, _, _, fluor_corrected, _ = pm._correct_image_group(
         _RAW.copy(), [_RAW.copy()], nuclear_path=Path("exp_DAPI_A01_f1_t0.tif"),
         nuclear_token="DAPI", fluor_tokens=["GFP"], tophat_nir=True, tophat_radius_nir=50,

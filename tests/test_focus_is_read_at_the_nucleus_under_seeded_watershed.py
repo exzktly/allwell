@@ -21,9 +21,10 @@ from tifffile import imwrite
 
 import pipeline.stardist as sd
 import process_microscopy as pm
+from util.schema import DEFAULT_SCHEMA, parse_schema
 from pipeline.field_quality import FOCUS_COLUMN, cell_focus_by_label
 
-SCHEMA = pm.parse_schema(pm.DEFAULT_SCHEMA)
+SCHEMA = parse_schema(DEFAULT_SCHEMA)
 SIZE = 600
 PITCH = 60
 NUCLEUS_R, CELL_R = 7, 22

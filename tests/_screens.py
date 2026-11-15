@@ -22,15 +22,17 @@ DESK = QRect(0, 0, 1640, 980)
 #: sideways (``tests/test_phone_windows.py`` uses the same two).
 PHONE_UPRIGHT = QRect(0, 0, 432, 936)
 PHONE_SIDEWAYS = QRect(0, 0, 936, 432)
-#: An unfolded foldable's inner screen — the iPhone Fold's 4:3 (1.41), at 1.2 px per phone point
-#: (``core.phone_layout.FOLD_REFERENCE_WIDTH_PT``: 690 pt across its short side) — held upright and
-#: sideways. Phone layout is entered by its button, as on the phones: sideways, a 1170 × 828 desktop
-#: is large enough for the desk layout, so it is not offered on its own.
-FOLD_UPRIGHT = QRect(0, 0, 828, 1170)
-FOLD_SIDEWAYS = QRect(0, 0, 1170, 828)
+#: The iPhone Duo's two screens at half their published pixels (``core.phone_layout.DUO_INNER_PX`` /
+#: ``DUO_OUTER_PX``), so they are read by their shape as RealVNC's resized desktop would be: unfolded
+#: (626 x 890 points, 1.5 px each) upright and sideways, where the page's Controls are docked left of
+#: it, and folded (466 x 678 points), a phone's form.
+DUO_UPRIGHT = QRect(0, 0, 939, 1335)
+DUO_SIDEWAYS = QRect(0, 0, 1335, 939)
+DUO_FOLDED = QRect(0, 0, 699, 1017)
 
 SCREENS: dict[str, QRect] = {"desk": DESK, "phone-upright": PHONE_UPRIGHT, "phone-sideways": PHONE_SIDEWAYS,
-                             "phone-fold-upright": FOLD_UPRIGHT, "phone-fold-sideways": FOLD_SIDEWAYS}
+                             "phone-duo-upright": DUO_UPRIGHT, "phone-duo-sideways": DUO_SIDEWAYS,
+                             "phone-duo-folded": DUO_FOLDED}
 
 
 def is_phone(screen: str) -> bool:

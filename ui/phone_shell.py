@@ -169,6 +169,10 @@ class PhoneHandles:
     #: The window's Back / Forward (``ui.page_history.PageHistory``): phone
     #: layout makes its own pair of buttons from it.
     history: object | None = None
+    #: The splitter that holds Review's pages (and, at the desk, the rail
+    #: beside them): on an unfolded foldable the Controls sheet docks in it,
+    #: left of the page (``ui.phone_dock``).
+    centre_split: QWidget | None = None
 
 
 # ── the rescale pass ──────────────────────────────────────────────────────
@@ -981,6 +985,19 @@ WIDE_SCREEN_PT = 600
 #: tall; an unfolded foldable on its side is 690, which has the height for the
 #: full bar and touch targets at the floor.
 SHORT_SCREEN_PT = 500
+#: The Controls sheet docked at the left of the page on an unfolded foldable
+#: (``ui/phone_dock.py``). The Duo's inner screen is 626 pt across upright,
+#: which leaves the plot 326 pt — a phone's width less a margin — and 890
+#: sideways, which leaves it 590. The sheet's label column is
+#: ``phone_layout.SHEET_LABEL_PT``, so a control has about 170 pt beside it, and
+#: a row wider than that stacks (``ui/phone_fit``). Never so wide that the page
+#: beside it is narrower than the narrowest phone (``DOCKED_PAGE_MIN_PT``, the
+#: 360 dp of the narrowest Android phones): every page is fitted to a phone's
+#: width, and none to less. Upright on the Duo the column is 266 pt and the
+#: page 360; at 236 pt (a page of 390) the column's two buttons a row — Fold
+#: change and Display — needed 353 px of its 330 and scrolled sideways.
+DOCKED_SHEET_PT = 300
+DOCKED_PAGE_MIN_PT = 360
 #: How often the side rail's status line follows the status bar while out,
 #: and the Wells button its count while the Wells sheet is open.
 _RAIL_STATUS_MS = 400
@@ -1023,6 +1040,9 @@ class PhoneShell(QObject):
         self._landscape: bool | None = None
         #: Whether Forward is in the bar (a wide screen) rather than in ⋯.
         self._forward_in_bar = False
+        #: On an unfolded foldable, whether the docked Controls column is
+        #: wanted: ⚙ Controls hides and shows it, and it follows the page.
+        self._dock_wanted = True
         self._build_controls()
         self._load_settings()
         self._listen_for_declarations()
@@ -1112,6 +1132,24 @@ class PhoneShell(QObject):
         """At least ``WIDE_SCREEN_PT`` across: a phone on its side, or an
         unfolded foldable either way."""
         return self.screen_points()[0] >= WIDE_SCREEN_PT
+
+    def is_docked(self) -> bool:
+        """Phone layout on a foldable's inner screen, opened: the Controls sheet
+        is a column docked left of the page (``ui/phone_dock``) rather than an
+        overlay, and stays open from page to page."""
+        a = self._avail()
+        return (phone_layout.is_on() and self._h.centre_split is not None
+                and phone_layout.is_unfolded(a.width(), a.height()))
+
+    def _docked_width(self) -> int:
+        """The docked Controls column's width: ``DOCKED_SHEET_PT``, less what
+        the page beside it needs to keep ``DOCKED_PAGE_MIN_PT``."""
+        across = self.screen_points()[0]
+        split = self._h.centre_split
+        # The splitter's handle sits between the column and the page, and
+        # comes out of the column: the page keeps all of its minimum.
+        handle = split.handleWidth() if split is not None else 0
+        return max(1, self.pt(max(0.0, min(DOCKED_SHEET_PT, across - DOCKED_PAGE_MIN_PT))) - handle)
 
     def is_short(self) -> bool:
         """Held sideways and less than ``SHORT_SCREEN_PT`` tall: a phone on its
@@ -1433,7 +1471,12 @@ class PhoneShell(QObject):
 
     # ── adapting individual widgets ───────────────────────────────────────
     def _band_managed(self, band: QWidget) -> bool:
+        """Whether *band* sits inside one of the roots whose pages' controls
+        phone layout lends (``PhoneHandles.band_roots``) — *band* itself
+        included, so a lent band's home page can be asked about too."""
         roots = [r for r in self._h.band_roots() if r is not None]
+        if any(band is r for r in roots):
+            return True
         p = band.parentWidget()
         while p is not None:
             if any(p is r for r in roots):
@@ -1958,26 +2001,34 @@ class PhoneShell(QObject):
         Image Table's builder and action strip, whose band is empty)."""
         marked = None
         for w in form_registry.declared("controls"):
-            if not self._band_managed(w):
+            # A band lent to a sheet is judged by the page it was lent from: it
+            # is that page's while the page is on screen, and no page's after.
+            lent = w is self._sheet_band
+            home = self._sheet_home if lent else w.parentWidget()
+            if home is None or not self._band_managed(home if lent else w):
                 continue
-            parent = w.parentWidget()
-            if w is not self._sheet_band and (parent is None or not parent.isVisible()):
+            if not home.isVisible() and not (lent and not self.is_docked()):
                 continue
             if not isinstance(w, ControlBand):
                 marked = w
-            elif (w.scope_count() + w.action_count()) > 0:
+            elif lent or (w.scope_count() + w.action_count()) > 0:
+                # Lent, its controls are in the sheet's form rather than its
+                # own row, so it counts none — and it was lent for having some.
                 return w
         return marked
 
     def _ensure_sheet(self):
-        """The Controls sheet, built for the screen's present shape."""
+        """The Controls sheet, built for the screen's present shape: docked
+        on an unfolded foldable, an overlay otherwise."""
         land = self.is_landscape()
-        if self._sheet is not None and getattr(self._sheet, "_aw_land", None) == land:
+        form = "dock" if self.is_docked() else land
+        if self._sheet is not None and getattr(self._sheet, "_aw_form", None) == form:
             return self._sheet
         if self._sheet is not None:
             self._sheet.closeNow()
             self._sheet.deleteLater()
-        self._sheet = self._build_sheet(land, self._give_band_back)
+        self._sheet = self._build_sheet(land, self._give_band_back, docked=form == "dock")
+        self._sheet._aw_form = form
         return self._sheet
 
     def _ensure_wells_sheet(self):
@@ -2002,10 +2053,12 @@ class PhoneShell(QObject):
             return 0
         return max(0, self._win.height() - strip.mapTo(self._win, strip.rect().topLeft()).y())
 
-    def _build_sheet(self, land: bool, on_closed):
+    def _build_sheet(self, land: bool, on_closed, *, docked: bool = False):
         """A sheet phone layout lends a page's widgets to: a bottom drawer
         upright, rising from above the strip, as tall as what it holds up to
-        ``SHEET_HEIGHT_SHARE`` of the window; a right-hand panel sideways."""
+        ``SHEET_HEIGHT_SHARE`` of the window; a right-hand panel sideways; and
+        *docked*, a ``DOCKED_SHEET_PT`` column left of the page
+        (``ui.phone_dock.DockedSheet``) on an unfolded foldable."""
         from PySide6.QtWidgets import QScrollArea
         from widgets.drawer import Drawer
         band = self._h.band
@@ -2025,7 +2078,10 @@ class PhoneShell(QObject):
 
         # No scrim: the plot above the sheet redraws as its controls change,
         # and a dimmed plot is one the user cannot judge the change by.
-        if land:
+        if docked:
+            from ui.phone_dock import DockedSheet
+            sheet = DockedSheet(self._h.centre_split, self._docked_width)
+        elif land:
             sheet = Drawer(self._win, edge="right", width_hint=lambda: self.pt(LANDSCAPE_SHEET_PT),
                            margin=0, top_inset=_below_band, scrim=0.0)
         else:
@@ -2066,7 +2122,7 @@ class PhoneShell(QObject):
         fit = _FitOnShow(scroll, target=_form_host)
         scroll.installEventFilter(fit)
         sheet._aw_fit = fit
-        if not land:
+        if not land and not docked:
             # The height is measured off the controls the sheet holds, and they
             # are lent in still at their page width: measured at ``open`` the
             # sheet came up about a third short, with the threshold row and the
@@ -2078,7 +2134,12 @@ class PhoneShell(QObject):
         return sheet
 
     def toggle_controls(self) -> None:
-        if self._sheet is not None and self._sheet.isOpen():
+        is_open = self._sheet is not None and self._sheet.isOpen()
+        if self.is_docked():
+            # Docked, the button hides and shows the column, and the choice
+            # holds from page to page (``refresh``).
+            self._dock_wanted = not is_open
+        if is_open:
             self.close_controls()
         else:
             self.open_controls()
@@ -2087,7 +2148,14 @@ class PhoneShell(QObject):
         band = self._current_band()
         if band is None:
             return
-        self.close_wells(now=True)      # one sheet at a time
+        docked = self.is_docked()
+        if self._sheet is not None and self._sheet.isOpen():
+            if self._sheet_band is band and getattr(self._sheet, "_aw_form", None) == (
+                    "dock" if docked else self.is_landscape()):
+                return
+            self.close_controls(now=True)   # another page's, or another shape's
+        if not docked:
+            self.close_wells(now=True)      # one sheet at a time
         sheet = self._ensure_sheet()
         parent = band.parentWidget()
         lay = parent.layout() if parent is not None else None
@@ -2115,7 +2183,7 @@ class PhoneShell(QObject):
         fit = getattr(sheet, "_aw_fit", None)
         if fit is not None:
             fit.refit_now()
-        self.controls_button.setText("Done ✕")
+        self.controls_button.setText("Hide controls" if docked else "Done ✕")
 
     def close_controls(self, *, now: bool = False) -> None:
         if self._sheet is None:
@@ -2157,7 +2225,9 @@ class PhoneShell(QObject):
         picker = self._well_picker()
         if not picker:
             return
-        self.close_controls(now=True)      # one sheet at a time
+        if not self.is_docked():
+            self.close_controls(now=True)  # one sheet at a time; a docked column stays
+
         if self._h.navigator_open():
             self._h.set_navigator(False)
         sheet = self._ensure_wells_sheet()
@@ -2282,7 +2352,25 @@ class PhoneShell(QObject):
                                    self.controls_button)))
         if not review:
             self.close_sheets()
+        else:
+            self._sync_dock()
         self._fit_pages()
+
+    def _sync_dock(self) -> None:
+        """On an unfolded foldable, keep the page on screen's controls in the
+        docked column — lent when the page changes, the column opened when the
+        screen became one — unless ⚙ Controls hid it."""
+        if not self.is_docked():
+            if getattr(self._sheet, "_aw_form", None) == "dock" and self._sheet.isOpen():
+                self.close_controls(now=True)     # the phone folded
+            return
+        band = self._current_band()
+        if band is None:
+            # A page with no controls: the column goes, the last page's
+            # controls back to it, and returns with the next page that has some.
+            self.close_controls(now=True)
+        elif self._dock_wanted:
+            self.open_controls()
 
     def _refresh_when_settled(self) -> None:
         self._sweep(force=False)

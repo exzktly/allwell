@@ -1,13 +1,13 @@
-"""Every page of the full app, with data, at a desktop, a phone's two shapes and an unfolded foldable's two.
+"""Every page of the full app, with data, at a desktop, a phone's two shapes and the iPhone Duo's three.
 
 The slow lane's other phone tests run on Qt's default offscreen screen, an 800×800 square. This one
 puts the app on a real screen — a 1640×980 desktop, a phone held upright (432×936), a phone held
-sideways (936×432), an unfolded foldable's near-square inner screen upright (828×1170) and sideways
-(1170×828) — loads a dataset that carries data for the pages it covers, visits every page
+sideways (936×432), the iPhone Duo unfolded upright (939×1335) and sideways (1335×939), where the page's
+Controls are docked beside it, and folded (699×1017) — loads a dataset that carries data for the pages it covers, visits every page
 (``tests/_page_tour.py``) and measures each for the defects a person finds by looking
-(``tests/_layout_checks.py``). Three datasets, five screens: fifteen app constructions, each in a
+(``tests/_layout_checks.py``). Three datasets, six screens: eighteen app constructions, each in a
 process of its own (a full app's widgets are never reclaimed in-process, and nine in one process
-slowed from seconds per page to minutes per page), three at a time, about sixteen minutes in all, so
+slowed from seconds per page to minutes per page), three at a time, about nineteen minutes in all, so
 it is a slow-lane file run on its own::
 
     scripts/test.sh tests/test_every_page_renders.py -m ""

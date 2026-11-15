@@ -29,23 +29,33 @@ from contextlib import contextmanager
 #: unit: a button is the same size on the phone in either orientation.
 PHONE_REFERENCE_WIDTH_PT = 390
 
-#: An unfolded foldable phone — a book-style fold such as the iPhone Fold, the
-#: Galaxy Z Fold or the Pixel Fold — has a near-square inner screen: about 4:3
-#: (1.41) on the iPhone, squarer on the Android folds, where every phone held
-#: upright or sideways is 16:9 (1.78) or longer, and most are 19.5:9 (2.17). A
-#: screen whose long side is less than ``FOLD_MAX_ASPECT`` times its short side
-#: is taken as that inner screen, and its short side as ``FOLD_REFERENCE_WIDTH_PT``
-#: points rather than 390: the iPhone Fold's 7.8-inch, 4:3 inner screen is
-#: 4.5 inches across its short side, and a phone point is 1/152 inch (390 pt over
-#: an iPhone 16's 2.56-inch width), which is 685 pt. With the phone's 390 that
-#: screen took every touch target, bar and line of text at 1.77 times its size.
-#: The Android folds' inner screens are a little wider still (750-840 pt), so on
-#: them a target comes out slightly larger than the floor, never smaller. The
-#: same rule covers any other near-square desktop phone layout is used on (a
-#: 1024 × 768 screen is narrower than the desk window, so phone-shaped), which
-#: is a small tablet's size rather than a phone's either.
-FOLD_MAX_ASPECT = 1.6
-FOLD_REFERENCE_WIDTH_PT = 690
+#: The iPhone Duo, Apple's foldable, has two screens and both are near-square
+#: — unlike every other phone, which is 16:9 (1.78) or longer, most 19.5:9
+#: (2.17). Apple's published figures:
+#:
+#: * the inner screen, unfolded: 7.6 inches, 1878 × 2670 px at 430 ppi, 1.42 : 1;
+#: * the outer screen, folded: 5.4 inches, 1398 × 2034 px at 460 ppi, 1.45 : 1.
+#:
+#: Apple publishes no point sizes; at the 3× scale of every recent iPhone the
+#: pixels make the inner screen 626 × 890 points and the outer 466 × 678 (the
+#: same figures come from the pixel densities: 1878 px / 430 ppi is 4.37
+#: inches, and an iPhone's point is 1/143-1/153 inch). Those short sides are the
+#: screens' reference widths, as 390 is a phone's.
+DUO_INNER_PX = (1878, 2670)
+DUO_OUTER_PX = (1398, 2034)
+DUO_INNER_PT = 626
+DUO_OUTER_PT = 466
+#: Which of the two a near-square screen of some other resolution is — RealVNC
+#: may give the desktop the screen's shape at a resolution of its own — is
+#: read from its shape: the inner screen is 1.422 : 1 and the outer 1.455 : 1,
+#: and this is the midpoint. A screen squarer still (a 4:3 or 5:4 monitor, an
+#: Android fold's inner screen) reads as an unfolded inner screen.
+DUO_SPLIT_ASPECT = 1.438
+#: A screen whose long side is under this many times its short side is a
+#: foldable's screen: both of the Duo's (1.42, 1.45), 4:3 (1.33) and anything
+#: squarer. 3:2 (1.5, a Surface laptop) and every phone (1.78 and longer) are
+#: not.
+FOLD_MAX_ASPECT = 1.47
 
 #: Touch sizes, in phone points. 44 pt is the smallest target a thumb hits
 #: reliably (Apple's minimum; Material's 48 dp is the same physical size on a
@@ -181,14 +191,20 @@ def follow(owner, fn: Callable[[bool], None]) -> None:
 def is_phone_shaped(width: int, height: int) -> bool:
     """Does a screen of this available size look like a phone?
 
-    Upright (taller than wide), or too small in either direction to hold the
-    desktop window. A phone held sideways at its full physical resolution is
+    Upright (taller than wide), too small in either direction to hold the
+    desktop window, or near-square (a foldable's screen, folded or open, and a
+    4:3 monitor with it: :func:`is_fold_shaped`). A phone held sideways at its full physical resolution is
     indistinguishable from a wide monitor by size alone, so it reads as
     desk-shaped; the toggle is how the user says otherwise.
     """
     if width <= 0 or height <= 0:
         return False
     if height > width or width < DESK_MIN_W or height < DESK_MIN_H:
+        return True
+    # A foldable's screen is near-square either way up, folded or not — and
+    # so is a 4:3 monitor, which is offered phone layout too: the two are the
+    # same shape, and the offer is one the desk can dismiss.
+    if is_fold_shaped(width, height):
         return True
     # Sideways at full resolution a phone is the size of a monitor, but not
     # its shape: phones are 19.5:9 or longer (2.17), monitors 16:9 (1.78) or
@@ -197,19 +213,41 @@ def is_phone_shaped(width: int, height: int) -> bool:
     return width / height >= PHONE_MIN_ASPECT and height < PHONE_MAX_SHORT_SIDE
 
 
-def is_fold_shaped(width: int, height: int) -> bool:
-    """Is a screen of this size near-square, the shape of an unfolded foldable's
-    inner screen (``FOLD_MAX_ASPECT``) rather than of a phone, in either
-    orientation?"""
+def duo_screen(width: int, height: int) -> str | None:
+    """Which of a foldable's screens a screen of this size is, in either
+    orientation: ``"inner"`` (unfolded), ``"outer"`` (folded), or ``None`` for
+    any screen that is not near-square (``FOLD_MAX_ASPECT``).
+
+    The Duo's own resolutions are matched exactly; any other near-square
+    screen by its shape (``DUO_SPLIT_ASPECT``)."""
     short, long = sorted((width, height))
-    return short > 0 and long / short < FOLD_MAX_ASPECT
+    if short <= 0:
+        return None
+    if (short, long) == DUO_INNER_PX:
+        return "inner"
+    if (short, long) == DUO_OUTER_PX:
+        return "outer"
+    aspect = long / short
+    if aspect >= FOLD_MAX_ASPECT:
+        return None
+    return "inner" if aspect < DUO_SPLIT_ASPECT else "outer"
+
+
+def is_fold_shaped(width: int, height: int) -> bool:
+    """Is a screen of this size one of a foldable's near-square screens?"""
+    return duo_screen(width, height) is not None
+
+
+def is_unfolded(width: int, height: int) -> bool:
+    """Is a screen of this size a foldable's inner screen, opened?"""
+    return duo_screen(width, height) == "inner"
 
 
 def reference_width_pt(width: int, height: int) -> int:
     """How many phone points the short side of a screen of this size is taken
-    to be: ``FOLD_REFERENCE_WIDTH_PT`` on an unfolded foldable, otherwise
-    ``PHONE_REFERENCE_WIDTH_PT``."""
-    return FOLD_REFERENCE_WIDTH_PT if is_fold_shaped(width, height) else PHONE_REFERENCE_WIDTH_PT
+    to be: the Duo's inner or outer screen's, otherwise a phone's 390."""
+    return {"inner": DUO_INNER_PT, "outer": DUO_OUTER_PT}.get(
+        duo_screen(width, height), PHONE_REFERENCE_WIDTH_PT)
 
 
 def phone_unit(width: int, height: int) -> float:

@@ -809,6 +809,7 @@ class AllWellApp(QMainWindow):
                                          if self._analyze_phone is not None else None),
             well_picker=_well_picker,
             history=getattr(self, "_history", None),
+            centre_split=getattr(review, "_h_pane", None),
             wells_count=lambda: len(review._ctx.state.selection.selected_wells or ()),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)

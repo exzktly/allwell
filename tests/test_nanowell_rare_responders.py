@@ -1075,3 +1075,41 @@ def test_the_cumulative_panel_shades_the_shape_test_s_region_and_says_so():
     assert (treated > control.max()).any()
     assert xs.max() == pytest.approx(math.log2(treated.max()))
     assert ax.get_title().endswith("dashed: exceedance test's cutoff · shaded: what the shape test counts")
+
+
+# ── A treatment group the exclusions emptied: never silently missing ─────────────────────────────────────────────
+
+def _groups_table(emptied):
+    """Two control wells and two wells each of drug and drug2, ten nanowells a well; the groups in *emptied* have no
+    value of the metric anywhere."""
+    rows = []
+    for well, condition in (("A01", "ctrl"), ("A02", "ctrl"), ("B01", "drug"), ("B02", "drug"),
+                            ("C01", "drug2"), ("C02", "drug2")):
+        for q in range(10):
+            value = np.nan if condition in emptied else 1.0 + q + (5.0 if condition != "ctrl" and q < 2 else 0.0)
+            rows.append({"plate_id": "p", "well_id": well, "condition": condition, "nanowell_id": f"{q},0",
+                         "value": value})
+    return pd.DataFrame(rows)
+
+
+def test_every_treatment_group_excluded_is_named_not_drawn_as_an_empty_figure():
+    """Reported: on a 12-timepoint plate the Rare responders figure showed only its top label and "Full report,
+    warnings and notes: Details ▸ under the figure" — no headline, no panel. Every treatment nanowell had been
+    excluded while the control's were kept, so the analysis returned no unit and no word of why."""
+    from review.features.nanowell.rare_data_compute import VALUE_MISSING
+
+    with pytest.raises(ValueError) as caught:
+        rr.analyse(_groups_table({"drug", "drug2"}), rr.RareParams(control="ctrl"))
+    assert str(caught.value) == (
+        "no treatment group has a nanowell left to test: "
+        f"drug: every one of its 20 nanowells was excluded before testing ({VALUE_MISSING}: 20); "
+        f"drug2: every one of its 20 nanowells was excluded before testing ({VALUE_MISSING}: 20)")
+
+
+def test_a_treatment_group_the_exclusions_emptied_is_warned_of_while_the_others_are_tested():
+    from review.features.nanowell.rare_data_compute import VALUE_MISSING
+
+    result = rr.analyse(_groups_table({"drug2"}), rr.RareParams(control="ctrl"))
+    assert [u.treatment for u in result.units] == ["drug"]
+    assert (f"drug2: every one of its 20 nanowells was excluded before testing ({VALUE_MISSING}: 20)"
+            in result.warnings)

@@ -2387,9 +2387,10 @@ class PhoneShell(QObject):
         Leaving re-applies the application stylesheet and re-polishes and re-lays out every widget
         (:func:`rescale_widgets`). Run from the action's ``triggered``, that happened inside the menu's own event
         loop, itself inside the ⋯ button's press, with the menu still open and being restyled under its own
-        handler. Reported on macOS: a fatal stack overflow under ``rescale_widgets``, from this action. The
-        recursion was inside Qt, where the boot log shows no frames, and it did not reproduce on Linux's offscreen
-        platform; leaving from the event loop's top level gives the restyle the whole stack and an idle menu."""
+        handler. Reported on Windows, where the main thread's stack is 1 MB against Linux's 8 MB: a fatal stack
+        overflow under ``rescale_widgets``, from this action. The recursion was inside Qt, where the boot log shows
+        no frames, and it did not reproduce on Linux's offscreen platform even at 1 MB; leaving from the event loop's
+        top level gives the restyle the whole stack and an idle menu."""
         self._menu.close()
         QTimer.singleShot(0, lambda: self.set_on(False))
 

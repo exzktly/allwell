@@ -144,6 +144,26 @@ def _units(wells: dict[str, Well], params: RareParams,
             treated = [w for w in here if w.condition == t]
             if treated:
                 out.append((plate, t, controls, treated))
+    if not out:
+        # Every treatment group lost every nanowell while the control kept some: there is nothing to test, and a
+        # figure with no group on it says nothing of why — name each group and what excluded it.
+        lost = treatments_lost(exclusions, params.control, set(treatments))
+        raise ValueError("no treatment group has a nanowell left to test: " + "; ".join(lost) if lost else
+                         "no treatment group is drawn beside the control")
+    return out
+
+
+def treatments_lost(exclusions: pd.DataFrame | None, control: str, tested) -> list[str]:
+    """``"<group>: every one of its N nanowells was excluded (<reasons>)"`` for each condition other than *control*
+    that holds excluded nanowells and is not among *tested* — a treatment group the exclusions emptied."""
+    if exclusions is None or not len(exclusions):
+        return []
+    out = []
+    for condition, rows in exclusions.groupby(exclusions["condition"].astype(str), sort=True):
+        if condition == str(control) or condition in {str(t) for t in tested}:
+            continue
+        out.append(f"{condition}: every one of its {len(rows):,} nanowells was excluded before testing "
+                   f"({_reasons_text(rows)})")
     return out
 
 
@@ -356,6 +376,8 @@ def analyse(data, params: RareParams | None = None, *, validate: bool = False,
     for u in units:
         u.interpretation = interpret(u, params.fdr)
     warnings = [f"{u.label}: {u.refusal}" for u in units if u.refusal]
+    # A treatment group the exclusions emptied is not tested; said, so it is never silently missing from the figure.
+    warnings += treatments_lost(prepared.exclusions, params.control, {u.treatment for u in units})
     warnings += [f"{u.label}: {u.resolution}" for u in units if u.resolution]
     result = RareResult(prepared, units, pd.DataFrame([_row(u) for u in units]), _sensitivity(units),
                         _per_well(units), responders(units, prepared), parameter_log(prepared, units), warnings)

@@ -13995,7 +13995,9 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   HC and AD are supporting evidence), the flagged nanowells — past the control cutoff only — with their crop paths,
   and the parameter log. A control with no kept nanowell refuses the analysis with the cause (`_units`): every
   nanowell excluded, or every one of the control's, each with `rare_data_compute.exclusion_counts` by reason; only
-  a control no row is labelled with is reported as an unknown condition, with the conditions found. Higher
+  a control no row is labelled with is reported as an unknown condition, with the conditions found. When every
+  treatment group lost every nanowell, it refuses with each group and its reasons (`treatments_lost`), and a
+  group lost while others are tested is one of the result's warnings, so no group is ever silently missing. Higher
   Criticism and the shape test are computed independently (`_run_hc`, `_run_ad`, each with its own `_permute`), so
   an HC undefined for every labeling leaves the shape test's p standing, and `rare_export_compute.caveats` reads
   each test's own permutation floor rather than HC's for both.

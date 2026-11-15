@@ -11023,8 +11023,9 @@ in the report — when:
 - the run flagged it as **fused**, **partly visible** (an edge nanowell) or **count-disagreeing**, or the
   **identity check** could not confirm it is the same nanowell over time.
 
-When these leave the control group, or every group, with no nanowell at all, the test does not run and the figure
-says how many nanowells were excluded and why (for example *every one of the 40 nanowells was excluded before
+When these leave the control group, every treatment group, or every group with no nanowell at all, the test does
+not run and the figure says, for each group, how many nanowells were excluded and why; a treatment group they empty
+while others remain is left out of the test and named among the warnings (for example *every one of the 40 nanowells was excluded before
 testing … no value of the metric at the Timepoint: 40*). The usual cause is a Metric with no value at the chosen
 Timepoint — a size class with no Cell Gating rule, a fluorescence channel not imaged then — so choose another
 Metric or Timepoint.

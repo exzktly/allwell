@@ -2380,6 +2380,19 @@ class PhoneShell(QObject):
         act.setDefaultWidget(row)
         return act
 
+    def _leave_from_menu(self) -> None:
+        """**Desktop layout**, from the ⋯ menu: close the menu, then leave phone layout once the menu and the button
+        that opened it have finished with the tap — as the menu's Text size buttons already do.
+
+        Leaving re-applies the application stylesheet and re-polishes and re-lays out every widget
+        (:func:`rescale_widgets`). Run from the action's ``triggered``, that happened inside the menu's own event
+        loop, itself inside the ⋯ button's press, with the menu still open and being restyled under its own
+        handler. Reported on macOS: a fatal stack overflow under ``rescale_widgets``, from this action. The
+        recursion was inside Qt, where the boot log shows no frames, and it did not reproduce on Linux's offscreen
+        platform; leaving from the event loop's top level gives the restyle the whole stack and an idle menu."""
+        self._menu.close()
+        QTimer.singleShot(0, lambda: self.set_on(False))
+
     def _fill_menu(self) -> None:
         from widgets.owned_action import owned_action
         m = self._menu
@@ -2402,4 +2415,4 @@ class PhoneShell(QObject):
             fwd.setEnabled(history.can_forward())
             fwd.triggered.connect(history.forward)
         m.addSeparator()
-        owned_action(m, "Desktop layout").triggered.connect(lambda: self.set_on(False))
+        owned_action(m, "Desktop layout").triggered.connect(self._leave_from_menu)

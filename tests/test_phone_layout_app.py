@@ -206,6 +206,9 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert {"Reload dataset", "Help", "Desktop layout"} <= set(texts)
     assert any(t.startswith("App log") for t in texts)
     next(a for a in shell._menu.actions() if a.text() == "Desktop layout").trigger()
+    # Not from inside the menu's handler: the restyle waits for the event loop's top level (a stack overflow under
+    # rescale_widgets was reported from this action, on macOS), and the menu is closed first.
+    assert phone_layout.is_on() and not shell._menu.isVisible()
     _pump(qapp)
 
     assert not phone_layout.is_on()

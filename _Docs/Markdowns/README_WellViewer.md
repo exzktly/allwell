@@ -7196,7 +7196,7 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   Choose the control group under **Control** (the band's *vs* combo, captioned *Control* while this test is chosen),
   with the control and treatment groups shown on the plate. When one group's name says it is a control — *ctrl*,
   *control*, *DMSO*, *vehicle*, *untreated*, *mock*, *negative* — and no control is chosen yet, choosing this test
-  preselects it, and the figure says so first ("ctrl was taken as the control because of its name…"); choosing a
+  preselects it, and the figure says so at its top, under the groups line ("ctrl was taken as the control because of its name…"); choosing a
   control yourself ends the guess. Two such names, or none, and nothing is guessed. With replicate
   sets defined, a click on a well in the plate shows or hides that well's whole group, so a click on a group that is
   already shown hides it: when the control is hidden the figure says so and names the wells that bring it back, and

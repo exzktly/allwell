@@ -14038,8 +14038,8 @@ at that timepoint (`controller.metric_column`, labelled by `controller._label`),
 nanowell the run flagged unless the band's *QC flags ▾* excludes the flag (`NanowellState.rare_qc_excluded`, saved,
 empty by default; `rare_data_compute.RARE_QC_FLAGS` is the roster: count-disagreeing, partly visible, fused, identity
 not confirmed). `compose(exclude_qc=)` drops every other flag's column from the table, so `qc_reasons` never sees it
-and each choice is keyed apart; an excluded flag that left nanowells out is counted on the figure, in a lead line that
-is never cut (`rc.qc_line`, from `rare_data_compute.qc_flag_counts`), and named in Details (`rc.excluded_note`). Every
+and each choice is keyed apart; an excluded flag that left nanowells out is counted on the figure, in a lead line at its
+top, under the groups line, (`rc.qc_line`, from `rare_data_compute.qc_flag_counts`), and named in Details (`rc.excluded_note`). Every
 other view draws flagged nanowells, so this keeps the test's nanowells the ones they draw unless the user chooses
 otherwise — and keys the
 result on a hash of that table, the parameters and the Metric's label,
@@ -14062,7 +14062,7 @@ the figure saying what is tested against what meanwhile (`rc.computing_text`). T
 it asks for "the control group". **Choosing the test with no control preselects one by its name**
 (`controller.set_stats_test` → `rc.guess_control`: exactly one group whose name has a word of `CONTROL_WORDS`;
 two or none and nothing is guessed), recorded in `NanowellState.control_guessed` — never saved, cleared when the user
-chooses a control (`set_control`) — and the figure's first line says so (`render_rare_page(lead=)`, never cut). **The verdict is decided by the
+chooses a control (`set_control`) — and the figure says so under its groups line, at the top (`render_rare_page(lead=)`, never below the fold). **The verdict is decided by the
 exceedance test alone** (`rare_report_compute.interpret`: `DETECTED` when its q is below the FDR; `UNDECIDED` when
 it has no group p — too few wells for its regression, said by `rare_export_compute.needs` — while nanowells are past
 the cutoff, since a test that did not run is not a negative, and likewise when nothing is past a cutoff that sits on
@@ -14092,8 +14092,9 @@ groups and each group's name and short p over them, wrapped to its own width; a 
 cumulative shares with their gap shaded) is drawn **once per comparison** (axes gid `nw-rare-panel:<key>:<i>`),
 captioned with the comparison's name and p, as many across as `columns_for` fits (at most `MAX_COLUMNS`, each at least
 `COLUMN_MIN_IN` wide, so one on a phone) and the rest wrapping below inside the same row — the figure never grows
-sideways. Each axes starts under its own title, however many lines it took. Under the rows, each comparison's ⚠
-caveats, named by comparison, then the lead, the lines and the note (gid `nw-rare-line`). Nothing is cut and no
+sideways. Each axes starts under its own title, however many lines it took. The lead — a control chosen by its name, nanowells the run's
+flags left out — sits under the groups line, at the top, since the figure scrolls; under the rows, each comparison's ⚠
+caveats, named by comparison, then the lines and the note (gid `nw-rare-line`). Nothing is cut and no
 comparison is left off: `render_rare_page` returns the height in inches the page needs at its width (also kept for
 `needed_height`, marked by an invisible axes gid `nw-rare-page`), and the page's figure card sits in a vertical
 scroll area (`tab_view`, `_nw_figure_scroll`): after every redraw `_rare_controller.fit_canvas_height` sets the

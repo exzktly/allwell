@@ -1136,3 +1136,18 @@ def test_a_well_whose_top_nanowells_are_past_every_control_is_marked_as_having_n
         assert f"{w.key.split(':', 1)[-1]} (its most extreme nanowells are past every control value" in title
     # A well that simply has nothing extreme is not blamed on the controls.
     assert hc.unscored_reason(np.array([0.5, 0.6, 0.9, 1.0]), 0.5).startswith("no HC score: none of its 2 most")
+
+
+def test_what_qualifies_the_whole_result_is_drawn_at_the_top_not_below_the_fold():
+    """Found retaking the tutorial: the figure scrolls, and the lead — a control taken because of its name, nanowells
+    the run's flags left out — was drawn after all four test rows, where only a reader who scrolled past the whole
+    figure would see it. It is drawn under the groups line, above the first comparison's headline and every panel."""
+    res = rr.analyse(_small_plate(spiked=True), rr.RareParams(control="ctrl"))
+    lead = "⚠ ctrl was taken as the control because of its name"
+    fig = _laid_out(res, 14.5, ["a line"], lead=[lead], note="pointer")
+    texts = {t.get_text(): t.get_position()[1] for t in fig.texts}
+    groups = next(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-groups")
+    first_head = max(t.get_position()[1] for t in fig.texts if t.get_gid() == "nw-rare-unit")
+    panels = [ax for ax in fig.axes if str(ax.get_gid()).startswith(("nw-rare-shared:", "nw-rare-panel:"))]
+    assert groups > texts[lead] > first_head > max(ax.get_position().y1 for ax in panels)
+    assert texts["a line"] < min(ax.get_position().y0 for ax in panels)       # the rest stays under the rows

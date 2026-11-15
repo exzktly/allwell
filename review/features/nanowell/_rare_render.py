@@ -553,7 +553,9 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     per comparison, captioned with the comparison's name and p (gid ``nw-rare-comparison:<key>:<i>``; the axes'
     ``nw-rare-panel:<key>:<i>``, a shared panel's ``nw-rare-shared:<key>``), as many side
     by side as the width holds (:func:`columns_for`) and the rest wrapping below in the same row. Under the rows: each
-    comparison's caveats (marked ⚠), *lead* (never cut), then *lines* and *note* (gid ``nw-rare-line``).
+    comparison's caveats (marked ⚠), then *lines* and *note* (gid ``nw-rare-line``). *lead* — a control chosen by its
+    name, nanowells the run's flags left out — is drawn under the groups line instead: the figure scrolls, and what
+    qualifies the whole result must not be below the fold.
 
     *stamped* says a label (a saved subset's name, the moving average) is written at the figure's top left once the
     page is drawn (``renderer.stamp_subset``): the first line then starts :data:`_STAMP_IN` lower, below it."""
@@ -596,6 +598,12 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     if units:
         text(rx.groups_line(result), _HEAD_PT, "nw-rare-groups", bold=True)
         y += 0.06
+    for item in lead:                       # what qualifies the whole result: at the top, never below the fold
+        for part in _wrapped(fig, [item], 0.96):
+            _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
+            y += step
+    if lead:
+        y += 0.04
     for i, unit in enumerate(units):
         y += 0.04
         text(rx.comparison_title(result, i), _HEAD_PT, f"nw-rare-comparison-head:{i}", bold=True)
@@ -635,7 +643,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     y += _TEXT_PAD_IN
     caveats = [f"⚠ {rx.comparison_title(result, i).split(':', 1)[0]} ({u.label}): {c}"
                for i, u in enumerate(units) for c in rx.unit_text(result, u)["caveats"]]
-    for item in [*lead, *caveats, *lines, *([note] if note else [])]:
+    for item in [*caveats, *lines, *([note] if note else [])]:
         for part in _wrapped(fig, [item], 0.96):
             _ink(fig.text(0.02, 1 - y / height, part, fontsize=_REPORT_PT, va="top", color=ink, gid="nw-rare-line"))
             y += step

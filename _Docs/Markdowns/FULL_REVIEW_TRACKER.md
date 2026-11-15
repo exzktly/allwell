@@ -128,13 +128,26 @@ These were probed against independent references and agreed, so no row exists fo
 
 ## Not established
 
-- **Type-I error of the Rare responders deciding test** (beta-binomial one-sided likelihood-ratio test) on null
-  plates: the simulation through the real `analyse()` did not finish inside three minutes, so there is no number.
 - **The bar plot built by the tab against the bar plot built by Batch Export** printed different values in one probe
   (`TAB-BAR` 1.00 against `BATCH-BAR` 1.91 for the same group under ratio-to-t0). The harness set the two up through
-  different state objects, so this may be the probe; it needs the tab's real state to settle.
-- **Concatenate rewriting a shifted timepoint token in a different spelling** (`60m` beside `0min`): seen in a probe's
-  listing, not followed through to what Review then parses.
+  different state objects, so this may be the probe; it needs the tab's real state to settle. Row S5 found that the
+  probe behind it compared Batch Export's collector with the Line tab's, and fixed the line path; the tab's own
+  collector was not compared on a real tab state.
+
+## Established after the rows were written
+
+Two items first listed as not established were then settled, and neither is a defect:
+
+- **Type-I error of the Rare responders deciding test** (beta-binomial one-sided likelihood-ratio test). Null plates
+  through the real `analyse()`: every well drawn from one process (500 nanowells, log fold change normal with a
+  well-level shift of standard deviation 0, 0.1 or 0.2), "treated" wells being more wells of that process, 300 plates
+  a case. Detected at a nominal 5%: 1.3%, 5.3%, 7.0% for 3 + 2 wells; 3.0%, 7.7%, 6.7% for 3 + 3; 4.3%, 6.3%, 4.3%
+  for 4 + 4; 2.0% for 6 + 3 with no shift (the last two cases of that design did not finish). With 300 plates the
+  sampling range around 5% is about 2.5% to 7.5%, so the test holds its level: conservative with no well-to-well
+  shift, and at most marginally above nominal with one (the 7.7%).
+- **Concatenate rewriting a shifted timepoint token in a different spelling** (`60m` beside the source's `0min`).
+  Followed through: the hours column (1.0, 1.33), the member names, the CSV's `filename` column and the sidecar all
+  agree, and both spellings parse to the same hours. The spelling differs and nothing computed does.
 
 ## Architecture and conventions
 

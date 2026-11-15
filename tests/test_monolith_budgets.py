@@ -336,7 +336,7 @@ ANALYZE_TAB_BUDGET = 583
 # analyze.advanced_section.AnalyzeAdvancedSectionMixin, the run controls to
 # analyze.run_footer, and Run scope to analyze.well_scope, when the form was
 # re-sectioned. Genuine extraction -- whole builders moved.
-ANALYZE_TAB_FORM_BUDGET = 459
+ANALYZE_TAB_FORM_BUDGET = 453
 
 
 def _line_count(rel: str) -> int:

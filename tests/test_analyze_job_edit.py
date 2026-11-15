@@ -137,6 +137,7 @@ _SPEC = {
     # Non-default, so the round trip proves the flag is restored rather than
     # merely left at the form's own default.
     "auto_detect": True,
+    "add_detected_channels": True,
 }
 
 # Both remote variants below are combinations the form can actually reach.

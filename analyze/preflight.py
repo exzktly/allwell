@@ -63,7 +63,7 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from services import run_journal
-from services.run_detect import DetectionError, resolve_detection
+from services.run_detect import DetectionError, add_detected_channels, resolve_detection
 from pipeline import completeness
 from core.safe import swallow, swallowed
 
@@ -465,6 +465,7 @@ class AnalyzePreflightMixin:
             return
         signals = self._preflight_signals
         detect = self._auto_detect_on()
+        add_channels = self._add_detected_channels_on()
 
         def _work() -> None:
             block = None
@@ -479,6 +480,15 @@ class AnalyzePreflightMixin:
                     scan_opts = resolve_detection(
                         {"opts": {**opts, "raw": in_dir},
                          "auto_detect": True})[0]["opts"]
+                except DetectionError:
+                    scan_opts = None
+            if add_channels and scan_opts is not None:
+                # The report counts the channels the run will run, which
+                # includes the ones the input adds to the listed ones.
+                try:
+                    scan_opts = add_detected_channels(
+                        {"opts": {**scan_opts, "raw": in_dir}, "add_detected_channels": True},
+                        list(opts.get("fluor_tokens") or []))[0]["opts"]
                 except DetectionError:
                     scan_opts = None
             try:

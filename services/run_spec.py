@@ -62,6 +62,10 @@ class RunSpec:
     #: (``services.run_detect``). Beside ``opts`` so it never reaches the
     #: pipeline's argv.
     auto_detect: bool = False
+    #: Add the channels the input's filenames carry to ``opts["fluor_tokens"]``
+    #: when the run starts — a union with the listed channels, where
+    #: :attr:`auto_detect` replaces them (``services.run_detect``).
+    add_detected_channels: bool = False
     #: The layout a converter earlier in the job queue recorded for the folder
     #: this run reads — written by ``JobQueue.materialise`` for a chained job,
     #: never by the form. ``None`` when there is none.
@@ -85,6 +89,7 @@ class RunSpec:
             "output_filter": self.output_filter,
             "selective_channels": self.selective_channels,
             "auto_detect": self.auto_detect,
+            "add_detected_channels": self.add_detected_channels,
             **({"upstream_layout": dict(self.upstream_layout)}
                if self.upstream_layout else {}),
         }
@@ -103,6 +108,7 @@ class RunSpec:
             output_filter=data.get("output_filter", "full"),
             selective_channels=bool(data.get("selective_channels", True)),
             auto_detect=bool(data.get("auto_detect", False)),
+            add_detected_channels=bool(data.get("add_detected_channels", False)),
             upstream_layout=dict(data["upstream_layout"])
             if isinstance(data.get("upstream_layout"), dict) else None,
         )

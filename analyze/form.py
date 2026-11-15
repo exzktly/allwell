@@ -194,13 +194,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._fluor_frame_layout.setSpacing(2)
         sec.layout().addWidget(self._fluor_frame)
         self._fluor_add_row("GFP")
-
-        add_btn = QPushButton("+ Add channel", sec)
-        add_btn.setProperty("variant", "secondary")
-        add_btn.setFixedWidth(self._ADD_BTN_W)
-        add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
-        sec.layout().addWidget(add_btn)
-        self._fluor_add_btn = add_btn  # for an OME-mode hide nothing performs yet
+        self._build_channel_list_controls(sec)
 
     def _build_segmentation_section(self, parent: QWidget) -> None:
         """The method, the channel it segments, and the method's own settings."""

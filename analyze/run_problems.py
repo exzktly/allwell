@@ -92,10 +92,11 @@ class AnalyzeRunProblemsMixin:
             problems.append(RunProblem(
                 "Filename schema", "Schema Error",
                 "Invalid filename schema:\n\n" + "\n".join(schema_errors)))
-        if not detect and not self._fluor_tokens_list():
+        settled_at_run = self._channels_settled_at_run()
+        if not settled_at_run and not self._fluor_tokens_list():
             problems.append(RunProblem("Channels", "Channel Error",
                                        "At least one channel is required."))
-        seg_errors = self._segmentation_validation_errors(channels=not detect)
+        seg_errors = self._segmentation_validation_errors(channels=not settled_at_run)
         if seg_errors:
             problems.append(RunProblem("Segmentation", "Segmentation Error",
                                        "\n".join(seg_errors)))

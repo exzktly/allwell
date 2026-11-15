@@ -31,6 +31,10 @@ guess — the converter named the files and the user assigned the roles on its
 page — so it is preferred, and the scan is used to check it against the files
 on disk and to fill whatever the converter could not say.
 
+A run can also carry :data:`ADD_CHANNELS_KEY`, which asks for a union rather
+than a replacement: :func:`add_detected_channels` keeps the channels the form
+listed and appends every other channel the input's filenames carry.
+
 Qt-free, like everything in ``services/``.
 """
 
@@ -51,6 +55,11 @@ from util.schema_infer import InferredSchema, _spread, infer_schema, sample_stem
 #: The ``RunSpec`` JSON key that asks for detection at run time. Beside
 #: ``opts`` rather than inside it, so it can never reach the pipeline's argv.
 AUTO_DETECT_KEY = "auto_detect"
+
+#: The ``RunSpec`` JSON key that asks for the channels found in the input at
+#: run time to be *added* to the channels the form lists — a union, where
+#: :data:`AUTO_DETECT_KEY` replaces them. Beside ``opts`` for the same reason.
+ADD_CHANNELS_KEY = "add_detected_channels"
 
 #: The spec key :meth:`services.job_queue.JobQueue.materialise` writes when a
 #: converter earlier in the chain recorded the layout it produced.
@@ -127,6 +136,12 @@ _SEGMENTATION_WHY = {
 def wants_detection(spec: dict) -> bool:
     """Whether a ``RunSpec`` JSON dict asks for run-time detection."""
     return bool((spec or {}).get(AUTO_DETECT_KEY))
+
+
+def wants_added_channels(spec: dict) -> bool:
+    """Whether a ``RunSpec`` JSON dict asks for the input's channels to be
+    added to the listed ones at run time."""
+    return bool((spec or {}).get(ADD_CHANNELS_KEY))
 
 
 def scan_pipeline_info(guess: InferredSchema) -> tuple[dict, ChannelTokens | None]:
@@ -428,3 +443,97 @@ def resolve_detection(spec: dict) -> tuple[dict, DetectedLayout | None]:
             f"{layout.summary()} But this job's settings do not fit those "
             "channels:\n" + "\n".join(f"• {e}" for e in errors))
     return out, layout
+
+
+def add_detected_channels(spec: dict, listed: list[str] | None = None) -> tuple[dict, str]:
+    """Return a copy of *spec* whose channels are *listed* plus the input's.
+
+    *spec* is the run as it stands after :func:`resolve_detection`, so its
+    ``opts`` already name the schema and separator the run will split the
+    filenames with — the form's, or the detected ones. *listed* is the
+    fluorescent channel list the form held when the run was set up; it defaults
+    to ``opts["fluor_tokens"]`` and is passed separately only because full
+    run-time detection has already replaced that key, and the channels typed on
+    the form must survive it: this option adds, it never removes.
+
+    The result is the listed channels in their own order, then whatever else
+    ``opts["fluor_tokens"]`` holds, then every other channel the filenames
+    carry, in first-seen order. Every name is read, not a sample, for the
+    reason :data:`_ENUMERATE_LIMIT` gives. Names are compared ignoring case,
+    because the pipeline writes each channel's columns under its lower-cased
+    name and two spellings of one channel would write the same columns. The
+    segmentation channel is never added to the fluorescent list, except under a
+    label-free method, where the phase channel it segments is quantified too.
+    A channel added this way is quantified only: it is given no smFISH or Phase
+    role, which stay the form's to assign.
+
+    Returns the new spec and one sentence for the run log naming what was
+    added — or that nothing was. A spec that does not ask for this comes back
+    unchanged with ``""``. Raises :class:`DetectionError` when the filenames
+    cannot be read for channels, rather than running the listed channels alone
+    as if the input had been checked (CLAUDE.md §7), and when the merged list
+    no longer fits the job's channel-naming options.
+    """
+    if not wants_added_channels(spec):
+        return spec, ""
+    opts = dict(spec.get("opts") or {})
+    raw = str(opts.get("raw") or "").strip()
+    if not raw:
+        raise DetectionError(missing_input_error(spec) or "")
+    name = Path(raw).name or raw
+    schema = str(opts.get("filename_schema") or "").strip()
+    separator = str(opts.get("filename_sep") or "")
+    if "channel" not in [f.strip() for f in schema.split(":")] or not separator:
+        raise DetectionError(
+            f"Channels found in the input were to be added at run time, but the "
+            f"filename schema ({schema or 'blank'}) has no channel field to read "
+            "them from. Add a channel field to the schema, or turn off "
+            "\"Add channels found in the input at run time\".")
+    try:
+        stems = sample_stems(raw, limit=_ENUMERATE_LIMIT)
+    except OSError as exc:
+        raise DetectionError(
+            f"The input folder {name!r} could not be read for its channels: {exc}") from exc
+    carried = _channel_values(stems, separator, schema)
+    if not carried:
+        raise DetectionError(
+            f"Channels found in the input were to be added at run time, but no "
+            f"channel names could be read from the filenames in {name!r} with the "
+            f"schema {schema} (separator {separator!r}).")
+
+    method = str(opts.get("segmentation_method") or "")
+    nuclear = str(opts.get("nuclear_token") or "").strip()
+    skip = set() if method in LABELFREE_METHODS or not nuclear else {nuclear.lower()}
+    current = [str(t).strip() for t in (opts.get("fluor_tokens") or [])]
+    base = [str(t).strip() for t in (current if listed is None else listed)]
+    merged: dict[str, str] = {}
+    for token in base:
+        if token and token.lower() not in skip:
+            merged.setdefault(token.lower(), token)
+    before = len(merged)
+    # What full detection put in the list counts as found in the input too,
+    # so the note names it as added rather than as listed.
+    for token in (*current, *carried):
+        if token and token.lower() not in skip:
+            merged.setdefault(token.lower(), token)
+    fluor = list(merged.values())
+    added = fluor[before:]
+    if not fluor:
+        raise DetectionError(
+            f"No fluorescent channel was listed, and the files in {name!r} carry "
+            f"none besides the segmentation channel ({nuclear}).")
+    opts["fluor_tokens"] = fluor
+    out = dict(spec)
+    out["opts"] = opts
+    if added:
+        note = (f"Added channels found in the input: {', '.join(added)} "
+                f"(beside the {before} listed). Channels run: {', '.join(fluor)}.")
+    else:
+        note = ("No channels beyond those listed were found in the input. "
+                f"Channels run: {', '.join(fluor)}.")
+    errors = channel_option_errors(opts)
+    if errors:
+        raise DetectionError(
+            f"{note} But this job's settings do not fit those channels:\n"
+            + "\n".join(f"• {e}" for e in errors))
+    return out, note

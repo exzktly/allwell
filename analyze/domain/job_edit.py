@@ -239,6 +239,9 @@ class AnalyzeJobEditMixin:
         detect = getattr(self, "_auto_detect_cb", None)
         if detect is not None:
             detect.setChecked(bool(spec.get("auto_detect")))
+        add = getattr(self, "_add_detected_channels_cb", None)
+        if add is not None:
+            add.setChecked(bool(spec.get("add_detected_channels")))
 
         # The remote-only parameter group's visibility is driven by the combo
         # and the cleanup checkbox; both were just set programmatically, which

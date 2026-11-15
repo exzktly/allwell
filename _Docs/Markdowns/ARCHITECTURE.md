@@ -14273,10 +14273,18 @@ y axis `_AXIS_ROOM_IN` beyond that, the room its tick labels and its y label tak
 fit has broken it onto two lines. As shares, a phone's 3.9 in figure had put the text 0.08 in from the edge, under
 the role bar, which ends 0.11 in in. Each axes title is wrapped to its own axes' width before the axes is placed
 under it (`_TITLE_GROWTH` allows for the style pass enlarging it), and in a shared panel whose wells are packed
-tighter than a count label is wide, the count labels and the well names stand upright.
+tighter than a count label is wide, the count labels and the well names stand upright — the angle recorded with
+`plot_style.own_xtick_angle`, since the style pass otherwise flattens every x tick label to the Properties angle.
+A shared panel holds as many comparisons as fit with every well's slot at least `MIN_SLOT_PT` (13 pt, an upright
+9 pt label and a gap) and wraps the rest onto another panel below, the control wells drawn again on each
+(`well_dot_chunks`; the first panel's gid is `nw-rare-shared:<key>`, the next `nw-rare-shared:<key>:<j>`). Under each
+per-comparison panel the room grows by the lines the phone fit will break its x label onto at the page's 9 pt
+(`_x_label_extra_in`), and `columns_for` counts columns from the width the margins leave, each panel's axes at least
+`COLUMN_MIN_IN` (2.4 in) across.
 `test_nanowell_rare_responders.py::test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width` measures
-the drawn figure at 12.6, 7 and 3.9 in with one to four comparisons, at the page's sizes and phone fit: no text under
-a role bar, across a block's edge, off the figure or on other text. The lead — a control chosen by its name, nanowells the run's
+the drawn figure at 12.6, 7 and 3.9 in with one to four comparisons, after the page's own passes (its 9 pt sizes,
+its X tick angle, and on the phone its label fit): no text under a role bar, across a block's edge, off the figure,
+or on or within 2 px of other text. The lead — a control chosen by its name, nanowells the run's
 flags left out — sits under the groups line, at the top, since the figure scrolls; under the rows, each comparison's ⚠
 caveats, named by comparison, then the lines and the note (gid `nw-rare-line`). Nothing is cut and no
 comparison is left off: `render_rare_page` returns the height in inches the page needs at its width (also kept for

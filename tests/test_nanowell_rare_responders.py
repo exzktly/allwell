@@ -1358,3 +1358,42 @@ def test_a_shared_panel_too_narrow_for_every_well_wraps_its_comparisons_onto_ano
         slot_pt = ax.get_position().width * 3.88 * 72 / (ax.get_xlim()[1] - ax.get_xlim()[0])
         assert slot_pt >= rd.MIN_SLOT_PT, slot_pt
     assert sorted(drawn) == sorted(u.label for u in res.units)                  # each comparison exactly once
+
+
+def test_a_panel_keeps_room_under_it_for_every_line_its_x_label_is_broken_onto():
+    """Seen on a phone: the page's label fit breaks an x label wider than its panel onto a second line
+    (``plot_style._fit_labels_to_phone``), and that line sat on the next comparison's caption. Under each
+    per-comparison panel, the room down to the next caption — or to its block's bottom edge — holds the tick labels
+    and every line of the label as broken, at the page's 9 pt and matplotlib's tick and label spacing, with 2 pt to
+    spare."""
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    from review.core import plot_style
+
+    t = [plate(n=120, responders=4, seed=0, treatment="drug0")]
+    t += [plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(1, 3)]
+    res = rr.analyse(pd.concat(t))
+    fig = _laid_out(res, 3.88)
+    for ax in fig.axes:
+        ax.tick_params(labelsize=9)
+        for label in (ax.xaxis.label, ax.yaxis.label, ax.title):
+            label.set_fontsize(9)
+    FigureCanvasAgg(fig).draw()
+    plot_style._fit_labels_to_phone(fig)
+    height_pt = fig.get_figheight() * 72
+    checked = 0
+    for ax in fig.axes:
+        gid = str(ax.get_gid())
+        if not gid.startswith("nw-rare-panel:"):
+            continue
+        key, i = gid.split(":")[1], int(gid.split(":")[2])
+        lines = ax.xaxis.label.get_text().count("\n") + 1
+        tick = ax.xaxis.get_major_ticks()[0]
+        need = (tick.tick1line.get_markersize() + tick.get_pad() + 9 * 1.2 + ax.xaxis.labelpad
+                + lines * 9 * ax.xaxis.label._linespacing + 2)
+        below = [t.get_position()[1] for t in fig.texts if t.get_gid() == f"nw-rare-comparison:{key}:{i + 1}"]
+        floor = below[0] if below else next(p.get_y() for p in fig.patches if p.get_gid() == f"nw-rare-block:{key}")
+        room = (ax.get_position().y0 - floor) * height_pt
+        assert room >= need, (gid, lines, round(room, 1), round(need, 1))
+        checked += lines > 1
+    assert checked                          # the fixture's x label is broken onto two lines on this phone's panels

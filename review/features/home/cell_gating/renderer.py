@@ -236,7 +236,13 @@ def _cell_gating_plot_cdf(ctx) -> None:
     # narrower than its title. Laid out again for the fitted titles.
     from review.core.plot_style import fit_titles_to_axes
     fit_titles_to_axes(fig)
-    fig.tight_layout(pad=1.3)
+    # Tight layout as the figure's engine, not once: it runs again on every
+    # draw, so a canvas that changes width after this — the page narrowed by
+    # phone layout's Controls docking beside it on an unfolded iPhone Duo — is
+    # laid out at the width it is drawn at. Laid out once at the page's full
+    # width, each left-hand "Cumulative Probability" hung 12 px off the figure
+    # once the column took 450 px of it.
+    fig.set_layout_engine("tight", pad=1.3)
     _note_thinned(fig, drawn_counts)
     ctx.runtime.cell_gating.canvas.draw_idle()
 

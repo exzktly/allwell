@@ -71,9 +71,30 @@ class _StackWhenNarrow(QObject):
         self._narrow: bool | None = None
         body.installEventFilter(self)
 
+    def _dock_width(self) -> int:
+        """The dock's width beside the preview: ``Metrics.dock_w``, or what its
+        controls need when that is more — phone layout's touch-sized rows, at a
+        phone point of 1.5 px (an iPhone Duo's screens), needed 402 px of a
+        fixed 360, and the dock's horizontal axis never scrolls."""
+        want = theme.Metrics.dock_w
+        scroll = self._dock.findChild(QScrollArea, "PlaygroundDockScroll")
+        inner = scroll.widget() if scroll is not None else None
+        if inner is not None:
+            margins = self._dock.layout().contentsMargins()
+            # The larger of the content's own minimum and one set on it, as Qt
+            # takes them (``widgets/responsive_row._effective_min_width``).
+            content = max(inner.minimumSizeHint().width(), inner.minimumWidth())
+            need = (content + scroll.verticalScrollBar().sizeHint().width()
+                    + margins.left() + margins.right())
+            want = max(want, need)
+        return want
+
     def apply(self) -> None:
         body, dock = self._body, self._dock
-        narrow = body.width() < theme.Metrics.dock_w + _CANVAS_MIN_W
+        width = self._dock_width()
+        narrow = body.width() < width + _CANVAS_MIN_W
+        if not narrow and dock.width() != width and self._narrow is False:
+            dock.setFixedWidth(width)           # the controls grew (a restyle), still beside
         if narrow == self._narrow:
             return
         self._narrow = narrow
@@ -85,7 +106,7 @@ class _StackWhenNarrow(QObject):
             lay.setStretchFactor(dock, 1)
         else:
             lay.setDirection(QBoxLayout.LeftToRight)
-            dock.setFixedWidth(theme.Metrics.dock_w)
+            dock.setFixedWidth(width)
             lay.setStretchFactor(dock, 0)
         lay.setStretchFactor(self._canvas, 1)
         # The dock's hairline faces the preview: its left edge beside it, its top below it.
@@ -128,7 +149,11 @@ def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
     rl.setSpacing(6)
     lbl = QLabel(label_text, row)
     lbl.setObjectName("Muted")
-    lbl.setFixedWidth(theme.Metrics.stepper_w)
+    # A floor, not a pin: the labels line up in a column at the desk, and a
+    # label whose text is wider than the column at phone layout's larger text
+    # takes the width it needs. Pinned, "Overlap (NMS)" and "Pixel size (µm)"
+    # were clipped by 7-9 px on an unfolded foldable's screen.
+    lbl.setMinimumWidth(theme.Metrics.stepper_w)
     if tooltip:
         row.setToolTip(tooltip)
         lbl.setToolTip(tooltip)

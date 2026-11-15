@@ -41,7 +41,7 @@ No All-Well coupling — a plain reusable widget.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ui import theme
@@ -342,6 +342,7 @@ class ControlBand(QWidget):
             root.addWidget(host, 1)
             self._form = BandForm(host, scope, actions, label_width=label_width,
                                   row_height=row_height, gap=gap)
+            self._sync_form_floor()
         else:
             form, self._form = self._form, None
             form.undo()
@@ -361,8 +362,37 @@ class ControlBand(QWidget):
             root.removeWidget(form.host)
             form.host.deleteLater()
             root.setContentsMargins(self._row_margins)
+            self.setMinimumHeight(self.band_height())
             self._scope_host.show()
         self.updateGeometry()
+
+    def _sync_form_floor(self) -> None:
+        """While a form, hold the band's explicit minimum at the form's height.
+
+        A parent layout sizes this band through its ``QWidgetItem``, which asks
+        the band's *own layout* for a height at a width — and as a form that
+        layout has no height-for-width and answers -1, so the parent fell back
+        to the explicit minimum, which is the row's one-row floor
+        (:meth:`band_height`). A sheet that sizes itself to its content never
+        noticed; in a column that does not (the docked Controls sheet on an
+        unfolded foldable), a form of several rows was 44 px tall and showed a
+        clipped heading. Re-measured on every resize and layout change, because
+        the form's height follows its width (rows stack) and its rows."""
+        if self._form is None:
+            return
+        want = self._form_height(self.width() or self.sizeHint().width())
+        if want != self.minimumHeight():
+            self.setMinimumHeight(want)
+
+    def resizeEvent(self, event) -> None:  # Qt naming
+        super().resizeEvent(event)
+        self._sync_form_floor()
+
+    def event(self, ev) -> bool:  # Qt naming
+        handled = super().event(ev)
+        if self._form is not None and ev.type() == QEvent.LayoutRequest:
+            self._sync_form_floor()
+        return handled
 
     def form(self):
         """The :class:`~widgets.control_band_form.BandForm` the band is laid

@@ -10804,6 +10804,24 @@ The switch takes a few seconds while every control is redrawn at the new size; a
 are ignored rather than landing on whatever is underneath. Turning the phone does
 the same, once, for the new shape.
 
+**On the iPhone Duo**, phone layout works folded and unfolded, and All-Well
+recognises both screens — both are nearly square, unlike other phones — and
+offers phone layout on either, whichever way the phone is held. Buttons stay a
+thumb's size and text stays at the chosen text size on each.
+
+- **Folded**, the screen is a little wider than a regular phone's and laid out
+  like one: one column, the controls at the bottom.
+- **Unfolded**, the page's **⚙ Controls** are docked in a column on the left,
+  beside the plot, so you can watch the plot change as you change them. The
+  column follows you from page to page; **Hide controls** at the bottom hides
+  it and **⚙ Controls** brings it back. The ☰ sidebar slides out as a panel
+  along the left, **›** (Forward) sits beside **‹** in the top bar, and held
+  sideways the top bar keeps its full height.
+
+Folding or unfolding re-sizes the window once, like turning the phone. A 4:3
+desktop monitor has the same shape as the unfolded Duo, so All-Well offers it
+phone layout too; tap **Not now** to keep the desktop layout.
+
 **Getting around.** The top bar holds:
 
 | Control | What it does |

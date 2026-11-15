@@ -275,3 +275,47 @@ def test_a_flat_icon_button_is_drawn_as_a_button_in_the_sheet(qtbot):
     band.setForm(False)
     _settle()
     assert w["props"].styleSheet() == own
+
+
+def test_a_form_gets_its_whole_height_in_a_column_that_does_not_size_to_it(qtbot):
+    """A band of actions alone (Cell Gating's) laid out as a form in a column that does not size itself to its
+    content — the docked Controls sheet on an unfolded foldable: a scroll area over a holder with a stretch under
+    the band — gets its whole height, and the row's one-row floor comes back when the form ends.
+
+    A parent layout sizes the band through its ``QWidgetItem``, which asks the band's *own* layout for a height at a
+    width; as a form of actions alone that layout answers -1, and the parent fell back to the band's explicit
+    minimum — the row's one row, 44 px — so the form showed a clipped ACTIONS heading and nothing under it. A band
+    with data controls as well happened to measure right, which is why the Bar Plots page never showed it. Wrong
+    implementations: the row's floor kept, or no floor at all (a form 0 px tall)."""
+    from PySide6.QtWidgets import QScrollArea, QVBoxLayout
+
+    window = QWidget()
+    qtbot.addWidget(window)
+    QVBoxLayout(window)
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    window.layout().addWidget(scroll)
+    holder = QWidget()
+    lay = QVBoxLayout(holder)
+    lay.addStretch(1)
+    scroll.setWidget(holder)
+    band = ControlBand()
+    for text in ("Jump to the CDFs", "Reset", "Save ▾", "Export"):
+        button = QPushButton(text)
+        button.setProperty("bandRole", "action")
+        band.add_action(button)
+    row_floor = band.minimumHeight()
+    window.resize(400, 1200)
+    window.show()
+    qtbot.waitExposed(window)
+    lay.insertWidget(0, band)
+    band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
+    band.show()
+    _settle()
+    _settle()
+    want = band._form_height(band.width())
+    assert want > 2 * row_floor                     # the case measures something: the form is several rows
+    assert band.height() == want, f"the form is {band.height()} px of the {want} it needs"
+    band.setForm(False)
+    _settle()
+    assert band.minimumHeight() == row_floor == band.band_height()

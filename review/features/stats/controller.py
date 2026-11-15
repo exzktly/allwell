@@ -873,7 +873,8 @@ from ui import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
-from widgets.plate_geometry import PLATE_MIN_WIDTH
+from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MIN_WIDTH
+from review.features.stats.group_card_view import ElidingLabel
 from review.domain.plate_layout import WELL_COLORS
 from review.domain.batch_models import BarGroup
 from review.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
@@ -1024,7 +1025,9 @@ def stats_refresh_group_list(ctx) -> None:
         if n_mem: parts.append(f"{n_mem} set{'s' if n_mem!=1 else ''}")
         if n_sol: parts.append(f"{n_sol} solo well{'s' if n_sol!=1 else ''}")
         if not parts: parts = ["empty"]
-        meta = QLabel(f"  ({', '.join(parts)})")
+        # The part of the card that gives when the column is narrower than the
+        # card (``group_card_view``); the rest of the card keeps its size.
+        meta = ElidingLabel(f"  ({', '.join(parts)})")
         meta.setObjectName("Muted")
         hl.addWidget(meta)
         # A bounded gap, not ``addStretch(1)``. On the rail, where this list was
@@ -1135,10 +1138,21 @@ def _stats_floor_group_list(ctx, layout) -> None:
     font and DPI make of them, and every literal here would be wrong on a
     display it was not measured on. The width is capped at the plate's own, so
     one long group name cannot push the map out of the row.
+
+    **At the UI scale in force.** The plate's own caps grow with phone layout's
+    larger text (``plate_geometry.apply_plate_caps``), and the cards grow with
+    it, so the list's height cap and width cap are the plate constants times
+    ``theme.ui_scale()``, and the pass runs again whenever that scale changes
+    (the list's ``_aw_rescale``), measuring the cards at their new size. With
+    the desk's 210 px and 220 px, on an unfolded foldable held upright — wide
+    enough to keep the map and the list side by side — two touch-sized cards
+    were held in a 159 px strip, each cut short sideways.
     """
     sa = ctx.widgets.get_or_none("_stats_grp_canvas")
     if sa is None:
         return
+    k = theme.ui_scale()
+    sa.setMaximumHeight(round(PLATE_MAX_HEIGHT * k))
     cards = [layout.itemAt(i).widget() for i in range(layout.count())]
     cards = [w for w in cards if w is not None]
     if not cards:
@@ -1156,9 +1170,19 @@ def _stats_floor_group_list(ctx, layout) -> None:
     # is not allowed to scroll sideways, because width is what forces the editor
     # to stack. ``PLATE_MIN_WIDTH`` is the width the page has already committed
     # to fitting for the map, so it is the most the list may ask for too. A card
-    # wider than that is elided by its own layout, which is a card that reads
-    # tightly; the alternative was a page with content behind its own edge.
-    sa.setMinimumWidth(min(card_w, PLATE_MIN_WIDTH))
+    # wider than that gives the difference back from its count, which elides
+    # (``group_card_view.ElidingLabel``) — a card that reads tightly; the
+    # alternative was a page with content behind its own edge.
+    sa.setMinimumWidth(min(card_w, round(PLATE_MIN_WIDTH * k)))
+
+
+def stats_refloor_group_list(ctx) -> None:
+    """Measure the group list's floors again from the cards it holds — after a
+    UI-scale change has resized them (see :func:`_stats_floor_group_list`)."""
+    inner = ctx.widgets.get_or_none("_stats_grp_inner")
+    lay = inner.layout() if inner is not None else None
+    if lay is not None:
+        _stats_floor_group_list(ctx, lay)
 
 
 def stats_select_grp(ctx, idx: int) -> None:

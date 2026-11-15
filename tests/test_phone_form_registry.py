@@ -334,8 +334,22 @@ def test_a_plot_card_s_canvas_declares_itself(qapp):
 def test_a_canvas_built_after_the_switch_is_drawn_at_the_phone_dpi_and_height_without_a_sweep(qapp, shell):
     """The case the sweep exists for — a plot on a page built after the switch —
     with nothing recognising the canvas by type. Wrong implementation: a shell
-    that dropped the canvas branch and did not add the kind to its adapters."""
+    that dropped the canvas branch and did not add the kind to its adapters.
+
+    On a phone at its full resolution (1080 × 2340), where a phone point is
+    several pixels and the plot's DPI rises with it: Qt's offscreen 800 × 800
+    screen is near-square, which phone layout reads as an unfolded foldable,
+    whose point is barely more than a pixel and whose plots keep the desk's DPI."""
     from matplotlib.figure import Figure
+    from PySide6.QtCore import QRect
+
+    from tests._screens import FakeScreen
+
+    with FakeScreen(QRect(0, 0, 1080, 2340)):
+        _canvas_drawn_at_the_phone_dpi(qapp, shell, Figure)
+
+
+def _canvas_drawn_at_the_phone_dpi(qapp, shell, Figure):
 
     from ui.phone_shell import PLOT_ROW_PT
     from widgets.canvas import make_canvas

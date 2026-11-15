@@ -5534,7 +5534,15 @@ laid out as the two questions it answers, in the order the app applies them:
    debris gate leads, labelled *always applied*: it composes with everything
    below and is not one of the alternatives. Then a radio pair for the source of
    the inclusion decision — per-channel intensity floors, or the Scatter Plot's
-   rectangular gates.
+   rectangular gates. The two are alternatives for every consumer, not only for
+   the gating pass: `domain/gating_state.fluor_gate_in_force` answers off for
+   every channel while scatter gates define inclusion, and
+   `channel_state_controller.get_all_fluor_gates` / `get_fluor_gate` — the only
+   way a plot, statistic or export learns a floor — read it. The floors the tab
+   holds stay on the slice and are saved through `stored_fluor_gates`, so
+   switching the mode back restores them.
+   `tests/test_scatter_gate_mode_replaces_the_floors.py` holds the tab's count
+   and the aggregates' population to one number.
 
    `qc/tab_view.build_qc_gate_controls` lays the gate out as a grid with one row
    per *measured quantity* — Area, Solidity, Region area, Circularity — and its

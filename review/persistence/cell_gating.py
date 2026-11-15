@@ -25,7 +25,7 @@ def save_to_pipeline_info(ctx) -> None:
     if not state.dataset.data_dir:
         return
     from review.core.channel_state_controller import (
-        get_all_fluor_gates,
+        stored_fluor_gates,
         seg_channel_token_of,
     )
     from review.domain.gating_state import (
@@ -38,7 +38,7 @@ def save_to_pipeline_info(ctx) -> None:
         return None if s is None else sorted(s)
 
     block = build_gating_block(
-        get_all_fluor_gates(ctx),
+        stored_fluor_gates(ctx),
         # ``thresh_frac_on`` carries every non-default Cell Gating row (fluor
         # channels + ``ratio:<name>`` keys); ``build_gating_block`` drops any at
         # the default, so passing the typed slice reproduces the historical block.

@@ -3411,7 +3411,11 @@ choice applies once, when the menu closes.
   choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
-  drawn a gate there, the scatter option is greyed out and says so. A gate drawn
+  drawn a gate there, the scatter option is greyed out and says so. The two are
+  alternatives: while the scatter gates decide inclusion the intensity minimums
+  are greyed out and nothing applies them — every plot, statistic and export
+  uses the cells the **Included for analysis** line counts — and the values you
+  typed are kept for when you switch back. A gate drawn
   on nanowell metrics (on the nanowell scatter, or on the "Nanowell ▸" axes)
   keeps every cell whose own nanowell lies inside it at that cell's timepoint.
   The nanowell values it reads count every cell the other gates keep, *before*

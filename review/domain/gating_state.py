@@ -350,6 +350,35 @@ def fluor_gate_for(cell_gating, channel: str) -> float:
     return 0.0 if val is None else float(val)
 
 
+def fluor_floors_in_force(cell_gating) -> bool:
+    """Whether the per-channel intensity floors decide inclusion right now.
+
+    They do not while scatter gates define inclusion (``use_scatter_gates``):
+    that mode *replaces* the floors — the gating pass writes ``Included`` as
+    all-pass and carries membership in ``Gate_Pass``, and the tab greys the
+    floor fields out. The stored values are kept, so switching the mode back
+    restores them, but nothing may filter by them meanwhile. This is the one
+    place that says so; the gating pass, the Cell Gating count and every
+    aggregate read their floors through :func:`fluor_gate_in_force`.
+
+    Read defensively, like :func:`resolve_gate_key`: a slice stood up without
+    the flag is in intensity mode.
+    """
+    return not bool(getattr(cell_gating, "use_scatter_gates", False))
+
+
+def fluor_gate_in_force(cell_gating, channel: str) -> float:
+    """The floor every calculation applies to *channel*: the stored one, or off.
+
+    :func:`fluor_gate_for` is what the tab holds and what is saved;
+    this is what filters cells. The two differ only while scatter gates define
+    inclusion, when the answer is :data:`FLUOR_GATE_OFF` for every channel.
+    """
+    if not fluor_floors_in_force(cell_gating):
+        return FLUOR_GATE_OFF
+    return fluor_gate_for(cell_gating, channel)
+
+
 def active_fluor_gates(fluor_gates) -> dict[str, float]:
     """The subset of *fluor_gates* that is actually gating anything.
 

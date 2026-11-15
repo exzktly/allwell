@@ -5206,6 +5206,12 @@ subtract) with a propagated error bar, which is the ΔΔCt convention; the
 option to draw it raw, because a raw control beside ratio bars would put two
 units on one axis.
 
+Error bars are propagated the same way on Bar Plots and Line Graphs, in all
+three panels: the spread of the control and of the baseline timepoint is
+combined with the sample's own. A sample with no spread of its own — a
+replicate set holding one well — stays without one after normalising, on a bar
+and on a curve alike, rather than borrowing its control's.
+
 Assignments are kept, never silently reset. A control whose group is deleted
 shows as `Veh_old (missing)` and comes back when the group does; an
 assignment for a sample that is no longer plotted collects under **Unused

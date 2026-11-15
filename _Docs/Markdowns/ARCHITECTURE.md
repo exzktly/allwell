@@ -22328,6 +22328,25 @@ don't have a meaningful denominator uncertainty can omit them; that
 recovers the legacy "treat denominator as exact" `spread / factor`
 behaviour and is the backwards-compatible default.
 
+The formula holds for **every panel on both tabs**, and two rules keep it so.
+The t0 baseline's own spread is folded into the fraction and Events fields
+exactly as into the mean: `_field_baseline` returns the baseline point's
+`(value, spread)` for the field it is asked about, reading the spread only
+from a slot the point carries, which is what the bar path gets from
+`member_first_tp_frac_resolved` / `member_first_tp_n_resolved`. And **an
+undefined numerator spread stays undefined through either operation** —
+`_scale_pt`, `_subtract_pt`, `_scale_field`, `_subtract_field` and
+`scale_bar_value` all return NaN for it — so a replicate set of one well,
+which has no spread, is never handed its control's spread as its own.
+`tests/test_bar_and_line_agree_on_a_normalised_spread.py` checks the
+arithmetic against hand-computed quadrature and then drives
+`collect_bar_items` and `collect_line_series` over one plate, holding the
+three panels' values and spreads equal raw, after subtracting a control and
+as a ratio to t0. One difference between the tabs is outside that test: when
+a replicate set's *ratio* baseline is unusable at the requested timepoint (a
+fraction of 0 at t0), the bar leaves the panel undefined while the curve
+falls back to the earliest usable timepoint, with a log line.
+
 ```
                             state.plot.fc_vs_control_on ─┐
 User → Control combo  ─→    state.plot.fc_control       ─┼─→ fold_change.fold_change_state(ctx)

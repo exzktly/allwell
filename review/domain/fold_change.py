@@ -156,9 +156,16 @@ def _subtract_pt(
     if not math.isfinite(shift):
         new = list(pt); new[1] = float("nan"); new[2] = 0.0
         return tuple(new)
-    s_val = s if is_number(s) else 0.0
-    shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
-    new_spread = math.sqrt(s_val * s_val + shift_var)
+    # An undefined spread stays undefined, as in ``_scale_pt``,
+    # ``_subtract_field`` and the bar path's ``scale_bar_value``. Folding it to
+    # 0.0 here handed a single-well replicate set, which has no spread of its
+    # own, the control's spread as if it were its own measured one.
+    s_val = _as_finite(s)
+    if s_val is None:
+        new_spread = float("nan")
+    else:
+        shift_var = float(shift_spread) ** 2 if math.isfinite(shift_spread) else 0.0
+        new_spread = math.sqrt(s_val * s_val + shift_var)
     new = list(pt)
     new[1] = float(m) - float(shift)
     new[2] = float(new_spread)
@@ -369,17 +376,24 @@ def _baseline_usable(value, *, op: str) -> bool:
 
 def _field_baseline(
     pts, val_idx: int, baseline_tp: float | None, *, op: str = "ratio",
+    spread_idx: int | None = None,
 ) -> tuple[float | None, float]:
-    """``(baseline_val, baseline_spread_unused)`` for a field's vs-t0 step.
+    """``(baseline_val, baseline_spread)`` for a field's vs-t0 step.
 
-    Mirrors the mean baseline logic: prefer the point at *baseline_tp*, else the
-    earliest finite non-zero value. The spread returned is always the field's
-    own spread at that point is *not* needed here — the count/fraction t0
-    propagation reuses the field's own spread via ``_scale_field`` — so this
-    returns only the divisor; the caller passes ``shift_spread=0`` / a 0 rel-err
-    for the baseline (matching the mean path, which folds only the control and
-    the member's own per-point spread, not a separate baseline spread term).
+    Mirrors the mean baseline logic in :func:`normalize_pts`: prefer the point
+    at *baseline_tp*, else the earliest usable value, and return that point's
+    OWN spread with it so the baseline's error folds into every downstream
+    point in quadrature — the module docstring's formula, and what the bar
+    path does through ``member_first_tp_frac_resolved`` /
+    ``member_first_tp_n_resolved``. The spread is read only from a slot the
+    point actually carries (``_spread_slot``) and an undefined one counts as
+    0.0, "denominator treated as exact", exactly as the mean step treats it.
     """
+    def _with_spread(pt) -> tuple[float, float]:
+        slot = _spread_slot(pt, spread_idx)
+        spread = _as_finite(pt[slot]) if slot is not None else None
+        return float(pt[val_idx]), (spread if spread is not None else 0.0)
+
     candidates = pts
     if baseline_tp is not None and math.isfinite(baseline_tp):
         tgt = float(baseline_tp)
@@ -387,7 +401,7 @@ def _field_baseline(
             if abs(float(pt[0]) - tgt) <= tp_tolerance(float(pt[0]), tgt):
                 v = pt[val_idx] if len(pt) > val_idx else None
                 if _baseline_usable(v, op=op):
-                    return float(v), 0.0
+                    return _with_spread(pt)
                 _logger.warning(
                     "Fold change: the requested baseline timepoint %g has no "
                     "usable value for field %d (%r) — falling back to the "
@@ -399,7 +413,7 @@ def _field_baseline(
     for pt in sorted(candidates, key=lambda p: p[0]):
         v = pt[val_idx] if len(pt) > val_idx else None
         if _baseline_usable(v, op=op):
-            return float(v), 0.0
+            return _with_spread(pt)
     return None, 0.0
 
 
@@ -448,7 +462,8 @@ def _normalize_field(
 
     # Step B: vs-t0 baseline (uses each member's own post-control values).
     if use_t0:
-        base, base_spread = _field_baseline(pts, val_idx, baseline_tp, op=op_t0)
+        base, base_spread = _field_baseline(pts, val_idx, baseline_tp, op=op_t0,
+                                            spread_idx=spread_idx)
         if base is not None:
             if op_t0 == "subtract":
                 pts = [_subtract_field(pt, val_idx, spread_idx, base,

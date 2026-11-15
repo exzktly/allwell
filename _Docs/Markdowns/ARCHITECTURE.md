@@ -907,8 +907,14 @@ text size changed), and given their desk form back on the way out, before the
 restyle (`_unfit_windows`): the layout, the row of buttons at its index and
 stretch, the maximum, the minimum (put back only when the code set it; one the
 layout set is left to the layout) and the size. A *native* file dialog —
-`QFileDialog.getOpenFileName` and its siblings, which open Windows' own picker —
-is not a Qt widget at all, and phone layout cannot size it.
+`QFileDialog.getOpenFileName` and its siblings, which open the operating
+system's own picker on Windows and macOS — is not a Qt window on screen at all,
+and phone layout leaves it wholly alone (`phone_window.is_native_dialog`: the
+sweep neither marks it, nor installs its filter, nor clamps it, and `kind`
+answers `None`). Touching it is not merely useless: the sweep's 300 ms tick runs
+inside the system dialog's own message loop and again on the focus change as it
+closes, and a Windows user choosing a folder on Convert CZI in phone layout had
+the app close with a native access violation inside `app.exec()` while it did.
 `tests/test_phone_windows.py` drives a `PhoneShell`, phone layout on, the real
 dialogs and the shell's own sweep on a phone-shaped screen;
 `tests/test_phone_remote_windows.py` (remote roster) does the same for Remote
@@ -11075,17 +11081,25 @@ The picker is `datasets/core/timepoint_picker.TimepointPicker`, a
 `widgets.checkable_dropdown.CheckableDropdown` beside each page's stride box.
 It holds the selection as a value (`()` all, `None` nothing ticked — refused by
 `RawFields.problems()` rather than read as "all"), because the list is rebuilt
-from each successful plan and a queued job's restored selection can arrive
-before the scan that lists the tokens. A restored token the source lacks is
-kept and listed as *(not in this source)*, so the plan refuses it by name
-instead of the page converting a different set than the job asked for. That
-refusal is the one plan the page cannot read the source's tokens from, so each
-converter's error (`CziImportError`, `Nd2ImportError`, `OmeImportError`)
-carries them as `source_timepoint_tokens` when it refuses the timepoint
-selection, and the page lists them from it. Without them a job reopened
-through `show_job` would list only its own ticked tokens, unmarked, and a
-source switched under a selection would go on listing the previous file's
-(`tests/test_timepoint_picker.py`). The
+whenever the source is read and a queued job's restored selection can arrive
+before the scan that lists the tokens. The tokens are listed **from the read,
+not from the plan**: Convert CZI from `CziSet.timepoint_tokens`, Convert ND2
+from `nd2_explode.timepoint_tokens(layout)`, and Convert OME-TIFF from a
+multi-image file's `layout.timepoint_tokens`, each before the page checks its
+fields or plans. Listing them only from a successful plan left the picker
+empty under every refusal the page exists to explain — a grid field, a plate
+whose scenes name no wells — while the read had found the timepoints
+(`test_the_timepoints_are_listed_when_the_plan_refuses_the_plate` in the CZI
+and ND2 page tests, `..._when_a_grid_field_is_refused` in the OME one). A
+single OME-TIFF image is the exception: its timepoints are frames the grid and
+frame order split, so only a plan can count them, and that page lists them from
+the plan, or from `OmeImportError.source_timepoint_tokens` when the plan
+refuses the timepoint selection. A restored token the source lacks is kept and
+listed as *(not in this source)*, so the plan refuses it by name instead of the
+page converting a different set than the job asked for; without the source's
+own tokens beside it a job reopened through `show_job` would list only its own
+ticked tokens, unmarked, and a source switched under a selection would go on
+listing the previous file's (`tests/test_timepoint_picker.py`). The
 menu's **All** resets to the whole timelapse rather than ticking every listed
 row, which is what leads out of that refusal before the real tokens are known.
 

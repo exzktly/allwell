@@ -995,3 +995,16 @@ def test_the_plate_selection_is_locked_while_a_run_is_in_flight(controller,
     finally:
         page.set_running(False)
     assert page._dashboard._plate.selectionMode() == "select"
+
+
+def test_the_timepoints_are_listed_when_the_plan_refuses_the_plate(controller, tmp_path):
+    """The Convert CZI report, on its sibling: the timepoints were listed only once the whole plan succeeded, so a
+    plate the page refuses — unnamed positions, still on "wells from the file" — showed an empty picker though the
+    read had found three timepoints. Listed from the read now."""
+    page = controller.page
+    src = tmp_path / "src"
+    src.mkdir()
+    bare = write_nd2(src / "bare.nd2", n_pos=4, n_t=3, n_c=1, well_names=[""] * 4)
+    _set_source(page, bare, tmp_path)
+    assert not page._run_btn.isEnabled(), page._verdict.text()             # the plan did refuse
+    assert page._timepoint_pick.source_tokens() == ["t0", "t1", "t2"]

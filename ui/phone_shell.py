@@ -1602,6 +1602,12 @@ class PhoneShell(QObject):
         from PySide6.QtWidgets import QAbstractScrollArea
         candidates: list[QWidget] = []
         for top in QApplication.topLevelWidgets():
+            # A dialog the operating system draws is left wholly alone — no
+            # mark, no filter, no clamp: there is no Qt window of it to fit,
+            # and touching it while the system dialog runs or closes crashed
+            # Windows (``phone_window.is_native_dialog``).
+            if phone_window.is_native_dialog(top):
+                continue
             candidates.append(top)
             candidates.extend(top.findChildren(QAbstractScrollArea))
         candidates.extend(form_registry.declared())

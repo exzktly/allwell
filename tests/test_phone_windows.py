@@ -251,3 +251,49 @@ def test_leaving_phone_layout_gives_the_window_its_desk_form_back(qapp, qtbot, p
     assert dialog.findChild(QWidget, "PhoneWindowFoot") is None
     assert dialog.maximumSize() == desk_max
     assert dialog.size() == desk_size
+
+
+def test_a_file_dialog_the_system_draws_is_never_touched(qapp, phone, monkeypatch):
+    """Reported on Windows: choosing a folder on Convert CZI in phone layout closed the app — a native access
+    violation inside ``app.exec()``, in phone layout only. The folder picker is the system's own dialog there, and
+    the sweep (its timer runs inside that dialog's message loop, and again on the focus change as it closes) had
+    marked it, installed its event filter on it and clamped it. Nothing of that has anything to fit: it is left
+    wholly alone. The dialog here is drawn by Qt (offscreen has no system dialog), so the platform is set to
+    Windows, where the static ``QFileDialog`` functions always hand the dialog to the system."""
+    from PySide6.QtWidgets import QFileDialog
+    from ui import phone_shell, phone_window
+    monkeypatch.setattr(phone_window.sys, "platform", "win32")
+    win, shell = _shell(qapp)
+    dialog = QFileDialog(win, "Select a folder of CZI files")
+    dialog.setFileMode(QFileDialog.Directory)
+    dialog.setGeometry(QRect(-500, -500, 1400, 1400))     # off the phone: a clamp would move it
+    _WINDOWS.append(dialog)
+    dialog.show()
+    _pump(qapp)
+    before = dialog.geometry()                            # as shown, frame and all
+    shell._sweep(force=False)                             # its 300 ms tick
+    _pump(qapp)
+    shell._sweep(force=True)                              # what the focus change as it closes runs
+    _pump(qapp)
+    assert phone_window.is_native_dialog(dialog)
+    assert phone_window.kind(dialog) is None
+    assert dialog.property(phone_shell._P_SEEN) is None
+    assert dialog.property(phone_shell._P_WATCHED) is None
+    assert dialog.geometry() == before
+
+
+def test_a_file_dialog_qt_draws_is_still_kept_on_the_screen(qapp, phone, monkeypatch):
+    """The other side: where Qt draws the file dialog itself (no system dialog, or the app opted out), it is a
+    window on the phone like any other and is still kept inside the screen."""
+    from PySide6.QtWidgets import QFileDialog
+    from ui import phone_window
+    monkeypatch.setattr(phone_window.sys, "platform", "win32")
+    win, shell = _shell(qapp)
+    dialog = QFileDialog(win, "Select a folder")
+    dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+    dialog.setGeometry(QRect(-500, -500, 1400, 1400))
+    _open(qapp, shell, dialog)
+    assert phone_window.kind(dialog) == phone_window.KEEP_ON_SCREEN
+    # Moved onto the screen and shrunk to it (its layout's own minimum may keep a few pixels more).
+    assert dialog.frameGeometry().topLeft() == UPRIGHT.topLeft()
+    assert dialog.frameGeometry().height() <= UPRIGHT.height()

@@ -53,7 +53,9 @@ windows (its sweep and its per-widget event filter) and calls in here.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QMargins, QObject, QRect, QSize, Qt
+import sys
+
+from PySide6.QtCore import QCoreApplication, QMargins, QObject, QRect, QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractButton, QBoxLayout, QColorDialog, QDialogButtonBox, QErrorMessage, QFileDialog,
     QFontDialog, QHBoxLayout, QInputDialog, QLayout, QMainWindow, QMessageBox, QProgressDialog,
@@ -89,10 +91,44 @@ CLOSE_TEXT = "Close ✕"
 _QWIDGETSIZE_MAX = 16_777_215
 
 
+#: Where Qt's file dialog is the operating system's own unless the app opts out.
+_NATIVE_FILE_DIALOG_PLATFORMS = ("win32", "darwin")
+
+
+def is_native_dialog(w: QWidget) -> bool:
+    """Whether *w* is a ``QFileDialog`` the operating system draws.
+
+    Such a dialog is a Qt object with no Qt window on the screen: the static
+    ``QFileDialog.getExistingDirectory`` and friends build one on the C++ stack,
+    hand it to the system dialog and destroy it on return. Phone layout has
+    nothing to fit there, and touching it is how phone layout crashed Windows:
+    choosing a folder on Convert CZI closed the app with a native access
+    violation inside ``app.exec()``, in phone layout only, after the sweep —
+    which runs on its timer inside the system dialog's own message loop and
+    again on the focus change as it closes — had installed an event filter on
+    the dialog, set properties on it and resized it. So it is never touched.
+
+    Native when Qt built none of its own widgets for it (the native helper is in
+    use), or on Windows and macOS unless the app or the dialog opted out of the
+    system dialog — the static functions never do.
+    """
+    if not isinstance(w, QFileDialog):
+        return False
+    if not w.findChildren(QWidget):
+        return True
+    if w.testOption(QFileDialog.DontUseNativeDialog) or QCoreApplication.testAttribute(
+            Qt.AA_DontUseNativeDialogs):
+        return False
+    return sys.platform in _NATIVE_FILE_DIALOG_PLATFORMS
+
+
 def kind(w: QWidget) -> str | None:
     """What phone layout does with *w* when it is shown: :data:`FORM`,
-    :data:`KEEP_ON_SCREEN`, or ``None`` when *w* is not a window it fits."""
+    :data:`KEEP_ON_SCREEN`, or ``None`` when *w* is not a window it fits —
+    including a dialog the operating system draws (:func:`is_native_dialog`)."""
     if not isinstance(w, QWidget) or not w.isWindow() or w.property(MAIN_WINDOW_PROP):
+        return None
+    if is_native_dialog(w):
         return None
     if w.windowType() not in _WINDOW_TYPES or w.windowFlags() & Qt.WindowType.FramelessWindowHint:
         return None             # a frameless window draws its own chrome: not one a person opens

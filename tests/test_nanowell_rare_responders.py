@@ -1298,8 +1298,9 @@ def _drawn_overlaps(fig) -> list:
     return found
 
 
+@pytest.mark.parametrize("font", ["the page's", "DejaVu Sans"])
 @pytest.mark.parametrize("n_drugs", [1, 3, 4])
-def test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width(n_drugs):
+def test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width(n_drugs, font, monkeypatch):
     """Reported: the colour bar overlapped the text, and the grey blocks the text around them. On a phone's figure
     (3.88 in) the margins were shares of the width, so text started 0.08 in from the edge — under the role bar,
     which ends 0.11 in in — and every block's heading, p line and the panels' y labels ran under it; titles wider than
@@ -1308,6 +1309,12 @@ def test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width(n_d
     own passes: its 9 pt sizes, its X tick angle (which laid the upright well names flat into one another until the
     renderer recorded their angle) and, on the phone, its label fit (which broke an x label onto a second line that
     sat on the next comparison's caption)."""
+    # And in matplotlib's fallback face: CI's runner drew DejaVu Sans, a fifth wider than the bundled Inter, and the
+    # lines wrapped by an average character width ran off the figure there while fitting here.
+    import matplotlib
+
+    if font == "DejaVu Sans":
+        monkeypatch.setitem(matplotlib.rcParams, "font.family", ["DejaVu Sans"])
     t = [plate(n=120, responders=4, seed=0, treatment="drug0")]
     t += [plate(n_ctrl=0, n=120, responders=4, seed=s, treatment=f"drug{s}") for s in range(1, n_drugs)]
     res = rr.analyse(pd.concat(t))

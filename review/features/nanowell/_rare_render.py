@@ -411,12 +411,38 @@ def render_hc(fig, unit) -> None:
     draw_hc(_new_axes(fig, 1)[0], unit)
 
 
-def _wrapped(fig, lines, width_frac: float, pt: float = None, indent: str = "   ") -> list[str]:
-    """*lines* wrapped to what fits *width_frac* of the figure's width at *pt* (the report's size) in the body face,
-    whose average character is about half its point size wide."""
+def _wrapped(fig, lines, width_frac: float, pt: float = None, indent: str = "   ", *, bold: bool = False) -> list[str]:
+    """*lines* broken between words so each drawn line fits *width_frac* of the figure's width at *pt* (the report's
+    size), measured in the face the figure draws with. Measured rather than estimated from an average character: the
+    estimate was right for the bundled Inter and short by a fifth for DejaVu Sans, matplotlib's fallback where the
+    bundled face is not registered, and the figure's widest lines ran off its right edge. A single word wider than the
+    room keeps its own line rather than being cut."""
+    from matplotlib.backends.backend_agg import RendererAgg
+    from matplotlib.font_manager import FontProperties
+
     pt = pt or _REPORT_PT
-    chars = max(30, int(fig.get_figwidth() * width_frac * 72 / (pt * 0.52)))
-    return [part for line in lines for part in (textwrap.wrap(line, chars, subsequent_indent=indent) or [""])]
+    room = fig.get_figwidth() * width_frac * 72                       # points
+    renderer = RendererAgg(1, 1, 72)                                   # 72 dpi: a width in pixels is one in points
+    prop = FontProperties(size=pt, weight="bold" if bold else "normal")
+
+    def width_of(text: str) -> float:
+        return renderer.get_text_width_height_descent(text, prop, ismath=False)[0]
+
+    out = []
+    for line in lines:
+        words, current = line.split(), ""
+        if not words:
+            out.append("")
+            continue
+        for word in words:
+            trial = f"{current} {word}" if current else word
+            if current and width_of(trial) > room:
+                out.append(current)
+                current = indent + word
+            else:
+                current = trial
+        out.append(current)
+    return out
 
 
 def _shared_controls(units) -> list:
@@ -669,12 +695,16 @@ def _small_x_label(key: str, value_label: str, log_axis: bool) -> str:
 _PAGE_LABEL_PT = 9.0
 
 
-def _x_label_extra_in(label: str, panel_in: float) -> float:
-    """Inches more than one line that *label* takes under a panel *panel_in* wide, once the phone fit breaks it to
-    the panel's width at the page's label size: 0 when it fits on one line."""
-    chars = max(12, int(panel_in * 72 / (_PAGE_LABEL_PT * 0.55)))
-    lines = len(textwrap.wrap(label, chars)) or 1
-    return (lines - 1) * _PAGE_LABEL_PT * _LEADING / 72
+def _x_label_lines(fig, label: str, panel_frac: float) -> list[str]:
+    """*label* broken to a panel *panel_frac* of the figure wide, measured at the page's label size (:func:`_wrapped`):
+    the renderer breaks it so at every width — the page's phone fit does the same on a phone, and at the desk an x
+    label wider than its panel ran off the figure from the right-hand column."""
+    return _wrapped(fig, [label], panel_frac * 0.96, _PAGE_LABEL_PT, "")
+
+
+def _x_label_extra_in(lines: int) -> float:
+    """Inches more than one line that an x label broken onto *lines* lines takes under its panel."""
+    return (max(lines, 1) - 1) * _PAGE_LABEL_PT * _LEADING / 72
 
 
 def columns_for(width_in: float) -> int:
@@ -727,7 +757,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
 
     def text(content, pt, gid, *, bold=False, x=content_x, wrap=content_w) -> None:
         nonlocal y
-        wrapped = _wrapped(fig, [content], wrap, pt, "")
+        wrapped = _wrapped(fig, [content], wrap, pt, "", bold=bold)
         _ink(fig.text(x, 1 - y / height, "\n".join(wrapped), fontsize=pt, fontweight="bold" if bold else "normal",
                       va="top", color=ink, linespacing=_LEADING, gid=gid))
         y += len(wrapped) * pt * _LEADING / 72
@@ -791,21 +821,26 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
             y += 0.12                                    # the captions clear the p line above them
             # The phone fit breaks an x label wider than its panel onto more lines (``plot_style``): the room under
             # the panel grows by those lines, or the last one sat on the next comparison's caption.
-            extra = _x_label_extra_in(_small_x_label(key, value_label, log_axis), panel_w * width)
+            x_label = _x_label_lines(fig, _small_x_label(key, value_label, log_axis), panel_w)
+            extra = _x_label_extra_in(len(x_label))
             small_in = SMALL_IN + extra
+            # Every caption whole, wrapped to its column, never cut: the room above the panels is the tallest one's.
+            captions = [_wrapped(fig, [f"{rx.comparison_title(result, i)} · {rx.test_p(u, key, params, len(units))}"],
+                                 panel_w + gap * 0.45, _REPORT_PT, "", bold=True) for i, u in enumerate(units)]
+            caption_in = max(CAPTION_IN, max(len(c) for c in captions) * _REPORT_PT * _LEADING / 72 + 0.08)
             for i, unit in enumerate(units):
                 line, col = divmod(i, cols)
-                top = y + line * (CAPTION_IN + small_in)
+                top = y + line * (caption_in + small_in)
                 x0 = left + col * (panel_w + gap)
-                caption = f"{rx.comparison_title(result, i)} · {rx.test_p(unit, key, params, len(units))}"
-                short = _wrapped(fig, [caption], panel_w + gap * 0.8, _REPORT_PT, "")[:2]
-                _ink(fig.text(x0 - 0.45 / width, 1 - top / height, "\n".join(short), fontsize=_REPORT_PT,
-                              fontweight="bold", va="top", color=ink, gid=f"nw-rare-comparison:{key}:{i}"))
-                ax = axes(x0, top + CAPTION_IN, panel_w, small_in, _BELOW_IN + extra)
+                _ink(fig.text(x0 - 0.45 / width, 1 - top / height, "\n".join(captions[i]), fontsize=_REPORT_PT,
+                              fontweight="bold", va="top", color=ink, linespacing=_LEADING,
+                              gid=f"nw-rare-comparison:{key}:{i}"))
+                ax = axes(x0, top + caption_in, panel_w, small_in, _BELOW_IN + extra)
                 ax.set_gid(f"nw-rare-panel:{key}:{i}")
                 draw(ax, unit)
-                fit_title(ax, top + CAPTION_IN, small_in, _BELOW_IN + extra)
-            y += lines_of * (CAPTION_IN + small_in)
+                ax.xaxis.label.set_text("\n".join(x_label))
+                fit_title(ax, top + caption_in, small_in, _BELOW_IN + extra)
+            y += lines_of * (caption_in + small_in)
         y += BLOCK_PAD_IN
         _draw_block(fig, probe, key, block_top, y, width, height)
     y += _TEXT_PAD_IN

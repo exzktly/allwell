@@ -14279,12 +14279,16 @@ A shared panel holds as many comparisons as fit with every well's slot at least 
 9 pt label and a gap) and wraps the rest onto another panel below, the control wells drawn again on each
 (`well_dot_chunks`; the first panel's gid is `nw-rare-shared:<key>`, the next `nw-rare-shared:<key>:<j>`). Under each
 per-comparison panel the room grows by the lines the phone fit will break its x label onto at the page's 9 pt
-(`_x_label_extra_in`), and `columns_for` counts columns from the width the margins leave, each panel's axes at least
+(`_x_label_lines` breaks it to the panel at every width, `_x_label_extra_in` adds the room), and `columns_for` counts
+columns from the width the margins leave, each panel's axes at least
 `COLUMN_MIN_IN` (2.4 in) across.
 `test_nanowell_rare_responders.py::test_no_text_overlaps_a_role_bar_a_block_edge_or_other_text_at_any_width` measures
 the drawn figure at 12.6, 7 and 3.9 in with one to four comparisons, after the page's own passes (its 9 pt sizes,
 its X tick angle, and on the phone its label fit): no text under a role bar, across a block's edge, off the figure,
-or on or within 2 px of other text. The lead — a control chosen by its name, nanowells the run's
+or on or within 2 px of other text — in the bundled face and in DejaVu Sans, matplotlib's fallback, which is a fifth
+wider. Every line the page writes is broken by measuring it in the face the figure draws with (`_wrapped`), never by
+an average character width, and a comparison's caption is never cut: the room above a row's panels is its tallest
+caption's. The lead — a control chosen by its name, nanowells the run's
 flags left out — sits under the groups line, at the top, since the figure scrolls; under the rows, each comparison's ⚠
 caveats, named by comparison, then the lines and the note (gid `nw-rare-line`). Nothing is cut and no
 comparison is left off: `render_rare_page` returns the height in inches the page needs at its width (also kept for

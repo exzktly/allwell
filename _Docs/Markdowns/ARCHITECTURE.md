@@ -14455,8 +14455,12 @@ is one of the older keys `array_map` or `array_qc` opens on `array` with the mat
   renderer draws it, `renderer.render_array`: the region is widened to the axes' shape (`fit_region`), so pixels
   stay square — and since that holds only at the size it was fitted for, the canvas's `resize_event` re-fits it:
   `tab_view` restarts a `_REFIT_MS` single-shot timer on each resize, and `controller.on_canvas_resized` redraws the
-  Array view when its axes no longer have the size its region was fitted to (and the Identity view's Diagnostics when
-  its figure is no longer the size it was laid out for) (without it a resize squashed every
+  Array view when its axes no longer have the size its region was fitted to, the Identity view's Diagnostics when
+  its figure is no longer the size it was laid out for, and every other view when its figure is no longer the width
+  it was drawn for (`redraw` stamps that width on the figure): each view breaks its captions to the figure's width
+  as it draws, so a canvas that narrows afterwards — Controls docking beside the page on an unfolded phone, a side
+  panel opening — would keep lines broken for the wider figure and run them off the canvas. Only the width is
+  compared there, since a height change breaks no line and the rare page changes its own height (without the re-fit a resize squashed every
   nanowell into an oval, and a draw made while the canvas was still being laid out showed one flattened row). It leaves a canvas that is no longer visible alone: the timer can fire after the page closes, and a redraw then queues matplotlib's deferred draw onto a canvas about to be deleted; the image is drawn for exactly that region and those pixels; the nanowells are filled by the
   metric (`MAP_CMAP`, with a colour bar; a nanowell without a value is a grey outline styled by its state,
   `_STATE_STYLE`, never a colour of the scale) or outlined in `ui/nanowell_sites.state_colour` with the same

@@ -13733,7 +13733,8 @@ the figure's clearing on every redraw would destroy. `window_view.build_window_s
 above the figure and `_nw_window_refresh` keeps it on the window; the pop-out's **Show** / **Layout** / pager row is
 `window_view.build_popout_window_controls` (`_nw_popout_window_refresh`). In the pop-out's Window mode
 (`NanowellState.popout_source`, `popout_layout`, persisted; `window_page` not) `controller.draw_popout` calls
-`_window_controller.draw_window_popout`: one page of `WINDOW_PAGE` (24) rows through `renderer.render_site_rows`, the
+`_window_controller.draw_window_popout`: one page of `NanowellState.popout_rows` rows (persisted, one of
+`crop_grid_compute.POPOUT_ROW_CHOICES`, default 24) through `renderer.render_site_rows`, the
 page's crops cut in one worker fetch (`_fetch` kind `window_crops`, `crops_for_sites`), `popout_hits` mapping each
 crop's axes to its nanowell for `on_popout_click`. A nanowell selected anywhere but inside the pop-out — a click on
 the page's figure (`controller._select`), the Scatter Plot's `_plot_links.show_nanowell`, or **Pop out**
@@ -13878,6 +13879,16 @@ pop-out draw path — one nanowell, the window's rows, the hex composite — ren
 (gid `nw-popout-no-timepoints`) instead of a figure while it is set, and the button reads *Timepoints: none*.
 Unticking the last timepoint sets it too; a tick or *All* clears it. Tests: `test_nanowell_popout_grid.py` (the menu)
 and `test_nanowell_composite_render.py` (side by side, the Grid shape, the hex layout following the menu).
+**Grid: rows a page.** While the pop-out shows many nanowells as rows — `popout_source` `"responders"`, or `"window"`
+in the Rows layout (`popout_view.build_popout_view_controls`'s `many_rows`) — the Grid menu offers how many rows a
+page holds (`crop_grid_compute.POPOUT_ROW_CHOICES`, entries carrying `("rows", n)`) instead of the one-nanowell shapes,
+which do not apply to rows, and the button reads `crop_grid_compute.rows_label`. `controller.set_popout_rows` stores
+`NanowellState.popout_rows` (persisted; `clamp_rows` restores anything not on the list as 24) and moves `window_page`
+to the page that holds the row that was at the top (`first_row_page`); `_set_popout` then refreshes the pager, whose
+`_window_controller.page_count` and `rc.page_count` both divide by `popout_rows`. `render_site_rows` lays the rows out
+to fill the figure, so fewer rows a page are drawn larger. Test:
+`test_nanowell_rare_responders_page.py::test_grid_sets_how_many_flagged_rows_a_page_holds_and_the_pager_follows`
+drives the real menu and pager, and fails when the flagged page is pinned back to 24.
 `window_view.build_popout_window_controls`'s refresh hides `_nw_popout_go_to_btn` while `popout_source` is
 `"window"` or `"responders"` (the Rare responders test's flagged nanowells, `_rare_controller.draw_flagged_popout`),
 and shows the pager for both: the button names one nanowell and the figure is of many.
@@ -14100,7 +14111,7 @@ in A01's colour.
 `hc_candidate` says whether a flagged nanowell is also one of Higher Criticism's candidates, which alone are never
 flagged — HC always has a peak, so on a plate with no responders every well still has candidates. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
 `draw_popout` sends to `rc.draw_flagged_popout`: rows of crops over time through `renderer.render_site_rows`,
-`FLAGGED_PAGE` to a page, cut through `_window_controller`'s crop pipeline and paged by its pager
+`NanowellState.popout_rows` to a page, cut through `_window_controller`'s crop pipeline and paged by its pager
 (`_window_controller.page_count` answers for this source). `tests/test_nanowell_rare_responders_page.py` drives
 it through the real page builder and was run against four mutations of the wiring (the rare branch never taken,
 the flagged list not kept, *vs* listing wells, the pop-out ignoring the source), each failing a test.

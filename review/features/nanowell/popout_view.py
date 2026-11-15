@@ -2,9 +2,12 @@
 
 **Timepoints** chooses which of the timepoints are panels (**All**, **None**, or a tick each, the menu staying open
 while several are ticked), **Channels** adds channels beside the page's
-image channel (a row of crops each), **Grid** sets the shape the panels are laid out in, and **Save ▾** saves,
+image channel (a row of crops each), **Grid** sets the shape the panels are laid out in — or, while the pop-out shows many nanowells as rows of crops
+(the Distribution window's in the Rows layout, or the rare-responder tests' flagged ones), how many rows a page holds,
+the pager recounting its pages to match — and **Save ▾** saves,
 copies or files the figure. Each writes one ``NanowellState`` field through the controller
-(``set_popout_timepoints``, ``set_popout_channels``, ``set_popout_grid``, ``save_popout_figure``); the rules those
+(``set_popout_timepoints``, ``set_popout_channels``, ``set_popout_grid`` / ``set_popout_rows``,
+``save_popout_figure``); the rules those
 fields follow are ``crop_grid_compute``'s.
 """
 
@@ -14,7 +17,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QMenu, QToolButton, QWidgetAction
 
 from review.features.nanowell import controller as nwc
-from review.features.nanowell.crop_grid_compute import POPOUT_MAX_COLS, grid_label
+from review.features.nanowell.crop_grid_compute import POPOUT_MAX_COLS, POPOUT_ROW_CHOICES, grid_label, rows_label
 from widgets.owned_action import owned_action
 
 _TPS_TIP = ("Which of the timepoints the pop-out shows, one panel each (in the Hex layout, one composite each, side "
@@ -24,7 +27,8 @@ _CHANNELS_TIP = ("Channels drawn beside the image channel, a row of crops each, 
                  "its own (the channel's Display range when it has one). The image channel is always drawn first.")
 _GRID_TIP = ("The shape of the pop-out's grid. Auto: one channel wraps into a near-square grid, several take a row "
              "each. One row: every timepoint across. One column: every timepoint down, one column per channel. "
-             "N across: the timepoints wrap every N panels.")
+             "N across: the timepoints wrap every N panels. While many nanowells are shown, a row each: how many rows "
+             "a page holds — fewer rows are drawn larger, and the pages are recounted.")
 _SAVE_TIP = "Save the nanowell over time as it is drawn here: a figure file, the clipboard, or Saved Plots"
 
 
@@ -144,9 +148,23 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
                          checked=channel in drawn, enabled=not first, data=channel,
                          on_toggle=lambda on, channel=channel: toggle_channel(channel, on))
 
+    def many_rows(st) -> bool:
+        """Rows of many nanowells, paged: the Grid control sets how many rows a page holds, not a grid's shape."""
+        return st is not None and (st.popout_source == "responders"
+                                   or (st.popout_source == "window" and st.popout_layout != "hex"))
+
     def rebuild_grid() -> None:
         st = _state(ctx)
         grid_menu.clear()
+        if many_rows(st):
+            grid_menu.addSection("Rows per page")
+            for rows in POPOUT_ROW_CHOICES:
+                action = owned_action(grid_menu, f"{rows} row{'' if rows == 1 else 's'}")
+                action.setCheckable(True)
+                action.setChecked(st.popout_rows == rows)
+                action.setData(("rows", rows))
+                action.triggered.connect(lambda _=False, rows=rows: nwc.set_popout_rows(ctx, rows))
+            return
         n_tps = max(1, len(shown_tps(st)))
         shapes = [("auto", 0), ("row", 0), ("column", 0)] + [
             ("columns", n) for n in range(2, min(POPOUT_MAX_COLS, n_tps - 1) + 1)]
@@ -166,7 +184,8 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         drawn = nwc.popout_channels(st)
         ch_btn.setText("Channels: 1" if len(drawn) == 1 else f"Channels: {len(drawn)}")
         ch_btn.setEnabled(len(_channels(st)) > 1)
-        grid_btn.setText(grid_label(st.popout_grid, st.popout_cols) if st is not None else "Grid: auto")
+        grid_btn.setText("Grid: auto" if st is None else rows_label(st.popout_rows) if many_rows(st)
+                         else grid_label(st.popout_grid, st.popout_cols))
         for button in (tps_btn, ch_btn, grid_btn):
             button.ensurePolished()                     # measured with the stylesheet's caret room, not before it
             button.setMinimumWidth(button.sizeHint().width())

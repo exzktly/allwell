@@ -7425,7 +7425,9 @@ The pop-out has a **Show** choice: **This nanowell** (the crops above) or **Wind
 Distribution window. In **Window** mode they are drawn as **Rows**: one row per nanowell, one column per timepoint, each
 row labelled with its rank, its well and address, and the value it is ranked by (the metric's value at the window's
 latest covered timepoint, largest first; a nanowell with none there last; ties by well, then address). Twenty-four rows
-make a page; ◀ ▶ turn it. Every crop is on one brightness scale, the Timepoints, Channels, Range, Cells, Metrics and
+make a page until you choose otherwise: while many nanowells are shown, **Grid** sets how many rows a page holds (1, 2,
+3, 4, 6, 8, 12, 16 or 24) instead of a grid's shape, fewer rows being drawn larger, and the page count recounts to
+match, keeping the row at the top of the page on screen. ◀ ▶ turn the pages. Every crop is on one brightness scale, the Timepoints, Channels, Range, Cells, Metrics and
 Save controls apply as they do to one nanowell, and a click on a row selects its nanowell, so the side panel follows. A
 nanowell clicked anywhere else — on the page's figure, or on a plot that shows single nanowells such as the Scatter
 Plot's nanowell scatter — turns the pop-out back to **This nanowell**, so it shows the nanowell you clicked without
@@ -11341,7 +11343,7 @@ the two has one.
 debris counted as a cell, a segmentation that split one cell into several. Every nanowell the verdict is counted
 from is therefore shown for review by eye. **Review flagged crops** opens the crops pop-out on **Show: Flagged
 (N)**: each treatment-well nanowell past the control cutoff, as a row of crops over every timepoint, the most
-extreme first, 24 to a page. Click a row to select that nanowell on the page. Higher Criticism's own candidates
+extreme first, 24 to a page until **Grid** chooses fewer rows a page, which draws each row larger. Click a row to select that nanowell on the page. Higher Criticism's own candidates
 are not flagged: it always has a peak, so on a plate with no responders every well still has candidates. The
 button is greyed out, with the reason on it, when nothing grew past the cutoff.
 

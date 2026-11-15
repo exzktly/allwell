@@ -13994,6 +13994,11 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   `alpha0·n` nanowells are all at p ≤ 1/n — past every control value, since an empirical p's floor 1/(N+1) is
   below 1/n whenever the pool is larger than the well — which are the strongest responders there are. HC+ keeps
   its definition; the figure marks such a well "no HC score" with that reason rather than leaving it undrawn.
+  The group statistic is the mean over the treatment wells that have a score, so such a well is left out of it: the
+  permutation p stays valid (every relabelling is scored by the same rule) but describes the scored wells only, and
+  every place it is written says so (`rare_export_compute.scored_note`: *p = 0.25 — from D01, D03; D02 has no HC
+  score* on the figure's row, caption and Details, *(D01, D03 only)* over the group on the shared panel). The shape
+  test's p is qualified the same way.
 * `rare_ad_compute` (Test C) — the one-sided, upper-tail-weighted Anderson–Darling `A²_R` per stratum, combined by
   nanowell share over the strata where it is defined, summed over the control values at or above the median with
   `F0 = #{control ≤ u} / (N + 1)`, so the pool's top value carries weight and mass beyond every control counts (with

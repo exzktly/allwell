@@ -1176,3 +1176,33 @@ def test_one_comparison_fills_half_the_row_and_nothing_on_it_overlaps():
     low, high = hc_ax.get_ylim()
     radius = (high - low) * 0.03
     assert all(low + radius <= v <= high for v in values if math.isfinite(v))
+
+
+def test_a_group_p_computed_without_an_unscored_well_names_the_wells_it_used():
+    """User decision (option 1): the group statistic of Higher Criticism is the mean over the wells that have a score,
+    which keeps its p valid but leaves out a well whose most extreme nanowells are all past every control value — the
+    strongest responders. The p is kept and says which wells it came from, on the figure's row and caption, over the
+    group on the shared panel, and in Details. Only drug2 is spiked, so it alone has no HC score."""
+    t = plate(n_ctrl=3, n_treat=3, n=100, responders=0, seed=4)
+    spiked = (t["well_id"] == "drug2") & (t["nanowell_id"].astype(int) < 15)
+    t.loc[spiked, "nt"] = (t.loc[spiked, "n0"] * 2 ** 6.5).astype(int)
+    res = rr.analyse(t)
+    unit = res.units[0]
+    hc_scores = {w.key.split(":", 1)[-1]: unit.hc[w.key].value for w in unit.treated}
+    assert math.isnan(hc_scores["drug2"]) and math.isfinite(hc_scores["drug0"]) and math.isfinite(hc_scores["drug1"])
+    from review.features.nanowell import rare_export_compute as rx
+
+    p = rx._num(unit.hc_perm.p)
+    said = rx.test_p(unit, "hc", res.prepared.params, 1)
+    assert said.startswith(f"p = {p}") and said.endswith(" — from drug0, drug1; drug2 has no HC score"), said
+    fig = _laid_out(res, 14.5)
+    row = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-test-p:hc")
+    assert row.endswith(" — from drug0, drug1; drug2 has no HC score")
+    caption = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-comparison:hc:0").replace("\n", " ")
+    assert caption.endswith(" — from drug0, drug1; drug2 has no HC score")
+    groups = [t.get_text() for t in _panel(fig, "nw-rare-shared:hc").texts if t.get_gid() == "rare-hc-peak-group"]
+    assert any("(drug0, drug1 only)" in " ".join(g.split()) for g in groups), groups
+    details = [line for line in rx.report_lines(res) if line.strip().startswith("Higher Criticism: mean score")]
+    assert details and details[0].endswith(" — from drug0, drug1; drug2 has no HC score")
+    # Every well scored, or none: nothing to qualify.
+    assert rx.scored_note(rr.analyse(plate(n_ctrl=3, n_treat=3, n=100, seed=4)).units[0], "hc") == ""

@@ -3351,6 +3351,31 @@ the four to do, so each warns under the pipeline's own logger naming what did
 not happen. A frame whose median really is zero is not one of these and says
 nothing.
 
+**`robust_mesh` places each tile's level at the tile's centre, and three things
+follow from that** (`pipeline.background._robust_grid_background`). A tile's
+sigma-clipped level is the background at the middle of the tile, so
+`_upsample_tile_mesh` fits a cubic spline (`RectBivariateSpline`) through nodes
+at the tile centres. Stretching the mesh so its outermost nodes land on the
+frame's first and last pixels, which is what an image zoom does, moves every
+node outward by up to half a tile, and under an illumination gradient the
+background is then wrong by that distance times the gradient across the whole
+frame, with opposite signs at its two sides: 0.5 counts per pixel on 100 px
+tiles read +24.8 at the left edge, +8 a third of the way in and −26 at the
+right, and identical cells read 785 at the left of a field where 800 was true.
+Second, the half tile outside the outermost centres is continued at the mesh's
+own slope (`_extend_nodes`) rather than held at the last node's level. The same
+continuation is what the 3×3 median over the mesh runs on: with the border row
+merely repeated, a border node's neighbourhood is lopsided and a gradient
+running along the border as well as across it moves the node. Third, the tiles
+are whole (`_even_tiles`): `ceil(length / tile)` tiles of equal size, spread
+evenly over real pixels, the requested size when it divides the axis and the
+nearest size below it otherwise. Padding the frame to a multiple of the tile
+by reflection made the last tile a mix of real and mirrored pixels whose level
+belongs to no one position. On a field with read noise and cells over a
+two-axis gradient the estimate is within a count of the truth (RMS 0.3 against
+9.2); `tests/test_mesh_background_follows_a_gradient.py` holds the ramp, the
+border, the cells and the swamped-tile case the median exists for.
+
 **A blank can be paired with the wells it corrects, and by default is not.**
 Named several blanks, `--background_well H12,G12` pools their frames into one
 reference per (channel, timepoint) — the less noisy estimate, and the right one

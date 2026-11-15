@@ -1,0 +1,146 @@
+# Full-app review — findings and remediation tracker
+
+**This document is temporary.** It is a remediation tracker in the sense of CLAUDE.md §6.1: one row per finding,
+updated in the same commit as the work, closed only with evidence, and deleted by the pull request that closes its
+last row (which says so in its body).
+
+It records a review of the whole application for (1) scientific validity and consistency of every calculation, gate
+and inclusion criterion, (2) adherence to the architecture and its conventions, and (3) implementation accuracy.
+
+## How the findings were produced, and what that is worth
+
+Every row below was produced by **running the application's own functions on a synthetic input and printing the
+result beside an independent reference** — a hand-computed value, `scipy`, `statsmodels`, or a brute-force loop. No
+row comes from a pre-existing test, and no row comes from reading alone. The pre-existing suite was used for exactly
+one thing: `ruff check .` and the twelve-file guard family pass on the tree the review started from (`0e1fc9c`),
+which is the baseline for the architecture category.
+
+The probes were written by eight scoped reviewers that were stopped by a usage limit before they could write their
+reports. Each probe was then re-run by the session that owns this tracker, and the numbers in the *Evidence* column
+are from those re-runs. What has **not** yet happened for a `todo` row is an audit of the probe's own harness against
+the application's real caller (CLAUDE.md §7.1 #3, §6.1 "each finding is a hypothesis"). So:
+
+- `todo` — the wrong output was reproduced by a probe; the real caller has not yet been traced by hand.
+- `confirmed` — the caller was traced and the defect is reachable by a user.
+- `done` — fixed, with a test that was watched failing on the unfixed code. The test is named.
+- `decision` — the behaviour is a design choice that belongs to the user; the row states the options.
+- `declined` — measured and found not to be a defect, with the reason.
+
+Recount with `grep -c '| \`todo\` |'` and so on. No total is typed here.
+
+Severity: **High** — a silently wrong number a user would publish, or data loss. **Medium** — wrong, or a crash, in
+an edge case a user can reach. **Low** — an inconsistency or a misleading label.
+
+## Areas checked and found sound
+
+These were probed against independent references and agreed, so no row exists for them:
+
+- Per-cell quantification (`process_microscopy._quantify_image_group`): area, total, mean, max, min and standard
+  deviation equal hand-computed values on synthetic cells, including non-contiguous label ids, a border cell and a
+  one-pixel cell.
+- `review/domain/stats_tests.py`: Hedges' *g*, Benjamini–Hochberg, the paired tests, the one-way omnibus, Dunnett
+  and the contrast test equal `scipy`'s closed forms; the two-way ANOVA equals `statsmodels`' Type II table on an
+  unbalanced design to twelve significant figures.
+- Standard deviation and SEM across replicates use `ddof=1` at every site (`stats_compute._reduce_reps`,
+  `data_loading`, the Nanowells page's summaries).
+- The Nanowells page's pairwise tests, BH adjustment, Dunnett and group confidence interval equal `scipy`'s; the
+  moving average equals a brute-force per-nanowell loop (trailing and centred, with gaps) with zero disagreements.
+- The nanowell pipeline end to end on rendered tiles: every nanowell counted once across tile seams, integrated
+  intensity within 6% of truth, no duplicate cells, clipped edge sites reported as clipped, and one address naming
+  one physical nanowell across timepoints under translation, rotation, a missing square and a bubble.
+- The Distribution tab's KDE equals `scipy.stats.gaussian_kde` at the same bandwidth to 1e-17.
+- The dose-response fit recovers known parameters, refuses under-determined inputs with a reason, and reports "no CI"
+  rather than a number when there are as many points as parameters.
+- Ripley's K under complete spatial randomness stays inside its envelope.
+
+## Findings
+
+### Statistics and normalisation
+
+| # | Sev | Where | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| S1 | High | `review/features/stats/controller.py::_bh_adjust`, `_run_pair_tests` | The Statistics tab carries its own Benjamini–Hochberg routine beside `stats_tests.bh_adjust`, and it counts a pair whose test returned `NaN` as a member of the family. A `NaN` p arises without an exception (Welch on two groups that are each constant, for example a fraction saturated at 1.0 in every well). The family size is then too large, the `NaN` pair is given a finite adjusted p, and the sort order of the real pairs is undefined. | Four groups, one producing `NaN` against the others: a raw p of 0.0106 is reported adjusted to 0.0211 where the correct value over the three computable pairs is 0.0317; each `NaN` pair is reported with an adjusted p of 0.021–0.029. | Delete the controller's copy; have `compute_pairwise` call `stats_tests.bh_adjust` and treat a non-finite p as "not computed" (no record, with the reason in the report). | `todo` |
+| S2 | High | `review/features/stats/controller.py::_run_pair_tests` ("Wilcoxon rank-sum"); `review/features/nanowell/statistics_compute.py` (Mann–Whitney) | Rank tests use a normal approximation at replicate counts where it is invalid. "Wilcoxon rank-sum" calls `scipy.stats.ranksums`, which is always the approximation: three wells against three gives p = 0.0495 and one star, where the smallest two-sided p any exact rank test can return for 3 v 3 is 0.1. "Mann–Whitney U" is exact only without ties; with tied values (count metrics, per-well medians of counts) `method="auto"` falls back to the approximation: 3 v 3 with all values tied within groups gives p = 0.047. | Probes print 0.0495 (ranksums) against 0.1 (exact) for the same samples; 0.0469 against an exact permutation p of 0.1 with ties. | One exact rank-sum routine in `stats_tests` (enumerate the permutation distribution with mid-ranks when the number of arrangements is small, otherwise the approximation with tie and continuity correction), used by both "Wilcoxon rank-sum" and "Mann–Whitney U" on the Statistics tab and on the Nanowells page; the report names which was used. | `todo` |
+| S3 | High | `review/domain/stats_tests.py::effect_size` | The interval printed as a "95% CI" on the difference of means is a percentile bootstrap, which under-covers badly at the replicate counts the app treats as normal. | 2,000 simulated experiments per size, normal data: the interval covers the true difference 80.0% of the time at n = 3 per group, 86.3% at n = 4, 88.8% at n = 6, 91.8% at n = 12; a Welch *t* interval covers 95–96.5% throughout. With no true difference at n = 3 the "95% CI" excludes zero in 19.5% of runs. | Replace the percentile bootstrap with the Welch–Satterthwaite *t* interval (deterministic, no seed needed, exact under normality), and say so in the label and the report. Keep `level`. | `todo` |
+| S4 | Medium | `review/features/stats/controller.py::collect_group_per_cell_values` (KS test) | The KS test's "ON" population is `value > ThreshFracOn`, while the bar, line and replicate statistics take the ON population from the scatter gate (`Gate_On`) when scatter-gate thresholding is active. The same dataset therefore has two ON populations depending on the test chosen. | ON population n = 304 of 2,000 (mean 207.3) for bar/line/stats; n = 1,591 (mean 111.7) for the KS test. | Route the KS sample through the same on-column resolution as `stats_compute._thresh_on_col`. | `todo` |
+| S5 | Medium | `review/features/barplot/collect.py` against `review/features/lineplot/controller.py` | The bar plot and the line plot report different spreads for the same group, statistic and timepoint under fold-change normalisation: a single-well group's spread after *subtract control* (bar ±6.03, line ±4.52), and the spread of the fraction above threshold after *ratio to t0* (bar ±12.59, line ±3.40). Raw, un-normalised values agree. | Probe prints both tabs' numbers side by side for four groups under three normalisations. | Trace both through `fold_change`'s propagation helpers; one of the two is propagating the baseline's spread and the other is not. Make both call the same helper. | `todo` |
+| S6 | Low | `review/domain/stats_compute.py` (single-well group, per-cell SEM) | A single well's per-cell SEM is computed with `ddof=0` while every other spread, and the tabs' own notes, say `ddof=1`. | Well with 65 cells: reported 8.9378 = sd(ddof=0)/√n; ddof=1 gives 9.0074. | Use `ddof=1`. | `todo` |
+
+### Gates and inclusion criteria
+
+| # | Sev | Where | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| B1 | High | `review/data/` field-quality exclusion (`Field_Pass`, `Excluded_Field_Pass`) | A field flagged by the run's field-quality record is joined to the cells by the **raw** FOV token of the record, while the frame's `fov` column has been normalised on load (`""` → `"1"`, `"001"` → `"1"`). On a plate whose FOV tokens are zero-padded, or that has no FOV slot, the join matches nothing: the panel says "Currently excluding 1 field" and no cell is excluded. | Three of nine cells should be dropped; zero are, for both the zero-padded and the no-FOV-slot layout. | Normalise the record's token through the same function `load_well_csv` uses before joining. | `todo` |
+| B2 | High | `review/features/barplot/collect.py:467` and every aggregate consumer; Cell Gating's "Included for analysis" | In scatter-gate inclusion mode the intensity floors are greyed out and Cell Gating's count ignores them, but the aggregates still pass `get_all_fluor_gates` and apply the stored floor. The count the user is shown and the population every plot uses differ. | "Included for analysis: 723 / 1,000"; bar, line, heatmap and distribution all use 371. With no scatter gate selected at all: 200 of 200 "included", 90 used. | Decide the floors in one place (`review/data/inclusion.py`) by the mode, and have both the count and the aggregates read it. | `todo` |
+| B3 | Medium | `review/features/scatter/` per-cell scatter | A floor of 0.0, which every other consumer treats as "gate off", is applied by the per-cell scatter as `x > 0`, dropping every cell at or below zero (352 of 1,000 in the probe); and a floor stored for a channel's *mean* intensity is applied to whatever column is on the axis, including the *total* intensity. Percentages printed on the scatter then use the reduced denominator (24.7% where the gating pass counts 51.2%). | Probe prints the three counts. | Treat 0.0 as off, and apply a floor only to the column it was defined on. | `todo` |
+| B4 | Medium | `review/features/home/cell_gating/controller.py::_cell_gating_valid_mask` | The threshold optimiser and the Cell Gating CDF build their population from three of the eleven inclusion layers, so a threshold is optimised on cells the plots then exclude. | Probe enumerates the layers honoured. | Build the mask from the composed inclusion mask. | `todo` |
+| B5 | Low | Cell Gating ratio CDF | The ratio is `num / (den + eps)` there and `num / max(den, eps)` everywhere else. | Denominators 50, 0.5, −0.5, −3 with eps 1: 2.0, 100, 100, 100 elsewhere; 1.96, 66.7, 200 and one dropped in the CDF. | Use the one ratio helper. | `todo` |
+| B6 | Low | Cell Gating labels | The labels read "Include ≥", "ON ≥" and "at or above", and every computation is a strict `>`. | Values 49, 50, 50, 51 at a cut of 50: one cell included where the label promises three. | Change the labels to ">" (the computation is the established behaviour and every saved threshold depends on it). | `todo` |
+
+### Pipeline measurements
+
+| # | Sev | Where | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| C1 | High | `pipeline/background.py::_match_background_scale` (`empty_well`) | The fit of the blank to the frame's background level fails once cells cover about half the field: the fitted background rises into the signal and every cell reads low. | Identical cells of true mean 500: 500.6 at 1% cover, 500.3 at 26%, **418.5 at 52%**, 412.8 at 53% (vignetted blank); 392.9 at 53% with a flat blank. | Fit on a robust low quantile of the frame-to-blank ratio rather than a statistic that crosses into the signal at 50% cover, and warn when the fit is not trustworthy. | `todo` |
+| C2 | High | `pipeline/background.py::_fft_butterworth_bandpass` + `_floor_after_subtract` | The FFT high-pass makes the per-cell mean depend on how many cells are in the field, while the method's own description says the high-pass-only form "preserves signal intensities for quantification". | Identical cells of true mean 500, radius 50: 413 with 20 cells, 400 with 500, **314 with 3,000**; radius 200: 493, 467, 337. Re-referencing the filtered frame to its own median gives 494, 492, 492 at radius 200. | Re-reference the filtered frame to its median before flooring, and correct the description of what radius does to quantification. | `todo` |
+| C3 | Medium | `process_microscopy` → `pipeline/field_quality_record` | The field-quality record's `nuc_area_median` is always `None`: the caller reads `r["area"]` and the records carry `area_px`. `nuc_count` in the same record disagrees with the rows written (5 against 3 in the probe). | Probe through the real `_quantify_image_group`. | Read `area_px`; derive `nuc_count` from the records written. | `todo` |
+| C4 | Medium | `pipeline/field_quality.py::saturated_fraction` | Saturation is measured against the dtype's ceiling, so a 12-bit camera saved as `uint16` never registers a clipped pixel. | A frame with 11.2% of pixels clipped at 4,095 records `sat_frac` 0.0; Review flags above 0.002. | Detect the effective ceiling (the frame's maximum when a meaningful share of pixels sit exactly at it at a `2^n − 1` value). | `todo` |
+| C5 | Medium | `process_microscopy` flat-field and combined empty-well paths | Four correction paths return the frame unchanged without saying so (combined empty-well with a shape mismatch or a missing channel; flat-field `empty_well` with either), while background `empty_well` alone warns. | Probe prints output == input and whether a warning was logged for each of five paths. | Warn on every identity return, with the same wording as the existing one. | `todo` |
+| C6 | Medium | `process_microscopy.process_well_zip_task` / `pipeline/completeness.py` | A field that legitimately holds no cells is counted as not covered, so the well is reported INCOMPLETE, is never sealed, and `--incremental` re-runs it for ever without change. | 3 groups, one empty: `groups_covered` 2 of 3, no seal, same after an incremental re-run. | Record a segmented, zero-cell group as covered. | `todo` |
+| C7 | Medium | `pipeline/io.py::load_2d_gray_with_ceiling` | An RGB image, which the grouper accepts, is returned as a `(width, 3)` array rather than a 2-D grey frame. | A 480 × 640 RGB TIFF returns shape (640, 3). | Detect a trailing channel axis of 3 or 4 and convert, or refuse with a named error. | `todo` |
+| C8 | Medium | `pipeline/field_quality.py::cell_focus_by_label` under seeded watershed | Per-cell focus is measured at the label outline on the nuclear frame; with seeded watershed the labels are cell outlines, so the estimator reads the wrong edge. | Sigma 1.0: nucleus outlines measure 81 of 81 at 0.36; cell outlines measure 28 of 81 with a range of 0.18–15.7. | Measure on the nuclear seeds when the segmentation is seeded watershed, or leave the column out and say why. | `todo` |
+| C9 | Low | `pipeline/background.py::_robust_grid_background` | The mesh background is wrong by up to a tile's worth of gradient at the frame's edges. | A pure linear gradient of 0.5 counts per pixel: error +24.8 at the left edge, −26.5 at the right, near zero at the centre. | Extrapolate the node grid to the frame edge rather than clamping. | `todo` |
+| C10 | Low | `process_microscopy.compute_shape_features` | Circularity is stored as 0.0 when the perimeter is zero (a one-pixel cell) — a value that was not computed written as a measurement. | One-pixel cell: `shape_circularity` 0.0. | Store nothing (NaN on read). | `todo` |
+
+### Nanowells page
+
+| # | Sev | Where | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| E1 | Medium | `review/features/nanowell/_rare_controller.py` / `rare_data_compute.py` | The Rare responders test resolves the page's Timepoint by a different rule from every other Statistics test: when the chosen timepoint is one the drawn wells do not have, the others fall back to the wells' last timepoint and Rare responders reports that no nanowell has a row. | Timepoint `t5` chosen on another well; Welch tests at `t4`; Rare responders: "no nanowell of the named wells has a row at timepoint 't5'". | Use the page's one timepoint resolver. | `todo` |
+| E2 | Medium | same | For a metric with one value per nanowell (growth rate), Rare responders drops nanowells by their state at the Timepoint, which that metric does not have; the sibling tests keep them. | Well B02 with 10 nanowells occluded at `t4` only: 40 nanowells in Welch, 30 in Rare responders. | Apply the state filter the way the siblings do for per-nanowell metrics. | `todo` |
+
+### Plot tabs
+
+| # | Sev | Where | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| F1 | High | `review/domain/spatial_compute.py` (the Spatial tab's "ICC") | The number reported as the intraclass correlation is determined by the colony sizes and not by the data: on pure noise it equals (K − 1)/(N − 1). | Noise, mean colony size 1.3: reported 0.798, ANOVA ICC(1) +0.012, (K−1)/(N−1) predicts 0.796; size 4.8: 0.213 against +0.009 and 0.208. | Compute ICC(1) from the one-way ANOVA mean squares, with the unbalanced-design `n₀`. | `todo` |
+| F2 | Medium | same, summary panel | With several fields overlaid, the local density is computed over the overlay and is several times the per-field truth; and the median hull area counts colonies too small to have a hull as 0.0. | Density 2.62e-4 against a per-field 6.49e-5; single linkage: median hull area 0.0 reported, 310.2 over the colonies that have a hull. | Compute density per field; leave colonies without a hull out of the median and state how many. | `todo` |
+| F3 | Medium | `review/features/lineplot/controller.py` | A timepoint at which no cell is above the ON cutoff is drawn for the fraction (0.0) and omitted for the event count (0), and in replicate-set mode it is omitted for both. Zero events is a measurement. | Well mode: fraction drawn at t = 0, 24, 48; events at 24, 48 only. Set mode: both start at 24. | Draw the zero. | `todo` |
+| F4 | Low | `review/features/distribution/controller.py` | With a logarithmic x axis, values at or below zero are dropped without a count, and the histogram's bin edges stay linear. | 23.4% of values at or below zero, silently off the axis. | State the count in the figure; build log-spaced edges. | `todo` |
+
+### Data loading and the Datasets tools
+
+| # | Sev | Where | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| G1 | High | `domain/tp_match.py::tp_close` | Two timepoints are "the same" when they differ by less than 0.1% of the hour value, so on a long time-lapse neighbouring frames are pooled: 5-minute frames merge from 83 h, 10-minute from 167 h, 30-minute from 500 h. Every consumer inherits it. | 5-minute frames over 5 days, 10 cells per frame: the Distribution at t = 100 h holds 30 cells from three frames; the bar plot's `n_total` is 30; a Subset with one timepoint ticked writes three timepoints' images and rows while its sidecar lists one. | An absolute tolerance far below any real frame interval (half a second, in hours), with the relative term removed. | `todo` |
+| G2 | Medium | `datasets/validate`, `datasets/subset`, `datasets/concatenate`, `datasets/merge_plates` | An input archive made by Finder's Compress (every image under `A01/`, with `__MACOSX/` AppleDouble twins): the pipeline reads it and Validate reports it clean, but Subset refuses it ("isn't in the filtered in/A01.zip"), and Concatenate and Merge copy the `__MACOSX` members into the result, under the wrong well in Merge. | Probe prints each tool's result. | One member-name normaliser (basename, operating-system members dropped) used by all four. | `todo` |
+| G3 | Low | `review/data/parquet_cache.py` | The cache key does not notice a CSV replaced by one of the same modification time. | Replaced file reads the old value 100 where 999 is on disk. | Add the file size to the key (a content hash would cost the read the cache exists to avoid). | `todo` |
+
+### Running an analysis
+
+| # | Sev | Where | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| H1 | High | `util/well_token` / `process_microscopy.process_well_zips` / Analyze preflight | Two archives that name the same well (`A1.zip` beside `A01.zip`) are both accepted and both run; the second overwrites the first's CSV, and the run report says the well is complete. Which half survives depends on the worker count. | `A1.zip` with fields 1–2 and `A01.zip` with fields 3–4: the CSV holds fields 1–2 with one worker and 3–4 with two; the report says 2 of 2 groups covered either way. | Refuse the run, naming both archives. | `todo` |
+| H2 | High | `services/pipeline_runner.py::_run_pipeline_remote` | A finished plate re-run on a remote host with a plate-level setting changed (auto-threshold switched on, a focus cut stated) is reported as "Nothing to upload: every well is already complete locally" and nothing is recomputed or rewritten, where the same re-run locally updates `pipeline_info.json`. | Local re-run writes `thresholds` and `focus_min` 0.3; the remote path launches nothing and the sidecar still says `no_auto_threshold: True`, `focus_min: 0.0`. | Run the plate-level pass locally when every well is complete and a plate-level setting differs from the sidecar's. | `todo` |
+| H3 | Medium | `util/settings_digest` / batched remote host | A plate computed by a batched host records a settings key that includes `--background_dir=<run>/bg`, which the app never asks with, so the plate is never recognised as finished afterwards and is recomputed. | Host records one key; the app asks with another; control without a blank matches. | Leave the blank's location out of the key and key on its content. | `todo` |
+| H4 | Medium | `analyze/domain/job_edit.py::hydrate_job` | Editing a queued job does not restore every option: `remote_upload_ahead` "all" comes back as "batch", and for a nanowell job the background method, the fluorescence tokens and the segmentation method come back different. | Round trip spec → form → spec with every option off its default. | Hydrate the missing fields; for the nanowell differences first establish which are the form's deliberate normalisation. | `todo` |
+
+## Not established
+
+- **Type-I error of the Rare responders deciding test** (beta-binomial one-sided likelihood-ratio test) on null
+  plates: the simulation through the real `analyse()` did not finish inside three minutes, so there is no number.
+- **The bar plot built by the tab against the bar plot built by Batch Export** printed different values in one probe
+  (`TAB-BAR` 1.00 against `BATCH-BAR` 1.91 for the same group under ratio-to-t0). The harness set the two up through
+  different state objects, so this may be the probe; it needs the tab's real state to settle.
+- **Concatenate rewriting a shifted timepoint token in a different spelling** (`60m` beside `0min`): seen in a probe's
+  listing, not followed through to what Review then parses.
+
+## Architecture and conventions
+
+`ruff check .` and the guard family (`test_optional_returns_declared`, `test_no_unbound_names`,
+`test_no_silent_except`, `test_safe_helpers_used_right`, `test_architecture_contracts`, `test_layering`,
+`test_guardrails`, `test_complexity_ratchet`, `test_monolith_budgets`, `test_stale_app_attrs`,
+`test_doc_version_sync`, `test_ctx_app_burndown`) pass on `0e1fc9c`. The findings in this category are the ones the
+guards cannot see, and each is recorded above where it produces a wrong number: one formula or predicate implemented
+twice and diverged (S1's two BH routines, S4's two ON populations, S5's two propagations, B2's two inclusion
+decisions, B5's two ratio formulas, B1's two FOV normalisations, G2's four member-name rules).

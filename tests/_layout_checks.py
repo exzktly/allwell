@@ -16,7 +16,9 @@ checks are the defects a manual sweep found, written as measurements:
 * ``table`` — an item view that needs a sideways scroll to show its columns;
 * ``sheet`` — the phone's ⚙ Controls sheet with content wider than itself, scroll bar or not;
 * ``menu`` — the phone's page button naming a page that is not the one on screen, or showing a name whose
-  ampersand Qt read as a keyboard mnemonic ("Validate & Repair" drawn as "Validate ̲Repair").
+  ampersand Qt read as a keyboard mnemonic ("Validate & Repair" drawn as "Validate ̲Repair");
+* ``caret`` — a button with a menu that draws two arrows, one large and one small: a "▾" in its text *and* the
+  menu indicator Qt paints for any button with a menu (:func:`draws_two_carets`).
 
 Each tolerance is calibrated so the **desktop** is clean on a data-filled app: a check that
 fires at the desk is a false alarm or a desk defect, and either way gets looked at.
@@ -290,8 +292,50 @@ def sideways_sheet(window: QWidget, shell) -> list[Finding]:
         return []
 
 
+#: Appended to a button's own style sheet to switch its menu indicator off, so a render with and without it can be
+#: compared. Both classes, because a QPushButton with a menu draws one too.
+_NO_INDICATOR_QSS = ("QToolButton::menu-indicator, QPushButton::menu-indicator "
+                     "{ image: none; width: 0px; height: 0px; }")
+
+
+def draws_menu_indicator(button: QAbstractButton) -> bool:
+    """Whether *button* paints a menu indicator, measured rather than inferred.
+
+    Whether the arrow is drawn depends on the button's class, its popup mode, a ``hasMenu`` property the theme
+    styles, a ``::menu-indicator`` rule in its own style sheet or any ancestor's, and the application sheet — reading
+    any one of those is how every previous fix missed a site. So render the button, switch the indicator off in its
+    own style sheet, render it again, and compare the pixels: they differ exactly when an indicator was drawn.
+    """
+    if getattr(button, "menu", None) is None or button.menu() is None:
+        return False
+    # Both renders follow a style-sheet change, so both are repolished: a button grabbed before its first polish
+    # (the first page a window shows) differs from any repolished render whether or not it has an indicator.
+    sheet = button.styleSheet()
+    try:
+        button.setStyleSheet(f"{sheet}\n/* measuring the menu indicator */")
+        before = button.grab().toImage()
+        button.setStyleSheet(f"{sheet}\n{_NO_INDICATOR_QSS}")
+        after = button.grab().toImage()
+    finally:
+        button.setStyleSheet(sheet)
+    return before != after
+
+
+def draws_two_carets(button: QAbstractButton) -> bool:
+    """A "▾" in *button*'s text beside the menu indicator Qt draws for it — two arrows, one large and one small."""
+    return "▾" in (button.text() or "") and draws_menu_indicator(button)
+
+
+def double_carets(window: QWidget) -> list[Finding]:
+    found = []
+    for w in visible_widgets(window):
+        if isinstance(w, QAbstractButton) and draws_two_carets(w):
+            found.append(Finding("caret", _name(w), f"{w.text()[:40]!r} has a ▾ in its text and a menu indicator"))
+    return found
+
+
 CHECKS = (clipped_text, clipped_scroll_content, off_window, figure_text_outside, figure_text_overlap,
-          figure_tick_overlap, scroll_slivers, wide_tables)
+          figure_tick_overlap, scroll_slivers, wide_tables, double_carets)
 
 
 def check_window(window: QWidget, shell=None) -> list[Finding]:

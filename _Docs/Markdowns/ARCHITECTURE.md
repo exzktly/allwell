@@ -14281,8 +14281,9 @@ figure per well and timepoint, two modes that exist only as interaction). Pinned
 wells, so every view, the Well combo and *Save nanowell data* leave them out, while the rest of Review is untouched —
 it is the page's choice of wells, not an inclusion layer. Every figure's note carries `controller.excluded_note`
 ("Excluded on this page: …") so a figure short of a selected well says so; the empty state names the case where every
-selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
-one or all (`set_well_excluded`, `restore_every_well`).
+selected well is excluded. *Excluded (n)* (`exclude_view`), shown only while any is excluded, restores
+one or all (`set_well_excluded`, `restore_every_well`). It is a `hasMenu` tool button, so its one arrow is the theme's
+chevron and its text carries no "▾".
 
 **Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 1–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
 the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. Like every `SpinBox` it commits a typed number on
@@ -23455,8 +23456,15 @@ you're in before you type the command.
   the window, figure text outside or over other figure text, neighbouring tick
   labels, a scroll area left a sliver, a table wider than its viewport, a Controls
   sheet whose content is wider than itself (`sideways_sheet`: a sheet does offer a
-  sideways bar, so the generic scroll check passed it), and a page
-  menu whose label differs from the page or swallows an ampersand. **What it cannot
+  sideways bar, so the generic scroll check passed it), a page
+  menu whose label differs from the page or swallows an ampersand, and a menu
+  button drawing two arrows (`double_carets`: a "▾" in its text beside the menu
+  indicator Qt paints for any button with a menu, measured by rendering the button
+  with and without its indicator — `draws_menu_indicator` — because the indicator is
+  decided by class, popup mode, the theme's `hasMenu` rule and any style sheet on
+  the way down, and reading one of them is how each earlier fix missed the next
+  site; `tests/test_a_menu_button_draws_one_arrow.py` runs the same measurement on
+  the shared menu-button factories and on buttons no page shows until used). **What it cannot
   see** is anything that appears only once a control is pressed — an in-page editor
   (the Nanowells Subset editor), a run dashboard shown when a folder is chosen, a
   popover, a menu, a dialog. Those were found by a crawl that pressed every control

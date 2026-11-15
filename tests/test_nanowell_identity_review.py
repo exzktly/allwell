@@ -222,3 +222,21 @@ def test_the_distribution_over_time_hatches_the_swarm_and_dashes_the_median(tmp_
     medians = [line for line in ax.lines if line.get_linewidth() == 1.2]
     styles = {tuple(round(v, 3) for v in line.get_xdata()): line.get_linestyle() for line in medians}
     assert styles and all((style == "--") == (x in xs) for xs, style in styles.items())
+
+
+
+def test_the_distribution_s_dashed_median_survives_the_page_s_line_style(tmp_path):
+    """The test above reads the figure ``draw_view`` returns; the page then runs its style pass
+    (``plot_style._style_lines``), which stamps the Properties Line style — solid by default — over every data line,
+    so a segment dashed for "identity not confirmed" reached the screen solid. Run that pass, with the default solid
+    style, and read the segments again."""
+    from review.core import plot_style
+
+    fig = _figure(_out(tmp_path, {"t_c": ni.REFERENCE, "t_a": ni.INCONCLUSIVE, "t_d": ni.CONFIRMED}),
+                  "distribution")
+    ax = fig.axes[0]
+    medians = [line for line in ax.lines if line.get_linewidth() == 1.2]
+    before = [line.get_linestyle() for line in medians]
+    assert before and set(before) == {"--"}            # both segments touch t_a, the one not confirmed
+    plot_style._style_lines(ax, plot_style._MarkPrefs({"line_style": "-"}))
+    assert [line.get_linestyle() for line in medians] == before

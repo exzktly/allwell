@@ -17,9 +17,19 @@ from review.features.nanowell.distribution_style_compute import (AUTO, BINS_DEFA
 from review.domain.nanowell_rim_focus import RimFocusRule
 from review.features.nanowell.series_compute import is_baseline
 from review.features.nanowell.statistics_compute import TEST_KEYS as STATS_TESTS
+from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS
 
 #: The Rare responders test's directions (``NanowellState.rare_direction``).
 RARE_DIRECTIONS = ("higher", "lower")
+
+
+def _rare_from(config: dict, fresh) -> tuple[str, list]:
+    """The Rare responders test's saved choices: its direction, and the run's flags it excludes (only known flags, in
+    the roster's order; anything else excludes nothing)."""
+    excluded = config.get("rare_qc_excluded")
+    excluded = excluded if isinstance(excluded, list) else []
+    return (_one_of(config.get("rare_direction"), RARE_DIRECTIONS, fresh.rare_direction),
+            [k for k in RARE_QC_FLAGS if k in excluded])
 
 
 def _one_of(value, allowed, default):
@@ -256,6 +266,11 @@ class NanowellState:
     #: The Rare responders test's direction: "higher" looks for responders in the top tail of the Metric, "lower"
     #: in the bottom tail (cell death, a loss of signal). Saved with the page.
     rare_direction: str = "higher"
+    #: The run's flags (``rare_data_compute.RARE_QC_FLAGS``: count-disagreeing, partly visible, fused, identity not
+    #: confirmed) whose nanowells the Rare responders test leaves out. Empty, the default: the test keeps every
+    #: nanowell the other views draw, flagged or not; excluding a flag trades those nanowells for a guard against a
+    #: miscount, a part-seen or seam-blended nanowell, or one that may be another nanowell. Saved with the page.
+    rare_qc_excluded: list = field(default_factory=list)
     #: The value label of the Rare responders result drawn (the Metric it ran on), for the flagged-crops pop-out.
     rare_value_label: str = ""
     #: The QC view's *Wells* (:data:`QC_WELLS`).
@@ -451,7 +466,7 @@ class NanowellState:
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
                 "stats_unit": self.stats_unit, "stats_test": self.stats_test, "rare_direction": self.rare_direction,
-                "qc_wells": self.qc_wells,
+                "rare_qc_excluded": list(self.rare_qc_excluded), "qc_wells": self.qc_wells,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
     def apply_config(self, config: dict) -> None:
@@ -481,7 +496,7 @@ class NanowellState:
         unit, test = config.get("stats_unit"), config.get("stats_test")
         self.stats_unit = unit if unit in STATS_UNITS else fresh.stats_unit
         self.stats_test = test if test in STATS_TESTS else fresh.stats_test
-        self.rare_direction = _one_of(config.get("rare_direction"), RARE_DIRECTIONS, fresh.rare_direction)
+        self.rare_direction, self.rare_qc_excluded = _rare_from(config, fresh)
         self.qc_wells = config.get("qc_wells") if config.get("qc_wells") in QC_WELLS else fresh.qc_wells
         self.subset = _subset_from(config)
         self.saved_subsets = saved_from_config(config.get("saved_subsets"))

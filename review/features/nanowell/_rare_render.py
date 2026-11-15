@@ -19,6 +19,7 @@ import textwrap
 
 import numpy as np
 
+from review.features.nanowell import rare_ad_compute as ad
 from review.features.nanowell.rare_data_compute import ALL
 from review.features.nanowell.rare_export_compute import unit_text
 from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
@@ -196,10 +197,13 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
             if xy is not None:
                 line = ax.step(*xy, where="post", color=colour, linestyle=style, linewidth=1.1)[0]
                 line.set_gid(f"{gid}:{stratum}")
+                # Dotted is the control: the title says so, so the page's Line style never restyles it solid.
+                line._aw_linestyle_is_data = True
                 if pair is not None:
                     _paired(line, pair)
                 elif colour == muted:
                     _ink(line, muted=True)
+        _shade_shape_test(ax, unit, stratum, log_axis, treated_c)
         cut = _cut_x(unit, stratum, log_axis)
         if np.isfinite(cut):
             line = ax.axvline(cut, color=control_c if pair is not None else ink, linestyle="--", linewidth=0.8)
@@ -211,7 +215,32 @@ def draw_ecdf_strata(ax, unit, value_label: str, log_axis: bool) -> None:
     ax.set_ylim(0, 1.01)
     _label_strata(ax, unit, strata, log_axis, publication)
     by = "" if strata == [ALL] else ", by starting cells"
-    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\nsolid: {unit.treatment} · dotted: control")
+    _title(ax, f"{value_label[:1].upper() + value_label[1:]}{by}\nsolid: {unit.treatment} · dotted: control\n"
+               f"dashed: exceedance test's cutoff · shaded: what the shape test counts")
+
+
+def _shade_shape_test(ax, unit, stratum, log_axis: bool, colour) -> None:
+    """Shade, between the two cumulative curves, where the upper-tail shape test counts
+    (``rare_ad_compute.drawn_excess``): past the control median, on the side the analysis looks, wherever the treated
+    nanowells have more mass beyond a value than the controls. Nothing when there is no such place."""
+    parts = {side: [w.values[stratum] for w in group if stratum in w.values]
+             for side, group in (("control", unit.controls), ("treated", unit.treated))}
+    if not parts["control"] or not parts["treated"]:
+        return
+    sign = unit.sign
+    x, f0, fn, excess = ad.drawn_excess(sign * np.concatenate(parts["control"]),
+                                        sign * np.concatenate(parts["treated"]), sign)
+    if not excess.any():
+        return
+    if log_axis:
+        keep = x > 0
+        x, f0, fn, excess = np.log2(x[keep]), f0[keep], fn[keep], excess[keep]
+    # A step drawn "post" holds each value up to the next x, and fill_between fills a step only when both its ends
+    # are marked: mark each excess point's next one too, or the last step — mass beyond the controls' top value, the
+    # heaviest the test weighs — is left unshaded.
+    reach = excess | np.r_[False, excess[:-1]]
+    poly = ax.fill_between(x, f0, fn, where=reach, step="post", color=colour, alpha=0.28, linewidth=0, zorder=1)
+    poly.set_gid(f"rare-ad-excess:{stratum}")
 
 
 def _label_strata(ax, unit, strata, log_axis: bool, publication: bool) -> None:
@@ -368,11 +397,14 @@ STACKED_ROW_MIN_IN = 1.9
 #: Inches: the figure's top margin, the space a row's x labels and two-line title take beyond its axes, the pad
 #: around the text under the panels, and the gap under a headline.
 _TOP_IN, _ROW_PAD_IN, _TEXT_PAD_IN, _HEAD_GAP_IN = 0.12, 1.2, 0.12, 0.1
+#: Inches the first headline moves down when the figure carries a label at its top left (``renderer.stamp_subset``,
+#: one line of ``renderer.FOOTER_PT`` from the figure's top edge), so the two never share a line.
+_STAMP_IN = 0.2
 #: The headline's size: the figure's largest text, since it is the answer.
 _HEAD_PT = 9.0
 
 
-def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
+def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped: bool = False) -> None:
     """The Statistics view's figure for the rare-responder tests. For each treatment, **the answer first**: its headline
     (``rare_export_compute.headline`` — the verdict and the counts behind it, gid ``nw-rare-unit``) above its row of
     panels — how far nanowells grew, the share of each well past the cutoff, Higher Criticism. Under the panels, each
@@ -385,8 +417,12 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
     its lines need, and as many treatments are drawn as their rows fit — the rest named in a line — so a long report
     or a short window never squeezes the panels below legibility. A figure narrower than :data:`STACK_BELOW_IN` (a
     phone's) stacks each treatment's three panels in a column, each at least :data:`STACKED_ROW_MIN_IN` tall:
-    side by side at that width each panel was about an inch across, its axis labels run into its neighbours."""
+    side by side at that width each panel was about an inch across, its axis labels run into its neighbours.
+
+    *stamped* says a label (a saved subset's name, the moving average) is written at the figure's top left once the
+    page is drawn (``renderer.stamp_subset``): the first headline then starts :data:`_STAMP_IN` lower, below it."""
     fig.clear()
+    top_in = _TOP_IN + (_STAMP_IN if stamped else 0.0)
     width, height = max(fig.get_figwidth(), 1.0), max(fig.get_figheight(), 1.0)
     stacked = width < STACK_BELOW_IN
     per_unit, cols = (3, 1) if stacked else (1, 3)      # rows of panels per treatment, panels per row
@@ -400,7 +436,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
     # cannot hold them all, it is the supporting tests that go to Details first.
     body = [[t["lines"][0], *[f"⚠ {c}" for c in t["caveats"]], *t["lines"][1:]] for t in texts]
     room = 0
-    used = _TOP_IN + (len(body[0]) if body else 0) * step_in + 2 * _TEXT_PAD_IN
+    used = top_in + (len(body[0]) if body else 0) * step_in + 2 * _TEXT_PAD_IN
     for h in head_in[:MAX_UNIT_ROWS]:
         if room and used + h + per_unit * row_min > height:
             break
@@ -416,7 +452,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
     first = _wrapped(fig, list(lead), 0.96)
     # The text takes what the panels leave, never more. It is cut between sentences, never inside one — a caveat cut
     # half way reads as a different sentence — and what is left out is counted; Details holds it all.
-    fits = max(1, int((height - _TOP_IN - sum(head_in) - len(units) * per_unit * row_min - 2 * _TEXT_PAD_IN)
+    fits = max(1, int((height - top_in - sum(head_in) - len(units) * per_unit * row_min - 2 * _TEXT_PAD_IN)
                       // step_in))
     tail = _wrapped(fig, [note], 0.96) if note else []
     text, left_out = list(first), 0
@@ -432,12 +468,12 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=()) -> None:
     else:
         text += tail
     text_in = len(text) * step_in + 2 * _TEXT_PAD_IN
-    band_in = max(row_min, (height - _TOP_IN - text_in - sum(head_in)) / max(1, len(units) * per_unit))
+    band_in = max(row_min, (height - top_in - text_in - sum(head_in)) / max(1, len(units) * per_unit))
     log_axis = log_axis_for(result)
     left, gap = 0.75 / width, 0.85 / width
     panel_w = (1.0 - left - 0.25 / width - (cols - 1) * gap) / cols
     axes_h = band_in - _ROW_PAD_IN
-    cursor = height - _TOP_IN
+    cursor = height - top_in
     probe = None
     for unit, head, h_in in zip(units, heads, head_in):
         head_top = cursor

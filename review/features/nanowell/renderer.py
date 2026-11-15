@@ -579,6 +579,7 @@ def _draw_centres(ax, model, panel, ink) -> None:
         for pieces, style in zip(split_segments(xs, ys, unverified), ("-", "--")):
             for (x0, y0), (x1, y1) in pieces:
                 for line_ in ax.plot([x0, x1], [y0, y1], color=ink, linewidth=1.2, linestyle=style, zorder=4):
+                    line_._aw_linestyle_is_data = True   # dashed is "identity not confirmed": Line style keeps off it
                     _ink(line_)
     for stat in panel.stats:
         if not math.isfinite(stat.centre):

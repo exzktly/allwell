@@ -13420,7 +13420,7 @@ short phrase (`moving_compute.figure_tag`: `Moving average over 3 timepoints (tr
 fold change's own baseline window) on `MOVING_VIEWS` (Distribution, Trajectories, Statistics) for a metric with values
 over time, `""` otherwise — every Statistics test included, the Rare responders test among them, since it tests the averaged values (`_rare_controller.windowed`) — so a figure of averaged values says so on the same line with or without a subset (the
 footer keeps `moving_compute.describe`'s full sentence; Statistics writes no footer sentence of it, which is why the
-tag is on the figure). The Distribution window's rows pop-out puts the same tag in its title; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
+tag is on the figure). `draw_view` works the label out before the view is drawn and passes `stamped` down (`_compose_view` → `_compose_statistics` → `_rare_controller.compose` → `_rare_render.render_rare_page`), because the Rare responders page starts its first headline at the figure's top: with a label coming it starts `_rare_render._STAMP_IN` lower, so the two never share a line (`test_nanowell_rare_moving_average.py::test_the_top_left_label_never_overlaps_the_headline` measures both boxes). The Distribution window's rows pop-out puts the same tag in its title; Extremes, drawn outside `draw_view`, stamps itself. Batch Export's
 Nanowells mode passes `subset_label` from its run settings, and the Scatter Plot's nanowell scatter reads it through
 the `nanowell.subset_label` service (`_plot_links.subset_label`) and replaces its own copy on each redraw. The Subset
 combo (`subset_view._fill_combo`) lists the saved names between the presets and *Custom subset…*, rebuilt only when
@@ -13984,14 +13984,20 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   `F0 = #{control ≤ u} / (N + 1)`, so the pool's top value carries weight and mass beyond every control counts (with
   `/ N` it counted nothing, and whole-number fold changes left nothing to sum); NaN — undefined, never 0 — only for a
   pool of one value. The Scholz–Stephens k-sample test
-  is reported as uncalibrated description only.
+  is reported as uncalibrated description only. `tail_start` is the control median the sum starts at, and
+  `drawn_excess` gives the figure the same region over the pooled values as drawn (`_rare_render._shade_shape_test`
+  shades it between the two cumulative curves, gid `rare-ad-excess:<stratum>`, on the analysed tail's side, so
+  *Responders lower* is shaded below the median); the panel's title names the dashed cutoff as the exceedance
+  test's and the shading as the shape test's.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
   shown), Benjamini–Hochberg across units for each test, `interpret` (the exceedance test alone decides the verdict;
   HC and AD are supporting evidence), the flagged nanowells — past the control cutoff only — with their crop paths,
   and the parameter log. A control with no kept nanowell refuses the analysis with the cause (`_units`): every
   nanowell excluded, or every one of the control's, each with `rare_data_compute.exclusion_counts` by reason; only
-  a control no row is labelled with is reported as an unknown condition, with the conditions found. Higher
+  a control no row is labelled with is reported as an unknown condition, with the conditions found. When every
+  treatment group lost every nanowell, it refuses with each group and its reasons (`treatments_lost`), and a
+  group lost while others are tested is one of the result's warnings, so no group is ever silently missing. Higher
   Criticism and the shape test are computed independently (`_run_hc`, `_run_ad`, each with its own `_permute`), so
   an HC undefined for every labeling leaves the shape test's p standing, and `rare_export_compute.caveats` reads
   each test's own permutation floor rather than HC's for both.
@@ -14014,7 +14020,14 @@ it never applies — a greyed control reads as one to unlock),
 resolves the timepoint as the view's samples do (the latest the drawn wells have when none is named), builds the
 per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — **the page's Metric**
 at that timepoint (`controller.metric_column`, labelled by `controller._label`), in the band's direction
-(`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*) — and keys the
+(`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*), keeping every
+nanowell the run flagged unless the band's *QC flags ▾* excludes the flag (`NanowellState.rare_qc_excluded`, saved,
+empty by default; `rare_data_compute.RARE_QC_FLAGS` is the roster: count-disagreeing, partly visible, fused, identity
+not confirmed). `compose(exclude_qc=)` drops every other flag's column from the table, so `qc_reasons` never sees it
+and each choice is keyed apart; an excluded flag that left nanowells out is counted on the figure, in a lead line that
+is never cut (`rc.qc_line`, from `rare_data_compute.qc_flag_counts`), and named in Details (`rc.excluded_note`). Every
+other view draws flagged nanowells, so this keeps the test's nanowells the ones they draw unless the user chooses
+otherwise — and keys the
 result on a hash of that table, the parameters and the Metric's label,
 so a key cannot return a result computed for other numbers. **With the moving average on**, `_compose_statistics`
 passes `moving`, `baseline_moving` (already `moving_compute.baseline_window_for`'s) and `moving_centred` (0 for a

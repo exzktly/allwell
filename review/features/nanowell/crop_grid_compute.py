@@ -18,6 +18,12 @@ from dataclasses import dataclass
 POPOUT_GRIDS = ("auto", "row", "column", "columns")
 #: The widest wrapped grid the **Grid** control offers.
 POPOUT_MAX_COLS = 12
+#: How many nanowells a page of rows holds, as the **Grid** control offers it while the pop-out shows many nanowells
+#: (the Distribution window's, in the Rows layout, or the rare-responder tests' flagged ones). Fewer rows are drawn
+#: larger: the rows are laid out to fill the figure.
+POPOUT_ROW_CHOICES = (1, 2, 3, 4, 6, 8, 12, 16, 24)
+#: The rows a page holds until the user chooses otherwise.
+POPOUT_ROWS_DEFAULT = 24
 
 
 @dataclass(frozen=True)
@@ -103,6 +109,25 @@ def grid_label(grid: str, cols: int) -> str:
     if grid == "columns" and int(cols or 0) >= 1:
         return f"Grid: {int(cols)} across"
     return "Grid: auto"
+
+
+def clamp_rows(rows) -> int:
+    """*rows* as a page's row count: one of :data:`POPOUT_ROW_CHOICES`, or :data:`POPOUT_ROWS_DEFAULT` for anything
+    that is not one (a bool, a string, a count the control never offers)."""
+    if isinstance(rows, int) and not isinstance(rows, bool) and rows in POPOUT_ROW_CHOICES:
+        return rows
+    return POPOUT_ROWS_DEFAULT
+
+
+def rows_label(rows: int) -> str:
+    """The **Grid** control's text while it sets the rows a page holds."""
+    return f"Grid: {int(rows)} row{'' if int(rows) == 1 else 's'} a page"
+
+
+def first_row_page(page: int, old_rows: int, new_rows: int) -> int:
+    """The page, at *new_rows* to a page, that holds the first row of page *page* at *old_rows* to a page — so
+    changing the rows a page holds keeps the nanowell at the top of the page on screen."""
+    return (max(0, int(page)) * max(1, int(old_rows))) // max(1, int(new_rows))
 
 
 def save_name(site, channels) -> str:

@@ -76,8 +76,8 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     assert [control.itemData(i) for i in range(control.count())] == ["", "ctrl", "drug"]
     _choose(page, "_nw_control_cb", "ctrl")
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
-    # The figure leads with the answer in counts; under the panels the deciding test, the supporting ones and the
-    # caveats; the full report is in Details, under the figure.
+    # The figure leads with the answer in counts; each test's row lists its p; under the panels, the caveats; the full
+    # report is in Details, under the figure.
     assert [t.replace("\n", " ") for t in _texts(page, "nw-rare-unit")] == [
         "drug: rare responders detected. 8 of 120 drug nanowells (6.7%) rose above the control cutoff (its top 1%) on "
         "cell count, against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells."]
@@ -88,10 +88,10 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
 
     drawn = st.rare_results[next(reversed(st.rare_results))].units[0].primary.p
     assert drawn == pytest.approx(0.00072, rel=0.02)
-    assert f"Deciding: exceedance test p = {rx._num(drawn)}." in figure
+    assert _texts(page, "nw-rare-test-p:exceedance") == [f"drug: p = {rx._num(drawn)}"]
     # Unstratified, the control pool is larger than a well, so the spikes fall where HC+ does not look: said so.
     assert "Higher Criticism cannot see the 8 most extreme drug nanowell(s)" in figure
-    assert "⚠ With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1" in figure
+    assert "⚠ Comparison 1 of 1 (drug): With 3 control and 2 drug wells, Higher Criticism and the shape test cannot go below p = 0.1" in figure
     assert rc.DETAILS_POINTER in figure and "anti-conservative" not in figure
     assert page.widgets.get("_nw_stats_flagged_btn").isEnabled()
     assert page.widgets.get("_nw_details_btn").isVisibleTo(page.window)
@@ -107,6 +107,32 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     flagged = {row["site"] for row in st.rare_flagged}
     assert flagged == {(w, q, 0) for w in ("B01", "B02") for q in RESPONDERS}
     assert st.rare_flagged[0]["fc"] == max(row["fc"] for row in st.rare_flagged)
+
+
+def test_the_rare_page_grows_its_canvas_to_what_it_needs_and_another_test_gives_it_back(page, qtbot):
+    """User decision: the figure never hides a comparison or a test, so the Rare responders page is as tall as it
+    needs and the page scrolls. The canvas' minimum is the height the page asked for, the page is drawn again at that
+    height once the canvas has grown, and any other test leaves the canvas no minimum — it fills the window again."""
+    import math
+
+    from review.features.nanowell._rare_render import needed_height, needs_relayout
+
+    st = _open(qtbot, page)
+    canvas, fig = page.widgets.get("_nw_canvas"), page.widgets.get("_nw_fig")
+    scroll = page.widgets.get("_nw_figure_scroll")
+    assert canvas.minimumHeight() == 0
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    qtbot.waitUntil(lambda: st.rare_footer is not None and canvas.minimumHeight() > 0, timeout=30000)
+    need = needed_height(fig)
+    ratio = getattr(canvas, "device_pixel_ratio", 1.0) or 1.0
+    assert canvas.minimumHeight() == math.ceil(need * fig.dpi / ratio)
+    qtbot.waitUntil(lambda: not needs_relayout(fig) and abs(fig.get_figheight() - need) < 0.05, timeout=10000)
+    qtbot.waitUntil(lambda: scroll.verticalScrollBar().maximum() > 0, timeout=10000)   # taller than the window
+    _choose(page, "_nw_stats_test_cb", "welch")
+    qtbot.waitUntil(lambda: canvas.minimumHeight() == 0, timeout=10000)
+    assert needed_height(fig) is None
+    qtbot.waitUntil(lambda: scroll.verticalScrollBar().maximum() == 0, timeout=10000)
 
 
 def test_review_flagged_crops_shows_them_in_the_pop_out(page, qtbot):
@@ -330,7 +356,7 @@ def test_the_page_s_metric_and_direction_drive_the_test(page, qtbot):
     # flag 30s here.
     counts = sorted({row["fc"] for row in st.rare_flagged})
     assert set(counts) <= {30.0, 60.0, 90.0} and max(counts) > 30.0, counts
-    assert any(t.startswith("⚠ Cell count is a level, not a change from the Baseline") for t in _texts(page, "nw-rare-line"))
+    assert any(t.startswith("⚠ Comparison 1 of 1 (drug): Cell count is a level, not a change from the Baseline") for t in _texts(page, "nw-rare-line"))
 
     _choose(page, "_nw_metric_cb", "count_fc")
     qtbot.waitUntil(lambda: " on count fold change" in " ".join(_texts(page, "nw-rare-unit")).replace("\n", " "),
@@ -372,9 +398,9 @@ def test_the_control_curve_is_dotted_on_the_page_as_its_title_says(page, qtbot):
     styles = {line.get_gid(): line.get_linestyle() for ax in fig.axes for line in ax.lines
               if str(line.get_gid()).startswith("rare-ecdf-")}
     assert styles == {"rare-ecdf-control:all": ":", "rare-ecdf-treatment:all": "-"}
-    # The shape test's region is shaded on the same panel, and survives the page's style pass too.
-    assert [c.get_gid() for ax in fig.axes for c in ax.collections if c.get_gid() == "rare-ad-excess:all"] == [
-        "rare-ad-excess:all"]
+    # The pooled shape test's gap is shaded on its own row's panel, and survives the page's style pass too.
+    assert [c.get_gid() for ax in fig.axes for c in ax.collections if c.get_gid() == "rare-pooled-gap:all"] == [
+        "rare-pooled-gap:all"]
     assert any("dotted: control" in t.get_text() for ax in fig.axes for t in ax.texts + [ax.title])
 
 
@@ -448,3 +474,41 @@ def test_the_excluded_flags_are_saved_with_the_page_and_an_unknown_one_is_not_re
     assert again.rare_qc_excluded == ["edge"]
     again.apply_config({"rare_qc_excluded": "edge"})
     assert again.rare_qc_excluded == []
+
+
+def _grid_rows_entry(ctx, rows):
+    ctx.widgets.get("_nw_popout_grid_menu").aboutToShow.emit()           # what opening the Grid menu does
+    for action in ctx.widgets.get("_nw_popout_grid_menu").actions():
+        if action.data() == ("rows", rows):
+            return action
+    raise AssertionError(f"no {rows}-row entry in the Grid menu")
+
+
+def _drawn_rows(ctx):
+    fig = ctx.widgets.get("_nw_popout_fig")
+    return [t.get_text().split("\n")[0] for t in fig.texts if t.get_gid() == "nw-extremes-row"]
+
+
+def test_grid_sets_how_many_flagged_rows_a_page_holds_and_the_pager_follows(page, qtbot):
+    st = _open(qtbot, page)
+    _choose(page, "_nw_stats_test_cb", "rare")
+    _choose(page, "_nw_control_cb", "ctrl")
+    qtbot.waitUntil(lambda: bool(st.rare_flagged), timeout=30000)
+    page.widgets.get("_nw_stats_flagged_btn").click()
+    n = len(st.rare_flagged)
+    assert n > 3, n                                         # enough flagged rows for a page of 2 to make 2+ pages
+    label, ahead = page.widgets.get("_nw_popout_page_label"), page.widgets.get("_nw_popout_page_next")
+    assert len(_drawn_rows(page)) == min(n, 24) and label.text() == f"Page 1 of {-(-n // 24)}"
+    _grid_rows_entry(page, 2).trigger()
+    assert st.popout_rows == 2 and page.widgets.get("_nw_popout_grid_btn").text() == "Grid: 2 rows a page"
+    assert label.text() == f"Page 1 of {-(-n // 2)}" and not ahead.isHidden()
+    assert _drawn_rows(page)[0].startswith("#1 ") and len(_drawn_rows(page)) == 2
+    ahead.click()
+    ahead.click()                                           # page 3 of 2 rows: rows 5 and 6 at the top
+    assert st.window_page == 2 and _drawn_rows(page)[0].startswith("#5 ")
+    _grid_rows_entry(page, 4).trigger()                     # the row at the top stays on the page shown: page 2 of 4
+    assert st.window_page == 1 and label.text() == f"Page 2 of {-(-n // 4)}"
+    assert _drawn_rows(page)[0].startswith("#5 ")
+    menu = page.widgets.get("_nw_popout_grid_menu")
+    menu.aboutToShow.emit()                                 # opened again, it ticks the choice in force alone
+    assert [a.data() for a in menu.actions() if a.isChecked()] == [("rows", 4)]

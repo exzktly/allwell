@@ -16,8 +16,8 @@ import shiboken6
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QSplitter, QToolButton,
-    QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
+    QSplitter, QToolButton, QVBoxLayout, QWidget,
 )
 
 from review.features.export.service import export_cell_data_from
@@ -326,8 +326,8 @@ def build_view_bar(ctx, view: str):
 
 def build_nanowell_tab(ctx, parent: QWidget) -> None:
     from review.core.ui_helpers import (
-        apply_plot_card_decorators, build_plot_save_menu, make_plot_with_right_dock, make_properties_button,
-        wrap_with_empty_state,
+        apply_plot_card_decorators, build_plot_save_menu, install_canvas_wheel_scroll, make_plot_with_right_dock,
+        make_properties_button, wrap_with_empty_state,
     )
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
@@ -585,7 +585,18 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     figure_host = QWidget(main)
     figure_layout = QVBoxLayout(figure_host)
     figure_layout.setContentsMargins(0, 0, 0, 0)
-    figure_layout.addWidget(card)
+    # The card scrolls vertically: every view but one fills the window as it always did (the canvas has no minimum),
+    # and the Statistics view's Rare responders page — one row per test, every comparison drawn — sets the canvas'
+    # minimum to the height it needs (``_rare_controller.fit_canvas_height``) and is read by scrolling. The wheel over
+    # the canvas scrolls only while there is somewhere to scroll; otherwise it reaches the canvas (the Array zoom).
+    figure_scroll = QScrollArea(figure_host)
+    figure_scroll.setWidgetResizable(True)
+    figure_scroll.setFrameShape(QFrame.NoFrame)
+    figure_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    figure_scroll.setWidget(card)
+    install_canvas_wheel_scroll(card.canvas, figure_scroll)
+    reg.register("_nw_figure_scroll", figure_scroll)
+    figure_layout.addWidget(figure_scroll)
     figures = wrap_with_empty_state(ctx.window, figure_host, icon="hexagon", reason=nwc.nanowell_empty_reason)
     layout.addWidget(figures, 1)
     # A page too short for the Subset's conditions and the figures both (a phone held sideways) gives the editor

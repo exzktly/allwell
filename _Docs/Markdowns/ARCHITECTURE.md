@@ -13788,7 +13788,8 @@ the figure's clearing on every redraw would destroy. `window_view.build_window_s
 above the figure and `_nw_window_refresh` keeps it on the window; the pop-out's **Show** / **Layout** / pager row is
 `window_view.build_popout_window_controls` (`_nw_popout_window_refresh`). In the pop-out's Window mode
 (`NanowellState.popout_source`, `popout_layout`, persisted; `window_page` not) `controller.draw_popout` calls
-`_window_controller.draw_window_popout`: one page of `WINDOW_PAGE` (24) rows through `renderer.render_site_rows`, the
+`_window_controller.draw_window_popout`: one page of `NanowellState.popout_rows` rows (persisted, one of
+`crop_grid_compute.POPOUT_ROW_CHOICES`, default 24) through `renderer.render_site_rows`, the
 page's crops cut in one worker fetch (`_fetch` kind `window_crops`, `crops_for_sites`), `popout_hits` mapping each
 crop's axes to its nanowell for `on_popout_click`. A nanowell selected anywhere but inside the pop-out — a click on
 the page's figure (`controller._select`), the Scatter Plot's `_plot_links.show_nanowell`, or **Pop out**
@@ -13933,6 +13934,16 @@ pop-out draw path — one nanowell, the window's rows, the hex composite — ren
 (gid `nw-popout-no-timepoints`) instead of a figure while it is set, and the button reads *Timepoints: none*.
 Unticking the last timepoint sets it too; a tick or *All* clears it. Tests: `test_nanowell_popout_grid.py` (the menu)
 and `test_nanowell_composite_render.py` (side by side, the Grid shape, the hex layout following the menu).
+**Grid: rows a page.** While the pop-out shows many nanowells as rows — `popout_source` `"responders"`, or `"window"`
+in the Rows layout (`popout_view.build_popout_view_controls`'s `many_rows`) — the Grid menu offers how many rows a
+page holds (`crop_grid_compute.POPOUT_ROW_CHOICES`, entries carrying `("rows", n)`) instead of the one-nanowell shapes,
+which do not apply to rows, and the button reads `crop_grid_compute.rows_label`. `controller.set_popout_rows` stores
+`NanowellState.popout_rows` (persisted; `clamp_rows` restores anything not on the list as 24) and moves `window_page`
+to the page that holds the row that was at the top (`first_row_page`); `_set_popout` then refreshes the pager, whose
+`_window_controller.page_count` and `rc.page_count` both divide by `popout_rows`. `render_site_rows` lays the rows out
+to fill the figure, so fewer rows a page are drawn larger. Test:
+`test_nanowell_rare_responders_page.py::test_grid_sets_how_many_flagged_rows_a_page_holds_and_the_pager_follows`
+drives the real menu and pager, and fails when the flagged page is pinned back to 24.
 `window_view.build_popout_window_controls`'s refresh hides `_nw_popout_go_to_btn` while `popout_source` is
 `"window"` or `"responders"` (the Rare responders test's flagged nanowells, `_rare_controller.draw_flagged_popout`),
 and shows the pager for both: the button names one nanowell and the figure is of many.
@@ -14034,16 +14045,19 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 * `rare_hc_compute` (Test B) — per-nanowell p-values against the stratum's pool, the HC+ statistic over
   `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when
   the pool cannot resolve the `1/n` scale (two or fewer control wells, or a pool under three times a well's size).
+  A well with no qualifying index says why in plain words (`unscored_reason`): `BEYOND_CONTROLS` when its top
+  `alpha0·n` nanowells are all at p ≤ 1/n — past every control value, since an empirical p's floor 1/(N+1) is
+  below 1/n whenever the pool is larger than the well — which are the strongest responders there are. HC+ keeps
+  its definition; the figure marks such a well "no HC score" with that reason rather than leaving it undrawn.
 * `rare_ad_compute` (Test C) — the one-sided, upper-tail-weighted Anderson–Darling `A²_R` per stratum, combined by
   nanowell share over the strata where it is defined, summed over the control values at or above the median with
   `F0 = #{control ≤ u} / (N + 1)`, so the pool's top value carries weight and mass beyond every control counts (with
   `/ N` it counted nothing, and whole-number fold changes left nothing to sum); NaN — undefined, never 0 — only for a
   pool of one value. The Scholz–Stephens k-sample test
-  is reported as uncalibrated description only. `tail_start` is the control median the sum starts at, and
-  `drawn_excess` gives the figure the same region over the pooled values as drawn (`_rare_render._shade_shape_test`
-  shades it between the two cumulative curves, gid `rare-ad-excess:<stratum>`, on the analysed tail's side, so
-  *Responders lower* is shaded below the median); the panel's title names the dashed cutoff as the exceedance
-  test's and the shading as the shape test's.
+  is reported as uncalibrated description only; the figure gives it a row of its own, headed as treating every
+  nanowell as independent, and shades the whole gap between its pooled cumulative curves
+  (`_rare_render._shade_gap`, gid `rare-pooled-gap:<stratum>`) — on both sides, since the test is two-sided.
+  `tail_start` is the control median the per-well sum starts at.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
   shown), Benjamini–Hochberg across units for each test, `interpret` (the exceedance test alone decides the verdict;
@@ -14118,19 +14132,31 @@ above the FDR, an exceedance regression with no control nanowell past the cutoff
 effectively nanowell-level, with the floor of a whole-well test beside it), and nanowells beyond Higher
 Criticism's reach (HC+ drops p ≤ 1/n, which with a control pool larger than a well are the most extreme ones) —
 gathered by `unit_text`; `report_lines`, the Details report, uses the same test names (`NAME_A/B/C`).
-`_rare_render.render_rare_page` draws, per treatment, its headline above its row of panels (gid `nw-rare-unit`) —
-how far nanowells grew (fold-change ticks `2×`, `4×` from `_fold_ticks`, a cutoff ≤ 0 not drawn on the log axis,
-each stratum labelled on its treatment curve by `_label_strata` — at staggered heights, since every cumulative curve
-ends at the same top right corner — with a dot in its paired shade, and the dashed line labelled at its foot),
-each well's share past the cutoff labelled with its count, Higher Criticism — and under the panels each treatment's
-deciding line, its ⚠ caveats, then its supporting line (gid `nw-rare-line`). It lays the figure out in inches,
-panels first: each row gets at least `ROW_MIN_IN`, as many treatments are drawn as fit (at most `MAX_UNIT_ROWS`,
-the rest named in a line that is always drawn), and the text takes only what the rows and headlines leave. Text
-that does not fit is cut **between sentences**, never inside one, after the first deciding line, which is always
-drawn; what is left out is counted in one pointer to Details. A figure
-narrower than `STACK_BELOW_IN` (a phone's, about 4 in) stacks each treatment's three panels in one column, each at
-least `STACKED_ROW_MIN_IN` tall: side by side there each panel was about an inch across and its labels ran into its
-neighbours'. The exceedance panel starts its y axis at 0 and raises its top by the height of a dot's count label in
+`_rare_render.render_rare_page` draws **one row per test**, so every plot on it belongs to exactly one test and
+says which. From the top: the groups tested, each with its wells, and the comparisons they make
+(`rare_export_compute.groups_line`, gid `nw-rare-groups`); each comparison's name
+(`comparison_title`, *Comparison i of n: group vs control*) over its headline (gid `nw-rare-unit`); then the four
+rows of `rare_export_compute.TEST_ROWS` — the exceedance test (which decides), Higher Criticism and the shape test
+(supporting), and the pooled shape test (description only, its heading saying it treats nanowells as independent) —
+each headed by `test_heading` and the comparisons' p from `test_p` (gids `nw-rare-test:<key>`,
+`nw-rare-test-p:<key>`). In a row, a plot of one dot per well (each well's share past the cutoff labelled with its
+count, each well's peak HC score, each well's A²_R) holds **every comparison on one axes** (`draw_well_dots`, axes
+gid `nw-rare-shared:<key>`): the control wells once as the band chance gives, then each group's wells, a rule between
+groups and each group's name and short p over them, wrapped to its own width; a well with no value is written in
+("no HC score"), never left out. A plot of curves (the cumulative shares with the cutoff, the HC curves, the pooled
+cumulative shares with their gap shaded) is drawn **once per comparison** (axes gid `nw-rare-panel:<key>:<i>`),
+captioned with the comparison's name and p, as many across as `columns_for` fits (at most `MAX_COLUMNS`, each at least
+`COLUMN_MIN_IN` wide, so one on a phone) and the rest wrapping below inside the same row — the figure never grows
+sideways. Each axes starts under its own title, however many lines it took. Under the rows, each comparison's ⚠
+caveats, named by comparison, then the lead, the lines and the note (gid `nw-rare-line`). Nothing is cut and no
+comparison is left off: `render_rare_page` returns the height in inches the page needs at its width (also kept for
+`needed_height`, marked by an invisible axes gid `nw-rare-page`), and the page's figure card sits in a vertical
+scroll area (`tab_view`, `_nw_figure_scroll`): after every redraw `_rare_controller.fit_canvas_height` sets the
+canvas' minimum height to that need — and to none on any other view, which fills the window as it always did —
+and `controller.on_canvas_resized` draws the page again once the canvas has grown (`needs_relayout`). The wheel over
+the canvas scrolls the area only while there is somewhere to scroll (`install_canvas_wheel_scroll`), so the Array
+view's wheel zoom is untouched. The single-panel functions (`draw_exceedance`, `draw_hc`, `draw_ecdf_strata`) still
+draw one comparison's panel each. The single exceedance panel starts its y axis at 0 and raises its top by the height of a dot's count label in
 points (`_headroom`), so a dot at the top of a short panel keeps its label inside the axes rather than over the
 title; a treatment dot is outlined in the plot ink (paired for the publication ground), so a dark plate colour
 shows on the dark card. Each treatment well's own empirical p is in Details, not on the panel: its floor is
@@ -14155,7 +14181,7 @@ in A01's colour.
 `hc_candidate` says whether a flagged nanowell is also one of Higher Criticism's candidates, which alone are never
 flagged — HC always has a peak, so on a plate with no responders every well still has candidates. **Review flagged crops** sets the pop-out's source to `responders` (`state.POPOUT_SOURCES`), which
 `draw_popout` sends to `rc.draw_flagged_popout`: rows of crops over time through `renderer.render_site_rows`,
-`FLAGGED_PAGE` to a page, cut through `_window_controller`'s crop pipeline and paged by its pager
+`NanowellState.popout_rows` to a page, cut through `_window_controller`'s crop pipeline and paged by its pager
 (`_window_controller.page_count` answers for this source). `tests/test_nanowell_rare_responders_page.py` drives
 it through the real page builder and was run against four mutations of the wiring (the rare branch never taken,
 the flagged list not kept, *vs* listing wells, the pop-out ignoring the source), each failing a test.
@@ -14336,8 +14362,9 @@ figure per well and timepoint, two modes that exist only as interaction). Pinned
 wells, so every view, the Well combo and *Save nanowell data* leave them out, while the rest of Review is untouched —
 it is the page's choice of wells, not an inclusion layer. Every figure's note carries `controller.excluded_note`
 ("Excluded on this page: …") so a figure short of a selected well says so; the empty state names the case where every
-selected well is excluded. *Excluded (n) ▾* (`exclude_view`), shown only while any is excluded, restores
-one or all (`set_well_excluded`, `restore_every_well`).
+selected well is excluded. *Excluded (n)* (`exclude_view`), shown only while any is excluded, restores
+one or all (`set_well_excluded`, `restore_every_well`). It is a `hasMenu` tool button, so its one arrow is the theme's
+chevron and its text carries no "▾".
 
 **Rim focus** on the band (`rim_focus_view`: a *Rim focus* box and a bare percentage spin box, 1–95, with no suffix (Qt refuses typing with the cursor inside one)) is a mirror of
 the Cell Gating panel's *Exclude out-of-focus nanowells*, never a setting of its own. Like every `SpinBox` it commits a typed number on
@@ -14893,8 +14920,12 @@ says which wells bring each back. The empty state uses it when every group is hi
 drawn; and the sample tests' report (`controller.control_not_drawn`) when the well or group chosen under *vs* is
 not among the samples, so every pair was compared instead — which `statistics_compute.compare` does silently.
 *vs* keeps its choice (`NanowellState.control`) while its group is hidden, so showing it again restores the test. A click on the
-figure selects the nearest drawn dot within 6 px; Shift, ⌘ or Ctrl adds (up to six, read from matplotlib's
-`event.modifiers`); empty space clears; the plate selection is never touched.
+figure selects the nearest drawn dot within 6 px, one at a time; empty space clears the selection, and with nothing
+selected changes nothing and draws nothing (`controller._select`); the plate selection is never touched. While the
+figure card's toolbar has Pan or Zoom on, a press and its release are the toolbar's and the page does nothing with
+them (`controller.toolbar_owns`, checked first in `on_click` and `on_release`): the press that began a pan used to be
+read as an empty-space click, whose full redraw threw the pan away on every view without a drag of its own
+(Statistics, Trajectories, Position) — `tests/test_nanowell_statistics_pan_zoom.py`.
 
 **Shared machinery.** The page is on every roster a plot page joins: `plot_style._FIG_PREF_KEY_MAP`
 (`nanowell`, `nanowell_detail`, and `nanowell_crops` / `nanowell_crops_popout` for the crop strip and the pop-out window), the Properties dock and open-panel maps in `features/export/style.py`, the
@@ -23512,8 +23543,15 @@ you're in before you type the command.
   the window, figure text outside or over other figure text, neighbouring tick
   labels, a scroll area left a sliver, a table wider than its viewport, a Controls
   sheet whose content is wider than itself (`sideways_sheet`: a sheet does offer a
-  sideways bar, so the generic scroll check passed it), and a page
-  menu whose label differs from the page or swallows an ampersand. **What it cannot
+  sideways bar, so the generic scroll check passed it), a page
+  menu whose label differs from the page or swallows an ampersand, and a menu
+  button drawing two arrows (`double_carets`: a "▾" in its text beside the menu
+  indicator Qt paints for any button with a menu, measured by rendering the button
+  with and without its indicator — `draws_menu_indicator` — because the indicator is
+  decided by class, popup mode, the theme's `hasMenu` rule and any style sheet on
+  the way down, and reading one of them is how each earlier fix missed the next
+  site; `tests/test_a_menu_button_draws_one_arrow.py` runs the same measurement on
+  the shared menu-button factories and on buttons no page shows until used). **What it cannot
   see** is anything that appears only once a control is pressed — an in-page editor
   (the Nanowells Subset editor), a run dashboard shown when a folder is chosen, a
   popover, a menu, a dialog. Those were found by a crawl that pressed every control

@@ -258,3 +258,22 @@ def test_the_timepoints_menu_stays_open_while_several_are_ticked(page, qtbot, ch
     click("t_c", far_right=True)                                      # both ticked is every timepoint
     assert menu.isVisible() and (st.popout_tps, st.popout_tps_none) == ([], False)
     menu.close()
+
+
+def test_the_rows_a_page_holds_are_one_of_the_choices_and_kept_with_the_page():
+    from review.features.nanowell.crop_grid_compute import (
+        POPOUT_ROW_CHOICES, POPOUT_ROWS_DEFAULT, clamp_rows, first_row_page, rows_label,
+    )
+
+    assert clamp_rows(8) == 8 and clamp_rows(5) == clamp_rows(True) == clamp_rows("8") == POPOUT_ROWS_DEFAULT
+    assert 1 in POPOUT_ROW_CHOICES and POPOUT_ROWS_DEFAULT in POPOUT_ROW_CHOICES
+    assert rows_label(1) == "Grid: 1 row a page" and rows_label(6) == "Grid: 6 rows a page"
+    # Row 49 is at the top of page 2 of 24; at 8 a page it is the top of page 6, at 16 inside page 3 (rows 33-48 +1).
+    assert first_row_page(2, 24, 8) == 6 and first_row_page(2, 24, 16) == 3 and first_row_page(0, 24, 1) == 0
+    st = NanowellState()
+    st.popout_rows = 6
+    again = NanowellState()
+    again.apply_config(st.to_config())
+    assert again.popout_rows == 6
+    again.apply_config({"popout_rows": 7})
+    assert again.popout_rows == POPOUT_ROWS_DEFAULT

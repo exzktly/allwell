@@ -28,7 +28,7 @@ through ``controller._fetch`` while the figure says so, and the page redraws whe
 
 **Review by eye.** The nanowells the drawn result flagged — the treatment nanowells past the control cutoff — are
 kept on ``NanowellState.rare_flagged``, and the pop-out's **Show: Flagged** draws them as rows of
-crops over time, :data:`FLAGGED_PAGE` to a page, through the same crop cutting the Distribution window's rows use.
+crops over time, ``NanowellState.popout_rows`` to a page (the pop-out's **Grid** control), through the same crop cutting the Distribution window's rows use.
 
 Reaches ``controller`` the way ``_window_controller`` does, through :func:`_nwc`, because the controller imports this
 module.
@@ -36,20 +36,20 @@ module.
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 
 from review.features.nanowell import controller as _controller
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import window_compute as wc
-from review.features.nanowell._rare_render import render_rare_page
+from review.features.nanowell._rare_render import needed_height, needs_relayout, render_rare_page
 from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS, RareParams, from_site_metrics, qc_flag_counts
 from review.features.nanowell.rare_export_compute import report_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
 from review.features.nanowell.renderer import Footer, render_message, render_site_rows
 from review.features.nanowell.summary_compute import timepoint_phrase
 
-#: Flagged nanowells the pop-out shows to a page, as the Distribution window's rows.
-FLAGGED_PAGE = 24
 #: Results kept at most: the one drawn and a few the user may step back to.
 RESULTS_KEPT = 4
 COMPUTING = "Testing"                                   # the start of every computing message (computing_text)
@@ -290,6 +290,23 @@ def flagged_rows(result: RareResult) -> list[dict]:
     return rows
 
 
+__all__ = ["needs_relayout"]       # the page's resize handler asks it through this module (``controller``)
+
+
+def fit_canvas_height(ctx) -> None:
+    """Make the page's canvas as tall as the figure on it needs: the rare page's height at its width
+    (``_rare_render.needed_height``) — the canvas sits in a scroll area, so a figure taller than the window scrolls
+    and every comparison stays on it — and no minimum at all for any other view, which fills the window as before."""
+    fig, canvas = ctx.widgets.get_or_none("_nw_fig"), ctx.widgets.get_or_none("_nw_canvas")
+    if fig is None or canvas is None:
+        return
+    need = needed_height(fig)
+    ratio = getattr(canvas, "device_pixel_ratio", 1.0) or 1.0
+    px = int(math.ceil(need * fig.dpi / ratio)) if need else 0
+    if canvas.minimumHeight() != px:
+        canvas.setMinimumHeight(px)
+
+
 def after_draw(ctx, st, model) -> None:
     """After the Statistics view is drawn: keep the flagged nanowells of the rare result drawn (none otherwise), drop
     results beyond :data:`RESULTS_KEPT`, and refresh the pop-out when it shows them."""
@@ -314,7 +331,7 @@ FLAGGED_NOT_RUN = ("Run the Rare responders test on the Statistics view: the nan
 
 
 def page_count(st) -> int:
-    return max(1, -(-len(st.rare_flagged) // FLAGGED_PAGE))
+    return max(1, -(-len(st.rare_flagged) // st.popout_rows))
 
 
 def open_flagged_popout(ctx) -> None:
@@ -361,8 +378,8 @@ def draw_flagged_popout(ctx, st, fig) -> None:
         render_message(fig, nwc.NO_TIMEPOINTS_SAID, gid="nw-popout-no-timepoints")
         return
     st.window_page = min(max(st.window_page, 0), page_count(st) - 1)
-    first = st.window_page * FLAGGED_PAGE
-    shown = flagged[first:first + FLAGGED_PAGE]
+    first = st.window_page * st.popout_rows
+    shown = flagged[first:first + st.popout_rows]
     sites = [row["site"] for row in shown]
     timepoints = [str(tp) for tp in st.data.timepoints()]
     column = nwc.drawn_metric_column(ctx) or "count_fc"        # the Metric the test ran on, not a fixed one

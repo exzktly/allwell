@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
-from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS
+from review.features.nanowell.crop_grid_compute import POPOUT_GRIDS, POPOUT_MAX_COLS, POPOUT_ROWS_DEFAULT, clamp_rows
 from review.features.nanowell.moving_compute import clamp_window
 from review.features.nanowell.distribution_style_compute import (AUTO, BINS_DEFAULT, SMOOTH_DEFAULT, clamp_bins,
                                                                  clamp_smooth, style_or_default)
@@ -216,6 +216,9 @@ class NanowellState:
     #: ``"columns"`` grid.
     popout_grid: str = "auto"
     popout_cols: int = 0
+    #: How many nanowells a page of the pop-out's rows holds while it shows many — the Distribution window's (Rows
+    #: layout) or the flagged ones (``crop_grid_compute.POPOUT_ROW_CHOICES``); set from the **Grid** control.
+    popout_rows: int = POPOUT_ROWS_DEFAULT
     #: The Distribution windows, ``window_compute.window_key(column, axis) -> DistributionWindow`` (one per metric
     #: and axis; the strip and the pop-out read the one for what is drawn).
     windows: dict = field(default_factory=dict)
@@ -455,7 +458,7 @@ class NanowellState:
                 "crop_metrics": self.crop_metrics, "popout_labels": self.popout_labels,
                 "popout_tps": list(self.popout_tps), "popout_tps_none": self.popout_tps_none,
                 "popout_channels": list(self.popout_channels),
-                "popout_grid": self.popout_grid, "popout_cols": self.popout_cols,
+                "popout_grid": self.popout_grid, "popout_cols": self.popout_cols, "popout_rows": self.popout_rows,
                 "windows": {k: w.to_config() for k, w in self.windows.items()},
                 "popout_source": self.popout_source, "popout_layout": self.popout_layout,
                 "composite_colour": self.composite_colour, "composite_sort": self.composite_sort,
@@ -516,6 +519,7 @@ class NanowellState:
         self.popout_grid = grid if grid in POPOUT_GRIDS else fresh.popout_grid
         self.popout_cols = (cols if isinstance(cols, int) and not isinstance(cols, bool)
                             and 1 <= cols <= POPOUT_MAX_COLS else fresh.popout_cols)
+        self.popout_rows = clamp_rows(config.get("popout_rows"))
         self.windows = _windows_from(config.get("windows"))
         self.popout_source = _choice(config.get("popout_source"), POPOUT_SOURCES, fresh.popout_source)
         self.popout_layout = _choice(config.get("popout_layout"), POPOUT_LAYOUTS, fresh.popout_layout)

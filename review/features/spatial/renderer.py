@@ -462,7 +462,7 @@ def _render_colony_metric_dist(ax, payload) -> None:
     decomp = payload.get("variance_decomp")
     if decomp is not None and decomp.n_cells > 0:
         text = (
-            f"ICC = {decomp.icc:.2f}  ·  "
+            f"ICC = {'not defined' if decomp.icc != decomp.icc else format(decomp.icc, '.2f')}  ·  "
             f"σ²_between = {decomp.sigma2_between:.3g}  ·  "
             f"σ²_within = {decomp.sigma2_within:.3g}  ·  "
             f"n = {decomp.n_cells} cells in {decomp.n_colonies} colonies"

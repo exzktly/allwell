@@ -7853,10 +7853,17 @@ axes:
   variance.
 - `σ²_total = var(x)` — population variance; equals
   `σ²_between + σ²_within` by construction.
-- `ICC = σ²_between / σ²_total` — the intraclass correlation
-  coefficient. **1** means variability is almost entirely between
-  colonies; **0** means colony identity carries no information about
-  the signal.
+- `ICC` — the intraclass correlation ICC(1), from the one-way ANOVA
+  mean squares: `(MSB − MSW) / (MSB + (n₀ − 1)·MSW)`, with `n₀` the
+  unbalanced design's effective colony size (`_icc1`). **1** means
+  variability is almost entirely between colonies; **about 0** means
+  colony identity carries no information about the signal, and it can
+  be slightly negative by chance. It is deliberately not
+  `σ²_between / σ²_total`: on pure noise that ratio is fixed by the
+  colony sizes at `(K − 1) / (N − 1)` — 0.8 when colonies average 1.3
+  cells — so it reads as a strong colony effect wherever colonies are
+  small. Not defined (drawn as "not defined", `NaN` in the summary)
+  with fewer than two colonies or no colony of two cells.
 
 Noise cells (label `-1`) and non-finite metric values are dropped from
 the decomposition, so ICC always reports on the analysed population,

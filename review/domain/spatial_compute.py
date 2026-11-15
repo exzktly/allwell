@@ -501,11 +501,19 @@ class VarianceDecomposition:
     ``sigma2_between`` is the variance among per-colony means (weighted by
     colony size), ``sigma2_within`` is the pooled within-colony variance,
     and ``sigma2_total`` = between + within by construction (population
-    variance decomposition — no Bessel correction on the totals). ``icc`` is
-    the intraclass correlation coefficient ``between / total`` — 1.0 means
-    all variation is inter-colony (every colony perfectly homogeneous),
-    0.0 means all variation is intra-colony (colony identity carries no
-    information about the signal). Noise-labelled cells (``-1``) are dropped.
+    variance decomposition — no Bessel correction on the totals).
+
+    ``icc`` is the intraclass correlation ICC(1), from the one-way ANOVA mean
+    squares: ``(MSB - MSW) / (MSB + (n0 - 1) * MSW)``, with ``n0`` the
+    unbalanced design's effective colony size. 1.0 means every colony is
+    perfectly homogeneous; about 0 means colony identity carries no information
+    about the signal, and it can be slightly negative by chance. It is **not**
+    ``sigma2_between / sigma2_total``: that ratio (eta squared) is fixed by the
+    colony sizes on pure noise — it equals ``(K - 1) / (N - 1)`` in
+    expectation, 0.8 when colonies average 1.3 cells — so it reported a strong
+    colony effect wherever the colonies were small. ``nan`` when it is not
+    defined: fewer than two colonies, or no colony with two cells.
+    Noise-labelled cells (``-1``) are dropped.
     """
 
     sigma2_between: float
@@ -514,6 +522,19 @@ class VarianceDecomposition:
     icc: float
     n_colonies: int
     n_cells: int
+
+
+def _icc1(ss_between: float, ss_within: float, sizes: list[int]) -> float:
+    """ICC(1) from one-way ANOVA sums of squares over colonies of *sizes* cells; ``nan`` when undefined."""
+    k, n = len(sizes), int(sum(sizes))
+    if k < 2 or n <= k:
+        return float("nan")                    # no between, or no within, degrees of freedom
+    msb, msw = ss_between / (k - 1), ss_within / (n - k)
+    n0 = (n - sum(size * size for size in sizes) / n) / (k - 1)
+    denominator = msb + (n0 - 1.0) * msw
+    if denominator <= 0.0:
+        return float("nan")                    # every cell identical: nothing to apportion
+    return float((msb - msw) / denominator)
 
 
 def variance_decomposition(
@@ -549,7 +570,7 @@ def variance_decomposition(
     sigma2_between = ss_between / n_total
     sigma2_within = ss_within / n_total
     sigma2_total = float(m.var())  # population variance = between + within
-    icc = 0.0 if sigma2_total <= 0 else (sigma2_between / sigma2_total)
+    icc = _icc1(ss_between, ss_within, [int((l == int(cid)).sum()) for cid in ids])
     return VarianceDecomposition(
         sigma2_between=sigma2_between,
         sigma2_within=sigma2_within,

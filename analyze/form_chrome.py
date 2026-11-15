@@ -23,6 +23,27 @@ from PySide6.QtWidgets import (
 from widgets.separator import build_hline_separator
 
 
+class _SummaryLabel(QLabel):
+    """A folded section's summary, elided again whenever its width changes.
+
+    The summary is cut to the room its header leaves it, and that room is not
+    settled when the text is first set: the header is laid out, a scroll bar
+    appears, the window is resized. Elided once, the text kept the cut made for
+    the earlier width and ran past a label that had since narrowed (98 px of
+    text in 86 px, on the slow lane's runner). The label's size policy ignores
+    its text, so setting the text again cannot change its width and start over.
+    """
+
+    def __init__(self, parent, on_width_changed) -> None:
+        super().__init__("", parent)
+        self._on_width_changed = on_width_changed
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt's name
+        super().resizeEvent(event)
+        if event.size().width() != event.oldSize().width():
+            self._on_width_changed()
+
+
 class AnalyzeFormChromeMixin:
     """Section / row / entry / info-marker builders for the Analyze form."""
 
@@ -75,7 +96,7 @@ class AnalyzeFormChromeMixin:
         if switch is not None:
             switch.setParent(header)
             hl.addWidget(switch)
-        summary_lbl = QLabel("", header)
+        summary_lbl = _SummaryLabel(header, lambda _title=title: self._refresh_section_summary(_title))
         summary_lbl.setObjectName("Muted")
         summary_lbl.setContentsMargins(6, 6, 0, 2)
         summary_lbl.setMinimumWidth(0)
@@ -144,7 +165,9 @@ class AnalyzeFormChromeMixin:
                 text = summary() or ""
         # Elided to the width the header leaves it: a schema or a well list
         # can be longer than the panel, and a clipped word reads as a typo.
-        width = label.width()
+        # The room is the label's contents rectangle, not its width: the label
+        # carries a left margin, and text elided to the full width overran it.
+        width = label.contentsRect().width()
         shown = (label.fontMetrics().elidedText(text, Qt.ElideRight, width)
                  if text and width > 40 else text)
         label.setText(shown)

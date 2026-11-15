@@ -108,13 +108,17 @@ def test_subtract_mode_accepts_a_zero_baseline():
 
 
 def test_ratio_mode_still_refuses_a_zero_divisor():
-    """Division by zero is undefined however inconvenient, so the fall-through
-    stands here — it is now logged rather than silent."""
+    """Division by zero is undefined however inconvenient — and undefined is
+    what the panel reads. It used to be taken against the next timepoint that
+    could divide (1.0 at t=24, "vs t0"), which the replicate-set bar never did;
+    the two now agree, and the choice was the user's (review row S5a)."""
+    import math
+
     out = normalize_pts(_PTS, use_t0=True, baseline_tp=0.0,
                         op="ratio", normalize_frac_n=True)
     by_t = {p[0]: p for p in out}
     assert by_t[24.0][1] == pytest.approx(3.0)    # mean divides by t=0
-    assert by_t[24.0][3] == pytest.approx(1.0)    # fraction falls back to t=24
+    assert math.isnan(by_t[24.0][3])              # fraction has no t=0 to divide by
 
 
 def test_the_zero_baseline_fallback_is_announced(caplog):
@@ -324,8 +328,13 @@ def test_bar_baselines_still_refuse_a_zero_divisor():
 
     assert fc.baseline_from_points_resolved(
         _BASE_PTS, baseline_tp=0.0, op="ratio")[0] == 0.0
-    assert fc.baseline_frac_from_points_resolved(
-        _BASE_PTS, baseline_tp=0.0, op="ratio")[0] == 24.0
+    # The fraction is 0 at the requested timepoint: the baseline is that
+    # timepoint, undefined — not the value at 24 h under another name.
+    import math
+
+    tp, value, _spread = fc.baseline_frac_from_points_resolved(
+        _BASE_PTS, baseline_tp=0.0, op="ratio")
+    assert tp == 0.0 and math.isnan(value)
 
 
 # ── 9. every gate filter answers the "is this gate on?" question the same way ─

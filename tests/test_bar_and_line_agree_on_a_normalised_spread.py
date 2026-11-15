@@ -20,6 +20,7 @@ plate and holds every panel's value and spread equal.
 from __future__ import annotations
 
 import math
+import sys
 
 import numpy as np
 import pandas as pd
@@ -195,3 +196,92 @@ def test_the_tabs_agree_on_the_ratio_to_t0(ctx):
     ctrl_line, trt_line = found["CTRL"][1], found["TRT"][1]
     assert (ctrl_line[2], ctrl_line[3]) == (pytest.approx(10.0930, abs=1e-4), pytest.approx(12.5906, abs=1e-4))
     assert trt_line[3] == pytest.approx(0.1922, abs=1e-4)                                   # were ±3.4039 and ±0.0
+
+
+# ── a baseline that cannot divide is undefined on every tab ─────────────────────────────────────────────────────────
+
+def test_a_ratio_baseline_of_zero_is_undefined_and_not_taken_from_a_later_timepoint():
+    """Full-app review row S5a. Fraction ON is 0 at t0 and 0.5, 1.0 after it: the ordinary start of an induction."""
+    pts = [(0.0, 10.0, 1.0, 0.0, 0, 50, 0.0), (24.0, 30.0, 2.0, 0.5, 25, 50, 0.1), (48.0, 40.0, 2.0, 1.0, 50, 50, 0.0)]
+    out = {p[0]: p for p in fc.normalize_pts(pts, use_t0=True, baseline_tp=0.0, op="ratio", normalize_frac_n=True)}
+    assert out[24.0][1] == pytest.approx(3.0)                     # the mean has a baseline, and divides by it
+    assert all(math.isnan(out[t][3]) for t in (0.0, 24.0, 48.0))  # the fraction has none: not 1.0 at 24 h, 2.0 at 48 h
+    # ... and with no timepoint named, "t0" is still the earliest one, not the earliest that happens to divide.
+    out = {p[0]: p for p in fc.normalize_pts(pts, use_t0=True, baseline_tp=None, op="ratio", normalize_frac_n=True)}
+    assert all(math.isnan(out[t][3]) for t in (0.0, 24.0, 48.0))
+    # Subtracting zero is defined, so that operation is untouched.
+    out = {p[0]: p for p in fc.normalize_pts(pts, use_t0=True, baseline_tp=0.0, op="subtract", normalize_frac_n=True)}
+    assert out[24.0][3] == pytest.approx(0.5)
+
+
+def test_the_bar_s_resolvers_name_the_requested_timepoint_and_say_it_cannot_divide():
+    pts = [(0.0, 10.0, 1.0, 0.0, 0, 50, 0.0), (24.0, 30.0, 2.0, 0.5, 25, 50, 0.1)]
+    tp, value, _spread = fc.baseline_frac_from_points_resolved(pts, baseline_tp=0.0, op="ratio")
+    assert tp == 0.0 and math.isnan(value)                        # was (24.0, 0.5): another timepoint's value
+    tp, value, _spread = fc.baseline_n_from_points_resolved(pts, baseline_tp=0.0, op="ratio")
+    assert tp == 0.0 and math.isnan(value)
+    assert fc.baseline_from_points_resolved(pts, baseline_tp=0.0, op="ratio")[:2] == (0.0, 10.0)
+    # A timepoint the member does not sample still resolves to its earliest measured point.
+    assert fc.baseline_from_points_resolved(pts, baseline_tp=12.0, op="ratio")[:2] == (0.0, 10.0)
+    # A member with no measured point has no baseline at all, which is a different answer from "cannot divide".
+    assert fc.baseline_frac_from_points_resolved([], baseline_tp=0.0, op="ratio") == (None, None, 0.0)
+
+
+def test_the_tabs_agree_that_a_set_with_no_on_cells_at_t0_has_no_fraction_ratio(ctx, monkeypatch):
+    """Through both tabs' real collectors: with the cut above every control cell at t0, the replicate-set bar read
+    NaN while the curve read 1.0 at 24 h (normalised against 24 h, under an axis labelled "vs t0")."""
+    from review.domain.fold_change_state import FoldChangeState
+
+    high = 40.0                                                    # above every CTRL cell at t0, not at 24 h
+    monkeypatch.setattr(ctx.state.channel, "threshold", high)
+    monkeypatch.setitem(ctx.state.cell_gating.thresh_frac_on, "gfp", high)
+    monkeypatch.setattr(sys.modules[__name__], "THRESHOLD", high)
+    try:
+        found = _both_tabs(ctx, FoldChangeState(vs_t0_on=True))
+    finally:
+        ctx.state.stats_cache.cache.clear()
+    bar, line = found["CTRL"]
+    assert math.isnan(bar[2]) and math.isnan(line[2]), (bar, line)  # fraction: undefined on both
+    assert math.isnan(bar[4]) and math.isnan(line[4]), (bar, line)  # events: undefined on both
+    assert bar[0] == pytest.approx(line[0]) and math.isfinite(bar[0])   # the mean still has its baseline
+
+
+# ── the Bar tab and Batch Export's bar figure draw the same numbers ─────────────────────────────────────────────────
+
+def _batch_bars(ctx, state, *, op_ctrl="ratio"):
+    """Batch Export's bar items for the same three sets at 24 h, keyed like the tab's."""
+    from review.domain.batch_models import BarGroup
+    from review.domain.plot_members import plot_replicate_sets_loaded
+    from review.features.barplot.collect import collect_bar_items_for_group
+
+    plot = ctx.state.plot
+    plot.fc_vs_control_on, plot.fc_control, plot.fc_vs_t0_on = state.vs_control_on, state.control, state.vs_t0_on
+    plot.fc_op_ctrl, plot.fc_op_t0, plot.fc_baseline_tp = op_ctrl, "ratio", "0"
+    ctx.state.stats_cache.cache.clear()
+    group = BarGroup("all", members=list(plot_replicate_sets_loaded(ctx)))
+    items = collect_bar_items_for_group(
+        ctx, group, 24.0, val_col="gfp_mean_intensity", threshold=THRESHOLD, use_sem=False,
+        per_fov_spread=False, fc_state=state, fc_baseline_tp=0.0)
+    return {it.display: (it.mean, it.spread, it.frac, it.frac_spread, it.n_above, it.n_above_spread) for it in items}
+
+
+@pytest.mark.parametrize("case", ["raw", "subtract control", "ratio to t0"])
+def test_batch_export_s_bars_are_the_bar_tab_s(ctx, case):
+    """The review left this open: one probe printed 1.00 on the tab against 1.91 in Batch Export for one set under
+    ratio-to-t0, having set the two up through different state objects. Here both read the same plot state."""
+    from review.domain.control_ref import ControlRef
+    from review.domain.fold_change_state import FoldChangeState
+
+    state, op = {
+        "raw": (FoldChangeState(), "ratio"),
+        "subtract control": (FoldChangeState(vs_control_on=True, control=ControlRef.for_replicate_set("CTRL")),
+                             "subtract"),
+        "ratio to t0": (FoldChangeState(vs_t0_on=True), "ratio"),
+    }[case]
+    tab = {member: bar for member, (bar, _line) in _both_tabs(ctx, state, op_ctrl=op).items()}
+    batch = _batch_bars(ctx, state, op_ctrl=op)
+    assert set(batch) == set(tab) == {"CTRL", "TRT", "SOLO"}
+    for member in tab:
+        assert batch[member] == pytest.approx(tab[member], nan_ok=True), (member, tab[member], batch[member])
+    if case == "ratio to t0":
+        assert tab["TRT"][0] == pytest.approx(1.9138, abs=1e-4)     # the number the probe printed for Batch Export

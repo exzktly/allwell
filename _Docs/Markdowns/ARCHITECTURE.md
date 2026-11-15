@@ -22574,10 +22574,25 @@ which has no spread, is never handed its control's spread as its own.
 arithmetic against hand-computed quadrature and then drives
 `collect_bar_items` and `collect_line_series` over one plate, holding the
 three panels' values and spreads equal raw, after subtracting a control and
-as a ratio to t0. One difference between the tabs is outside that test: when
-a replicate set's *ratio* baseline is unusable at the requested timepoint (a
-fraction of 0 at t0), the bar leaves the panel undefined while the curve
-falls back to the earliest usable timepoint, with a log line.
+as a ratio to t0, and holds Batch Export's bar items
+(`collect_bar_items_for_group`) equal to the tab's for the same sets, a
+replicate set of one well included: a pooled set is one replicate however
+many wells it holds (`replicate_unit`), so it has no spread, and only an
+expanded entry (`pool_replicates` off) is a well shown with its own
+cell-to-cell spread (`_is_replicate_member`).
+
+**A baseline is chosen by timepoint, never by whether it can divide.**
+`_baseline_point` names the point a member's vs-t0 step is taken against: the
+one at the requested timepoint when the member has a measured value there,
+otherwise its earliest measured point. When that point's value cannot serve
+— zero, under a ratio, which is the ordinary reading of a fraction-on or an
+event count at the start of an induction — the panel is **undefined** for
+that member (NaN, with a log line naming the timepoint), on the curve, on the
+per-well bar and on the replicate-set bar alike. It is not taken against a
+later timepoint: that drew 1.0 at 24 h under an axis labelled "vs t0".
+Subtracting zero is defined and is untouched. `_resolve_baseline` is the one
+rule behind every `baseline_*_from_points*` function, and distinguishes "no
+measured point" (`None`) from "a baseline that cannot divide" (NaN).
 
 ```
                             state.plot.fc_vs_control_on ─┐

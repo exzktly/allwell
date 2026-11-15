@@ -36,7 +36,6 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-from tifffile import imread
 
 from pipeline.background import estimate_background_field
 from pipeline.flatfield import estimate_basic_flatfield
@@ -98,10 +97,9 @@ def _load_image_source(source) -> np.ndarray | None:
         if isinstance(source, tuple):
             zpath, member = source
             with zipfile.ZipFile(zpath, "r") as zf:
-                arr = imread(_io.BytesIO(zf.read(member)))
-            while arr.ndim > 2:
-                arr = arr[0]
-            return arr.astype(np.float32)
+                data = _io.BytesIO(zf.read(member))
+            data.name = member      # so a refused colour image is named
+            return load_2d_gray(data)
         return load_2d_gray(source)
     except (OSError, zipfile.BadZipFile, ValueError, KeyError) as exc:
         log.debug("skipping unreadable image source %r: %s", source, exc)

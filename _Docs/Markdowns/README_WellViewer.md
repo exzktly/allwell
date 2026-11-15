@@ -969,6 +969,13 @@ same way, so you never have to pick the inner one:
 - A folder containing an `in/` subfolder → input = that `in/`, output =
   `<selected folder>/out`.
 
+**Each image is one greyscale frame.** A multi-page image is read as its first
+page. An image saved as RGB whose three colour planes are identical — a grey
+frame a program exported as colour — is read as that grey frame. An image whose
+colour planes differ has no single intensity per pixel, so the field it belongs
+to fails with `… is a colour image` in the run's `errors/` folder, naming the
+file: export each channel as its own greyscale image.
+
 **Loose images and per-well folders are not analysis input.** If the selected
 folder (or its `in/`) holds loose images, `A01/`-style folders of images with
 no matching `A01.zip`, or any other folder with images in it (a `TimePoint_1/`

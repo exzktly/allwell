@@ -20908,6 +20908,21 @@ cannot drift. `dyn_range` is measured **before correction**, in
 subtraction both reshape the frame's spread. The remaining three need the
 segmentation and are measured after it, in `field_quality.group_record`.
 
+**One rule turns what a reader returned into the frame that is measured:**
+`pipeline.io.first_2d_plane`. A `(Z, H, W)` stack gives its first page. A
+trailing colour axis — `(H, W, 3)` or `(H, W, 4)` with both other axes longer
+than 4 — is not a stack, and indexing it like one yields the image's first row
+as a `(W, 3)` "frame". So equal colour planes (a grey image exported as RGB)
+give that plane, with any alpha plane ignored, and planes that differ raise
+`ColourImageError`, a `ValueError` that names the file: luminance weights, the
+brightest plane and the sum are three different intensities and the pipeline
+picks none of them. In a run that is one failed field with its record under
+`errors/`. The three places that read an input frame all go through it —
+`load_2d_gray_with_ceiling`, the empty-well sampler's archive branch
+(`empty_well._load_image_source`, which skips a coloured blank like any
+unreadable one), and the Otsu sampler's input-archive frame in
+`pipeline/auto_threshold.py`. `tests/test_a_colour_image_is_not_read_as_a_strip.py`.
+
 **The scoring is split in two, and the split is the feature.**
 `review/domain/field_quality_scores.py` scores the *acquisition* metrics
 (`focus`, `sat_frac`, `dyn_range`) as a robust z **within a timepoint, across

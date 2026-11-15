@@ -28,7 +28,8 @@ on a network mount) — doing less work is the only thing that makes a local sca
 faster, and ``test_scan_reads_each_container_once_and_each_csv_once`` holds the
 budget at two container opens and one CSV parse per well.
 *Done* is read the same way ``pipeline.incremental_keys.incremental_done_fov_keys``
-composes it (CSV rows ∪ out-zip members ∪ output folder), but **on the real
+composes it (CSV rows ∪ the well's record of finished groups, ``.aw_done/``; for
+a well with no such record, CSV rows ∪ out-zip members ∪ output folder), but **on the real
 paths already in hand** rather than by reconstructing
 ``f"{csv_prefix}_{safe_well}.csv"`` — that reconstruction is unsafe here:
 ``csv_prefix`` is a CLI arg never recorded in ``pipeline_info.json``, and
@@ -52,6 +53,7 @@ from pathlib import Path
 from datasets.core.concurrency import pick_workers
 from datasets.core.nanowell_tables import nanowell_findings
 from datasets.validate.nanowell_relabel import finding_of, plan_dataset as plan_relabels
+from pipeline.done_groups import read_done_record
 from pipeline.completeness import (
     csv_keys_from_rows,
     done_keys,
@@ -124,6 +126,9 @@ class WellReport:
     intent: int = 0
     covered_csv: int = 0
     covered_any: int = 0
+    #: Covered groups the well's record of finished groups (``pipeline.done_groups``) says were processed to the
+    #: end and held no cells: in ``covered_any``, in no CSV row. Zero for a well with no such record.
+    no_cells: int = 0
 
     @property
     def complete(self) -> bool:
@@ -337,6 +342,9 @@ class WellEvidence:
 
     groups_total: int | None = None
     groups_covered: int | None = None
+    #: How many of ``groups_covered`` were measured and held no cells (``run_report``'s ``groups_no_cells``); 0 in
+    #: a record written before the count existed, where ``groups_covered`` is the CSV's alone.
+    groups_no_cells: int = 0
     recorded_failures: tuple[str, ...] = ()
     error_files: tuple[str, ...] = ()
     #: What the run journal last recorded for this well, or ``""``. One of
@@ -365,15 +373,18 @@ class WellEvidence:
     def segmented_zero_cells(self) -> bool:
         """The run completed this well and it produced no rows anywhere.
 
-        ``groups_covered`` is read back from the finished CSV, so zero coverage
-        across a well the run *did* attempt in full, with nothing failed and no
-        traceback on disk, is a measurement — this well had no cells — not a
-        gap. Re-segmenting it would produce the same empty result.
+        ``groups_covered`` less ``groups_no_cells`` is the count read back from
+        the finished CSV, so none of it across a well the run *did* attempt in
+        full, with nothing failed and no traceback on disk, is a measurement —
+        this well had no cells — not a gap. Re-segmenting it would produce the
+        same empty result. (A run that counts its empty fields records such a
+        well as fully covered, every group among ``groups_no_cells``; an
+        earlier one recorded it as covering nothing. Both land here.)
         """
         return (
             self.recorded
             and (self.groups_total or 0) > 0
-            and self.groups_covered == 0
+            and (self.groups_covered or 0) - self.groups_no_cells == 0
             and not self.recorded_failures
             and not self.error_files
         )
@@ -396,6 +407,7 @@ def _read_run_report(info: dict) -> dict[str, WellEvidence]:
         out[well] = WellEvidence(
             groups_total=_as_int(rec.get("groups_total")),
             groups_covered=_as_int(rec.get("groups_covered")),
+            groups_no_cells=_as_int(rec.get("groups_no_cells")) or 0,
             recorded_failures=tuple(
                 str(f) for f in (failed if isinstance(failed, list) else [])),
         )
@@ -563,7 +575,7 @@ def _well_intent(
 def _well_done(
     parsed_csvs: dict[Path, tuple[list[dict], list[str], str]],
     out_zip: Path | None, out_folder: Path | None,
-    *, schema_fields, sep: str,
+    *, schema_fields, sep: str, recorded=None,
 ) -> tuple[set[tuple[str, str]], str]:
     """``(fov, timepoint)`` pairs already recorded for a well, plus the
     three-way CSV state (``ok`` / ``empty`` / ``unreadable`` / ``missing``)
@@ -573,7 +585,11 @@ def _well_done(
     ``out_folder`` is ever non-None in practice, but checking both here
     (rather than the caller picking one) means this function alone decides
     what "done" means, matching ``pipeline.incremental_keys.
-    incremental_done_fov_keys``'s own three-way union.
+    incremental_done_fov_keys``'s own three-way union. That is the rule for a
+    well with no record of finished groups; *recorded* is that record's groups
+    when the well has one (``pipeline.done_groups``), and then done is the CSV
+    and the record, images counting for nothing — the same switch
+    ``incremental_done_fov_keys`` makes, inside ``pipeline.completeness.done_keys``.
 
     *parsed_csvs* maps each of the well's candidate CSVs to its already-parsed
     ``(rows, fieldnames, state)``. The scan parses each CSV exactly once and
@@ -592,7 +608,7 @@ def _well_done(
     csv_state = reduce_csv_state(state for _rows, _fn, state in parsed_csvs.values())
     done = done_keys(
         csv_keys=csv_keys, out_zip=out_zip, out_folder=out_folder,
-        schema=schema_fields, sep=sep)
+        schema=schema_fields, sep=sep, recorded=recorded)
     return done, csv_state, csv_keys
 
 
@@ -730,7 +746,7 @@ def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
 def _scan_one_well(
     well: str, *, in_map, zip_map, folder_map, csv_candidates, schema_fields, sep: str,
     fov_field_present: bool, evidence_map: dict[str, WellEvidence] | None = None,
-    nanowell_dir: Path | None = None,
+    nanowell_dir: Path | None = None, out_dir: Path | None = None,
 ) -> tuple[WellReport, list[Finding], set[str] | None]:
     """Read-only per-well diff: intent (from the input container) vs. done
     (from the CSV/out-zip/out-folder). Pulled out of :func:`_scan_wells` so
@@ -760,8 +776,11 @@ def _scan_one_well(
 
     out_zip = zip_map.get(well)
     out_folder = folder_map.get(well)
+    # Describing the folder, not reusing it: a record made under any settings says which groups finished.
+    done_record = None if out_dir is None else read_done_record(out_dir, well)
     done, csv_state, csv_keys = _well_done(
-        parsed_csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep)
+        parsed_csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep,
+        recorded=None if done_record is None else done_record.groups)
 
     # No container means no intent, so the diff below is empty either way; the
     # explicit branch keeps that readable rather than leaving it to follow from
@@ -792,6 +811,7 @@ def _scan_one_well(
         zero_cell_recorded=evidence.segmented_zero_cells,
         not_fetched_recorded=evidence.stranded_on_remote,
         intent=intent_count, covered_csv=len(csv_keys), covered_any=covered_any,
+        no_cells=0 if done_record is None or nanowell else len(set(done_record.no_cells) - csv_keys),
     )
 
     # A well with real recorded output (done) should have every one of its
@@ -911,7 +931,7 @@ def _scan_wells(
             well, in_map=in_map, zip_map=zip_map, folder_map=folder_map,
             csv_candidates=csv_candidates, schema_fields=schema_fields, sep=sep,
             fov_field_present=fov_field_present, evidence_map=evidence_map,
-            nanowell_dir=paths.out_dir / "nanowells",
+            nanowell_dir=paths.out_dir / "nanowells", out_dir=paths.out_dir,
         )
         if progress is not None and progress.on_well_done is not None:
             progress.on_well_done(result[0])

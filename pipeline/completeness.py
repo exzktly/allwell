@@ -64,14 +64,21 @@ class WellCoverage:
     """How much of one well's input its output actually accounts for.
 
     Two "covered" counts, deliberately, because they answer different
-    questions. *covered_any* unions the measurements CSV with the output
-    archive, which is what an incremental re-run would treat as already done —
-    so it is the honest denominator for "how much would re-running recover".
+    questions. *covered_any* unions the measurements CSV with the well's record
+    of finished groups — or, for a well written before that record, with the
+    output archive — which is what an incremental re-run would treat as already
+    done, so it is the honest denominator for "how much would re-running recover".
     *covered_csv* counts only the CSV, which is the file every plot and every
     statistic actually reads. A well whose archive is whole but whose CSV is
     empty has full ``covered_any`` and zero ``covered_csv``, and that gap is
     precisely the state a coverage figure derived from either number alone
     would hide.
+
+    *no_cells* is how many of the covered groups the well's record of finished
+    groups (``pipeline.done_groups``) says were processed to the end and held
+    no cells. They are covered, they are in neither CSV count's rows, and they
+    are counted apart so "measured, nothing there" is never folded into
+    "covered" unseen. Zero for a well with no such record.
     """
 
     well: str
@@ -88,6 +95,7 @@ class WellCoverage:
     #: could not address (no central square found, say). Those are in *missing* too — an incremental run redoes
     #: them — but they are not "never processed", and a reader told so would look for a run that did not happen.
     not_addressed: tuple[tuple[str, str], ...] = ()
+    no_cells: int = 0
 
     @property
     def complete(self) -> bool:
@@ -131,10 +139,17 @@ def reduce_csv_state(states) -> str:
 
 def done_keys(
     *, csv_keys: set[tuple[str, str]], out_zip: Path | None,
-    out_folder: Path | None, schema, sep: str,
+    out_folder: Path | None, schema, sep: str, recorded=None,
 ) -> set[tuple[str, str]]:
-    """Every ``(fov, timepoint)`` pair a well has recorded, from all three
-    possible sources.
+    """Every ``(fov, timepoint)`` pair a well has finished.
+
+    *recorded* is the well's record of finished groups
+    (``pipeline.done_groups.recorded_done_keys``), or ``None`` when it has
+    none. With one, done is the CSV's keys and the recorded groups — a field
+    that held no cells is done, and a group whose images were written before
+    its quantification failed is not — and no container is opened. Without
+    one, the well was written before that record existed and the rule below
+    applies unchanged, from all three possible sources.
 
     A dataset is written either zipped or folder-mode, never both, so only one
     of *out_zip* / *out_folder* is ever non-``None`` in practice — but both are
@@ -148,6 +163,8 @@ def done_keys(
     this opens at most the output container and never reads a CSV.
     """
     done = set(csv_keys)
+    if recorded is not None:
+        return done | set(recorded)
     if out_zip is not None:
         done |= read_done_fov_keys_from_zip(out_zip, schema=schema, sep=sep)
     if out_folder is not None:
@@ -226,7 +243,7 @@ def health(
 def coverage_for_well(
     well: str, *, in_members, csv_keys, csv_state: str, out_zip: Path | None,
     out_folder: Path | None, schema, sep: str, fov_field_present: bool,
-    skip_hidden: bool = False, failed=(),
+    skip_hidden: bool = False, failed=(), done_record=None,
 ) -> WellCoverage:
     """Assemble one well's :class:`WellCoverage` from data the caller already
     holds.
@@ -241,6 +258,10 @@ def coverage_for_well(
     *skip_hidden* follows the container's kind, and the caller passes it because
     only the caller knows: a folder can hold dotfiles the filesystem put there,
     a zip's members are whatever was written into it.
+
+    *done_record* is the well's ``pipeline.done_groups.DoneRecord`` when the
+    caller found one beside the output, and decides which rule
+    :func:`done_keys` applies.
 
     This opens the output container and nothing else. Keeping input listing and
     CSV parsing on the caller's side is what lets Validate delegate to this
@@ -261,7 +282,8 @@ def coverage_for_well(
             images_only=True)
     done = done_keys(
         csv_keys=csv_keys, out_zip=out_zip, out_folder=out_folder,
-        schema=schema, sep=sep)
+        schema=schema, sep=sep,
+        recorded=None if done_record is None else done_record.groups)
     missing = missing_keys(intent, done, fov_field_present=fov_field_present)
     return WellCoverage(
         well=well,
@@ -274,6 +296,7 @@ def coverage_for_well(
         has_out_zip=out_zip is not None,
         has_out_folder=out_folder is not None,
         failed=tuple(failed),
+        no_cells=0 if done_record is None else len(set(done_record.no_cells) - set(csv_keys)),
     )
 
 
@@ -534,6 +557,7 @@ def _csv_prefixes_present(output_dir: Path) -> list[str]:
 
 def _scan_well_coverage(well, container, out_dir, csv_prefix, schema, sep, fov_field_present, failed):
     """One well's coverage: per timepoint when it was run in nanowell mode, per (fov, timepoint) otherwise."""
+    from pipeline.done_groups import read_done_record
     from pipeline.well_skip import existing_csv_for_well, out_folder_path, out_zip_path
 
     out_zip = out_zip_path(out_dir, well)
@@ -551,7 +575,8 @@ def _scan_well_coverage(well, container, out_dir, csv_prefix, schema, sep, fov_f
         out_zip=out_zip if out_zip.exists() else None,
         out_folder=out_folder if out_folder.is_dir() else None,
         schema=schema, sep=sep, fov_field_present=fov_field_present,
-        skip_hidden=bool(container is not None and container.is_dir()), failed=failed)
+        skip_hidden=bool(container is not None and container.is_dir()), failed=failed,
+        done_record=read_done_record(out_dir, well))
 
 
 def scan_run(
@@ -665,6 +690,8 @@ def well_record(cov: WellCoverage, *, max_missing: int = MAX_MISSING_PER_WELL) -
         "has_out_zip": cov.has_out_zip,
         "has_out_folder": cov.has_out_folder,
         "failed": list(cov.failed),
+        # Covered groups that were processed to the end and held no cells: in `covered_any`, in no CSV row.
+        "no_cells": cov.no_cells,
         "health": state,
         "not_addressed_count": len(cov.not_addressed),
         "not_addressed": [list(pair) for pair in cov.not_addressed[:max_missing]],
@@ -765,6 +792,7 @@ def build_block(
             "intent": sum(int(r.get("intent") or 0) for r in records.values()),
             "covered_csv": sum(int(r.get("covered_csv") or 0) for r in records.values()),
             "covered_any": sum(int(r.get("covered_any") or 0) for r in records.values()),
+            "no_cells": sum(int(r.get("no_cells") or 0) for r in records.values()),
         },
         "errors": dict(errors or {"files": 0, "by_type": {}}),
         "findings": list(findings or []),
@@ -905,8 +933,9 @@ def log_summary(block: dict, *, log) -> None:
             "undefined. Re-run with --incremental to recover the missing groups.",
             partial, missing_groups, shown)
         return
-    log.info("Completeness: all %d well(s) cover every FOV-group in their input.",
-             n_wells)
+    no_cells = int(totals.get("no_cells") or 0)
+    log.info("Completeness: all %d well(s) cover every FOV-group in their input%s.", n_wells,
+             f" ({no_cells} of those FOV-group(s) were measured and held no cells)" if no_cells else "")
 
 
 def record_run_check(

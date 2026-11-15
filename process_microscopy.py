@@ -162,6 +162,7 @@ from pipeline.io import (
     publish_scratch_args,
     scratch_base_for,
 )
+from pipeline.done_groups import withdraw_done_record
 from pipeline.fov_checkpoint import (
     _fov_stem,
     _load_fov_checkpoint,
@@ -1631,18 +1632,6 @@ _MAX_CONSECUTIVE_IO_FAILURES = 3
 # poison the per-well CSV.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def _prune_scratch_files(tmp_images: Path) -> None:
     """Remove ``__aw_tmp_*`` partials from a previous killed run.
 
@@ -1669,6 +1658,7 @@ def _process_groups_in_worker(
     settings_key: str = "",
     measured_of: int | None = None,
     open_image=None,
+    finished: list | None = None,
 ) -> tuple[list[dict], list[str]]:
     """
     Process all image groups for one well within a single worker process.
@@ -1679,6 +1669,9 @@ def _process_groups_in_worker(
     *fov_threads* controls concurrent FOV processing via ThreadPoolExecutor.
     fov_threads=1 (default) is safe for any backend; >1 benefits multi-core CPU.
     *open_image* reaches :func:`process_image_group` (zip mode reads in place).
+    *finished*, when given, gains ``(nuclear file name, cell count)`` for each
+    group taken to the end — processed now or resumed from its checkpoint, never
+    one that failed: what ``pipeline.done_groups`` records as done.
 
     *errors_dir* is the persistent dataset output dir (NOT the ``tmp_images``
     staging dir); a per-FOV-group failure trace is written under
@@ -1705,6 +1698,7 @@ def _process_groups_in_worker(
 
     all_records: list[dict] = []
     failed:      list[str]  = []
+    finished = [] if finished is None else finished
 
     def _record_fov_failure(nuclear_path: Path, exc: BaseException) -> None:
         """Persist a per-FOV traceback + log it as an error the GUI surfaces."""
@@ -1755,6 +1749,7 @@ def _process_groups_in_worker(
                 "reprocessed on restart.", nuclear_path.name, ckpt_exc,
             )
         _note_quality(quality)
+        finished.append((nuclear_path.name, len(recs)))
         return recs
 
     def _note_quality(quality: dict | None) -> None:
@@ -1787,6 +1782,7 @@ def _process_groups_in_worker(
             # block, and a plate resumed once would be scored against a subset
             # chosen by wherever the previous run happened to be killed.
             _note_quality(quality)
+            finished.append((nuclear_path.name, len(records)))
             return records
         return _run_group(nuclear_path, fluor_paths)
 
@@ -2063,14 +2059,14 @@ def process_well_zip_task(
                         "Well %s — the recorded settings differ from this "
                         "run's; recomputing every FOV-group.", well_label)
                     prior = None
-                # CSV is the primary done-set; a processed well can have its
-                # <well>_out.zip without a sibling CSV (remote-only materialise /
-                # lost CSV) → recover done keys from the outputs too.
+                # The CSV's groups and the well's record of finished ones (pipeline.done_groups);
+                # a well written before that record → the CSV and, for a lost CSV /
+                # remote-only materialise, the keys recovered from its output images.
                 done, csv_done = ((set(), False) if prior is None else
                                   incremental_done_fov_keys(
                                       prior, well_label, csv_prefix=csv_prefix,
                                       safe_well=safe_well, schema=schema,
-                                      sep=sep))
+                                      sep=sep, settings_key=settings_key))
                 if done and not csv_done:
                     log.info("Well %s — no prior CSV; recovered %d done FOV-group(s) "
                              "from processed outputs.", well_label, len(done))
@@ -2088,14 +2084,17 @@ def process_well_zip_task(
                 # else: no prior CSV or out.zip → new well → process all (full).
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
+            done_kw = dict(processed=[], schema=schema, sep=sep, settings_key=settings_key, incremental=incremental)
             with ZipMemberReader(zip_path) as members:
                 records, failed, aborted_reason, not_attempted = _process_groups_in_worker(
                     groups, kwargs, well_label, errors_dir=output_dir,
-                    settings_key=settings_key, open_image=members.open,
+                    settings_key=settings_key, open_image=members.open, finished=done_kw["processed"],
                     measured_of=groups_in_input if incremental else None)
             if _suspended_before_any_group(well_label, records, failed):
                 return [], []
             withdraw_seal(output_dir, well_label)    # before the CSV / out.zip rewrite; raises if it cannot
+            if not incremental:
+                withdraw_done_record(output_dir, well_label)    # a whole-well rewrite starts its record again
 
             if incremental:
                 if records:
@@ -2107,7 +2106,7 @@ def process_well_zip_task(
                 record_well_completeness(
                     output_dir, well_label, groups_in_input, csv_path, failed,
                     aborted_reason=aborted_reason,
-                    not_attempted=not_attempted)
+                    not_attempted=not_attempted, **done_kw)
                 n_compressed = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_compressed, out_zip.name)
@@ -2120,7 +2119,7 @@ def process_well_zip_task(
                 record_well_completeness(
                     output_dir, well_label, groups_in_input, csv_path, failed,
                     aborted_reason=aborted_reason,
-                    not_attempted=not_attempted)
+                    not_attempted=not_attempted, **done_kw)
 
                 n_compressed = compress_images_to_zip(tmp_images, out_zip)
                 log.info("Well %s: %d image(s) -> %s", well_label, n_compressed, out_zip.name)

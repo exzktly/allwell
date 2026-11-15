@@ -147,3 +147,28 @@ def test_a_colour_change_still_starts_a_new_insert(tab):
         QTextCursor.insertText = original
 
     assert [t for t in inserts] == ["a\nb\n", "bad\n", "c\n"]
+
+
+def test_a_poll_armed_before_the_tab_is_destroyed_never_fires(qtbot, monkeypatch):
+    """The poll re-arms itself through a single-shot timer. Armed with no context object, the call outlived the
+    tab: it went on running every 80 ms on a destroyed tab for the life of the process, and wrote to a log pane
+    that was gone — which surfaced on a CI runner as an error at this file's teardown (``Internal C++ object
+    (QTextEdit) already deleted``). Most of what it raises is swallowed, so the count is what is asserted."""
+    import shiboken6
+
+    from analyze.tab import AnalyzeTab
+
+    after_death: list[bool] = []
+    real_poll = AnalyzeTab._poll_log
+
+    def counted(self) -> None:
+        if not shiboken6.isValid(self):
+            after_death.append(True)
+        real_poll(self)
+
+    monkeypatch.setattr(AnalyzeTab, "_poll_log", counted)
+    doomed = AnalyzeTab()
+    doomed._poll_log()                                   # arms the next poll, as a live tab always has one armed
+    shiboken6.delete(doomed)                             # the C++ tab and its log pane are gone now
+    qtbot.wait(300)                                      # room for three polls at the idle 80 ms
+    assert after_death == []

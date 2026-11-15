@@ -110,7 +110,7 @@ from services.remote_transport import (
     delete_remote_paths,
     pull_small_file,
 )
-from services.remote_finished_wells import pull_settings_marker
+from services.remote_finished_wells import pull_done_record, pull_settings_marker
 from services.remote_scratch import (
     _new_transit_dir,
     _transit_dir,
@@ -1275,6 +1275,10 @@ class Fetcher:
             self.run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
             stop_event=self._stop, what=f"the settings marker for {well}",
         )
+        # And the record of which of its FOV-groups finished — the fields that held no cells among them.
+        pull_done_record(pull_small_file, self.host, self.run.remote_output_dir, self.run.local_output_dir, well,
+                         incremental=self.run.incremental, stop_event=self._stop,
+                         what=f"the record of finished FOV-groups for {well}")
 
     def _sidecar_loop(self) -> None:
         """Pull ``pipeline_info.json`` as soon as the remote has written one.
@@ -1829,6 +1833,9 @@ class FetchedOutputVerifier:
             pull_small_file, self.host, f"{run.remote_output_dir}/{SETTINGS_DIRNAME}/{well}.json",
             run.local_output_dir / SETTINGS_DIRNAME / f"{well}.json",
             stop_event=self._cancelled, what=f"the settings marker for {well}")
+        pull_done_record(pull_small_file, self.host, run.remote_output_dir, run.local_output_dir, well,
+                         incremental=run.incremental, stop_event=self._cancelled,
+                         what=f"the record of finished FOV-groups for {well}")
         run.fetched_wells.add(well)
         return True
 

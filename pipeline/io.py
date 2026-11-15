@@ -1202,8 +1202,8 @@ def merge_records_into_csv(
         # new rows alone. Atomically, so there was no partial file to notice;
         # the caller logged "+N row(s), merged" with N being the whole of what
         # survived; and because `done_keys` unions the CSV with the well's
-        # `_out.zip`, which still held every image, the well went on reporting
-        # complete. The lost timepoints were unrecoverable short of --force.
+        # record of finished groups (or its `_out.zip`, which still held every
+        # image), the well went on reporting complete. The lost timepoints were unrecoverable short of --force.
         #
         # Note that a *corrupt* CSV already failed the well loudly here —
         # UnicodeDecodeError and csv.Error were never caught — so an unreadable

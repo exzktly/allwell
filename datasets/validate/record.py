@@ -68,6 +68,7 @@ def _coverage(report: WellReport, failed: tuple[str, ...]) -> WellCoverage:
         has_out_zip=report.has_out_zip,
         has_out_folder=report.has_out_folder,
         failed=failed,
+        no_cells=report.no_cells,
     )
 
 

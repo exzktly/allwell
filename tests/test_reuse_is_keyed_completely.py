@@ -350,6 +350,17 @@ REUSE_CONTRACTS = {
                            "withdrawn and never written again is a well left part way or died mid-rewrite",
         "completeness_record": "an unsealed well whose last completeness record ended short is run again",
     },
+    # The well's record of which FOV-groups were processed to the end (``pipeline.done_groups``). It is what lets
+    # an incremental run, the remote upload's split and the finished-here check leave a group alone with no CSV
+    # row to show for it — a field that held no cells — so it is a reuse decision of its own, beside the well's.
+    "done_groups.read_done_record": {
+        "digest": "the settings the record was written under, against the reader's settings key: a field that "
+                  "held no cells under one segmenter or threshold may hold some under another, so a record made "
+                  "under other settings must not make a group look done. Unlike the well's settings marker an "
+                  "unknown digest is not grandfathered: no well written before the record existed has one",
+        "format": "the payload's shape. A record of another format is one this build would misread, and no "
+                  "record at all sends the well to the earlier rule, which is always safe",
+    },
     "parquet_cache.read_cached": {
         "st_size": (
             "the CSV's byte count. The pipeline rewrites these files — an "
@@ -1713,7 +1724,28 @@ def _finished_output_case(tmp_path, key: str):
     return baseline, finished_output(out, "A01", "measurements", "abcdef0123456789", records=records)
 
 
+def _done_record_case(tmp_path, key):
+    """A well whose record says field 3 was measured and held no cells, read back under each key changed alone."""
+    import json
+
+    from pipeline.done_groups import done_record_path, read_done_record, record_processed_groups
+
+    record_processed_groups(tmp_path, "A01", [("e_DAPI_A01_3_T01.tif", 0)],
+                            schema="experiment:channel:well:fov:timepoint", sep="_", settings_key="abcdef0123456789")
+    baseline = read_done_record(tmp_path, "A01", "abcdef0123456789")
+    reader_key = "abcdef0123456789"
+    if key == "digest":
+        reader_key = "0123456789abcdef"
+    elif key == "format":
+        path = done_record_path(tmp_path, "A01")
+        path.write_text(json.dumps({**json.loads(path.read_text()), "format": 0}))
+    else:
+        raise AssertionError(f"no mutation written for {key!r}: add one beside its reason in REUSE_CONTRACTS")
+    return baseline is not None and baseline.groups == {("3", "T01")}, read_done_record(tmp_path, "A01", reader_key)
+
+
 _REMOTE_DECISIONS = {
+    "done_groups.read_done_record": lambda tmp_path, mp, key: _done_record_case(tmp_path, key),
     "remote_finished_wells.finished_here": lambda tmp_path, mp, key: _finished_here_case(tmp_path, key),
     "remote_batch_resume.take_from_remote": _take_from_remote_case,
     "remote_recover.recover_finished_outputs": _recover_case,

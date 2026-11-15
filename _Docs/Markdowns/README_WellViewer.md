@@ -1649,6 +1649,14 @@ skip what is done".
     then merged into the existing CSV and archive. Wells with no output at all
     process in full; complete wells are left untouched. Datasets → *Validate &
     Repair* → **Complete this run in Analyze** chooses this for you.
+    A field that was analysed and held no cells counts as recorded — it is not
+    processed again, and it does not make its well incomplete — while a field
+    that failed part way is processed again even though some of its images
+    were already saved. Each well keeps a small record of which fields it
+    finished for this (`.aw_done/` in the output folder). A well analysed
+    before that record existed is read as it always was, from its CSV and its
+    saved images; choose **Redo it**, or name the well under **Force these
+    wells**, to bring such a well up to date.
   - **Redo it.** Re-processes wells whose output ZIPs already exist (`--force`). It also
     discards the per-FOV checkpoints a stopped run left behind, so forcing really
     does recompute: it used to re-run the well and then resume those checkpoints,
@@ -1698,8 +1706,9 @@ skip what is done".
   but a queued job keeps it.
 - **Force these wells.** Comma-separated wells to reprocess in full, whatever
   else the run decides. This is the only thing that recovers a well whose
-  `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
-  processed images count as already-done work, so an incremental run reports
+  `<WELL>_out.zip` exists but whose measurements CSV is missing: its record of
+  finished fields (or, for a well analysed before that record existed, its own
+  processed images) counts as already-done work, so an incremental run reports
   that well "up to date" and skips it forever. Forcing it re-segments the well
   and overwrites its outputs; every other well is unaffected. Validate &
   Repair's completion handoff fills this in for you with exactly those wells.
@@ -2861,6 +2870,10 @@ recently. The log line for a folder the automatic clean-up kept says the same.
 ├── errors/                 ← one traceback per failed field, when any fail;
 │   └── superseded/            once the well later finishes whole, its old
 │                              tracebacks move here (kept, never deleted)
+├── .aw_done/<well>.json    ← which of the well's fields were analysed to the
+│                              end, and which of those held no cells
+├── .aw_settings/, .aw_complete/  ← the settings each well was made under, and
+│                              a seal on each well whose output is whole
 ├── provenance.jsonl        ← the dataset's history (see below)
 └── (transient tmp_<well>/  ← deleted on success)
 ```
@@ -2886,7 +2899,8 @@ importers until its first Analyze run.
 **The completeness record.** `pipeline_info.json` gains a `run_check` block at
 the end of every run, holding one entry per well: how many
 `(field, timepoint)` groups its input held, how many its measurements CSV
-covers, how many the CSV and the output archive cover between them, which are
+covers, how many are covered once the fields that were analysed and held no
+cells are counted too (and how many those are, as `no_cells`), which are
 missing, and which of five states that adds up to: **complete** (every group
 accounted for, with both the measurements CSV and the output archive on disk),
 **partial** (some groups missing), **measurements with no output archive** (the
@@ -2898,6 +2912,14 @@ Repair** ask you to chase. It is written *after* the last well, which is why
 its presence means something on its own — the rest of `pipeline_info.json` is written before
 the first image is read, so a run that died in its first seconds still leaves
 that file behind looking perfectly normal.
+
+A field with no cells is a result, not a gap: it is counted as covered, the
+well is complete with it, and the end of the run log names how many there were
+and in which wells (`NO CELLS: …`) — worth a glance, since an out-of-focus
+field looks the same. Hovering the well on Home says `… measured with no
+cells`. A field that failed is the opposite case and stays missing until it is
+processed again. For a well analysed before fields with no cells were
+recorded, covered still means "in the CSV, or has saved images".
 
 The same block is written by [Validate & Repair](#validate--repair-dataset) when
 its check finishes, which is how a dataset produced before this record existed

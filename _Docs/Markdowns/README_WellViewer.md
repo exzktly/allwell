@@ -9154,7 +9154,9 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
 
 1. **OME-TIFF source** — pick the `.ome.tif` file. All-Well reads its metadata
    immediately and suggests a **Destination folder** (`<name>_dataset` beside the
-   file); change it if you like. The readout then shows the file's **target** —
+   file); change it if you like. The converted wells go into an `in/` folder
+   *inside* the destination, so a destination itself named `in` is refused —
+   choose the folder above it (the same holds on every Datasets tool). The readout then shows the file's **target** —
    how many stage positions (or, for a single packed image, frames) it holds, and
    once you set FOVs per well, the well count that implies (positions ÷ FOVs). Use
    it to guide how many wells to place before you touch the grid or the plate.
@@ -10708,6 +10710,11 @@ FOV lists — All-Well says which settings are missing before you save, since
 saving would otherwise quietly widen the job to everything. Editing a job
 that has already finished is allowed, and says so: it updates what the job
 would do, but the job does not run again until you choose **Retry**.
+
+**Why a job failed** — a failed or cancelled job's row leads its second line
+with the reason ("Failed — …"); hover it for the whole message, or choose
+**Why it failed…** from the row's **⋯** menu to read all of it in a window you
+can select and copy from.
 
 The **⋯** menu also offers **Duplicate** (a copy directly below — the
 quickest way to queue the same operation over several plates, or to try one

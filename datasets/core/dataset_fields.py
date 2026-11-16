@@ -47,8 +47,11 @@ def is_free_destination(
     Cross-field rules — "the destination must differ from both sources" — stay
     on the page, since they need fields this function cannot see.
     """
-    from datasets.core.dataset_paths import DatasetPaths
+    from datasets.core.dataset_paths import DatasetPaths, named_in_problem
 
+    named_in = named_in_problem(root)
+    if named_in:
+        return named_in
     dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
     if is_complete(dest):
         return "Already holds a finished dataset — choose an empty folder."

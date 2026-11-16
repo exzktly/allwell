@@ -13574,8 +13574,11 @@ nanowell's own rim, *Nanowell rim fitted*: 1 where `focus` > 0, 0 where it is no
 `empty`, NaN where the run did not measure the nanowell — exactly where `series_compute.rim_focus_text` captions a crop
 *rim not fitted*, which `test_nanowell_subset_row_flags.py::test_nanowell_rim_fitted_agrees_with_every_crop_caption`
 holds), `rim_out_of_focus` (not
-`rim_focus_ok`), `field_left_out` (`state` is `field_excluded`) and `no_count` (a measurable `run_state` with no
-`n_cells`). Each is read from its own column by `_row_flag` so that none stands in for another: `run_state` is
+`rim_focus_ok`), `field_left_out` (`state` is `field_excluded`), `no_count` (a measurable `run_state` with no
+`n_cells`), and the run's own per-row flags `count_disagreement` (*Count-disagreeing*) and `partially_visible` (*Partly
+visible*), each read from the site table's column of that name (`_RUN_FLAGS`) — with `fused` and `identity_out`, the
+flags the run marks a nanowell with without removing it, so a Subset is how every view, the Rare responders test
+among them, leaves the same flagged nanowells out. Each is read from its own column by `_row_flag` so that none stands in for another: `run_state` is
 `state` as `_addressed_grid` left it, copied by `site_metrics` before Cell Gating (`field_excluded`) and the
 rim-focus rule (`out_of_focus`) overwrite `state`, so a nanowell in a field left out is still `found`. A table
 without the column a property reads answers no value on every row rather than *no*. A numeric field is compared by `ge` / `le` / `eq` / `between` /
@@ -14261,13 +14264,11 @@ another well has), builds the
 per-nanowell table from the already-Subset metrics with `rare_data_compute.from_site_metrics` — **the page's Metric**
 at that timepoint (`controller.metric_column`, labelled by `controller._label`), in the band's direction
 (`NanowellState.rare_direction`, saved, `statistics_view.DIRECTIONS`: *Responders higher / lower*), keeping every
-nanowell the run flagged unless the band's *QC flags ▾* excludes the flag (`NanowellState.rare_qc_excluded`, saved,
-empty by default; `rare_data_compute.RARE_QC_FLAGS` is the roster: count-disagreeing, partly visible, fused, identity
-not confirmed). `compose(exclude_qc=)` drops every other flag's column from the table, so `qc_reasons` never sees it
-and each choice is keyed apart; an excluded flag that left nanowells out is counted on the figure, in a lead line at its
-top, under the groups line, (`rc.qc_line`, from `rare_data_compute.qc_flag_counts`), and named in Details (`rc.excluded_note`). Every
-other view draws flagged nanowells, so this keeps the test's nanowells the ones they draw unless the user chooses
-otherwise. **A Metric with one value per nanowell** (`distribution_compute.PER_NANOWELL`: the growth rate, the
+nanowell the run flagged, as every other view draws them. The run's flags are Subset conditions
+(`subset_compute.ROW_FLAGS`' *Count-disagreeing* and *Partly visible*, read from the site table's own columns, beside
+*Seam* and *Identity contradicted*), so one Subset leaves flagged nanowells out of every view at once, this test
+included, and the views being compared draw the same nanowells; the test has no flag choice of its own, and a page
+saved with the old `rare_qc_excluded` opens without it (`state._rare_from`). **A Metric with one value per nanowell** (`distribution_compute.PER_NANOWELL`: the growth rate, the
 occupancy class) has no timepoint, so `compose` builds its table with `from_site_metrics(per_nanowell=True)`: the rows
 are each well's first timepoint, the rows `distribution_model` reads these metrics from for every other test (so a
 well imaged at other timepoints than the rest is still in), no `qc_state` is written, and a nanowell is left out only

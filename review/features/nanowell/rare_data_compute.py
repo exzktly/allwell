@@ -329,30 +329,6 @@ def exclusion_counts(exclusions: pd.DataFrame) -> dict:
     return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
 
 
-#: The site table's per-row flags that become QC flags of a nanowell at its final timepoint (``nanowell_task``).
-SITE_QC_FLAGS = {"fused": "qc_fused", "partially_visible": "qc_edge", "count_disagreement": "qc_count_disagreement"}
-
-#: The run's flags a nanowell can be left out of the Rare responders test for: the page's key -> (the table's column,
-#: what the page calls it). Every other view draws such nanowells, and so does this test unless the page excludes the
-#: flag (``NanowellState.rare_qc_excluded``); the state at the timepoint and a missing value exclude everywhere, so are
-#: not here.
-RARE_QC_FLAGS = {
-    "count_disagreement": ("qc_count_disagreement", "count-disagreeing"),
-    "edge": ("qc_edge", "partly visible"),
-    "fused": ("qc_fused", "on a tile seam (fused)"),
-    "identity": ("qc_identity", "identity not confirmed"),
-}
-
-
-def qc_flag_counts(exclusions: pd.DataFrame) -> dict:
-    """``flag key -> how many nanowells it left out`` for the :data:`RARE_QC_FLAGS` among *exclusions*' reasons (a
-    nanowell left out for two flags counts under each), only the flags that left any out, in the roster's order."""
-    counts = exclusion_counts(exclusions)
-    by_reason = {f"QC: {column[len(QC_PREFIX):]}": key for key, (column, _label) in RARE_QC_FLAGS.items()}
-    found = {by_reason[r]: n for r, n in counts.items() if r in by_reason}
-    return {key: found[key] for key in RARE_QC_FLAGS if found.get(key)}
-
-
 def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: str, *, plate_id: str = "plate",
                       crop_path=None, value_column: str | None = None,
                       value_reasons: pd.Series | None = None, per_nanowell: bool = False) -> pd.DataFrame:
@@ -404,11 +380,6 @@ def from_site_metrics(metrics: pd.DataFrame, conditions: dict, final_timepoint: 
             out[VALUE_REASON] = value_reasons.reindex(final.index).fillna("").astype(str).to_numpy()
     state = final["state"].astype(str).to_numpy()
     out["qc_state"] = "" if per_nanowell else np.where(np.isin(state, ["measured", "empty"]), "", state)
-    for column, flag in SITE_QC_FLAGS.items():
-        if column in final.columns:
-            out[flag] = final[column].eq(True).to_numpy()            # NA is not a flag
-    if "identity_ok" in final.columns:
-        out["qc_identity"] = (final["identity_ok"] != True).to_numpy()  # noqa: E712 — NA is not a pass
     out["crop_path"] = ([crop_path(w, int(q), int(r)) for w, q, r in zip(final["well"], final["nw_q"], final["nw_r"])]
                         if crop_path is not None else "")
     return out.reset_index(drop=True)

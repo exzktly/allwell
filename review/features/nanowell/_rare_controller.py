@@ -48,7 +48,7 @@ from review.features.nanowell import distribution_compute as dc
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._rare_render import needed_height, needs_relayout, render_rare_page
-from review.features.nanowell.rare_data_compute import RARE_QC_FLAGS, RareParams, from_site_metrics, qc_flag_counts
+from review.features.nanowell.rare_data_compute import RareParams, from_site_metrics
 from review.features.nanowell.rare_export_compute import report_lines
 from review.features.nanowell.rare_report_compute import RareResult, analyse
 from review.features.nanowell.renderer import Footer, render_message, render_site_rows
@@ -143,17 +143,15 @@ def windowed(metrics: pd.DataFrame, wells, column: str, *, moving: int, baseline
 def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: str = "", store: dict | None,
             request, moving: int = 0, baseline_moving: int = 0, moving_centred: bool = False, cohort: bool = False,
             unit_set: bool = False, hidden: dict | None = None, guessed: str = "", column: str = "",
-            value_label: str = "", direction: str = "higher", stamped: str = "",
-            exclude_qc=frozenset()) -> RareResult | None:
+            value_label: str = "", direction: str = "higher", stamped: str = "") -> RareResult | None:
     """Draw the Rare responders test into *fig*: its result when *store* holds it, else a sentence while *request*
     (``request(key, job)``) has it computed, or one saying why it cannot run. Returns the result drawn, or ``None``.
 
     *moving* (0 or 1: off), *baseline_moving* and *moving_centred* are the moving average the page's other Statistics
-    tests apply (:func:`windowed`); the caller passes 0 for a metric with one value per nanowell. *exclude_qc* (the
-    band's *QC flags* ticks, keys of ``rare_data_compute.RARE_QC_FLAGS``) leaves out the nanowells those flags mark;
-    every other flag's column is dropped from the table, so ``qc_reasons`` never sees it — by default all four, so the
-    test keeps every nanowell the other views draw — and each choice is keyed apart. The figure says how many an
-    excluded flag left out (:func:`qc_line`)."""
+    tests apply (:func:`windowed`); the caller passes 0 for a metric with one value per nanowell. The test keeps every
+    nanowell the run flagged (count-disagreeing, partly visible, on a tile seam, identity contradicted), as every
+    other view draws them: a Subset with those conditions leaves them out of every view at once, this test included,
+    so the views being compared show the same nanowells."""
     timepoint = drawn_timepoint(metrics, groups, timepoint)
     reason = why_not(groups, control, metrics, timepoint, hidden, column)
     if reason:
@@ -180,9 +178,6 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     except ValueError as exc:
         render_message(fig, str(exc), gid="nw-rare-why")
         return None
-    excluded = [key for key in RARE_QC_FLAGS if key in set(exclude_qc)]
-    table = table.drop(columns=[RARE_QC_FLAGS[key][0] for key in RARE_QC_FLAGS if key not in excluded],
-                       errors="ignore")
     params = RareParams(control=control, direction=direction)
     key = (*result_key(table, params), value_label)      # the label is in the result's sentences
     held = (store or {}).get(key)
@@ -198,30 +193,11 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     notes = [VALUE_NOTE_PER_NANOWELL if per_nanowell else
              f"{values} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.",
              *([mvc.describe(moving, column, baseline_moving, moving_centred)] if averaging else []),
-             *([excluded_note(excluded)] if excluded else []),
              *([NOT_APPLIED] if cohort else []), *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
-    lead = [*([guessed_note(control)] if guessed and guessed == control else []), qc_line(held)]
+    lead = [*([guessed_note(control)] if guessed and guessed == control else [])]
     render_rare_page(fig, held, note=DETAILS_POINTER, stamped=stamped, lead=[line for line in lead if line])
     return held
-
-
-def qc_line(result: RareResult) -> str:
-    """The figure's line, drawn before everything and never cut, naming how many nanowells each excluded flag of the
-    run left out of the test — which every other view draws, so a test on fewer nanowells than the Distribution view
-    shows says why on its face. ``""`` when no flag left any out."""
-    counts = qc_flag_counts(result.prepared.exclusions)
-    if not counts:
-        return ""
-    parts = ", ".join(f"{n:,} {RARE_QC_FLAGS[key][1]}" for key, n in counts.items())
-    return (f"⚠ Left out by the run's flags before testing, as chosen under QC flags: {parts}. Other views draw "
-            "them.")
-
-
-def excluded_note(excluded) -> str:
-    """Details' sentence when the page excludes some of the run's flags."""
-    names = ", ".join(RARE_QC_FLAGS[key][1] for key in excluded)
-    return f"Left out by the QC flags choice: nanowells {names}. Every other view draws them."
 
 
 def timepoint_hours(metrics: pd.DataFrame, timepoint: str) -> float:
@@ -278,7 +254,7 @@ def hook(ctx, st) -> dict:
         _nwc()._fetch(ctx, "rare_results", key, job,
                       failed=lambda message: f"The rare-responder tests could not be run: {message}")
     return {"store": st.rare_results, "request": request, "guessed": st.control_guessed,
-            "direction": st.rare_direction, "exclude_qc": frozenset(st.rare_qc_excluded)}
+            "direction": st.rare_direction}
 
 
 def flagged_rows(result: RareResult) -> list[dict]:

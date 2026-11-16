@@ -412,68 +412,67 @@ def _flag(st, wells, flag, sites=None):
     st.metrics.loc[rows, flag] = True if flag != "identity_ok" else False
 
 
-def test_flagged_nanowells_are_kept_by_default_and_excluded_by_choice(page, qtbot):
-    """Reported: the Rare responders test emptied both treatment groups on a plate whose Distribution view drew
-    their nanowells: the test left out every nanowell the run had flagged, and Distribution draws them. User decisions:
-    by default the test keeps them, as every other view does; each flag can be excluded under QC flags, and then the
-    figure says what it left out. Here every drug nanowell is flagged count-disagreeing at the Timepoint."""
+def test_flagged_nanowells_are_tested_as_every_view_draws_them_and_the_test_has_no_flag_choice_of_its_own(
+        page, qtbot):
+    """Reported: the Rare responders test emptied both treatment groups on a plate whose Distribution view drew their
+    nanowells, because it alone left out what the run had flagged. User decisions since: the test keeps them, as every
+    view does, and its own *QC flags* choice is gone — the flags are Subset conditions, so one Subset leaves them out
+    of every view at once. Here every drug nanowell is flagged count-disagreeing at the Timepoint."""
     st = _open(qtbot, page)
     _flag(st, ["B01", "B02"], "count_disagreement")
     _choose(page, "_nw_stats_test_cb", "rare")
     _choose(page, "_nw_control_cb", "ctrl")
-    button = page.widgets.get("_nw_rare_qc_btn")
-    assert button.isVisibleTo(page.window) and button.text() == "QC flags: none excluded"
-    assert st.rare_qc_excluded == []
-    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-unit")), timeout=30000)
+    assert page.widgets.get_or_none("_nw_rare_qc_btn") is None
+    qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-unit") or _texts(page, "nw-rare-why")), timeout=30000)
+    assert not _texts(page, "nw-rare-why"), _texts(page, "nw-rare-why")         # no group emptied by its flags
     assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders detected.")
     assert st.rare_footer.counts.endswith("300 nanowells kept, 0 excluded")
-    assert not any(t.startswith("⚠ Left out by the run's flags") for t in _texts(page, "nw-rare-line"))
-    page.widgets.get("_nw_rare_qc_count_disagreement").trigger()          # the menu's tick, as a click sets it
-    assert st.rare_qc_excluded == ["count_disagreement"] and button.text() == "QC flags: 1 excluded"
-    why = "nw-rare-why"
-    qtbot.waitUntil(lambda: any("no treatment group has a nanowell left to test" in t for t in _texts(page, why)),
-                    timeout=30000)
-    assert any("drug: every one of its 120 nanowells was excluded before testing (QC: count_disagreement: 120)"
-               in t for t in _texts(page, why))
-    _choose(page, "_nw_stats_test_cb", "welch")
-    assert not button.isVisibleTo(page.window)
+    assert not any("QC" in t for t in _texts(page, "nw-rare-line"))
 
 
-@pytest.mark.parametrize("flag, column, label", [("count_disagreement", "count_disagreement", "count-disagreeing"),
-                                                 ("edge", "partially_visible", "partly visible"),
-                                                 ("fused", "fused", "on a tile seam (fused)"),
-                                                 ("identity", "identity_ok", "identity not confirmed")])
-def test_an_excluded_flag_s_nanowells_are_counted_on_the_figure(page, qtbot, flag, column, label):
-    """Two nanowells of each drug well (none of the responders) carry the flag: kept and unremarked by default;
-    left out once the flag's tick is set, and the figure says how many, since every other view draws them."""
+@pytest.mark.parametrize("field, column", [("count_disagreement", "count_disagreement"),
+                                           ("partially_visible", "partially_visible"),
+                                           ("fused", "fused"), ("identity_out", "identity_ok")])
+def test_a_subset_on_a_run_flag_leaves_the_same_nanowells_out_of_the_test_and_of_distribution(page, qtbot, field,
+                                                                                                column):
+    """User decision: to compare the Rare responders test with the Distribution view on the same nanowells, the run's
+    flags are Subset conditions. Two nanowells of each drug well (none of the responders) carry the flag at the
+    Timepoint; a Subset with the flag's condition set to *no* there takes those four out of the test and out of the
+    Distribution view alike, and both say so as every Subset does."""
+    from review.features.nanowell import subset_compute as ss
+    from review.features.nanowell.tab_view import VIEWS
+
     st = _open(qtbot, page)
     _flag(st, ["B01", "B02"], column, sites=[0, 1])
     _choose(page, "_nw_stats_test_cb", "rare")
     _choose(page, "_nw_control_cb", "ctrl")
     qtbot.waitUntil(lambda: st.rare_footer is not None, timeout=30000)
     assert st.rare_footer.counts.endswith("300 nanowells kept, 0 excluded")
-    assert not any(t.startswith("⚠ Left out by the run's flags") for t in _texts(page, "nw-rare-line"))
-    page.widgets.get(f"_nw_rare_qc_{flag}").trigger()
-    assert st.rare_qc_excluded == [flag]
-    said = f"⚠ Left out by the run's flags before testing, as chosen under QC flags: 4 {label}. Other views draw them."
-    qtbot.waitUntil(lambda: said in _texts(page, "nw-rare-line"), timeout=30000)
-    assert st.rare_footer.counts.endswith("296 nanowells kept, 4 excluded")
-    assert rc.excluded_note([flag]) in st.rare_footer.notes
+    from review.features.nanowell import controller
+
+    def dots() -> set:
+        return {(s[0], int(s[1])) for _ax, _x, _y, sites in st.hits.entries for s in sites}
+
+    flagged = {(w, q) for w in ("B01", "B02") for q in (0, 1)}
+    page.widgets.get("_nw_view_bar").setCurrentIndex([k for k, _l in VIEWS].index("distribution"))
+    assert flagged <= dots() and len(dots()) == 300                     # Distribution draws them, as the test did
+    controller.set_subset(page, ss.Subset((ss.Condition(field, "no", at="tp:t_a"),)).validated())
+    assert not flagged & dots() and len(dots()) == 296                 # gone from Distribution …
+    page.widgets.get("_nw_view_bar").setCurrentIndex([k for k, _l in VIEWS].index("statistics"))
+    qtbot.waitUntil(lambda: st.rare_footer is not None and st.rare_footer.counts.endswith("296 nanowells kept, "
+                                                                                          "0 excluded"),
+                    timeout=30000)                                      # … and from the test, the same four
 
 
-def test_the_excluded_flags_are_saved_with_the_page_and_an_unknown_one_is_not_restored():
+def test_a_page_saved_with_the_test_s_old_qc_flags_choice_still_opens():
+    """A page saved while the test had its own *QC flags* choice carries ``rare_qc_excluded``: it opens, the choice
+    is not restored (a Subset's flag conditions replace it), and the direction beside it is."""
     from review.features.nanowell.state import NanowellState
 
-    assert NanowellState().rare_qc_excluded == []                         # nothing thrown away by default
     st = NanowellState()
-    st.rare_qc_excluded = ["fused", "count_disagreement"]
-    again = NanowellState()
-    again.apply_config(st.to_config())
-    assert again.rare_qc_excluded == ["count_disagreement", "fused"]     # the roster's order
-    again.apply_config({"rare_qc_excluded": ["tilted", "edge"]})
-    assert again.rare_qc_excluded == ["edge"]
-    again.apply_config({"rare_qc_excluded": "edge"})
-    assert again.rare_qc_excluded == []
+    st.apply_config({"rare_qc_excluded": ["fused", "edge"], "rare_direction": "lower"})
+    assert st.rare_direction == "lower" and not hasattr(st, "rare_qc_excluded")
+    assert "rare_qc_excluded" not in st.to_config()
 
 
 def _grid_rows_entry(ctx, rows):

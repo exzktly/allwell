@@ -2220,6 +2220,24 @@ def _draw_record(fig, record, left: float, ink, muted) -> None:
 
 #: The share of the figure's width the subset label may take at its top left, clear of the key at its top right.
 _SUBSET_LABEL_SHARE = 0.5
+#: Inches from the figure's top edge to the top of the subset label. A distance, not a share of the height: at 0.5%
+#: of a figure's height the label sat 0.03 in down on a 6.4 in figure and 0.23 in down on the Rare responders page,
+#: which grows to fit its content (45 in on a phone), and slid into the page's first line.
+_STAMP_TOP_IN = 0.04
+
+
+def _stamp_lines(fig, text: str) -> str:
+    """*text* broken as :func:`stamp_subset` writes it: to :data:`_SUBSET_LABEL_SHARE` of the figure's width."""
+    return _fit_text(text, _figure_pt(fig)[0] * _SUBSET_LABEL_SHARE, FOOTER_PT)
+
+
+def stamp_height_in(fig, text: str) -> float:
+    """Inches from the figure's top edge to the bottom of the label :func:`stamp_subset` writes for *text* — every line
+    it wraps to — so a view whose text starts at the top can begin under it. 0 with no label."""
+    if not text:
+        return 0.0
+    lines = _stamp_lines(fig, text).count("\n") + 1
+    return _STAMP_TOP_IN + lines * FOOTER_PT * 1.25 / 72
 
 
 def stamp_subset(fig, text: str) -> None:
@@ -2233,9 +2251,8 @@ def stamp_subset(fig, text: str) -> None:
     from types import SimpleNamespace
 
     _bg, _fg, muted = _inks(SimpleNamespace(figure=fig))     # the tokens are the figure's, read through any axes
-    width_pt = _figure_pt(fig)[0] * _SUBSET_LABEL_SHARE
-    _ink(fig.text(0.01, 0.995, _fit_text(text, width_pt, FOOTER_PT), ha="left", va="top", fontsize=FOOTER_PT,
-                  color=muted, gid="nw-subset-label"), muted=True)
+    _ink(fig.text(0.01, 1.0 - _STAMP_TOP_IN / max(fig.get_figheight(), 0.1), _stamp_lines(fig, text), ha="left",
+                  va="top", fontsize=FOOTER_PT, linespacing=1.25, color=muted, gid="nw-subset-label"), muted=True)
 
 
 def render_message(fig, text: str, *, gid: str) -> None:

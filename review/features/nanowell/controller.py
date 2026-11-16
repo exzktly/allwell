@@ -1089,7 +1089,7 @@ def draw_view(fig, view: str, metrics, data, *, subset_label: str = "", **kwargs
     stamp = "" if view == "identity" else " · ".join(filter(None, [
         _named(subset_label, _sizes_of(kwargs.get("gate"), kwargs.get("sizes"))), moving_tag(view, **kwargs)]))
     # Known before the view is drawn, so a view whose text starts at the very top leaves the label its line.
-    drawn = _compose_view(fig, view, metrics, data, stamped=bool(stamp), **kwargs)
+    drawn = _compose_view(fig, view, metrics, data, stamped=stamp, **kwargs)
     stamp_subset(fig, stamp)
     return drawn
 
@@ -1120,9 +1120,10 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
                   decoration: Decoration | None = None, names: dict | None = None,
                   swarm_spacing: float = 0.0, footer_out: bool = False, sizes=None, dist_style: str = "auto",
                   violin_smooth: int = 100, hist_bins: int = 30, hist_log: bool = False,
-                  stamped: bool = False) -> tuple[object, object]:
-    """The composition :func:`draw_view` stamps; see it for every keyword. *stamped* says a label will be written at
-    the figure's top left afterwards (``renderer.stamp_subset``), which the Rare responders page leaves room for."""
+                  stamped: str = "") -> tuple[object, object]:
+    """The composition :func:`draw_view` stamps; see it for every keyword. *stamped* is the label that will be written
+    at the figure's top left afterwards (``renderer.stamp_subset``), ``""`` for none; the Rare responders page leaves
+    room for every line it wraps to."""
     names = names or {}
     if view == "identity":
         return None, idc.draw_identity(fig, data, well=well, timepoint=well_timepoint, note=note, **(identity or {}))
@@ -1220,7 +1221,7 @@ def _compose_view(fig, view: str, metrics, data, *, groups: dict, metric: str, c
 def _compose_statistics(fig, metrics, data, *, groups: dict, metric: str, channel, timepoint: str, control: str,
                         baseline: str, cohort: bool, moving: int, baseline_moving: int, moving_centred: bool, sizes,
                         names: dict, tableless, note: str, stats_unit: str, stats_test: str, stats_cache, rare,
-                        hidden: dict | None = None, stamped: bool = False) -> object | None:
+                        hidden: dict | None = None, stamped: str = "") -> object | None:
     """The Statistics view: the samples compared by *stats_test* — or, for the Rare responders test, the groups
     against the control group by the rare-responder analysis (``_rare_controller.compose``, *rare* carrying the
     page's store of results and its worker request). Returns the result drawn. *hidden* is the groups hidden on the

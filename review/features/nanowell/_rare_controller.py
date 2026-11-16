@@ -143,7 +143,7 @@ def windowed(metrics: pd.DataFrame, wells, column: str, *, moving: int, baseline
 def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: str = "", store: dict | None,
             request, moving: int = 0, baseline_moving: int = 0, moving_centred: bool = False, cohort: bool = False,
             unit_set: bool = False, hidden: dict | None = None, guessed: str = "", column: str = "",
-            value_label: str = "", direction: str = "higher", stamped: bool = False,
+            value_label: str = "", direction: str = "higher", stamped: str = "",
             exclude_qc=frozenset()) -> RareResult | None:
     """Draw the Rare responders test into *fig*: its result when *store* holds it, else a sentence while *request*
     (``request(key, job)``) has it computed, or one saying why it cannot run. Returns the result drawn, or ``None``.

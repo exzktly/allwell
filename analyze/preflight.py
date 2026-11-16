@@ -273,8 +273,17 @@ class AnalyzePreflightMixin:
         # The resume offer is scoped to this same folder, and it is handed the
         # already-resolved path rather than re-deriving it: `plan_input_layout`
         # walks the input volume, and doing that twice per settle is one walk
-        # too many.
-        self.refresh_resume_banner(current_output_dir=target)
+        # too many. A field that names a folder which resolves to no output —
+        # one a queued job has not written yet, or a typo — is not an empty
+        # form: `""` would have the card offer the newest unfinished run on any
+        # plate, described as though it were this one. It gets `UNRESOLVED`,
+        # which offers nothing, exactly as `_current_output_dir` answers.
+        scope = target
+        if not scope:
+            with swallow("reading the input field for the resume card"):
+                if self._input_edit.text().strip():
+                    scope = self.UNRESOLVED
+        self.refresh_resume_banner(current_output_dir=scope)
         if not target or getattr(self, "_running", False):
             banner.setVisible(False)
             return

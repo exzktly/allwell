@@ -500,6 +500,10 @@ class AnalyzeSuspendMixin:
         banner = getattr(self, "_resume_banner", None)
         if banner is None:
             return
+        # Kept for the card's own buttons (:meth:`_card_scope`): they must act
+        # on the offer the card was painted from, not on one re-derived from
+        # whatever the input field says by the time they are pressed.
+        self._resume_scope = current_output_dir
         offer = self._resumable(current_output_dir)
         if offer is None or getattr(self, "_running", False):
             banner.setVisible(False)
@@ -517,6 +521,27 @@ class AnalyzeSuspendMixin:
         self._resume_tally.setVisible(bool(tally))
         banner.setVisible(True)
         self._note_resume_card(offer.output_dir)
+
+    #: The folder scope the card was last painted for — what
+    #: :meth:`refresh_resume_banner` passed to :meth:`_resumable` — or ``None``
+    #: for "work it out from the form".
+    _resume_scope: str | None = None
+
+    def _card_scope(self) -> str | None:
+        """The scope the card's buttons look the offer up in.
+
+        The scope the card was painted for, so Discard, Load settings and
+        Resume act on the run the card names. Re-deriving it from the input
+        field at the moment of the click could disagree with the card: the Job
+        Queue fills the field programmatically, with a folder an earlier job
+        has not written yet, and the buttons then found no offer and returned
+        without a word while the card stayed up — a card none of its own
+        buttons could take down. ``None`` when the card is down.
+        """
+        banner = getattr(self, "_resume_banner", None)
+        if banner is None or banner.isHidden():
+            return None
+        return self._resume_scope
 
     # ── what there is to resume ──────────────────────────────────────────
     def _resumable(self, current: str | None = None) -> _Resumable | None:
@@ -920,7 +945,7 @@ class AnalyzeSuspendMixin:
         still half done, with the run reporting success.
         """
         try:
-            offer = self._resumable()
+            offer = self._resumable(self._card_scope())
             if offer is None:
                 self.refresh_resume_banner()
                 return
@@ -968,7 +993,7 @@ class AnalyzeSuspendMixin:
         is not a decision about the run, and Resume or Discard remain available.
         """
         try:
-            offer = self._resumable()
+            offer = self._resumable(self._card_scope())
             if offer is None:
                 self.refresh_resume_banner()
                 return
@@ -1038,8 +1063,12 @@ class AnalyzeSuspendMixin:
     def _discard_suspended(self) -> None:
         """Forget the record. The output folder itself is left alone."""
         try:
-            offer = self._resumable()
+            offer = self._resumable(self._card_scope())
             if offer is None:
+                # Nothing to forget any more (another window, or the record
+                # was cleared): take the card down rather than leave it up
+                # with a button that does nothing.
+                self.refresh_resume_banner()
                 return
             choice = QMessageBox.question(
                 self, "Discard unfinished run",

@@ -17466,6 +17466,19 @@ journal offer for the folder on the form — so filtering the journal alone left
 the offer standing, unchanged, sourced from the record that was still saying
 yes.
 
+**The card's buttons act on the card's own offer, and an unresolvable folder
+offers nothing.** `refresh_resume_banner` keeps the scope it painted the card
+for (`_resume_scope`), and Discard, Load settings and Resume look the offer up
+in that scope (`_card_scope`) rather than re-deriving one from the input field
+at the moment of the click. The two used to disagree whenever the field changed
+without settling — the Job Queue fills it programmatically when a queued Analyze
+job is set up — and the buttons then found no offer and returned silently while
+the card stayed up. `settle_folder_banners` likewise passes `UNRESOLVED`, not
+`""`, when the field names a folder that plans to no output directory (one a
+queued job has not written yet, or a typo): `""` means "the form names nothing"
+and offers the newest unfinished run on any plate, which put another plate's
+stopped run on the card while a queued job was being set up.
+
 **Dismissing an offer is not a claim that the plate finished.** Discard calls
 `run_journal.dismiss`, which flags the index entry; it used to call `forget`,
 which deletes it. The entry is read by two things with opposite intents (§7.7

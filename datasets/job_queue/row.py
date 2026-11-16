@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
+    QMessageBox,
     QProgressBar,
     QSizePolicy,
     QVBoxLayout,
@@ -99,6 +100,27 @@ _STATE_DOT = {
 }
 
 
+def failure_reason(job: JobSpec) -> str | None:
+    """What a failed or cancelled row says about why, or ``None``.
+
+    ``None`` for every other state. A failure with no message still gets a
+    sentence: an empty reason left the row reading exactly like a job that
+    had nothing to report, which is the silent outcome CLAUDE.md §7 is about.
+    """
+    if job.state not in JobState.FAILURE_LIKE:
+        return None
+    word = "Failed" if job.state == JobState.FAILED else "Cancelled"
+    message = (job.message or "").strip()
+    if not message:
+        return (f"{word} — no reason was reported. Open the job (click the "
+                "row) and read its page's log.")
+    if message.lower().startswith(word.lower()):
+        # Every Datasets worker's cancel message already opens with
+        # "Cancelled" (JobQueueController._was_cancelled reads it so).
+        return message
+    return f"{word} — {message}"
+
+
 class JobRow(QWidget):
     """A single queue entry, rewritable in place."""
 
@@ -128,6 +150,8 @@ class JobRow(QWidget):
         self.job_id = job.id
         self._job = job
         self._detail_text = ""
+        self._detail_tip = ""
+        self._failure_box: QMessageBox | None = None
         self._predecessors: list[tuple[str, str]] = []
         self._others: list[tuple[str, str]] = []
         self._below: list[tuple[str, str]] = []
@@ -263,16 +287,29 @@ class JobRow(QWidget):
 
         self._detail_text = self._compose_detail(job)
         self._detail.setVisible(bool(self._detail_text))
-        self._detail.setToolTip(self._detail_text)
+        # The line shows the reason's first line only; the tooltip carries the
+        # whole of it, because a run's failure message often runs to several
+        # lines (the input-layout refusal names the folder and the remedy).
+        self._detail_tip = self._compose_detail(job, full=True)
+        self._detail.setToolTip(self._detail_tip)
         self._apply_elision()
 
-    def _compose_detail(self, job: JobSpec) -> str:
+    def _compose_detail(self, job: JobSpec, *, full: bool = False) -> str:
         """The second line: where this job runs, what it waits for, what it said.
 
         Joined into one line rather than stacked, because a queue is read down
-        the first line and the second exists to be scanned, not studied.
+        the first line and the second exists to be scanned, not studied. With
+        *full* the job's message is given whole, for the tooltip; otherwise
+        only its first line, since a label eliding a multi-line message cut it
+        to nothing useful.
         """
         parts = []
+        failure = failure_reason(job)
+        if failure is not None:
+            # First, like a blocked job's reason and for the same reason: at
+            # the end of an elided line it was cut off at every window width,
+            # behind the job's paths, so a failed row said only that it failed.
+            parts.append(failure if full else failure.splitlines()[0])
         if job.stale_because and job.state == JobState.SUCCEEDED:
             parts.append(f"Out of date — “{job.stale_because}” was run again "
                          "after this finished; Retry to bring it up to date")
@@ -305,8 +342,8 @@ class JobRow(QWidget):
         detail = describe_detail(job.kind, job.spec)
         if detail:
             parts.append(detail)
-        if job.message and job.state != JobState.BLOCKED:
-            parts.append(job.message)
+        if job.message and failure is None and job.state != JobState.BLOCKED:
+            parts.append(job.message if full else job.message.splitlines()[0])
         return "  ·  ".join(parts)
 
     def _apply_elision(self) -> None:
@@ -356,6 +393,10 @@ class JobRow(QWidget):
         if job.state in JobState.CLEARABLE:
             self._add_retry(menu)
 
+        if failure_reason(job) is not None:
+            owned_action(menu, "Why it failed…").triggered.connect(
+                self.show_failure)
+
         if len(input_targets(job.kind)) > 1:
             for target in input_targets(job.kind):
                 self._add_input_submenu(menu, target)
@@ -377,6 +418,33 @@ class JobRow(QWidget):
         owned_action(menu, "Remove from queue").triggered.connect(
             lambda: self.removeClicked.emit(self.job_id))
         return menu
+
+    def show_failure(self) -> QMessageBox:
+        """Show the whole of a failed or cancelled job's message, selectable.
+
+        Non-modal and shown rather than exec()'d: the queue keeps running
+        behind it, and an exec()'d box blocks forever under the offscreen
+        platform the tests run on (tests/conftest.py). Returned so a test can
+        read what it says.
+        """
+        job = self._job
+        reason = failure_reason(job) or ""
+        if self._failure_box is not None:
+            self._failure_box.close()
+        box = QMessageBox(self.window())
+        box.setObjectName("JobFailureBox")
+        box.setAttribute(Qt.WA_DeleteOnClose, True)
+        box.setWindowModality(Qt.NonModal)
+        box.setIcon(QMessageBox.Warning)
+        name = self._name_text or KIND_LABEL.get(job.kind, job.kind)
+        box.setWindowTitle(f"{name} — {job.state}")
+        box.setText(reason)
+        box.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        box.setStandardButtons(QMessageBox.Close)
+        box.destroyed.connect(lambda *_: setattr(self, "_failure_box", None))
+        self._failure_box = box
+        box.show()
+        return box
 
     def _job_entry(self, job_id: str, label: str) -> str:
         """A menu entry naming another job: its queue position and its name.

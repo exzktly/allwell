@@ -179,12 +179,14 @@ def test_long_detail_is_elided_not_hard_clipped(qapp):
     row._apply_elision()
     assert row._detail.text() != long_message
     assert row._detail.text().endswith("…")
-    assert row._detail.toolTip() == long_message
+    assert row._detail.toolTip() == f"Failed — {long_message}"
 
 
 def test_detail_line_is_hidden_when_there_is_nothing_to_say(qapp):
-    """An empty second line would leave every row taller for nothing."""
-    row = JobRow(_job(spec={}, message=""))
+    """An empty second line would leave every row taller for nothing. A
+    pending job: a failed one always has something to say, its reason or
+    that none was reported (tests/test_job_queue_failure_reason.py)."""
+    row = JobRow(_job(spec={}, message="", state=JobState.PENDING))
     assert row._detail.isHidden()
 
 

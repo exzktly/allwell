@@ -34,6 +34,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from datasets.core.dataset_paths import named_in_problem
 from util.aw_safe import swallow
 from util.dir_scan import zip_files_in
 from util.json_write import write_json_atomic
@@ -281,6 +282,9 @@ def destination_problem(dest: Path | str, marker: str,
         return ""
     if root.exists() and not root.is_dir():
         return "Not a folder — choose a folder."
+    named_in = named_in_problem(root)
+    if named_in:
+        return named_in
     if signature is not None:
         state = resume_state(root, marker, signature)
         if state.mismatched:

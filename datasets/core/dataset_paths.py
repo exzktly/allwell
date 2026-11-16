@@ -52,6 +52,23 @@ class DatasetPaths:
 _TRAILING_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})$")
 
 
+def named_in_problem(root: Path | str) -> str:
+    """``""`` unless *root* is itself named ``in``, else a short reason.
+
+    Every tool that writes a dataset writes ``<root>/in/<WELL>.zip``. A
+    destination already named ``in`` therefore produces ``in/in/``, and Analyze
+    — which treats a folder named ``in`` as the input itself
+    (``services.input_resolution_service.plan_input_layout``) — then finds no
+    per-well zips in it and refuses the run. The comparison ignores case for
+    the same reason the planner's does.
+    """
+    if Path(root).name.lower() != "in":
+        return ""
+    return ("Named “in” — the tool writes an in/ folder inside the one you "
+            "choose, so this would make in/in/ and Analyze would find no "
+            "wells. Choose the folder above it.")
+
+
 def split_stem_well(stem: str) -> tuple[str, str] | None:
     """Split a stem into ``(prefix, canonical_well)``, or ``None``.
 

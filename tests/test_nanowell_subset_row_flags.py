@@ -161,7 +161,7 @@ def test_the_properties_are_offered_written_and_persisted():
     assert {n: offered[n] for n in ss.ROW_FLAGS} == {
         "found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking", "rim_fitted": "Tracking",
         "nw_rim_fitted": "Quality", "occluded": "Quality", "rim_out_of_focus": "Quality", "field_left_out": "Quality",
-        "no_count": "Quality"}
+        "no_count": "Quality", "count_disagreement": "Quality", "partially_visible": "Quality"}
     assert offered["identity"] == "Tracking"
     assert C("found", "yes", at="every").validated().text() == "Found by the run at every timepoint: yes"
     for bad in (C("found", "ge", 1), C("occluded", "in", values=("x",))):

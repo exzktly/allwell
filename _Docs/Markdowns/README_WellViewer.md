@@ -9568,8 +9568,15 @@ on the plate rather than supplying it.
 
    **A folder holding a master file still converts.** A Split Scenes export
    writes one extra `.czi` describing the plate, with no images in it. It is
-   passed over and named in the readout rather than refused — it used to stop
-   the whole folder converting.
+   passed over and named in the readout rather than refused.
+
+   **So does a numbered series.** When ZEN writes an acquisition as
+   `Exp(1).czi`, `Exp(2).czi`, … beside an un-numbered `Exp.czi`, the scenes
+   are in the numbered files and `Exp.czi` holds the initial plate scan. A
+   folder conversion leaves `Exp.czi` out and names it in the readout, even
+   when its images happen to match the scenes' channels and size. To convert
+   the plate scan itself, pick `Exp.czi` and untick *Convert all … .czi files
+   in this folder as one plate*.
 
    **A source missing some images is converted anyway, and says so.** If the
    file holds fewer images than its scenes, tiles, timepoints and channels

@@ -832,3 +832,123 @@ def test_a_folder_where_every_file_is_empty_is_refused(tmp_path):
 
     assert "holds no image tiles" in result.problem
     assert result.index_files == []
+
+
+# ── the root of a numbered series: Exp.czi beside Exp(1).czi, Exp(2).czi ────
+
+def _numbered_series(tmp_path, wells=("A01", "A02", "A03"), *, root_tiles=None):
+    """A ZEN numbered series: one scene per ``Exp(N).czi``, plus an
+    un-numbered ``Exp.czi`` that holds the initial plate scan rather than any
+    of the scenes.
+
+    The root is deliberately *not* empty, and deliberately shaped unlike the
+    scenes — one channel, a larger image, a scene per well — because that is
+    what the report described: the empty-master drop already handled a root
+    with no tiles, and a root that held tiles fell through to the set
+    comparison and refused the folder.
+    """
+    folder = tmp_path / "Exp_series"
+    folder.mkdir(parents=True, exist_ok=True)
+    if root_tiles is None:
+        root_tiles = plate_tiles(wells=len(wells), fovs=1, timepoints=1,
+                                 channels=1, shape=(16, 16))
+    write_czi(folder / "Exp.czi", root_tiles,
+              xml=plate_metadata_xml(
+                  scene_wells={i: w for i, w in enumerate(wells)},
+                  channels=["Brightfield"]))
+    for index, well in enumerate(wells, start=1):
+        write_czi(folder / f"Exp({index}).czi",
+                  plate_tiles(wells=1, fovs=1, timepoints=2, channels=2),
+                  xml=plate_metadata_xml(scene_wells={0: well},
+                                         channels=["DAPI", "GFP"]))
+    return folder
+
+
+def test_the_root_of_a_numbered_series_does_not_refuse_the_folder(tmp_path):
+    """The reported failure: the root holds the plate scan, so it disagreed
+    with every numbered file about the channels and the image size, and the
+    whole folder was refused for a file that holds none of its scenes."""
+    folder = _numbered_series(tmp_path)
+
+    result = read_czi_set(folder)
+
+    assert result.problem == "", result.problem
+    assert [p.name for p in result.files] == [
+        "Exp(1).czi", "Exp(2).czi", "Exp(3).czi"]
+    assert [p.name for p in result.series_roots] == ["Exp.czi"]
+    assert result.wells_from_files() == ["A01", "A02", "A03"]
+    assert {p.path.name for p in result.positions} == {
+        "Exp(1).czi", "Exp(2).czi", "Exp(3).czi"}
+
+
+def test_a_root_shaped_like_its_scenes_is_still_not_converted(tmp_path):
+    """Dropped by its name, not by its disagreement. A root whose plate scan
+    happens to match the scenes' channels and tile size would otherwise be
+    converted as extra wells — the plate scan's images filed under the same
+    filenames as the acquisition's, with nothing to say they are not."""
+    folder = _numbered_series(
+        tmp_path, root_tiles=plate_tiles(wells=1, fovs=1, timepoints=2,
+                                         channels=2))
+
+    result = read_czi_set(folder)
+
+    assert result.problem == "", result.problem
+    assert "Exp.czi" not in {p.path.name for p in result.positions}
+    assert [p.name for p in result.series_roots] == ["Exp.czi"]
+
+
+def test_the_dropped_root_is_named(tmp_path):
+    """Said, not silently done (CLAUDE.md §7)."""
+    folder = _numbered_series(tmp_path)
+
+    note = read_czi_set(folder).shortfall_note
+
+    assert "Exp.czi" in note
+    assert "not converted" in note
+    assert "Exp(1).czi" in note
+
+
+def test_a_root_picked_on_its_own_is_converted(tmp_path):
+    """The drop is for a member of a *set*: picking the root alone is asking
+    for the plate scan, and that is what it gets."""
+    folder = _numbered_series(tmp_path)
+
+    result = read_czi_set(folder / "Exp.czi")
+
+    assert result.problem == "", result.problem
+    assert [p.name for p in result.files] == ["Exp.czi"]
+    assert result.series_roots == []
+
+
+@pytest.mark.parametrize("names,roots", [
+    (["Exp.czi", "Exp(1).czi", "Exp(2).czi"], ["Exp.czi"]),
+    (["Exp.czi", "Exp (1).czi"], ["Exp.czi"]),          # ZEN's spaced spelling
+    (["exp.czi", "Exp(1).czi"], ["exp.czi"]),           # case folded
+    (["Exp.czi", "Exp_A01.czi", "Exp_A02.czi"], []),    # split scenes: no series
+    (["Exp.czi", "Other(1).czi"], []),                  # a different stem
+    (["Exp(1).czi", "Exp(2).czi"], []),                 # no root present
+    (["Exp.czi", "Exp(x).czi"], []),                    # not a number
+])
+def test_which_files_are_series_roots(tmp_path, names, roots):
+    from pipeline.czi_set import series_roots
+
+    paths = [tmp_path / name for name in names]
+
+    assert [p.name for p in series_roots(paths)] == roots
+
+
+def test_a_peek_leaves_the_series_root_out(tmp_path):
+    """The provisional plate is drawn from the same files the run converts;
+    the root's plate scan names every well and would paint wells the numbered
+    files may not hold."""
+    folder = _numbered_series(tmp_path, wells=("A01", "A02"))
+    # The root names a well no numbered file holds.
+    write_czi(folder / "Exp.czi",
+              plate_tiles(wells=3, fovs=1, timepoints=1, channels=1),
+              xml=plate_metadata_xml(scene_wells={0: "A01", 1: "A02", 2: "H12"},
+                                     channels=["Brightfield"]))
+
+    peek = peek_wells(folder)
+
+    assert "H12" not in peek.wells
+    assert [p.name for p in peek.files] == ["Exp(1).czi", "Exp(2).czi"]

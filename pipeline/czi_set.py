@@ -118,6 +118,11 @@ class CziSet:
     #: which files it passed over: a converter that silently ignores an input
     #: the user pointed it at is indistinguishable from one that missed it.
     index_files: list = field(default_factory=list)
+    #: The un-numbered root of a ZEN numbered series (``Exp.czi`` beside
+    #: ``Exp(1).czi``, ``Exp(2).czi``, …) — see :func:`series_roots`. Dropped
+    #: from the set before it is read, and kept here for the same reason as
+    #: :attr:`index_files`: so the page can say which file it passed over.
+    series_roots: list = field(default_factory=list)
     #: What the files are short of the rectangle their axes imply, one
     #: sentence per file that is short of anything, or ``""``.
     #:
@@ -421,6 +426,53 @@ def discover_czi_files(source: Path | str) -> list[Path]:
     return []
 
 
+#: A member of a ZEN numbered series: ``Exp(1)``, ``Exp (2)`` — the stem, then
+#: a parenthesised number at the very end. ``[0-9]`` rather than ``\\d`` so a
+#: fullwidth digit is not read as a number, as in :func:`natural_key`.
+_SERIES_MEMBER = re.compile(r"^(?P<stem>.*?)\s*\((?P<n>[0-9]+)\)$")
+
+
+def series_roots(paths: "list[Path]") -> list[Path]:
+    """The files in *paths* that are the un-numbered root of a numbered series.
+
+    ZEN can write an acquisition as ``Exp(1).czi``, ``Exp(2).czi``, … with an
+    un-numbered ``Exp.czi`` beside them. The scenes are in the numbered files;
+    the root holds the initial plate scan, not one of the scenes. Because it
+    holds tiles, the empty-master drop in :func:`read_czi_set` does not catch
+    it, and because a plate scan is shaped nothing like the scenes (other
+    channels, another image size, a scene per well), it then failed the set
+    comparison and refused the whole folder.
+
+    Decided by **name**, not by the disagreement. A root whose plate scan
+    happened to match the scenes' channels and tile size would otherwise pass
+    the comparison and be converted as extra wells — the plate scan's images
+    under the acquisition's filenames, with nothing to say they are not, which
+    is worse than the refusal this replaces. A file is a root only when the
+    same set holds at least one ``<its stem>(N)`` file; stems compare
+    case-folded, as :func:`natural_key` orders them.
+    """
+    stems = set()
+    for path in paths:
+        match = _SERIES_MEMBER.match(path.stem)
+        if match:
+            stems.add(match.group("stem").casefold())
+    return [path for path in paths
+            if not _SERIES_MEMBER.match(path.stem)
+            and path.stem.casefold() in stems]
+
+
+def _drop_series_roots(paths: "list[Path]") -> tuple[list[Path], list[Path]]:
+    """``(paths without the series roots, the roots)``.
+
+    Only for a set of more than one file: a root picked on its own is the user
+    asking for the plate scan, and that is what they get.
+    """
+    roots = series_roots(paths) if len(paths) > 1 else []
+    if not roots:
+        return paths, []
+    return [path for path in paths if path not in roots], roots
+
+
 def siblings_of(source: Path | str) -> list[Path]:
     """Every ``.czi`` in *source*'s own folder, *source* included, sorted."""
     source = Path(source)
@@ -518,7 +570,10 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
     the caller's to catch — that is a broken file rather than a mismatched set.
     """
     paths = list(files) if files is not None else discover_czi_files(source)
-    result = CziSet(files=paths)
+    # Before the read, not after it: the root is decided by name, and its plate
+    # scan is a subblock directory nobody needs to walk.
+    paths, roots = _drop_series_roots(paths)
+    result = CziSet(files=paths, series_roots=roots)
     if not paths:
         result.problem = (
             f"No .czi files in {Path(source).name or source}."
@@ -597,6 +652,15 @@ def read_czi_set(source: Path | str, *, files: "list[Path] | None" = None,
     first, first_path = result.layouts[0], paths[0]
 
     notes: list[str] = []
+    if result.series_roots:
+        # Said, for the same reason as the empty master below.
+        shown = ", ".join(path.name for path in result.series_roots[:2])
+        more = len(result.series_roots) - min(2, len(result.series_roots))
+        notes.append(
+            f"{shown}{', …' if more else ''} not converted — beside "
+            f"{paths[0].name} and the other numbered files it is the root of "
+            f"ZEN's numbered series, which holds the initial plate scan rather "
+            f"than a scene. Pick it on its own to convert that scan.")
     if result.index_files:
         # Said, not silently done. A converter that passes over a file the
         # user pointed it at, without a word, is indistinguishable from one
@@ -751,6 +815,9 @@ def peek_wells(source: Path | str, *,
     an answer it can convert against.
     """
     paths = list(files) if files is not None else discover_czi_files(source)
+    # The same files the full read converts, so the provisional plate does not
+    # paint the wells the root's plate scan names.
+    paths, _roots = _drop_series_roots(paths)
     peek = PlatePeek(files=paths)
     if not paths:
         peek.problem = f"No .czi files in {Path(source).name or source}."

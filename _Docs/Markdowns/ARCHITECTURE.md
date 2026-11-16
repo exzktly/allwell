@@ -10443,6 +10443,21 @@ only to a member of a *set* — one file picked on its own and holding nothing
 is the user having picked the wrong file, which is the whole value of the
 check, so that refusal stays.
 
+**The un-numbered root of a numbered series is dropped by name.** ZEN can
+write an acquisition as `Exp(1).czi`, `Exp(2).czi`, … beside an un-numbered
+`Exp.czi` that holds the initial plate scan rather than a scene. That root
+holds tiles, so the empty-master drop above does not catch it, and its plate
+scan is shaped nothing like the scenes, so it failed the set comparison and
+refused the folder. `czi_set.series_roots` names a file a root when the same
+set holds at least one `<its stem>(N)` file (optional space before the
+parenthesis, ASCII digits, stems case-folded); `read_czi_set` and
+`peek_wells` both drop roots before reading anything, `read_czi_set` records
+them in `CziSet.series_roots`, and the readout names them. The decision is by
+name rather than by disagreement on purpose: a root whose scan matched the
+scenes' channels and tile size would pass the comparison and be converted as
+extra wells under the acquisition's filenames. A root picked on its own is a
+set of one and converts as the plate scan it is.
+
 A peek is allowed to be *incomplete* and not to be *wrong*: a file carrying no
 readable metadata contributes nothing, because the filename may only stand in
 for a scene name on a file holding exactly one scene and a peek cannot count

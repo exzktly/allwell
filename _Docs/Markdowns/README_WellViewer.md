@@ -11418,11 +11418,50 @@ treatment from that well's own luck, and the test refuses to pretend otherwise.
 | 2 or more + 1 | per-well empirical p only | per-well empirical p only |
 | 2 + 2 | empirical null; Fisher shown, not used | 6 shufflings, smallest p 0.17 |
 | 3 + 2 | beta-binomial regression | 10 shufflings, smallest p 0.1 |
+| 3 + 3 | beta-binomial regression | 20 shufflings, smallest p 0.05 |
 | 6 + 3 | beta-binomial regression | 84 shufflings, smallest p 0.012 |
 
 **Several treatments.** Each group other than the control is tested against it. Across groups, each test's
 p-values are corrected separately by **Benjamini–Hochberg** (the *q* in the report), which controls the expected
 share of false discoveries among the results called significant. "Significant" in the report means q < 0.05.
+
+**How many treatments a design can test.** Benjamini–Hochberg turns a raw p into
+
+```
+q = p × m / rank
+```
+
+where *m* is the number of treatments tested against the control and *rank* is the p-value's place when all *m*
+are sorted from smallest. A result is significant when q < 0.05, which is the same as p < 0.05 × rank / m. So
+every treatment added makes a hit need a smaller raw p, and q is never smaller than p. With 20 treatments and one
+real hit, that hit needs p < 0.05 × 1/20 = 0.0025; with 10 real hits, the weakest of them (rank 10) needs
+p < 0.05 × 10/20 = 0.025.
+
+What that means depends on whether a test's p has a floor:
+
+- **The exceedance test (A), which decides the verdict, has no floor.** Its p comes from the beta-binomial
+  regression, so there is no fixed cap on the number of treatments: a strong enough effect can reach the corrected
+  threshold. The cap is power — each extra treatment raises the effect a hit must show.
+- **Higher Criticism (B) and the upper-tail shape test (C) have a floor.** Each treatment is shuffled only with the
+  control wells, never with the other treatments, so its floor is 1 / C(c + t, t) for c control and t treatment
+  wells, whatever else is on the plate. With 3 control and 3 treatment wells that is 1/20 = 0.05, and since q is
+  never below p, neither test can be significant at any number of treatments — one included. A single treatment
+  whose p sits on the floor stays significant after correction only while floor × m < 0.05:
+
+| Control wells (3 treatment wells each) | Shufflings | Smallest p for B and C | Most treatments a lone B or C hit survives |
+| --- | --- | --- | --- |
+| 3 | 20 | 0.05 | none |
+| 4 | 35 | 0.029 | 1 |
+| 6 | 84 | 0.012 | 4 |
+| 8 | 165 | 0.006 | 8 |
+
+- **Each well's own empirical p** has a floor of 1 / (control wells + 1) — 0.25 with three control wells — so with
+  three controls no single well is ever called unusual.
+
+More control wells help every one of these at once: they lower the permutation floor, the per-well floor and the
+uncertainty in the regression's ρ, and the self-check needs at least four of them. With three controls the
+regression's p rests on large-sample theory fitted to six wells per comparison, and the self-check that would
+measure its calibration cannot run.
 
 **The interpretation rule.** The exceedance test (A) alone decides, so the verdict is never given two chances:
 

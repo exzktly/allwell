@@ -11463,6 +11463,34 @@ uncertainty in the regression's ρ, and the self-check needs at least four of th
 regression's p rests on large-sample theory fitted to six wells per comparison, and the self-check that would
 measure its calibration cannot run.
 
+**Replicates a verdict needs.** The verdict is the exceedance test's alone, so these are the conditions under
+which a treatment can be called *rare responders detected*:
+
+1. **At least 3 control wells and 2 treatment wells.** That is what the beta-binomial regression needs to give a
+   group p. With 2 or more wells a side but fewer than that, each treatment well gets only its own empirical p and
+   the figure says *cannot be decided with these wells* whenever a nanowell is past the cutoff; with fewer than 2
+   wells on either side it says *too few wells to test the group*. Wells from every plate are pooled, with a plate
+   term in the regression, so the counts may be spread over plates.
+2. **At least one nanowell past the cutoff** in some well of the comparison. With none, the verdict is *not
+   detected* — or *cannot be decided* when the cutoff sits on a tie the treatment piles onto.
+3. **q < 0.05 after Benjamini–Hochberg across the m treatments tested**, which is raw p < 0.05 × rank / m. The
+   regression's p has no floor, so any number of treatments can be tested; each one added raises the effect a hit
+   needs.
+
+Three control and two treatment wells are enough for a verdict but not enough to check it: the between-well spread
+ρ comes from five wells, ρ cannot be estimated when no control nanowell is past the cutoff (the figure then warns
+that its p overstates the evidence), the self-check needs at least four control wells, and each well's own p cannot
+go below 0.25.
+
+| Goal | Control wells | Treatment wells per treatment |
+| --- | --- | --- |
+| A verdict at all | 3 | 2 |
+| A verdict the self-check can test on the plate | 4 | 3 |
+| Higher Criticism and the shape test able to pass correction beside several treatments (floor 0.012 or less) | 6 or more | 3 |
+
+Control wells count most: every treatment is compared with the same ones, and they set every floor and the
+estimate of ρ.
+
 **The interpretation rule.** The exceedance test (A) alone decides, so the verdict is never given two chances:
 
 | The exceedance test, after correction | The figure says |

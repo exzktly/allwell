@@ -161,7 +161,7 @@ def test_the_properties_are_offered_written_and_persisted():
     assert {n: offered[n] for n in ss.ROW_FLAGS} == {
         "found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking", "rim_fitted": "Tracking",
         "nw_rim_fitted": "Quality", "occluded": "Quality", "rim_out_of_focus": "Quality", "field_left_out": "Quality",
-        "no_count": "Quality"}
+        "no_count": "Quality", "count_disagreement": "Quality", "partially_visible": "Quality"}
     assert offered["identity"] == "Tracking"
     assert C("found", "yes", at="every").validated().text() == "Found by the run at every timepoint: yes"
     for bad in (C("found", "ge", 1), C("occluded", "in", values=("x",))):
@@ -266,3 +266,29 @@ def test_nanowell_rim_fitted_agrees_with_every_crop_caption(metrics):
 def test_the_two_rim_properties_are_named_apart():
     assert C("rim_fitted", "yes", at="every").validated().text() == "Array outline fitted at every timepoint: yes"
     assert C("nw_rim_fitted", "yes", at="every").validated().text() == "Nanowell rim fitted at every timepoint: yes"
+
+
+def test_count_disagreeing_and_partly_visible_are_conditions_read_from_the_run_s_own_flags(tmp_path):
+    """User decision: the run's QC flags are Subset conditions, so one Subset leaves the same flagged nanowells out of
+    every view — Distribution and the Statistics tests, Rare responders among them — rather than a choice only that
+    test honoured. Count-disagreeing and Partly visible join Seam and Identity contradicted, each yes/no at a
+    timepoint, read through the real pipeline from the site table's own columns. Nanowell 1 disagrees at t_a only,
+    2 is partly visible at t_c only, 3 is both at t_a; a table without the column decides nothing."""
+    rows = []
+    for q in range(5):
+        for tp in ("t_c", "t_a", "t_d"):
+            row = _row(tp, q, 0, n=2, c=0.2, gfp=200.0)
+            row["count_disagreement"] = (q == 1 and tp == "t_a") or (q == 3 and tp == "t_a")
+            row["partially_visible"] = (q == 2 and tp == "t_c") or (q == 3 and tp == "t_a")
+            rows.append(row)
+    metrics = site_metrics(load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts=STARTS)))
+    labels = {name: label for name, label, _group in ss.field_choices()}
+    assert labels["count_disagreement"] == "Count-disagreeing" and labels["partially_visible"] == "Partly visible"
+    assert ss.ops_for("count_disagreement") == ss.ops_for("partially_visible") == ss.ops_for("fused")   # yes / no
+    assert _kept(metrics, C("count_disagreement", "no", at="tp:t_a"))[0] == _in_a01(0, 2, 4)
+    assert _kept(metrics, C("count_disagreement", "yes", at="any"))[0] == _in_a01(1, 3)
+    assert _kept(metrics, C("partially_visible", "no", at="every"))[0] == _in_a01(0, 1, 4)
+    assert _kept(metrics, C("partially_visible", "yes", at="tp:t_c"))[0] == _in_a01(2)
+    clean = (C("count_disagreement", "no", at="tp:t_a"), C("partially_visible", "no", at="tp:t_a"))
+    assert _kept(metrics, *clean)[0] == [("A01", 0), ("A01", 2), ("A01", 4)]
+    assert _kept(metrics.drop(columns=["count_disagreement"]), C("count_disagreement", "no", at="tp:t_a"))[0] == []

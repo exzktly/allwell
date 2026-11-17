@@ -25,7 +25,9 @@ import numpy as np
 from review.core.plot_style import own_xtick_angle
 from review.features.nanowell.rare_data_compute import ALL
 from review.features.nanowell import rare_export_compute as rx
-from review.features.nanowell.renderer import GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes
+from review.features.nanowell.renderer import (
+    GRID_TYPE_SCALE, _ink, _inks, _is_publication, _prepare_axes, stamp_height_in,
+)
 
 #: Crops drawn at most per figure; the rest are counted in its title.
 MAX_CROPS = 48
@@ -636,9 +638,10 @@ _TITLE_GROWTH = 0.62
 _ABOVE_IN, _BELOW_IN = 0.5, 0.62
 #: Inches: the figure's top margin, and the pad around the text under the panels.
 _TOP_IN, _TEXT_PAD_IN = 0.12, 0.12
-#: Inches the first line moves down when the figure carries a label at its top left (``renderer.stamp_subset``,
-#: one line of ``renderer.FOOTER_PT`` from the figure's top edge), so the two never share a line.
-_STAMP_IN = 0.2
+#: Inches between the bottom of the label at the figure's top left (``renderer.stamp_subset``) and the page's first
+#: line. The label wraps to half the figure's width, so a subset's name with the moving-average tag takes several
+#: lines on a phone; the page measures them (``renderer.stamp_height_in``) rather than leaving room for one.
+_STAMP_GAP_IN = 0.08
 #: The headline's size: the figure's largest text, since it is the answer; a test row's heading is the next.
 _HEAD_PT = 9.0
 _TEST_PT = 8.5
@@ -714,7 +717,7 @@ def columns_for(width_in: float) -> int:
     return max(1, min(MAX_COLUMNS, int((usable + _COLUMN_GAP_IN) // (COLUMN_MIN_IN + _COLUMN_GAP_IN))))
 
 
-def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped: bool = False) -> float:
+def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped: str = "") -> float:
     """The Statistics view's figure for the rare-responder tests, **one row per test**, and returns the height in
     inches it needs to hold all of it at the figure's width — the page grows the canvas to that and scrolls, so no
     comparison and no test is ever left off the figure.
@@ -733,8 +736,9 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     name, nanowells the run's flags left out — is drawn under the groups line instead: the figure scrolls, and what
     qualifies the whole result must not be below the fold.
 
-    *stamped* says a label (a saved subset's name, the moving average) is written at the figure's top left once the
-    page is drawn (``renderer.stamp_subset``): the first line then starts :data:`_STAMP_IN` lower, below it."""
+    *stamped* is the label (a saved subset's name, the moving average) written at the figure's top left once the page
+    is drawn (``renderer.stamp_subset``), ``""`` for none: the first line starts under every line it wraps to
+    (``renderer.stamp_height_in``) and :data:`_STAMP_GAP_IN` more."""
 
     fig.clear()
     width, height = max(fig.get_figwidth(), 1.0), max(fig.get_figheight(), 1.0)
@@ -750,7 +754,7 @@ def render_rare_page(fig, result, lines=(), *, note: str = "", lead=(), stamped:
     probe.axis("off")
     probe.set_gid(PAGE_MARK)            # the page's figure holds the rare page while this axes is on it
     ink = _inks(probe)[1]
-    y = _TOP_IN + (_STAMP_IN if stamped else 0.0)          # inches down from the figure's top
+    y = max(_TOP_IN, stamp_height_in(fig, stamped) + _STAMP_GAP_IN if stamped else 0.0)  # inches from the top
 
     content_x = _CONTENT_IN / width                   # every line of text starts here, clear of a block's role bar
     content_w = 1.0 - 2 * content_x

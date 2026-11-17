@@ -122,7 +122,14 @@ ROW_FLAGS = {
     "rim_out_of_focus": "Rim out of focus",
     "field_left_out": "In a field left out",
     "no_count": "Measured without a count",
+    "count_disagreement": "Count-disagreeing",
+    "partially_visible": "Partly visible",
 }
+#: The run's own per-row flags among :data:`ROW_FLAGS`, each read as it is written in the site table: the cell count
+#: and the area's estimate of it disagree, or the nanowell is cut by the image's edge. With *Seam* and *Identity
+#: contradicted* they are the flags the run marks a nanowell with without removing it; every view draws such
+#: nanowells unless a Subset leaves them out, the Statistics tests (Rare responders among them) included.
+_RUN_FLAGS = ("count_disagreement", "partially_visible")
 #: Which group of the editor each property is listed under.
 _ROW_FLAG_GROUPS = {"found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking",
                     "rim_fitted": "Tracking"}
@@ -759,6 +766,9 @@ def _row_flag(metrics: pd.DataFrame, name: str) -> np.ndarray:
                         else pd.Series(True, index=metrics.index))
             hit = state.isin(MEASURABLE) & no_count
         return hit.to_numpy(dtype=float)
+    if name in _RUN_FLAGS:
+        flag = column(name)
+        return np.full(len(metrics), np.nan) if flag is None else flag.map(_flag_value).to_numpy(dtype=float)
     if name == "field_left_out":
         state = column("state")
         return np.full(len(metrics), np.nan) if state is None else (state == FIELD_EXCLUDED).to_numpy(dtype=float)

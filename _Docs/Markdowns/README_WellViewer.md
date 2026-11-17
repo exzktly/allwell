@@ -6911,9 +6911,14 @@ the sentence names it.
     - *Rim out of focus* — flagged by the rim-focus rule (always *no* while that rule is off).
     - *In a field left out* — its imaging field is left out by Cell Gating, QC triage or the FOVs you chose.
     - *Measured without a count* — measured, but the run recorded no cell count.
+    - *Count-disagreeing* — the run's cell count and its estimate from the cells' area differ by more than 30 % and
+      by at least one cell (often a clump outlined as one cell).
+    - *Partly visible* — only part of the nanowell was seen or imaged.
 
-    *at any timepoint · no* on one of the last five keeps the nanowells it never touched; *yes* keeps only those
-    it did.
+    *at any timepoint · no* on one of the last seven keeps the nanowells it never touched; *yes* keeps only those
+    it did. With **Seam** and *Identity contradicted*, *Count-disagreeing* and *Partly visible* are the flags the run
+    marks a nanowell with without removing it: a Subset of them set to *no* at the Timepoint leaves the same flagged
+    nanowells out of every view, so the Distribution view and the Statistics tests compare the same nanowells.
   - **scatter gate** — *inside* or *outside* a gate you drew on the Scatter Plot over two nanowell metrics (with
     Observations set to Nanowells, or on its "Nanowell ▸" axes). Read at a timepoint like a metric: each nanowell at
     a timepoint is one point on that scatter, and *inside* means the point lies in the box. The condition follows
@@ -11188,12 +11193,12 @@ in the report — when:
 - **on a tile seam (fused)**: measured from a blend of two tiles;
 - **identity not confirmed**: its address may name another nanowell at this timepoint.
 
-Every view draws flagged nanowells, and by default the Rare responders test tests them too. **QC flags ▾**, beside
-*Responders higher / lower*, has a tick per flag: a ticked flag's nanowells are left out of the test, the figure
-says how many each one left out (*⚠ Left out by the run's flags before testing, as chosen under QC flags: 40
-count-disagreeing…*), and Details says which flags were excluded. Excluding a flag guards against a miscount or a
-nanowell that is not what it seems, at the cost of testing fewer nanowells than the other views draw. The choice is
-saved with the page.
+Every view draws flagged nanowells, and so does the Rare responders test. To leave them out, use the **Subset**: each
+flag is a condition there (*Count-disagreeing*, *Partly visible*, *Seam*, *Identity contradicted*), and a Subset
+with a flag set to *no* at the Timepoint leaves those nanowells out of every view at once — the Distribution view,
+the other Statistics tests and this one — so what you compare is the same set of nanowells everywhere, and the
+figures name the Subset at their top left. Leaving a flag out guards against a miscount or a nanowell that is not
+what it seems, at the cost of fewer nanowells.
 
 When these leave the control group, every treatment group, or every group with no nanowell at all, the test does
 not run and the figure says, for each group, how many nanowells were excluded and why; a treatment group they empty
@@ -11413,11 +11418,78 @@ treatment from that well's own luck, and the test refuses to pretend otherwise.
 | 2 or more + 1 | per-well empirical p only | per-well empirical p only |
 | 2 + 2 | empirical null; Fisher shown, not used | 6 shufflings, smallest p 0.17 |
 | 3 + 2 | beta-binomial regression | 10 shufflings, smallest p 0.1 |
+| 3 + 3 | beta-binomial regression | 20 shufflings, smallest p 0.05 |
 | 6 + 3 | beta-binomial regression | 84 shufflings, smallest p 0.012 |
 
 **Several treatments.** Each group other than the control is tested against it. Across groups, each test's
 p-values are corrected separately by **Benjamini–Hochberg** (the *q* in the report), which controls the expected
 share of false discoveries among the results called significant. "Significant" in the report means q < 0.05.
+
+**How many treatments a design can test.** Benjamini–Hochberg turns a raw p into
+
+```
+q = p × m / rank
+```
+
+where *m* is the number of treatments tested against the control and *rank* is the p-value's place when all *m*
+are sorted from smallest. A result is significant when q < 0.05, which is the same as p < 0.05 × rank / m. So
+every treatment added makes a hit need a smaller raw p, and q is never smaller than p. With 20 treatments and one
+real hit, that hit needs p < 0.05 × 1/20 = 0.0025; with 10 real hits, the weakest of them (rank 10) needs
+p < 0.05 × 10/20 = 0.025.
+
+What that means depends on whether a test's p has a floor:
+
+- **The exceedance test (A), which decides the verdict, has no floor.** Its p comes from the beta-binomial
+  regression, so there is no fixed cap on the number of treatments: a strong enough effect can reach the corrected
+  threshold. The cap is power — each extra treatment raises the effect a hit must show.
+- **Higher Criticism (B) and the upper-tail shape test (C) have a floor.** Each treatment is shuffled only with the
+  control wells, never with the other treatments, so its floor is 1 / C(c + t, t) for c control and t treatment
+  wells, whatever else is on the plate. With 3 control and 3 treatment wells that is 1/20 = 0.05, and since q is
+  never below p, neither test can be significant at any number of treatments — one included. A single treatment
+  whose p sits on the floor stays significant after correction only while floor × m < 0.05:
+
+| Control wells (3 treatment wells each) | Shufflings | Smallest p for B and C | Most treatments a lone B or C hit survives |
+| --- | --- | --- | --- |
+| 3 | 20 | 0.05 | none |
+| 4 | 35 | 0.029 | 1 |
+| 6 | 84 | 0.012 | 4 |
+| 8 | 165 | 0.006 | 8 |
+
+- **Each well's own empirical p** has a floor of 1 / (control wells + 1) — 0.25 with three control wells — so with
+  three controls no single well is ever called unusual.
+
+More control wells help every one of these at once: they lower the permutation floor, the per-well floor and the
+uncertainty in the regression's ρ, and the self-check needs at least four of them. With three controls the
+regression's p rests on large-sample theory fitted to six wells per comparison, and the self-check that would
+measure its calibration cannot run.
+
+**Replicates a verdict needs.** The verdict is the exceedance test's alone, so these are the conditions under
+which a treatment can be called *rare responders detected*:
+
+1. **At least 3 control wells and 2 treatment wells.** That is what the beta-binomial regression needs to give a
+   group p. With 2 or more wells a side but fewer than that, each treatment well gets only its own empirical p and
+   the figure says *cannot be decided with these wells* whenever a nanowell is past the cutoff; with fewer than 2
+   wells on either side it says *too few wells to test the group*. Wells from every plate are pooled, with a plate
+   term in the regression, so the counts may be spread over plates.
+2. **At least one nanowell past the cutoff** in some well of the comparison. With none, the verdict is *not
+   detected* — or *cannot be decided* when the cutoff sits on a tie the treatment piles onto.
+3. **q < 0.05 after Benjamini–Hochberg across the m treatments tested**, which is raw p < 0.05 × rank / m. The
+   regression's p has no floor, so any number of treatments can be tested; each one added raises the effect a hit
+   needs.
+
+Three control and two treatment wells are enough for a verdict but not enough to check it: the between-well spread
+ρ comes from five wells, ρ cannot be estimated when no control nanowell is past the cutoff (the figure then warns
+that its p overstates the evidence), the self-check needs at least four control wells, and each well's own p cannot
+go below 0.25.
+
+| Goal | Control wells | Treatment wells per treatment |
+| --- | --- | --- |
+| A verdict at all | 3 | 2 |
+| A verdict the self-check can test on the plate | 4 | 3 |
+| Higher Criticism and the shape test able to pass correction beside several treatments (floor 0.012 or less) | 6 or more | 3 |
+
+Control wells count most: every treatment is compared with the same ones, and they set every floor and the
+estimate of ρ.
 
 **The interpretation rule.** The exceedance test (A) alone decides, so the verdict is never given two chances:
 

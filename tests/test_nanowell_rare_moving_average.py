@@ -201,23 +201,40 @@ def test_the_rare_figure_carries_the_moving_average_tag_only_when_it_is_on(plate
         assert _stamp(fig) == want
 
 
+LONG_SUBSET = "Subset: “Big responders inside the rim focus, two or more cells at the start”"
+
+
 @pytest.mark.parametrize("size", [(15.0, 8.6), (4.3, 7.3)], ids=["desk", "phone"])
-@pytest.mark.parametrize("moving, subset_label", [(3, ""), (0, "Subset: “Big”"), (3, "Subset: “Big”")])
+@pytest.mark.parametrize("moving, subset_label", [(3, ""), (0, "Subset: “Big”"), (3, "Subset: “Big”"),
+                                                  (3, LONG_SUBSET)])
 def test_the_top_left_label_never_overlaps_the_headline(plate, size, moving, subset_label):
     """Seen on the page: with the moving average on, "Moving average over 3 timepoints (centred)" was drawn across the
     start of the verdict's headline. The label is stamped at the top left after the view is drawn, and the Rare
-    responders page started its headline in that same strip. A saved subset's name collided the same way. Measured
-    on the drawn figure: the label's box ends above the headline's."""
+    responders page started its headline in that same strip. A saved subset's name collided the same way.
+
+    Seen again on the page once the figure grew to fit every comparison: the label was placed at a share of the
+    figure's height (0.5%, 0.23 in down a 45 in phone figure) and wraps to half its width (three lines on a phone for
+    a long subset's name with the moving-average tag), while the page left room for one line near the top. Drawn as
+    the page draws it — once, then again at the height it asked for — and measured: the label's box ends above the
+    groups line's."""
     from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+    from review.features.nanowell._rare_render import needed_height
 
     metrics, data = plate
     key, result = _result(plate, moving=moving)
     fig = Figure(figsize=size)
     canvas = FigureCanvasAgg(fig)
-    nwc.draw_view(fig, "statistics", metrics, data, groups=GROUPS, metric="n", channel=None, axis="wells",
-                  timepoint="t4", control="ctrl", baseline="earliest", cohort=False, well="A01", well_timepoint="t4",
-                  stats_test="rare", moving=moving, subset_label=subset_label,
-                  rare={"store": {key: result}, "request": lambda k, j: None})
+
+    def draw() -> None:
+        nwc.draw_view(fig, "statistics", metrics, data, groups=GROUPS, metric="n", channel=None, axis="wells",
+                      timepoint="t4", control="ctrl", baseline="earliest", cohort=False, well="A01",
+                      well_timepoint="t4", stats_test="rare", moving=moving, subset_label=subset_label,
+                      rare={"store": {key: result}, "request": lambda k, j: None})
+
+    draw()
+    fig.set_size_inches(size[0], needed_height(fig))                 # the canvas grows to what the page asked for
+    draw()
     canvas.draw()
     renderer = canvas.get_renderer()
     (label,) = [t for t in fig.texts if t.get_gid() == "nw-subset-label"]

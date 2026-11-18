@@ -7132,11 +7132,9 @@ the sentence names it.
   "Nanowells used U of R" (on *Along x: Time*, "Nanowell × timepoint values", since a nanowell is counted at
   each timepoint) adds up the panels drawn, and the number of wells; past twelve panels the rest are named,
   not counted. A selected well with no nanowell table is named in the footer, not drawn.
-- **No summary marker is drawn beside a swarm** — the dots are the figure. When **vs** names a control group
-  on *Along x: Wells*, "×1.5" is written to the right of each other group, at the height of its centre: the
-  mean of its wells' medians over the control group's mean of wells' medians (on log₂ fold change, the
-  difference). Wells are the replicate unit, not nanowells, and the footer says so whenever that comparison
-  is shown.
+- **Nothing is drawn or written beside a swarm** — no summary marker, no interval, and no comparison with
+  the control group: the dots are the figure. To compare groups with a control, use the **Statistics** view,
+  which tests them with wells as the replicate unit.
 - Times are each timepoint's recorded start from the acquisition record. When the record cannot give every
   timepoint a time, the timepoint labels are used and the footer says so.
 

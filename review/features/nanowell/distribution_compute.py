@@ -522,10 +522,9 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
     stat = well_statistic(model.column)                 # how a well's nanowells become its one value
     if model.integer:
         model.notes.append("Whole-number values are packed within ±0.4 of their value.")
+    # Along x: Wells draws no line and no comparison with the control, so neither is footnoted there.
     if model.axis == WELLS:
-        if any(math.isfinite(s.vs_control) for p in model.panels for s in p.stats):
-            model.notes.append(f"The comparison with the control is per well (mean of well {stat}s over the "
-                               "control's); nanowells are not replicates.")
+        pass
     elif any(n.startswith("Fixed cohort") for n in model.alerts):
         model.notes.append(f"The line joins each well's {stat} over its fixed cohort, the same nanowells at every "
                            "timepoint.")

@@ -222,8 +222,8 @@ def _dot_units(ax, fig) -> tuple[float, float]:
 
 def _y_limits(model: DistributionModel, panel) -> tuple[float, float]:
     values = np.concatenate([s.values for s in panel.swarms] or [np.zeros(0)])
-    # Only a centre that carries a comparison is drawn (as text), so only that one widens the axis.
-    stats = [st.centre for st in panel.stats if math.isfinite(st.centre) and math.isfinite(st.vs_control)]
+    # No group centre is drawn, so none widens the axis: only the dots and the responding cut do.
+    stats = []
     if model.responding_above is not None and math.isfinite(model.responding_above):
         stats.append(model.responding_above)          # the cut stays in view, or the line would not be seen
     every = np.concatenate([values, np.asarray(stats, dtype=float)])
@@ -561,10 +561,11 @@ def _draw_bands(ax, panel, below_pt: float, ink, muted) -> float:
 
 
 def _draw_centres(ax, model, panel, ink) -> None:
-    """Each well's median joined over time, and each group's comparison with the control.
+    """Each well's median joined over time.
 
-    No summary marker or interval is drawn beside a swarm: the swarm is the figure. The comparison with the
-    control (only when **vs** names a group) is written as text at the height of the group's centre."""
+    Nothing is drawn beside a swarm — no summary marker, no interval and no comparison with the control written
+    at the group's centre: the swarm is the figure. ``panel.stats`` still carries each group's centre and
+    ``vs_control``; the renderer reads neither."""
     marks = model.identity_marks if model.axis == TIME else {}
     for well, points in panel.medians.items():
         pts = [(px, py) for px, py in points if math.isfinite(py)]
@@ -581,13 +582,6 @@ def _draw_centres(ax, model, panel, ink) -> None:
                 for line_ in ax.plot([x0, x1], [y0, y1], color=ink, linewidth=1.2, linestyle=style, zorder=4):
                     line_._aw_linestyle_is_data = True   # dashed is "identity not confirmed": Line style keeps off it
                     _ink(line_)
-    for stat in panel.stats:
-        if not math.isfinite(stat.centre):
-            continue
-        sx = stat.x + 0.44
-        if math.isfinite(stat.vs_control):
-            text = (f" {stat.vs_control:+.3g}" if "log2" in model.metric else f" ×{stat.vs_control:.3g}")
-            _ink(ax.text(sx, stat.centre, text, fontsize=ANNOTATION_PT, va="center", color=ink, gid="nw-vs-control"))
 
 
 def _draw_swarm(ax, model, swarm, half, dot_w, dot_h, hits, rings, ink):

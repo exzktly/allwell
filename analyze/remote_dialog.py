@@ -416,7 +416,9 @@ class RemoteFormDialog(QDialog):
         self._queue_wait_spin.setToolTip(
             "How long a job may wait in the scheduler queue before the run "
             "gives up and cancels it. Raise this if your cluster queues or "
-            "provisions nodes on demand. 0 = wait indefinitely."
+            "provisions nodes on demand. 0 = wait indefinitely. A node "
+            "requested in Manage Remotes that is still queued takes a saved "
+            "change at once, so raising this keeps its place in the queue."
         )
         wait_row.addWidget(self._queue_wait_spin)
         wait_row.addStretch(1)

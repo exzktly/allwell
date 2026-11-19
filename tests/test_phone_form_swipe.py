@@ -86,6 +86,56 @@ def test_turning_it_off_removes_the_guard_and_turning_it_on_twice_adds_one(qtbot
     assert vp.findChildren(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly) == []
 
 
+def test_a_viewport_already_grabbed_is_never_grabbed_again(qtbot, scroller_calls):
+    """Reported on Windows, twice: choosing a folder in phone layout (Convert CZI, then Subset / Split) closed the
+    app with an access violation inside ``app.exec()`` and no Python frame. Browse sits in the page's scroll area,
+    so its click is replayed by Qt's drag recognizer and the folder dialog runs inside the gesture manager's walk;
+    the dialog changes the focus window, the sweep that follows asks for every scroll area again, and
+    ``QScroller.grabGesture`` on a viewport already grabbed frees the recognizer the walk is standing on. The wrong
+    implementation this rejects is the one that shipped: a grab per ask."""
+    area, *_ = _form(qtbot)
+    vp = area.viewport()
+    for _ in range(3):
+        set_drag_scroll(vp, True)
+    assert scroller_calls == [("grab", vp)]
+
+
+def test_turning_it_off_waits_for_a_dialog_s_event_loop_to_end(qtbot, scroller_calls, monkeypatch):
+    """Turned off, the viewport stops scrolling at once and keeps its recognizer until no dialog's event loop is
+    running: ``ungrabGesture`` under a click the recognizer is replaying is the same freed walk as a second grab."""
+    from PySide6.QtCore import QThread
+    area, label, *_ = _form(qtbot)
+    vp = area.viewport()
+    set_drag_scroll(vp, True)
+    level = {"n": 2}                                    # app.exec() and a dialog's loop inside it
+    monkeypatch.setattr(QThread, "loopLevel", lambda self: level["n"])
+    monkeypatch.setattr("ui.phone_shell._RELEASE_RETRY_MS", 0)
+    set_drag_scroll(vp, False)
+    assert scroller_calls == [("grab", vp)], "released from inside the call that asked"
+    assert not _starts_a_scroll(area, label, QPoint(5, 5)), "turned off, it must not scroll while it waits"
+    for _ in range(5):
+        QApplication.processEvents()
+    assert scroller_calls == [("grab", vp)], "released while a dialog's event loop was running"
+    level["n"] = 1                                      # the dialog closed
+    for _ in range(5):
+        QApplication.processEvents()
+    assert scroller_calls == [("grab", vp), ("ungrab", vp)]
+    set_drag_scroll(vp, True)                           # and it can be taken again afterwards
+    assert scroller_calls[-1] == ("grab", vp) and len(scroller_calls) == 3
+
+
+def test_turned_on_again_before_the_release_it_keeps_its_one_grab(qtbot, scroller_calls):
+    area, label, *_ = _form(qtbot)
+    vp = area.viewport()
+    set_drag_scroll(vp, True)
+    set_drag_scroll(vp, False)
+    set_drag_scroll(vp, True)
+    for _ in range(5):
+        QApplication.processEvents()
+    assert scroller_calls == [("grab", vp)]
+    assert _starts_a_scroll(area, label, QPoint(5, 5))
+
+
 @pytest.fixture
 def scroller_calls(monkeypatch):
     calls = []
@@ -152,6 +202,9 @@ def test_every_scroll_area_scrolls_by_a_drag_unless_its_drag_means_something(
     assert all(a.viewport().property("_awDragScroll") for a in scrolls)
 
     grab_every_scroll_area(False)
+    assert not [t for kind, t in scroller_calls if kind == "ungrab"], \
+        "a grab is never released from inside the call that asked (set_drag_scroll)"
+    QApplication.processEvents()        # the release, once the event loop turns
     # Compared by the C++ object, and only for viewports still alive. The
     # sweep reaches every scroll area in the process — widgets earlier tests
     # in this worker left behind among them — and one of those can be deleted

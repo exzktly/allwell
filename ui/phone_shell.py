@@ -573,9 +573,40 @@ class _DragOwnerGuard(QObject):
     (marked by ``_swipe_plot_area``), where a swipe on the plot is how the page
     scrolls. A plot anywhere else — a dialog's — may be one you draw on."""
 
+    def __init__(self, viewport: QWidget) -> None:
+        super().__init__(viewport)
+        self._viewport = viewport
+        self._release = QTimer(self)
+        self._release.setSingleShot(True)
+        self._release.timeout.connect(self._release_grab)
+
+    def release_soon(self) -> None:
+        """Give the viewport's gesture back to Qt once nothing can be inside
+        it (:func:`set_drag_scroll` says why it is never done at once)."""
+        self._release.start(0)
+
+    def _release_grab(self) -> None:
+        from PySide6.QtCore import QThread
+        from PySide6.QtWidgets import QScroller
+        vp = self._viewport
+        if not shiboken6.isValid(vp) or vp.property(_P_DRAG_SCROLL):
+            return                      # gone, or scrolling by a drag again: keep the grab
+        if QThread.currentThread().loopLevel() > 1:
+            # A dialog's own event loop is running, and the click that opened
+            # it may be one this viewport's recognizer is still replaying.
+            self._release.start(_RELEASE_RETRY_MS)
+            return
+        QScroller.ungrabGesture(vp)
+        vp.setProperty(_P_DRAG_GRABBED, None)
+        vp.removeEventFilter(self)
+        self.deleteLater()
+
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
         if not isinstance(ev, QEvent) or ev.type() != QEvent.ScrollPrepare:
             return False
+        if isinstance(obj, QWidget) and not obj.property(_P_DRAG_SCROLL):
+            ev.ignore()                 # turned off; the grab is only waiting to be released
+            return True
         from PySide6.QtWidgets import QAbstractSlider
         w = obj.childAt(ev.startPos().toPoint()) if isinstance(obj, QWidget) else None
         plots_swipe = isinstance(obj, QWidget) and bool(obj.property(_P_SWIPE_PLOTS))
@@ -644,6 +675,15 @@ def _plate_owns_drag(w: QWidget) -> bool:
 #: Set on a viewport while :func:`set_drag_scroll` has it scrolling by a drag.
 _P_DRAG_SCROLL = "_awDragScroll"
 
+#: Set on a viewport from ``QScroller.grabGesture`` until ``ungrabGesture``:
+#: Qt holds a gesture recognizer for it. Outlasts :data:`_P_DRAG_SCROLL` by the
+#: time :func:`set_drag_scroll` waits before releasing a grab.
+_P_DRAG_GRABBED = "_awDragGrabbed"
+
+#: How long a release waits before asking again whether a dialog's event loop
+#: is still running (``_DragOwnerGuard._release_grab``).
+_RELEASE_RETRY_MS = 200
+
 #: Set on the viewport of a plot page's scroll area (``_swipe_plot_area``): a
 #: drag that starts on its plot scrolls the page. Anywhere else a drag that
 #: starts on a plot is the plot's — a plot in a dialog may be one you draw on.
@@ -704,20 +744,44 @@ def grab_every_scroll_area(on: bool) -> int:
 
 
 def set_drag_scroll(viewport: QWidget, on: bool) -> None:
-    """Scroll *viewport*'s area by a left-button drag, or stop. Idempotent."""
+    """Scroll *viewport*'s area by a left-button drag, or stop. Idempotent.
+
+    **A viewport is grabbed once and never grabbed again while the grab is
+    held, and a grab is never released from inside the call that asked.**
+    Qt's recognizer holds a press on anything inside the viewport and replays
+    it on release, so a button's ``clicked`` — and whatever it opens — runs
+    *inside* the gesture manager's walk over its recognizers.
+    ``QScroller.grabGesture`` on a viewport already grabbed is an ungrab and a
+    new grab, and ``ungrabGesture`` removes the recognizer the walk is standing
+    on; when the click's slot returns, Qt steps on from freed memory. That was
+    the Windows access violation inside ``app.exec()`` with no Python frame,
+    on choosing a folder in phone layout: Browse sits in the page's scroll
+    area, its click is such a replay, the system dialog's opening and closing
+    each change the focus window, and the sweep that follows a focus change
+    (``PhoneShell._sweep(force=True)``) asked for every scroll area again
+    while the dialog's loop ran. Linux reads the freed node and carries on,
+    so no test crashed; valgrind names it.
+
+    So turning it on grabs only a viewport not yet grabbed (adding a
+    recognizer disturbs no walk), and turning it off only marks the viewport:
+    its guard refuses every scroll from then on, and releases the grab from a
+    timer once no dialog's event loop is running. One case is not covered: a
+    slot that pumps ``processEvents`` itself (a batch export) is not a loop
+    Qt counts, so a grab turned off during one can still be released under a
+    replayed click.
+    """
     from PySide6.QtWidgets import QScroller
     viewport.setProperty(_P_DRAG_SCROLL, bool(on))
     guard = viewport.findChild(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly)
     if on:
-        QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)
+        if not viewport.property(_P_DRAG_GRABBED):
+            QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)
+            viewport.setProperty(_P_DRAG_GRABBED, True)
         if guard is None:
             guard = _DragOwnerGuard(viewport)
             viewport.installEventFilter(guard)
-    else:
-        QScroller.ungrabGesture(viewport)
-        if guard is not None:
-            viewport.removeEventFilter(guard)
-            guard.deleteLater()
+    elif guard is not None:
+        guard.release_soon()
 
 
 class _FitOnShow(QObject):
@@ -1603,9 +1667,10 @@ class PhoneShell(QObject):
         candidates: list[QWidget] = []
         for top in QApplication.topLevelWidgets():
             # A dialog the operating system draws is left wholly alone — no
-            # mark, no filter, no clamp: there is no Qt window of it to fit,
-            # and touching it while the system dialog runs or closes crashed
-            # Windows (``phone_window.is_native_dialog``).
+            # mark, no filter, no clamp: there is no Qt window of it to fit
+            # (``phone_window.is_native_dialog``). The crash on choosing a
+            # folder was the page's scroll area grabbed twice
+            # (``set_drag_scroll``), not this dialog.
             if phone_window.is_native_dialog(top):
                 continue
             candidates.append(top)

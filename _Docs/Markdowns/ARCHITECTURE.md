@@ -780,8 +780,38 @@ area in the process (`grab_every_scroll_area`, on the switch and on each restyle
 inside phone layout), and the sweep (`_sweep`) grabs every one built later — a
 page built lazily, a dialog, a popover, the Properties panel's, a combo box's
 list (whose view Qt replaces, so the replacement is found as a new widget).
-Leaving phone layout ungrabs every viewport carrying the `_awDragScroll` mark,
-whoever grabbed it. It is a rule rather than a roster of roots because the
+Leaving phone layout gives back every viewport carrying the `_awDragScroll` mark,
+whoever grabbed it.
+
+**A viewport is grabbed once, and a grab is never released from inside the call
+that asked** (`set_drag_scroll`). Qt's flick recognizer holds a press on
+anything inside a grabbed viewport and replays it on release, so a button's
+`clicked` — and whatever it opens, a folder dialog included — runs *inside* the
+gesture manager's walk over its recognizers. `QScroller.grabGesture` on a
+viewport already grabbed is an ungrab and a new grab, and `ungrabGesture`
+removes the recognizer that walk is standing on; when the click's slot returns,
+Qt steps on from freed memory. On Windows that is an access violation inside
+`app.exec()` with no Python frame, and it is what choosing a folder in phone
+layout did (Convert CZI, Subset / Split): Browse sits in the page's scroll area,
+the system dialog's opening and closing each change the focus window, and the
+forced sweep that follows a focus change asks for every scroll area again while
+the dialog's loop runs. Linux reads the freed node and carries on, so no test
+crashes; under valgrind the second grab is two invalid reads in
+`std::_Rb_tree_increment` below `QApplication::notify`, freed by
+`QScroller::ungrabGesture`, and none with the rule. So `set_drag_scroll(…,
+True)` grabs only a viewport without the `_awDragGrabbed` mark — adding a
+recognizer disturbs no walk — and `set_drag_scroll(…, False)` only clears
+`_awDragScroll`: the viewport's `_DragOwnerGuard` refuses every scroll from then
+on and releases the grab from a timer, once `QThread.loopLevel()` says no
+dialog's event loop is running (it asks again every `_RELEASE_RETRY_MS`
+otherwise), and a viewport turned on again before that keeps its one grab. Not
+covered: a slot that pumps `processEvents` itself (a batch export) is not a loop
+Qt counts, so a grab turned off during one can still be released under a
+replayed click. `tests/test_phone_form_swipe.py` holds the one grab and the
+wait; `tests/test_phone_windows.py::test_the_sweep_a_focus_change_runs_grabs_no_scroll_area_twice`
+drives the real shell through a dialog's two focus changes.
+
+Grabbing every scroll area is a rule rather than a roster of roots because the
 roster was the bug: it covered the rail, the Controls sheet, the logs and the
 Datasets and Analyze forms, and each root left out was a surface a thumb could
 not scroll — reported for the Properties panel, measured for Home (1,600 px of
@@ -911,10 +941,10 @@ layout set is left to the layout) and the size. A *native* file dialog —
 system's own picker on Windows and macOS — is not a Qt window on screen at all,
 and phone layout leaves it wholly alone (`phone_window.is_native_dialog`: the
 sweep neither marks it, nor installs its filter, nor clamps it, and `kind`
-answers `None`). Touching it is not merely useless: the sweep's 300 ms tick runs
-inside the system dialog's own message loop and again on the focus change as it
-closes, and a Windows user choosing a folder on Convert CZI in phone layout had
-the app close with a native access violation inside `app.exec()` while it did.
+answers `None`): there is nothing of it to fit, and the sweep's 300 ms tick runs
+inside the system dialog's own message loop. The access violation a Windows user
+gets on choosing a folder in phone layout is not this dialog's, though — it is
+the scroll area behind it being grabbed a second time (`set_drag_scroll`, above).
 `tests/test_phone_windows.py` drives a `PhoneShell`, phone layout on, the real
 dialogs and the shell's own sweep on a phone-shaped screen;
 `tests/test_phone_remote_windows.py` (remote roster) does the same for Remote

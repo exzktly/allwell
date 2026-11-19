@@ -101,12 +101,10 @@ def is_native_dialog(w: QWidget) -> bool:
     Such a dialog is a Qt object with no Qt window on the screen: the static
     ``QFileDialog.getExistingDirectory`` and friends build one on the C++ stack,
     hand it to the system dialog and destroy it on return. Phone layout has
-    nothing to fit there, and touching it is how phone layout crashed Windows:
-    choosing a folder on Convert CZI closed the app with a native access
-    violation inside ``app.exec()``, in phone layout only, after the sweep —
-    which runs on its timer inside the system dialog's own message loop and
-    again on the focus change as it closes — had installed an event filter on
-    the dialog, set properties on it and resized it. So it is never touched.
+    nothing to fit there, and the sweep runs on its timer inside the system
+    dialog's own message loop, so it is never touched. (The access violation
+    on choosing a folder in phone layout was not this dialog's: it was the
+    scroll area behind it grabbed a second time — ``phone_shell.set_drag_scroll``.)
 
     Native when Qt built none of its own widgets for it (the native helper is in
     use), or on Windows and macOS unless the app or the dialog opted out of the

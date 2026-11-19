@@ -9226,7 +9226,12 @@ cannot supply). On the queue path it also accepts a blank input and an input
 that does not exist yet, and so skips every check that reads the input: the
 packed-file redirect and the parts of the background-well and control-well
 checks that parse the input's filenames (`check_input=False`), which the
-pipeline itself refuses at run start. Those two parse with the form's schema,
+pipeline itself refuses at run start. An input that exists is still treated as
+not yet known while the field holds a queued job's output (`_pending_input`, set
+by `set_pending_inputs`): a converter may be pointed at the folder its source
+file sits in, so before it runs that folder exists and holds the `.czi` — and
+asking it the packed-file question refused to queue the Analyze of the
+conversion's own output. Those two parse with the form's schema,
 so with detection on they are deferred on the Run path as well; without it,
 the Run button asks all of them of whatever the field names, as before.
 
@@ -9294,7 +9299,13 @@ naming the wrong one sends them to a page that will refuse their file. So the
 readout under the input field and the run-time refusal
 (`analyze.domain.input.AnalyzeInputMixin._packed_input_hint`, which the pre-run
 validation reads) redirect the user to the right converter in the same words
-instead of trying to run it. `_packed_input_hint` returns a message for a
+instead of trying to run it. A directory whose `in/` already holds well zips is
+a dataset root and is never a packed input, whatever sits beside it
+(`_holds_converted_wells`): the converters' `destination_problem` accepts the
+folder that holds the source file, and a conversion there writes `in/` beside
+the `.czi` / `.nd2` / `.ome.tif`, which the pipeline never reads. An `in/` with
+no well zips in it is a conversion that has not happened, and the redirect
+stands. `_packed_input_hint` returns a message for a
 check it could not *make*, too, rather than `None`: `None` is the answer that
 means "this input is fine, start the run", so answering it for a permission error
 part-way through the walk turned the guard off silently and let the run go ahead

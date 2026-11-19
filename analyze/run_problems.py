@@ -81,8 +81,16 @@ class AnalyzeRunProblemsMixin:
         if not raw and not for_queue:
             problems.append(RunProblem("Data", "Input Error", "No input folder selected."))
         # The Run button asks everything of whatever the field names; only a
-        # queued job may name a folder not written yet.
-        input_known = bool(raw) and (not for_queue or Path(raw).exists())
+        # queued job may name a folder not written yet. A folder that exists is
+        # still not known when the field holds a queued job's output
+        # (``set_pending_inputs``): a conversion pointed at the folder its
+        # source file sits in writes ``in/`` beside that file, so before it has
+        # run the folder holds the source — and asking it the packed-file
+        # question refused to queue the Analyze of the conversion's own output.
+        pending = getattr(self, "_pending_input", None)
+        pending_here = pending is not None and pending[0] == raw
+        input_known = (bool(raw) and not pending_here
+                       and (not for_queue or Path(raw).exists()))
         if input_known and not live:
             packed_hint = self._packed_input_hint()
             if packed_hint is not None:

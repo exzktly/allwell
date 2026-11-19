@@ -297,3 +297,29 @@ def test_a_file_dialog_qt_draws_is_still_kept_on_the_screen(qapp, phone, monkeyp
     # Moved onto the screen and shrunk to it (its layout's own minimum may keep a few pixels more).
     assert dialog.frameGeometry().topLeft() == UPRIGHT.topLeft()
     assert dialog.frameGeometry().height() <= UPRIGHT.height()
+
+
+def test_the_sweep_a_focus_change_runs_grabs_no_scroll_area_twice(qapp, phone, monkeypatch):
+    """Reported on Windows: choosing a folder on Subset / Split in phone layout closed the app with an access
+    violation inside ``app.exec()`` and no Python frame — the Convert CZI report again, after the dialog itself was
+    left alone. Browse sits in the page's scroll area, so Qt's drag recognizer replays its click and the folder
+    dialog runs inside the gesture manager's walk over its recognizers; the dialog opening and closing each change
+    the focus window, and the forced sweep that follows asked ``QScroller.grabGesture`` for every scroll area
+    again, which on a viewport already grabbed frees the recognizer that walk is standing on
+    (``phone_shell.set_drag_scroll``). The app's own sequence: a page's scroll area, the sweep that finds it, then
+    the two forced sweeps of a dialog — one grab, and nothing released."""
+    from PySide6.QtWidgets import QScrollArea, QScroller
+    calls = []
+    monkeypatch.setattr(QScroller, "grabGesture", lambda target, kind: calls.append(("grab", target)))
+    monkeypatch.setattr(QScroller, "ungrabGesture", lambda target: calls.append(("ungrab", target)))
+    win, shell = _shell(qapp)
+    area = QScrollArea(win)
+    area.setWidget(QWidget())
+    win.layout().addWidget(area)
+    _pump(qapp)
+    shell._sweep(force=False)                             # its 300 ms tick finds the page
+    shell._on_focus_window()                              # the system dialog opens
+    shell._on_focus_window()                              # and closes
+    _pump(qapp)
+    assert [kind for kind, t in calls if t is area.viewport()] == ["grab"]
+

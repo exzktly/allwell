@@ -21,7 +21,7 @@ from types import SimpleNamespace
 import pytest
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
-from PySide6.QtWidgets import QScrollArea, QScroller, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QScrollArea, QScroller, QVBoxLayout, QWidget
 
 from ui.phone_shell import PhoneShell
 
@@ -67,6 +67,10 @@ def test_a_plot_on_a_main_page_scrolls_its_page_by_a_drag(qtbot, scroller_calls)
     PhoneShell._swipe_plot_area(shell, canvas, True)
     assert scroller_calls == [("grab", area.viewport(), QScroller.LeftMouseButtonGesture)]
     PhoneShell._swipe_plot_area(shell, canvas, False)
+    # Given back once the event loop turns, never inside the call that asked
+    # (``phone_shell.set_drag_scroll``).
+    assert scroller_calls[-1][0] == "grab"
+    QApplication.processEvents()
     assert scroller_calls[-1] == ("ungrab", area.viewport())
 
 
@@ -79,6 +83,10 @@ def test_sizing_a_canvas_for_the_phone_is_what_turns_it_on(qtbot, scroller_calls
     PhoneShell.size_canvas(shell, canvas, True)
     assert ("grab", area.viewport(), QScroller.LeftMouseButtonGesture) in scroller_calls
     PhoneShell.size_canvas(shell, canvas, False)
+    # Given back once the event loop turns, never inside the call that asked
+    # (``phone_shell.set_drag_scroll``).
+    assert scroller_calls[-1][0] == "grab"
+    QApplication.processEvents()
     assert scroller_calls[-1] == ("ungrab", area.viewport())
 
 

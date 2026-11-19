@@ -441,6 +441,26 @@ class PackedInput(NamedTuple):
     message: str
 
 
+def _holds_converted_wells(root: Path) -> bool:
+    """Whether *root* is a dataset root: an ``in/`` beside it holds well zips.
+
+    A converter may be pointed at the very folder its source file sits in —
+    ``destination_problem`` allows it, since that folder holds no ``in/`` yet —
+    and it then writes ``<folder>/in/<WELL>.zip`` beside the ``.czi`` /
+    ``.nd2`` / ``.ome.tif`` it read. The pipeline reads ``in/`` only and never
+    the file beside it, so that file is the original export kept with its
+    dataset, not the input; redirecting the user to convert it again refused
+    the very folder the conversion had just written. An ``in/`` with no well
+    zips is still a conversion that has not happened, and the redirect stands.
+    """
+    in_dir = root / "in"
+    try:
+        return in_dir.is_dir() and any(
+            is_well_archive(p) and _is_well_named(p) for p in files_in(in_dir))
+    except OSError:
+        return False
+
+
 def detect_packed_input(raw: Path) -> PackedInput | None:
     """Return the packed acquisition file at *raw*, or ``None`` if there is none.
 
@@ -449,7 +469,8 @@ def detect_packed_input(raw: Path) -> PackedInput | None:
     ambiguous for an OME-TIFF or an ND2 — picking either would convert a plate
     the user did not name — and is not for a CZI, where a folder of them is
     ZEN's *Split Scenes* export of one plate; see :data:`_PACKED_KINDS`.
-    Analyze uses this to spot a packed input and redirect the user to the
+    A directory whose ``in/`` already holds well zips is a dataset, whatever
+    sits beside it (:func:`_holds_converted_wells`). Analyze uses this to spot a packed input and redirect the user to the
     Datasets converter for it; the converters themselves do the work
     (``datasets.ome_import``, ``datasets.czi_import``, ``datasets.nd2_import``).
     """
@@ -460,6 +481,8 @@ def detect_packed_input(raw: Path) -> PackedInput | None:
                 return PackedInput(raw, action, message)
         return None
     if raw.is_dir():
+        if _holds_converted_wells(raw):
+            return None
         try:
             entries = list(files_in(raw))
         except OSError:

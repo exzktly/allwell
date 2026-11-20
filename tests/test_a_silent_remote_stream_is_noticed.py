@@ -120,3 +120,47 @@ def test_the_warning_goes_when_output_resumes_and_is_said_once_per_silence(setup
     runner._enqueue(("line", "2026-10-28 09:21:00  INFO      Well A01 — FOV 4/12 done\n"))
     tab._check_stream()
     assert tab._dashboard.status_text() == ""
+
+
+def _waiting_for_granted_node(host, runner):
+    """The run claimed a granted node that is still queued: staged and uploaded, nothing launched. The run's
+    pidfile and ``.slurm`` sidecar are written by the launch, so neither exists yet."""
+    host.write(PIDFILE, "")
+    host.write(PIDFILE + ".slurm", "")
+    runner._remote_runner.node_wait = lambda: None
+    runner._enqueue(("line", "[remote] scheduler: waiting for the granted node (job 777) to be granted.\n"))
+
+
+def test_a_wait_for_the_granted_node_is_not_silence(setup):
+    """Reported: while a run waited for its granted node, the silence check said "<host> holds no job id or pid
+    for this run" and told the user the run was not there any more. Nothing had been launched yet — the run's
+    pidfile and sidecar are written by the launch — so the probe had nothing to find, and read that as gone."""
+    tab, runner, host, logged = setup
+    _waiting_for_granted_node(host, runner)
+    tab._poll_log()
+    _quiet_for(runner, 45 * 60)
+    tab._check_stream()
+    assert not any("No output" in t for t in logged)
+    assert runner._silence_probe is None
+    assert tab._dashboard.status_text() != "No output from hpc for 45m00s — checking it is still running…"
+
+
+def test_a_probe_during_the_granted_node_wait_does_not_call_the_run_gone(setup):
+    from services.remote_liveness import GONE, probe
+
+    tab, runner, host, logged = setup
+    _waiting_for_granted_node(host, runner)
+    # What asking the host would say, and why it must not be asked: the reported line, about a run that is fine.
+    found = probe(runner._remote_runner.host, PIDFILE, scheduler=True, job_hint="")
+    assert (found.state, found.words) == (GONE, "hpc holds no job id or pid for this run")
+    assert runner.probe_silence() is False
+    assert runner._silence_probe is None
+    runner._remote_runner.node_wait = None              # granted: the run is launched, and a silence is asked about
+    host.write(PIDFILE, "2147483646\n")
+    host.write(PIDFILE + ".slurm", "4242\n")
+    host.add_job("4242", "RUNNING")
+    _quiet_for(runner, 21 * 60)
+    tab._check_stream()
+    assert _probe_answer(tab, runner, logged) == [
+        "[remote] no-output check: the scheduler lists job 4242 as RUNNING; the run is still going there, so it "
+        "is only quiet; nothing to do.\n"]

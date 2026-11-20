@@ -183,6 +183,10 @@ class AnalyzeProgressMixin:
         age = getattr(runner, "seconds_since_output", None)
         if age is None or getattr(self, "_sched_since", None) is not None:
             return
+        if getattr(runner, "waiting_for_granted_node", False):
+            # A wait for the granted node is a queue wait too, and nothing is launched until it ends, so the host
+            # has no pid or job of this run to find: asking it would report the run gone (see the property).
+            return
         if age < self._SILENCE_WARN_S:
             # Talking again: retract the warning if it is still what is shown.
             if getattr(self, "_silence_warned_at", None) is not None:

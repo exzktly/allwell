@@ -1651,6 +1651,19 @@ class PipelineRunner:
         """The remote host's name, or ``""`` for a local run."""
         return str(getattr(self._remote, "name", "") or "")
 
+    @property
+    def waiting_for_granted_node(self) -> bool:
+        """Whether the run is waiting for the granted node it claimed to be granted (``RemoteRunner.node_pending``).
+
+        That wait is a queue wait the stream does not announce as one: the run is staged and uploaded, and nothing
+        is launched until the node is granted, so the host holds no pidfile and no job id for the run yet. The
+        silence check must not ask the host about it — the probe finds nothing and reads that as a run that has
+        gone (reported: "<host> holds no job id or pid for this run" while the run waited for its node).
+        """
+        remote = self._remote_runner
+        pending = getattr(remote, "node_pending", None)
+        return bool(pending()) if callable(pending) else False
+
     def probe_silence(self) -> bool:
         """Ask the host, on a thread of its own, whether a silent run is alive.
 
@@ -1658,12 +1671,14 @@ class PipelineRunner:
         log line, said with ``activity=False`` so it does not reset the silence
         it reports on. Never stops or cancels anything — the user decides, and
         the line says what each answer means for them. ``False`` when there is
-        nothing to ask (no remote run launched) or a probe is already out.
+        nothing to ask (no remote run launched, or the run is still waiting for
+        its granted node — :attr:`waiting_for_granted_node`) or a probe is
+        already out.
         """
         remote = self._remote_runner
         run = getattr(remote, "run", None)
         host = getattr(remote, "host", None)
-        if run is None or host is None:
+        if run is None or host is None or self.waiting_for_granted_node:
             return False
         if self._silence_probe is not None and self._silence_probe.is_alive():
             return False

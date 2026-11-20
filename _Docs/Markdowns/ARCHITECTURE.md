@@ -21777,7 +21777,9 @@ was not happening.
 the time of every line and transfer tick the run says (`seconds_since_output`,
 `last_output_line`), and `AnalyzeProgressMixin._check_stream` looks every 30 s
 while a remote run is going. Outside a scheduler queue wait (silent by design,
-with its own clock), twenty minutes with nothing (`_SILENCE_WARN_S`) puts "No
+with its own clock) and outside a wait for the granted node the run claimed
+(`PipelineRunner.waiting_for_granted_node`, i.e. `RemoteRunner.node_pending`),
+twenty minutes with nothing (`_SILENCE_WARN_S`) puts "No
 output from <host> for 21m00s — checking it is still running…" on the status
 line and two `[warn]` lines in the log — the last line received, that a quiet
 stretch is not by itself a failure, and Stop / Resume as what to do if the run has
@@ -21793,6 +21795,14 @@ nanowells, a batched run its driver's tick, a transfer a line a second; the
 longest quiet stretch is one long step (locating a large timepoint, a heavy
 FOV-group on CPU), which is minutes. Before this the reader simply blocked, and an
 hour after a job had died every surface still read "Processing N/M" and "ETA 0s".
+The granted-node wait is excluded because the stream does not announce it as a
+queue wait (no `sched` event starts the pane's queue clock), and nothing of the
+run exists on the host until the node is granted and the step launched — the
+pidfile and `.slurm` sidecar are written by the launch, and the hold job's own id
+is one the probe deliberately ignores (`slurm_ids.hold_check_shell`). Asked then,
+`remote_liveness.probe` found nothing and answered "gone" ("<host> holds no job
+id or pid for this run"), and the check told the user to Stop a run that was only
+queued; `probe_silence` also declines on its own while the wait lasts.
 
 **Transfer progress is live state, so it stays out of the log.** A remote
 transfer used to write a line every eight seconds (bytes so far, time elapsed)

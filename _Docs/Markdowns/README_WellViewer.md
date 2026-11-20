@@ -11485,9 +11485,10 @@ What that means depends on whether a test's p has a floor:
   three controls no single well is ever called unusual.
 
 More control wells help every one of these at once: they lower the permutation floor, the per-well floor and the
-uncertainty in the regression's ρ, and the self-check needs at least four of them. With three controls the
-regression's p rests on large-sample theory fitted to six wells per comparison, and the self-check that would
-measure its calibration cannot run.
+uncertainty in the regression's ρ, and the self-check needs at least four of them to run and at least five to
+check the exceedance test (see *The self-check* below). With three controls the regression's p rests on
+large-sample theory fitted to six wells per comparison, and the self-check that would measure its calibration
+cannot run.
 
 **Replicates a verdict needs.** The verdict is the exceedance test's alone, so these are the conditions under
 which a treatment can be called *rare responders detected*:
@@ -11505,13 +11506,13 @@ which a treatment can be called *rare responders detected*:
 
 Three control and two treatment wells are enough for a verdict but not enough to check it: the between-well spread
 ρ comes from five wells, ρ cannot be estimated when no control nanowell is past the cutoff (the figure then warns
-that its p overstates the evidence), the self-check needs at least four control wells, and each well's own p cannot
-go below 0.25.
+that its p overstates the evidence), the self-check cannot test the regression with fewer than five control wells,
+and each well's own p cannot go below 0.25.
 
 | Goal | Control wells | Treatment wells per treatment |
 | --- | --- | --- |
 | A verdict at all | 3 | 2 |
-| A verdict the self-check can test on the plate | 4 | 3 |
+| A verdict the self-check can test on the plate | 5 | 2 |
 | Higher Criticism and the shape test able to pass correction beside several treatments (floor 0.012 or less) | 6 or more | 3 |
 
 Control wells count most: every treatment is compared with the same ones, and they set every floor and the
@@ -11635,8 +11636,12 @@ Your plate's numbers will differ; that is the point of running it.
 **How to use it.** Run the self-check when planning a screen, not after reading a result. If power at the effect
 size you expect is low, the remedy is more wells — especially more **control** wells, which raise the floor of
 every per-well p and every permutation p — not more nanowells per well. The self-check needs at least **4
-control wells** (two halves of two), and it re-runs every test dozens of times, so it is not run on the
-Statistics view; the view's report covers the analysis itself.
+control wells** to run at all (two halves of two), and at least **5** to check the exceedance test, which
+decides the verdict: its regression needs 3 control and 2 treatment wells, and a split of 4 control wells gives it
+only 2 and 2, so with 4 the self-check reports Higher Criticism and the shape test and leaves the exceedance
+test's rows empty. With 5 the split is 3 and 2, and only 10 distinct splits exist, so its false-positive share
+is a rough estimate; more control wells sharpen it. The self-check re-runs every test dozens of times, so it is
+not run on the Statistics view; the view's report covers the analysis itself.
 
 ### Glossary of the Rare responders labels
 

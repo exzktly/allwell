@@ -45,9 +45,9 @@ DUO_INNER_PX = (1878, 2670)
 DUO_OUTER_PX = (1398, 2034)
 DUO_INNER_PT = 626
 DUO_OUTER_PT = 466
-#: Which of the two a near-square screen of some other resolution is — RealVNC
-#: may give the desktop the screen's shape at a resolution of its own — is
-#: read from its shape: the inner screen is 1.422 : 1 and the outer 1.455 : 1,
+#: Once phone layout is on, which of the two a near-square screen of some
+#: other resolution is — RealVNC may give the desktop the screen's shape at a
+#: resolution of its own — is read from its shape: the inner screen is 1.422 : 1 and the outer 1.455 : 1,
 #: and this is the midpoint. A screen squarer still (a 4:3 or 5:4 monitor, an
 #: Android fold's inner screen) reads as an unfolded inner screen.
 DUO_SPLIT_ASPECT = 1.438
@@ -56,6 +56,20 @@ DUO_SPLIT_ASPECT = 1.438
 #: squarer. 3:2 (1.5, a Surface laptop) and every phone (1.78 and longer) are
 #: not.
 FOLD_MAX_ASPECT = 1.47
+#: Whether to *offer* phone layout is another question, and shape cannot answer
+#: it: every iPad is between 4:3 (1.33) and 1.52 : 1, the Duo's screens 1.42 and
+#: 1.45, so an iPad reached over VNC at its native resolution is the Duo's
+#: shape and a desk's size, and offering phone layout to every near-square
+#: screen offered it to every iPad. So :func:`is_phone_shaped` takes a screen
+#: for the Duo's only at the Duo's own resolution (:func:`is_duo_resolution`);
+#: no iPad and no common monitor has a side of 1878, 2670, 1398 or 2034 px. A
+#: Duo whose desktop RealVNC sets to another resolution is still offered phone
+#: layout when that desktop is too small for the desk window, and the toggle
+#: is there when it is not. The size tested is the *available* geometry, which
+#: the Windows taskbar takes a strip from, so one side must match exactly and
+#: the other may fall short by up to this many pixels: 48 px of taskbar at
+#: 100 % scaling, 120 px at 250 %.
+DUO_TASKBAR_SLACK_PX = 160
 
 #: Touch sizes, in phone points. 44 pt is the smallest target a thumb hits
 #: reliably (Apple's minimum; Material's 48 dp is the same physical size on a
@@ -96,6 +110,12 @@ DEFAULT_TEXT_SIZE = "M"
 #: this cannot hold the desktop layout, which is one of the ways a screen
 #: reads as phone-shaped.
 DESK_MIN_W, DESK_MIN_H = 1100, 800
+
+#: A screen at least this much taller than wide is a phone held upright (every
+#: phone is 16:9, 1.78, or longer, and a taskbar's strip leaves 1.7 of that).
+#: A squarer upright screen wide and tall enough for the desk window — an iPad
+#: held upright, 1.33 to 1.52 — is a desk.
+PHONE_UPRIGHT_MIN_ASPECT = 1.6
 
 #: A screen this much wider than tall, and shorter than the second figure, is a
 #: phone on its side rather than a monitor (see ``is_phone_shaped``).
@@ -191,26 +211,53 @@ def follow(owner, fn: Callable[[bool], None]) -> None:
 def is_phone_shaped(width: int, height: int) -> bool:
     """Does a screen of this available size look like a phone?
 
-    Upright (taller than wide), too small in either direction to hold the
-    desktop window, or near-square (a foldable's screen, folded or open, and a
-    4:3 monitor with it: :func:`is_fold_shaped`). A phone held sideways at its full physical resolution is
-    indistinguishable from a wide monitor by size alone, so it reads as
-    desk-shaped; the toggle is how the user says otherwise.
+    Too small in either direction to hold the desktop window; upright at a
+    phone's proportions (``PHONE_UPRIGHT_MIN_ASPECT``); one of the iPhone
+    Duo's screens at its own resolution (:func:`is_duo_resolution`); or a
+    phone on its side. A tablet is none of these — an iPad either way up, at
+    its native resolution, holds the desk window and is no phone's shape — and
+    neither is a 4:3 monitor. A phone held sideways at its full physical
+    resolution is indistinguishable from a wide monitor by size alone, so it
+    reads as desk-shaped; the toggle is how the user says otherwise.
     """
     if width <= 0 or height <= 0:
         return False
-    if height > width or width < DESK_MIN_W or height < DESK_MIN_H:
+    if width < DESK_MIN_W or height < DESK_MIN_H:
         return True
-    # A foldable's screen is near-square either way up, folded or not — and
-    # so is a 4:3 monitor, which is offered phone layout too: the two are the
-    # same shape, and the offer is one the desk can dismiss.
-    if is_fold_shaped(width, height):
+    if height > width and height / width >= PHONE_UPRIGHT_MIN_ASPECT:
+        return True
+    if is_duo_resolution(width, height):
         return True
     # Sideways at full resolution a phone is the size of a monitor, but not
     # its shape: phones are 19.5:9 or longer (2.17), monitors 16:9 (1.78) or
     # 16:10. Only an ultrawide 21:9 at 1080 lines tall reads as a phone too,
     # which costs it no more than an offer it can dismiss.
     return width / height >= PHONE_MIN_ASPECT and height < PHONE_MAX_SHORT_SIDE
+
+
+def is_duo_resolution(width: int, height: int) -> bool:
+    """Is a screen of this available size one of the iPhone Duo's screens at
+    its own resolution, either way up — less at most a taskbar's strip off one
+    side (``DUO_TASKBAR_SLACK_PX``, which says why not by shape)?"""
+    short, long = sorted((width, height))
+    slack = DUO_TASKBAR_SLACK_PX
+    for n_short, n_long in (DUO_INNER_PX, DUO_OUTER_PX):
+        if ((short == n_short and n_long - slack <= long <= n_long)
+                or (long == n_long and n_short - slack <= short <= n_short)):
+            return True
+    return False
+
+
+def keeps_phone_layout(width: int, height: int) -> bool:
+    """Is a screen of this available size one phone layout, once on, stays on?
+
+    Every phone-shaped screen, and every near-square one too
+    (:func:`is_fold_shaped`): a Duo whose desktop RealVNC gives a resolution
+    of its own is not offered phone layout by its shape, but once the user
+    has turned it on there, a banner offering the desk back and a launch that
+    reopens at the desk would undo their choice. An iPad on which the user
+    turned phone layout on is held to it the same way."""
+    return is_phone_shaped(width, height) or is_fold_shaped(width, height)
 
 
 def duo_screen(width: int, height: int) -> str | None:

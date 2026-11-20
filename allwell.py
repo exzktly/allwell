@@ -2413,7 +2413,8 @@ def _install_combobox_popup_widener() -> None:
 def _phone_layout_at_startup(app) -> bool:
     """Start in phone layout? And if so, scale the size tokens now.
 
-    Only when the user left it on *and* the screen is still phone-shaped: a
+    Only when the user left it on *and* the screen is still one phone layout
+    keeps (``phone_layout.keeps_phone_layout``: phone-shaped or near-square): a
     preference saved on the phone must not open the next desk launch as a
     phone. Scaling here — after the theme, before any widget exists — builds
     every widget at the phone's text size, including the ones that freeze a
@@ -2429,7 +2430,7 @@ def _phone_layout_at_startup(app) -> bool:
         if screen is None:
             return False
         avail = screen.availableGeometry()
-        if not phone_layout.is_phone_shaped(avail.width(), avail.height()):
+        if not phone_layout.keeps_phone_layout(avail.width(), avail.height()):
             return False
         size = phone_layout.parse_text_size(
             s.value(phone_layout.KEY_TEXT_SIZE, phone_layout.DEFAULT_TEXT_SIZE))

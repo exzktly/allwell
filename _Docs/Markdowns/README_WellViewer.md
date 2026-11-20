@@ -2811,8 +2811,8 @@ recently. The log line for a folder the automatic clean-up kept says the same.
   launcher, or a smaller batch size). A local run that is sent a termination
   signal by something other than Stop or Suspend is reported the same way.
 - **A remote run that goes quiet is checked.** If a remote run prints nothing
-  for twenty minutes (outside a wait in the scheduler's queue, which is quiet by
-  nature), the status line says *No output from `<host>` for 21m00s — checking it
+  for twenty minutes (outside a wait in the scheduler's queue or for a granted
+  node to be granted, which are quiet by nature), the status line says *No output from `<host>` for 21m00s — checking it
   is still running…*, the log shows the last line received, and the app asks the
   host whether the run is still there. The answer goes in the log: still
   running (it is only slow — nothing to do), no longer running (press **Stop**,

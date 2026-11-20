@@ -93,7 +93,7 @@ def test_a_failed_bootstrap_does_not_move_a_local_run_to_a_remote(tab, monkeypat
 
 
 def test_deleting_the_selected_remote_falls_back_to_local(tab, monkeypatch):
-    """The behaviour ``_open_manage_remotes``' docstring has always claimed."""
+    """The behaviour ``open_manage_remotes``' docstring has always claimed."""
     import services.remote_config as remote_config
 
     monkeypatch.setattr(remote_config, "load_remotes", lambda: _remotes("hpc", "box"))

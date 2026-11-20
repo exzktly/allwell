@@ -160,7 +160,7 @@ class AnalyzeRunFooterMixin:
         self._manage_remotes_btn.setProperty("variant", "secondary")
         self._manage_remotes_btn.setToolTip(
             "Add, edit, delete, test, or bootstrap remote-execution hosts.")
-        self._manage_remotes_btn.clicked.connect(self._open_manage_remotes)
+        self._manage_remotes_btn.clicked.connect(self.open_manage_remotes)
         rl.addWidget(self._manage_remotes_btn)
         layout.addWidget(remote_widget)
 

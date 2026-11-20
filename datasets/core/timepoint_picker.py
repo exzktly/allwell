@@ -37,6 +37,8 @@ class TimepointPicker(CheckableDropdown):
         #: (refused by the page), anything else is the explicit selection.
         self._subset: tuple[str, ...] | None = ()
         self._settled = False
+        #: The page is reading the source and has no timepoints to list yet.
+        self._reading = False
         self.changed.connect(self._on_ticks_changed)
         self._rebuild()
 
@@ -54,12 +56,46 @@ class TimepointPicker(CheckableDropdown):
         self._rebuild()
 
     def set_source_tokens(self, tokens) -> None:
-        """List *tokens*, keeping the current selection. A no-op if unchanged."""
+        """List *tokens*, keeping the current selection. A no-op if unchanged.
+
+        Ends the reading state: what was being waited for has arrived.
+        """
         tokens = [str(t) for t in tokens]
+        self._reading = False
         if tokens == self._tokens:
+            self._refresh_summary()
             return
         self._tokens = tokens
         self._rebuild()
+
+    def set_reading(self, reading: bool) -> None:
+        """Say the source is being read and its timepoints are not listed yet.
+
+        Without it an empty list read "No timepoints ticked", and the menu offered only All and None —
+        a picker that looks broken, beside a Convert button that is available during the read and
+        then converts every timepoint. A new source clears the old one's tokens as it starts reading.
+        """
+        self._reading = bool(reading)
+        if self._reading and self._tokens:
+            self._tokens = []
+            self._rebuild()
+        self._refresh_summary()
+
+    def is_reading(self) -> bool:
+        return self._reading
+
+    def _refresh_summary(self) -> None:
+        super()._refresh_summary()
+        # Called by the base constructor before this class's fields exist.
+        if getattr(self, "_tokens", None) is None or self._tokens or self.count():
+            return
+        if getattr(self, "_reading", False):
+            self._button.setText("Reading the timepoints…  ▾")
+            self._button.setToolTip(
+                "The source is still being read. Its timepoints are listed here as soon as they are "
+                "known; a conversion started before then converts every timepoint.")
+        elif self._subset == ():
+            self._button.setText("Every timepoint  ▾")
 
     # ── internals ────────────────────────────────────────────────────────
     def _set_all(self, value: bool) -> None:

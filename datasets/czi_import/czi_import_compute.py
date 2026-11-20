@@ -38,6 +38,7 @@ from pipeline.czi_set import (
     discover_czi_files,
     peek_wells,
     read_czi_set_safely,
+    read_timepoint_tokens,
     siblings_of,
 )
 from util.channel_roles import (  # noqa: F401 (re-export for the view)
@@ -445,6 +446,15 @@ def peek_source(src: Path | str, params: ConversionParams,
     Provisional by construction; see :class:`~pipeline.czi_set.PlatePeek`.
     """
     return peek_wells(src, files=source_files(src, params), report=report)
+
+
+def source_timepoint_tokens(src: Path | str, params: ConversionParams) -> list[str]:
+    """The timepoints :func:`read_source` will list, from the one file it takes them from.
+
+    For the page to list them while the rest of a split plate is still being read
+    (:func:`pipeline.czi_set.read_timepoint_tokens`). Raises what reading that file raises.
+    """
+    return read_timepoint_tokens(src, files=source_files(src, params))[0]
 
 
 def read_source(src: Path | str, params: ConversionParams,

@@ -738,6 +738,36 @@ def _timepoint_tokens(layout: CziLayout) -> tuple[list[str], str]:
         f"time — {'; '.join(resolved.reasons)}.")
 
 
+def read_timepoint_tokens(source: Path | str, *,
+                          files: "list[Path] | None" = None) -> tuple[list[str], str]:
+    """``(tokens, note)`` exactly as :func:`read_czi_set` would list them, from one file's read.
+
+    :func:`read_czi_set` takes the timepoints from the first file that holds image tiles — a split export's
+    members all cover the same timepoints — but it returns only once **every** file's subblock directory has
+    been read, which on a network share is one round trip per file. A page waiting on it to list the
+    timepoints showed an empty picker for as long as that took, and Convert, which is available meanwhile,
+    then converted every timepoint because nothing could be unticked.
+
+    So this reads only the file the full read will take them from: series roots are dropped by name as there,
+    and a file with no image tiles (ZEN's split-scene master) is passed over as the full read drops it. The
+    layouts it reads go into the same caches, under the keys the full read asks for, so the full read that
+    follows pays nothing for them. Raises :class:`~pipeline.czi_read.CziReadError` when that file cannot be
+    read; the full read then reports it in its own words.
+    """
+    paths = list(files) if files is not None else discover_czi_files(source)
+    paths, _roots = _drop_series_roots(paths)
+    scan_cache.load(paths)
+    for path in paths:
+        layout = read_czi_layout(path, read_times=True, metadata=cached_plate_metadata(path))
+        if layout.n_blocks:
+            if path != paths[0]:
+                # The full read reads every file but the first without its times; this one it would then re-read
+                # with them (the master went first), so it is remembered under both keys.
+                remember_layout(path, False, layout)
+            return _timepoint_tokens(layout)
+    return [], ""
+
+
 def read_czi_set_safely(source: Path | str, *,
                         files: "list[Path] | None" = None,
                         report=None) -> CziSet:

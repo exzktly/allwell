@@ -26,16 +26,21 @@ class SubsetWorker(QThread):
     succeeded = Signal(str, str)   # (destination root, summary line)
     failed = Signal(str)
 
-    def __init__(self, src_root: str, dest_root: str, filt: SubsetFilter, parent=None) -> None:
+    def __init__(self, src_root: str, dest_root: str, filt: SubsetFilter, parent=None, *,
+                 schema: str = "", separator: str = "_", in_place: bool = False) -> None:
         super().__init__(parent)
         self._src_root = src_root
         self._dest_root = dest_root
         self._filt = filt
+        self._schema = schema
+        self._separator = separator
+        self._in_place = in_place
 
     def run(self) -> None:  # noqa: D401 — QThread entry point
         try:
             self.logLine.emit("Validating…")
-            plan = build_subset_plan(self._src_root, self._dest_root, self._filt)
+            plan = build_subset_plan(self._src_root, self._dest_root, self._filt, schema=self._schema,
+                                     separator=self._separator, in_place=self._in_place)
         except SubsetError as exc:
             self.failed.emit(str(exc))
             return

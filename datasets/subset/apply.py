@@ -51,6 +51,7 @@ from datasets.subset.subset_compute import (
     timepoint_kept,
 )
 from datasets.core.member_names import data_member_basenames
+from datasets.subset.apply_raw import execute_raw_plan
 from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
 from util.well_token import canonical_well_label
 from datasets.core.nanowell_tables import carry_nanowell_tables, recheck_identity
@@ -251,6 +252,9 @@ def execute_plan(
     cancelled = is_cancelled or _null_cancelled
     report = progress or _null_progress
     report_fraction = sub_progress or _null_sub_progress
+
+    if plan.raw:
+        return execute_raw_plan(plan, emit, cancelled, report, report_fraction, workers=workers)
 
     acquisition = read_record(plan.src.root)
 

@@ -19,7 +19,7 @@ from datasets.core.dataset_paths import shorten_headline
 from datasets.concatenate.concatenate_compute import destination_has_marker
 from datasets.concatenate.view import ConcatenatePage
 from datasets.concatenate.worker import ConcatenateWorker, UndoAppendWorker
-from datasets.concatenate.raw_compute import is_raw_dataset
+from datasets.core.raw_dataset import is_raw_dataset
 from datasets.core.tool_controller import DestinationToolController
 
 

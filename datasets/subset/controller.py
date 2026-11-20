@@ -73,7 +73,9 @@ class SubsetController(DestinationToolController):
         wells = frozenset(w for w in (canonical_well_label(w) for w in self.page.selected_wells()) if w)
         tps = None if self.page.all_timepoints_selected() else frozenset(self.page.selected_timepoints())
         fovs = None if self.page.all_fovs_selected() else frozenset(self.page.selected_fovs())
-        filt = SubsetFilter(wells=wells or None, timepoint_labels=tps, fovs=fovs)
+        channels = None if self.page.all_channels_selected() else frozenset(self.page.selected_channels())
+        filt = SubsetFilter(wells=wells or None, timepoint_labels=tps, fovs=fovs, channels=channels)
+        in_place = self.page.in_place()
 
         self.page.clear_log()
         self.page.dashboard.reset()
@@ -90,7 +92,9 @@ class SubsetController(DestinationToolController):
         self.page._plate.setEnabled(False)
         self.page.set_running(True)
 
-        worker = SubsetWorker(self.page.source_path(), dest_path, filt)
+        worker = SubsetWorker(self.page.source_path(), "" if in_place else dest_path, filt,
+                              schema=self.page.typed_schema(), separator=self.page.typed_separator(),
+                              in_place=in_place)
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
         worker.wellStage.connect(self._on_well_stage)
@@ -104,12 +108,19 @@ class SubsetController(DestinationToolController):
     def collect_spec(self) -> dict:
         return {
             "source": self.page.source_path(),
-            "destination": self.page.destination_path(),
+            # An in-place edit writes into its source; a destination left in the hidden field would name a
+            # folder the job never touches, and the queue would link later jobs to it.
+            "destination": "" if self.page.in_place() else self.page.destination_path(),
             "wells": self.page.wells_for_spec(),
             "timepoint_labels": (
                 None if self.page.all_timepoints_selected() else self.page.selected_timepoints()
             ),
             "fovs": None if self.page.all_fovs_selected() else self.page.selected_fovs(),
+            # The three below apply to a source holding only in/; on an analysed one they are empty.
+            "channels": None if self.page.all_channels_selected() else self.page.selected_channels(),
+            "schema": self.page.typed_schema(),
+            "separator": self.page.typed_separator(),
+            "in_place": self.page.in_place(),
         }
 
     def _on_queue_requested(self) -> None:
@@ -118,10 +129,15 @@ class SubsetController(DestinationToolController):
 
     def show_job(self, spec: dict) -> None:
         self.page.set_source_path(spec.get("source", ""))
+        # Before the pickers: a typed schema decides which timepoints, FOVs and channels they offer, and
+        # setting it rebuilds them.
+        self.page.set_schema(spec.get("schema") or "", spec.get("separator"))
         self.page.set_destination_path(spec.get("destination", ""))
         self.page.set_selected_wells(spec.get("wells"))
         self.page.set_selected_timepoints(spec.get("timepoint_labels"))
         self.page.set_selected_fovs(spec.get("fovs"))
+        self.page.set_selected_channels(spec.get("channels"))
+        self.page.set_in_place(bool(spec.get("in_place")))
 
     def set_pending_inputs(self, pending: dict, projection: dict | None = None) -> None:
         """Show inputs that are queued jobs' outputs not written yet
@@ -137,6 +153,8 @@ class SubsetController(DestinationToolController):
             source_wells=preview_wells(self.page.source_path()),
             source_timepoints=self.page.available_timepoints(),
             source_fovs=self.page.available_fovs(),
+            channels=spec.get("channels"),
+            source_channels=self.page.available_channels(),
         )
         if shortfall:
             # Running would keep less than the job names and look complete.

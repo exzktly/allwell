@@ -1,4 +1,7 @@
-"""Raw datasets for Concatenate: a converted plate nobody has analysed yet.
+"""Raw datasets: a converted plate nobody has analysed yet.
+
+Shared by the Datasets tools that accept one — Concatenate and Subset — which
+is why it lives in ``datasets/core`` rather than beside either.
 
 A dataset is normally ``in/`` plus ``out/`` with ``out/pipeline_info.json``,
 which says how the filenames decompose into fields. A freshly converted plate
@@ -91,18 +94,19 @@ def _holds_loose_images(root: Path) -> bool:
 
 
 #: What every "not usable" reason ends with: the two shapes this tool takes.
-_SHAPES = ("Concatenate takes an analysed dataset (an 'in' and an 'out' folder) or a raw one "
+_SHAPES = ("{tool} takes an analysed dataset (an 'in' and an 'out' folder) or a raw one "
            "(just an 'in' folder of per-well zips, as Import Loose or the OME/CZI import writes).")
 
 
-def unusable_reason(root: Path | str) -> str:
+def unusable_reason(root: Path | str, *, tool: str = "Concatenate") -> str:
     """``""`` when *root* is shaped like an analysed or a raw dataset, else why not.
 
     Structural only, so the page can call it on every edit of a path field. It
     exists because the shared rule (``in`` *and* ``out``) answered every
     rejection with "needs both an 'in' and an 'out' folder", which told the
     user raw image sets were not accepted at all — they are, once converted.
-    Each branch names the one thing to do about it.
+    Each branch names the one thing to do about it. *tool* names the page
+    asking, since the closing sentence says what that tool takes.
     """
     root = Path(root)
     if not root.is_dir():
@@ -112,13 +116,13 @@ def unusable_reason(root: Path | str) -> str:
             return ("It holds images but no 'in' folder, so it hasn't been converted into a "
                     "dataset yet. Run Datasets → Import Loose (or the OME/CZI import) on it "
                     "first, then pick the folder that writes.")
-        return "It has no 'in' folder. " + _SHAPES
+        return "It has no 'in' folder. " + _SHAPES.format(tool=tool)
     out = root / "out"
     if not out.exists():
         return ""
     contents = _out_contents(out)
     if contents is None:
-        return "Its 'out' is not a readable folder. " + _SHAPES
+        return "Its 'out' is not a readable folder. " + _SHAPES.format(tool=tool)
     if contents and not (out / "pipeline_info.json").is_file():
         shown = ", ".join(contents[:3]) + (", …" if len(contents) > 3 else "")
         return ("Its 'out' folder holds files but no pipeline_info.json, so it is neither an "

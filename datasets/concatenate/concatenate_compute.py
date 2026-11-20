@@ -61,7 +61,7 @@ from datasets.core.nanowell_tables import (
     carried_nanowell_block, has_nanowell_tables, refuse_unjoinable_nanowell_tables, refuse_unusable_tables,
 )
 from datasets.concatenate.nanowell_link import NanowellLink, plan_link
-from datasets.concatenate.raw_compute import (
+from datasets.core.raw_dataset import (
     check_raw_compatible, is_raw_dataset, raw_info, raw_paths, unusable_reason,
 )
 

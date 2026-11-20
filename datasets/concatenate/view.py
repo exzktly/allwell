@@ -48,7 +48,7 @@ from datasets.concatenate.concatenate_compute import (
 from datasets.concatenate.dashboard import ConcatDashboard
 from datasets.concatenate.in_place import in_place_refusal
 from util.zip_append import pending_journals
-from datasets.concatenate.raw_compute import unusable_reason
+from datasets.core.raw_dataset import unusable_reason
 from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 

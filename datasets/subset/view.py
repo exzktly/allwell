@@ -9,6 +9,11 @@ own**) with the raw log demoted to a collapsible checkbox. Run progress is
 painted directly onto the well-plate selector above instead of a second
 plate map — see :mod:`~datasets.subset.controller`.
 
+A source holding only ``in/`` (a converted plate not yet analysed) adds three controls, shown only for one:
+the filename schema (read from the acquisition record, typed, or inferred — see
+:mod:`datasets.subset.raw_compute`, which also fills the pickers), a Channels row, and **Edit in place**,
+which removes what is unticked from the source's own archives instead of copying the rest.
+
 Pure view: it owns widgets and emits intent (``runRequested``,
 ``openInReviewRequested``, ``sourceChanged``); the worker wiring lives in
 :mod:`~datasets.subset.controller`.
@@ -25,6 +30,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -45,13 +51,16 @@ from datasets.subset.subset_compute import (
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
-from datasets.core.dataset_fields import is_dataset, is_free_destination
+from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
+from datasets.core.raw_dataset import is_raw_dataset, raw_paths, unusable_reason
+from datasets.subset.raw_compute import RawSchemaError, resolve_raw_source
+from util.schema import DEFAULT_SEP
 
 
-
-
-_is_dataset = is_dataset
+def _is_dataset(root: Path) -> str:
+    """The source rule: an analysed dataset, or one holding only ``in/``."""
+    return unusable_reason(root, tool="Subset")
 
 
 def _is_destination(root: Path) -> str:
@@ -79,6 +88,12 @@ _ONLY_THESE_FOVS = (
     "only when it runs; untick all to keep every FOV.")
 _FOV_UNKNOWN = ("All FOVs — which ones the earlier job writes is known only "
                 "when it runs.")
+_IN_PLACE_WARNING = (
+    "Edit in place removes every unticked well, timepoint, FOV and channel from this dataset's own "
+    "archives. Nothing removed is kept anywhere, and it cannot be undone. Each well is rewritten on its "
+    "own, so it needs only that well's room on disk.")
+_RUN_LABEL = "▶  Subset"
+_RUN_IN_PLACE_LABEL = "▶  Remove from dataset"
 
 
 class SubsetPage(LogPanelMixin, QWidget):
@@ -95,6 +110,10 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._running = False
         self._tp_checks: dict[str, QCheckBox] = {}
         self._fov_checks: dict[str, QCheckBox] = {}
+        self._ch_checks: dict[str, QCheckBox] = {}
+        # Whether the source holds only in/ — the controls for one are shown only then.
+        self._raw = False
+        self._source_wells: list[str] = []
         # What the queued job writing a pending source is expected to hold
         # (``services.job_projection``); read instead of the disk while the
         # source does not exist yet. Empty when the source is a real folder.
@@ -154,6 +173,7 @@ class SubsetPage(LogPanelMixin, QWidget):
             validator=_is_dataset)
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
+        self._build_raw_controls(outer)
         self._dest_field = PathField(
             "Destination folder", pick=folder_picker("Select destination folder"),
             validator=_is_destination)
@@ -197,11 +217,23 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._fov_flow = FlowLayout(self._fov_host)
         outer.addWidget(self._fov_host)
 
+        # Only an in-only source can be cut by channel: an analysed one's tables are per channel.
+        self._ch_heading = QLabel("Channels", self)
+        outer.addWidget(self._ch_heading)
+        self._ch_hint = QLabel("This dataset's filename schema has no channel field.", self)
+        self._ch_hint.setObjectName("Muted")
+        outer.addWidget(self._ch_hint)
+        self._ch_host = QWidget(self)
+        self._ch_flow = FlowLayout(self._ch_host)
+        outer.addWidget(self._ch_host)
+        for widget in (self._ch_heading, self._ch_hint, self._ch_host):
+            widget.setVisible(False)
+
         run_row = QWidget(self)
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Subset", self)
+        self._run_btn = QPushButton(_RUN_LABEL, self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
@@ -230,6 +262,43 @@ class SubsetPage(LogPanelMixin, QWidget):
         # dashboard has no maximumHeight of its own, and with the raw log
         # hidden by default there was nothing else to absorb the growth).
         outer.addStretch(1)
+
+    def _build_raw_controls(self, outer: QVBoxLayout) -> None:
+        """The filename schema and Edit in place, for a source holding only ``in/``. Hidden otherwise."""
+        self._raw_box = QWidget(self)
+        box = QVBoxLayout(self._raw_box)
+        box.setContentsMargins(0, 0, 0, 0)
+        box.setSpacing(theme.Spacing.sm)
+        row = QHBoxLayout()
+        row.setSpacing(theme.Spacing.sm)
+        row.addWidget(QLabel("Filename schema", self._raw_box))
+        self._schema_edit = QLineEdit(self._raw_box)
+        self._schema_edit.setPlaceholderText("from the acquisition record, or e.g. experiment:channel:well:fov:timepoint")
+        self._schema_edit.setToolTip(
+            "Which part of each image name is which field, colon-separated. Leave empty to use the dataset's "
+            "acquisition record (in/acquisition.json), or a reading of the names when it has none.")
+        self._schema_edit.editingFinished.connect(self._on_schema_edited)
+        row.addWidget(self._schema_edit, 1)
+        row.addWidget(QLabel("Separator", self._raw_box))
+        self._sep_edit = QLineEdit(DEFAULT_SEP, self._raw_box)
+        self._sep_edit.setMaxLength(3)
+        self._sep_edit.editingFinished.connect(self._on_schema_edited)
+        row.addWidget(self._sep_edit)
+        box.addLayout(row)
+        self._schema_note = QLabel("", self._raw_box)
+        self._schema_note.setObjectName("Muted")
+        self._schema_note.setWordWrap(True)
+        box.addWidget(self._schema_note)
+        self._in_place_cb = QCheckBox("Edit in place — remove what is unticked from this dataset", self._raw_box)
+        self._in_place_cb.toggled.connect(self._on_in_place_toggled)
+        box.addWidget(self._in_place_cb)
+        self._in_place_warning = QLabel(_IN_PLACE_WARNING, self._raw_box)
+        self._in_place_warning.setObjectName("Warn")
+        self._in_place_warning.setWordWrap(True)
+        self._in_place_warning.setVisible(False)
+        box.addWidget(self._in_place_warning)
+        self._raw_box.setVisible(False)
+        outer.addWidget(self._raw_box)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(outer, "Subset Output")
@@ -267,6 +336,50 @@ class SubsetPage(LogPanelMixin, QWidget):
     def available_fovs(self) -> list[str]:
         """Every FOV the page offers, ticked or not."""
         return list(self._fov_checks)
+
+    def selected_channels(self) -> list[str]:
+        return [label for label, cb in self._ch_checks.items() if cb.isChecked()]
+
+    def available_channels(self) -> list[str]:
+        return list(self._ch_checks)
+
+    def all_channels_selected(self) -> bool:
+        return len(self.selected_channels()) == len(self._ch_checks)
+
+    def is_raw_source(self) -> bool:
+        """Whether the source holds only ``in/`` (a converted plate not yet analysed)."""
+        return self._raw
+
+    def in_place(self) -> bool:
+        return self._raw and self._in_place_cb.isChecked()
+
+    def typed_schema(self) -> str:
+        return self._schema_edit.text().strip() if self._raw else ""
+
+    def typed_separator(self) -> str:
+        return self._sep_edit.text() or DEFAULT_SEP
+
+    def set_schema(self, schema: str, separator: str | None) -> None:
+        if schema:
+            self._requested["raw"] = True
+        self._schema_edit.setText(schema or "")
+        self._sep_edit.setText(separator or DEFAULT_SEP)
+        self._reload_source_metadata()
+        self._refresh_run_enabled()
+
+    def set_in_place(self, on: bool) -> None:
+        if on:
+            self._requested["raw"] = True
+        self._in_place_cb.setChecked(bool(on))
+
+    def set_selected_channels(self, labels: list[str] | None) -> None:
+        self._requested["channels"] = list(labels) if labels is not None else None
+        if labels is None:
+            return
+        self._requested["raw"] = True
+        wanted = {label.lower() for label in labels}
+        for label, cb in self._ch_checks.items():
+            cb.setChecked(label.lower() in wanted)
 
     def wells_for_spec(self) -> list[str] | None:
         """The selected wells, or ``None`` for "every well".
@@ -352,7 +465,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._run_btn.setEnabled(not running and self._inputs_ready()
                                  and not self.has_pending_inputs())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
-        self._run_btn.setText("Subsetting…" if running else "▶  Subset")
+        self._run_btn.setText("Subsetting…" if running else self._run_label())
         # Locked alongside the plate (SubsetController._launch) — picking a
         # new source mid-run fires sourceChanged, which repaints the plate
         # for the new dataset while the old run's worker keeps executing in
@@ -365,12 +478,16 @@ class SubsetPage(LogPanelMixin, QWidget):
         # (the path display is already read-only; only Browse needs locking).
         self._src_field.setLocked(running)
         self._dest_field.setLocked(running)
+        self._raw_box.setEnabled(not running)
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
+        if self._raw:
+            # An unanalysed plate has nothing for Review to show until Analyze runs on it.
+            return
         promote_open_button(self._open_btn, self._run_btn)
 
     def revalidate_fields(self) -> None:
@@ -455,20 +572,34 @@ class SubsetPage(LogPanelMixin, QWidget):
 
     def _reload_source_metadata(self) -> None:
         if self.has_pending_inputs():
+            # Whether a source not written yet will hold only in/ is not known, so the raw controls show only
+            # for an edited job that already uses them — keeping its schema, channels and in-place choice — and
+            # the run checks them against the real folder when it starts.
+            asked = self._requested.get("channels")
+            self._raw = bool(self._requested.get("raw"))
+            self._raw_box.setVisible(self._raw)
+            self._schema_note.setText("")
+            self._show_channels(list(asked or []) if self._raw else None)
             self._load_projected_metadata()
+            self._on_in_place_toggled(self._in_place_cb.isChecked())
             return
         self._wells_hint.setVisible(False)
         self._tp_hint.setText(_TP_PICK_SOURCE)
         self._fov_hint.setText(_FOV_PICK_SOURCE)
         src = self.source_path()
         info = {}
-        if src:
+        self._raw = bool(src) and is_raw_dataset(src)
+        self._raw_box.setVisible(self._raw)
+        if self._raw:
+            info = self._raw_info(src)
+        elif src:
             info_path = Path(src) / "out" / "pipeline_info.json"
             if info_path.exists():
                 try:
                     info = json.loads(info_path.read_text())
                 except (OSError, json.JSONDecodeError):
                     info = {}
+        self._show_channels(info.get("available_channels") or [] if self._raw else None)
 
         wells = []
         if src:
@@ -480,6 +611,7 @@ class SubsetPage(LogPanelMixin, QWidget):
                     token = canonical_well_label(name)
                     if token:
                         wells.append(token)
+        self._source_wells = list(wells)
         self._plate.setEnabledWells(wells or None)
         self._plate.setSelectedWellIds(wells)
 
@@ -491,6 +623,50 @@ class SubsetPage(LogPanelMixin, QWidget):
 
         fovs = sorted({str(f).strip() for f in info.get("available_fovs", []) or [] if str(f).strip()})
         self._rebuild_checks(self._fov_flow, self._fov_checks, fovs, self._fov_hint)
+        self._on_in_place_toggled(self._in_place_cb.isChecked())
+
+    def _raw_info(self, src: str) -> dict:
+        """The pickers' values for an in-only source, and the schema note saying where they came from."""
+        try:
+            source = resolve_raw_source(raw_paths(src), typed_schema=self._schema_edit.text().strip(),
+                                        typed_sep=self.typed_separator())
+        except RawSchemaError as exc:
+            self._schema_note.setObjectName("Error")
+            self._schema_note.setText(f"{exc} Only wells can be chosen until the schema is settled.")
+            self._schema_note.style().polish(self._schema_note)
+            return {}
+        self._schema_note.setObjectName("Muted")
+        self._schema_note.setText(source.describe())
+        self._schema_note.style().polish(self._schema_note)
+        return source.info
+
+    def _show_channels(self, channels: list[str] | None) -> None:
+        """The Channels row: shown for an in-only source (*channels* a list), hidden otherwise (``None``)."""
+        shown = channels is not None
+        self._ch_heading.setVisible(shown)
+        self._rebuild_checks(self._ch_flow, self._ch_checks, list(channels or []), self._ch_hint)
+        self._ch_hint.setVisible(shown and not channels)
+        self._ch_host.setVisible(shown)
+
+    def _on_schema_edited(self) -> None:
+        if not self._raw:
+            return
+        self._reload_source_metadata()
+        self._refresh_run_enabled()
+        self._update_status_preview()
+
+    def _run_label(self) -> str:
+        return _RUN_IN_PLACE_LABEL if self.in_place() else _RUN_LABEL
+
+    def _on_in_place_toggled(self, _on: bool) -> None:
+        in_place = self.in_place()
+        self._in_place_warning.setVisible(in_place)
+        self._dest_field.setVisible(not in_place)
+        if not self._running:
+            self._run_btn.setText(self._run_label())
+            set_variant(self._run_btn, "danger" if in_place else "primary")
+        self._refresh_run_enabled()
+        self._update_status_preview()
 
     def _load_projected_metadata(self) -> None:
         """The pickers for a source a queued job has still to write.
@@ -550,13 +726,15 @@ class SubsetPage(LogPanelMixin, QWidget):
         hint.setVisible(not labels)
 
     def _inputs_ready(self) -> bool:
+        destination_ok = self.in_place() or (
+            self._dest_field.is_valid() and self.destination_path() != self.source_path())
         return (
             self._src_field.is_valid()
-            and self._dest_field.is_valid()
-            and self.destination_path() != self.source_path()
+            and destination_ok
             and bool(self.selected_wells())
             and bool(self.selected_timepoints() or not self._tp_checks)
             and bool(self.selected_fovs() or not self._fov_checks)
+            and bool(self.selected_channels() or not self._ch_checks)
         )
 
     def _on_input_changed(self, *_args) -> None:
@@ -592,5 +770,11 @@ class SubsetPage(LogPanelMixin, QWidget):
         wells = self.selected_wells()
         self.dashboard.reset()
         self.dashboard.set_wells(wells)
-        self.dashboard.set_headline(f"Ready — {len(wells)} well(s) selected.")
+        if self.in_place():
+            dropped = len(self._source_wells) - len(wells)
+            self.dashboard.set_headline(
+                f"Ready to edit in place — {len(wells)} well(s) kept"
+                + (f", {dropped} deleted." if dropped > 0 else "."))
+        else:
+            self.dashboard.set_headline(f"Ready — {len(wells)} well(s) selected.")
         self.dashboard.setVisible(True)

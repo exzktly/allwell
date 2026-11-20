@@ -190,11 +190,11 @@ def planned_output(kind: str, spec: dict) -> str | None:
         value = str((spec.get("opts") or {}).get("raw") or "").strip()
     elif kind == "concatenate":
         value = _get("dataset1") if spec.get("in_place") else _get("destination")
-    elif kind == "import_loose":
+    elif kind in ("import_loose", "subset"):
         value = _get("source") if spec.get("in_place") else _get("destination")
     elif kind == "validate":
         value = _get("dataset")
-    elif kind in (*CONVERTER_KINDS, "subset", "merge_plates"):
+    elif kind in (*CONVERTER_KINDS, "merge_plates"):
         value = _get("destination")
     else:
         value = ""

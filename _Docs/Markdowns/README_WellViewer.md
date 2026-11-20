@@ -10507,6 +10507,43 @@ by well only is the fastest case — nothing inside those wells' archives has
 to be touched at all — and narrowing by timepoint or FOV costs roughly in
 proportion to how much you keep.
 
+#### A dataset that has not been analysed yet
+
+The source can also be a dataset with only an `in` folder — a plate written by
+**Convert OME-TIFF**, **Convert CZI**, **Convert ND2** or **Import Loose**, before
+Analyze has run on it. The page then shows three more things:
+
+- **Filename schema.** To choose timepoints, FOVs or channels, Subset has to
+  know which part of each image name is which. It reads that from the plate's
+  acquisition record (`in/acquisition.json`, which every converter writes). With
+  no record it tries to read it from the names themselves. If neither works, or
+  your images are named some other way, type the schema (for example
+  `experiment:channel:well:fov:timepoint`) and its separator. The line under the
+  field says where the schema came from. A typed schema that disagrees with the
+  acquisition record is refused, because the record was written from the source
+  file itself. With no schema at all you can still choose wells.
+- **Channels.** Untick a channel to leave it out. This exists only for a plate
+  that has not been analysed: an analysed dataset's measurements are per
+  channel, and Subset does not rewrite them.
+- **Edit in place.** Instead of copying what you keep into a new folder, remove
+  what you untick from this dataset's own archives — for example to delete a
+  timepoint or a channel you don't need. There is no destination, and the
+  button reads **Remove from dataset**. Each well's archive is rewritten on its
+  own and then swapped in, so the edit needs only that much free space, never
+  room for a second copy. Nothing removed is kept anywhere, and it cannot be
+  undone. A well left with no images, and any well you untick, is deleted. If
+  the edit is interrupted, run the same edit again to finish it; until then
+  Subset refuses to copy from the half-edited folder. Edit in place is not
+  offered for an analysed dataset, whose results would go on describing the
+  images removed.
+
+A subset of an unanalysed plate is itself an unanalysed plate: an `in` folder
+and no `out` folder, so there is nothing to open in Review until Analyze has
+run on it. The acquisition record and any nanowell anchors set by hand are cut
+to the images kept. If the plate has an `INCOMPLETE_WELLS.txt`, it keeps the
+lines of the wells kept; after removing timepoints, FOVs or channels, its counts
+still describe the source and the log says so.
+
 A well archive need not be flat. One made with Finder's **Compress**, which
 holds each image inside a folder named for the well beside macOS's hidden
 `__MACOSX` copies, is subset like any other: members keep the names they have,

@@ -250,7 +250,8 @@ other screen whose long side is under 1.47 times its short (`FOLD_MAX_ASPECT`) b
 its shape — under 1.438 (`DUO_SPLIT_ASPECT`, midway between the two) the inner
 screen, above it the outer. A 4:3 or 5:4 monitor and an Android fold's inner
 screen therefore read as the Duo unfolded; 3:2 (1.5, a Surface laptop) and every
-phone (16:9, 1.78, or longer) are not near-square. With 390 for both, the Duo
+phone (16:9, 1.78, or longer) are not near-square. That sizes phone layout once it is
+on; whether to *offer* it is decided by resolution, not shape (below). With 390 for both, the Duo
 unfolded drew every target and line of text 1.6 times its size and folded 1.2
 times. RealVNC
 shrinks the remote desktop to the phone's screen, so a widget `n·u` pixels wide
@@ -884,13 +885,22 @@ a portrait desktop and every control on its right ran off the screen, including
 whatever would have fixed it. The same call compares the screen's shape with the
 layout and, when they disagree, shows a banner (`ContextBanner`, *Switch* / *Not
 now*) offering the other layout. It never switches by itself.
-`phone_layout.is_phone_shaped` calls a screen a phone when it is upright, too
-small for the desk window, or sideways at a phone's proportions — at least 1.95:1
-with a short side under 1,300 px; phones are 19.5:9 (2.17) or longer, monitors
-16:9 (1.78) or 16:10 — or when it is near-square (`is_fold_shaped`): the Duo
-folded or unfolded, either way up and at any size. A 4:3 or 5:4 monitor is the
-same shape as the Duo unfolded and is offered phone layout too, which its user
-dismisses with *Not now*; no rule of size or shape tells the two apart.
+`phone_layout.is_phone_shaped` calls a screen a phone when it is too small for the
+desk window; upright at a phone's proportions, at least 1.6 times taller than
+wide (`PHONE_UPRIGHT_MIN_ASPECT`; phones are 16:9, 1.78, or longer); one of the
+Duo's screens at the Duo's own resolution (`is_duo_resolution`: either way up,
+one side exact and the other up to 160 px short of it for the taskbar's strip
+off the available geometry, `DUO_TASKBAR_SLACK_PX`); or sideways at a phone's
+proportions — at least 1.95:1 with a short side under 1,300 px; phones are
+19.5:9 (2.17) or longer, monitors 16:9 (1.78) or 16:10. It does not use the
+Duo's shape: every iPad is between 4:3 (1.33) and 1.52 : 1, the Duo's own two
+shapes among them, so reading the Duo by shape offered phone layout to every
+iPad reached over VNC, and calling every upright screen a phone offered it to
+every iPad held upright. No iPad and no common monitor has a side of 1878, 2670,
+1398 or 2034 px. A Duo whose desktop is given another resolution is offered
+phone layout only when that desktop is too small for the desk window
+(half the Duo's pixels, upright or folded, is); otherwise the toggle turns it
+on, and `duo_screen` then sizes it by shape as above.
 A geometry change while phone layout is on (the phone
 turned, and VNC resized the desktop under the maximized window) closes the
 Controls sheet and restyles at the new unit.

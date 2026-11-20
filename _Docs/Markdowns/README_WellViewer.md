@@ -10999,8 +10999,8 @@ and plots sized for the phone, and buttons big enough for a thumb, whatever
 resolution the remote desktop has. Switching never touches a run in progress.
 
 **Turning it on.** Tap the phone icon among the small buttons at the top right of
-the window, just left of ⓘ (help). If All-Well notices the screen has turned phone-shaped (upright,
-too small for the desktop window, or sideways at a phone's long proportions), a
+the window, just left of ⓘ (help). If All-Well notices the screen has turned phone-shaped (too
+small for the desktop window, or a phone's long proportions either way up), a
 strip across the top offers the switch — tap **Switch**, or **Not now**. It never
 switches on its own.
 
@@ -11010,8 +11010,9 @@ are ignored rather than landing on whatever is underneath. Turning the phone doe
 the same, once, for the new shape.
 
 **On the iPhone Duo**, phone layout works folded and unfolded, and All-Well
-recognises both screens — both are nearly square, unlike other phones — and
-offers phone layout on either, whichever way the phone is held. Buttons stay a
+recognises both screens and offers phone layout on either, whichever way the
+phone is held. If the remote desktop is set to a resolution other than the
+Duo's own and no offer appears, tap the phone icon to switch. Buttons stay a
 thumb's size and text stays at the chosen text size on each.
 
 - **Folded**, the screen is a little wider than a regular phone's and laid out
@@ -11023,9 +11024,9 @@ thumb's size and text stays at the chosen text size on each.
   along the left, **›** (Forward) sits beside **‹** in the top bar, and held
   sideways the top bar keeps its full height.
 
-Folding or unfolding re-sizes the window once, like turning the phone. A 4:3
-desktop monitor has the same shape as the unfolded Duo, so All-Well offers it
-phone layout too; tap **Not now** to keep the desktop layout.
+Folding or unfolding re-sizes the window once, like turning the phone. An iPad
+(or a 4:3 monitor) is not offered phone layout: either way up, its screen holds
+the desktop layout.
 
 **Getting around.** The top bar holds:
 

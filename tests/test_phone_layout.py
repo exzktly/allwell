@@ -581,6 +581,47 @@ def test_startup_reenters_phone_layout_only_on_a_phone_shaped_screen():
     assert theme.ui_scale() == pytest.approx(15 * u / 13)
 
 
+def test_startup_keeps_phone_layout_left_on_on_a_near_square_screen():
+    """The Duo unfolded sideways at half its pixels (1335 x 939) holds the desk window and is not the Duo's own
+    resolution, so it is not offered phone layout; but turned on there, it must reopen in it. Wrong implementation:
+    re-entering only on a screen phone layout would be offered on, which reopened that Duo at the desk."""
+    import allwell
+    _store(True)
+    assert not phone_layout.is_phone_shaped(1335, 939)
+    assert allwell._phone_layout_at_startup(_App(1335, 939)) is True
+
+
+def _offers(qapp, monkeypatch, w, h, *, on):
+    """What ``_maybe_offer`` does on a screen of this size: ``"phone"`` / ``"desk"`` for the banner it shows,
+    ``None`` when it hides it."""
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QVBoxLayout
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win, show=False)
+    shown = []
+    monkeypatch.setattr(shell, "_show_banner", lambda *, to_phone: shown.append("phone" if to_phone else "desk"))
+    monkeypatch.setattr(shell, "_hide_banner", lambda: shown.append(None))
+    phone_layout.set_on(on)
+    shell._maybe_offer(QRect(0, 0, w, h))
+    return shown[-1]
+
+
+@pytest.mark.parametrize("w,h,on,offered", [
+    (2360, 1640, False, None),     # an iPad Air landscape, at the desk: nothing offered (the report)
+    (1640, 2360, False, None),     # and upright
+    (2732, 2048, False, None),     # a 13" iPad
+    (1080, 2000, False, "phone"),  # a phone upright: phone layout offered
+    (1335, 939, True, None),       # the Duo sideways at half its pixels, in phone layout: the desk is not offered
+    (1920, 1040, True, "desk"),    # a monitor in phone layout: the desk is
+])
+def test_the_banner_offers_the_layout_the_screen_fits(qapp, app_sheet, monkeypatch, w, h, on, offered):
+    """Through the shell's own offer, not only ``is_phone_shaped``. Wrong implementations: offering phone layout by
+    the Duo's shape (every iPad), or using the offer's rule to decide when phone layout already on is kept, which
+    offered a half-resolution Duo the desk back."""
+    assert _offers(qapp, monkeypatch, w, h, on=on) == offered
+
+
 def test_startup_honours_a_chosen_text_size_and_an_off_preference():
     import allwell
     _store(True, "L")
@@ -1838,12 +1879,46 @@ def test_a_duo_screen_s_short_side_is_its_published_width_in_points(w, h, expect
 
 
 @pytest.mark.parametrize("w,h,expected", [
-    (2670, 1878, True), (2034, 1398, True),           # the Duo sideways, at a desktop's size: offered phone layout
-    (2048, 1536, True),                               # and so is a 4:3 monitor, the same shape
-    (2256, 1504, False), (1920, 1080, False),         # 3:2 and 16:9 are not
+    (2670, 1878, True), (2034, 1398, True),           # the Duo sideways, at its own size: offered phone layout
+    (1878, 2670, True), (1398, 2034, True),           # and upright
+    (2670, 1830, True), (1878, 2622, True),           # less a 48 px taskbar off either side
+    (2034, 1278, True),                               # less a 120 px one (250 % scaling)
+    (939, 1335, True), (699, 1017, True),             # at half its pixels, too small for the desk window
+    (2670, 1700, False),                              # more than a taskbar short of the Duo: not it
+    (2048, 1536, False),                              # a 4:3 monitor is the Duo's shape, not its size
+    (2256, 1504, False), (1920, 1080, False),         # nor are 3:2 and 16:9
 ])
-def test_a_near_square_screen_is_offered_phone_layout(w, h, expected):
+def test_the_duo_is_offered_phone_layout_by_its_resolution(w, h, expected):
+    """Wrong implementations: offering it by the Duo's shape, which every iPad and 4:3 monitor has (the report:
+    an iPad over VNC was offered phone layout); or an exact match that the taskbar's strip off the available
+    geometry defeats."""
     assert phone_layout.is_phone_shaped(w, h) is expected
+
+
+#: Every current iPad's native resolution, landscape: 10.2", 10.9"/11" Air, 11" Pro, 11" Pro (M4), 12.9"/13",
+#: 13" Pro (M4), mini. Between them 1.33 to 1.52 : 1, the Duo's 1.42 and 1.45 inside that.
+_IPADS = [(2160, 1620), (2360, 1640), (2388, 1668), (2420, 1668), (2732, 2048), (2752, 2064), (2266, 1488)]
+
+
+@pytest.mark.parametrize("w,h", _IPADS)
+@pytest.mark.parametrize("upright", [False, True], ids=["landscape", "upright"])
+@pytest.mark.parametrize("taskbar", [0, 48])
+def test_an_ipad_over_vnc_is_not_offered_phone_layout(w, h, upright, taskbar):
+    """The report: viewing the app over VNC on an iPad offered phone layout. Landscape an iPad is the Duo's shape;
+    upright it is taller than wide. So the wrong implementations are reading the Duo from its shape, and calling
+    every upright screen a phone — 23 of these 28 cases were offered phone layout by one or the other."""
+    if upright:
+        w, h = h, w
+    h -= taskbar
+    assert phone_layout.is_phone_shaped(w, h) is False
+
+
+@pytest.mark.parametrize("w,h", [(1179, 2556 - 48), (1290, 2796), (1440, 2560 - 48)])
+def test_a_phone_upright_at_full_resolution_is_still_a_phone(w, h):
+    """Wide and tall enough for the desk window, but a phone's proportions (2.17, 1.78 less a taskbar): narrowing
+    the upright rule for the iPad must not let these through. Wrong implementation: 'upright and too narrow for the
+    desk window' alone, or an aspect floor above 1.7."""
+    assert phone_layout.is_phone_shaped(w, h) is True
 
 
 @pytest.mark.parametrize("screen,wide,short", [

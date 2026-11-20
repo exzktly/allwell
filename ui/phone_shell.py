@@ -2022,7 +2022,11 @@ class PhoneShell(QObject):
     def _maybe_offer(self, avail: QRect) -> None:
         """Offer the other layout when the screen's shape says it would fit
         better. Never switch: the user may be mid-tap."""
-        phone_shaped = phone_layout.is_phone_shaped(avail.width(), avail.height())
+        w, h = avail.width(), avail.height()
+        # Offered on a phone-shaped screen; kept, once on, on a near-square one
+        # too (``phone_layout.keeps_phone_layout``).
+        phone_shaped = (phone_layout.keeps_phone_layout(w, h) if phone_layout.is_on()
+                        else phone_layout.is_phone_shaped(w, h))
         mismatch = phone_shaped != phone_layout.is_on()
         if not mismatch or self._banner_dismissed_for == phone_shaped:
             self._hide_banner()

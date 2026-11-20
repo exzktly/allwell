@@ -11151,7 +11151,9 @@ The picker is `datasets/core/timepoint_picker.TimepointPicker`, a
 While a page reads its source it is told so (`set_reading`, by the CZI and ND2
 pages, which read off the window's thread) and says *Reading the timepoints…*
 rather than the dropdown's *No timepoints ticked*, which over an empty list
-read as a picker that could not be used; listing tokens ends that state. With
+read as a picker that could not be used, and its menu's first line says the
+same (`CheckableDropdown.setEmptyMenuText`, a generic empty-menu note) instead
+of offering only All and None; listing tokens ends that state. With
 nothing listed and everything selected it says *Every timepoint*.
 It holds the selection as a value (`()` all, `None` nothing ticked — refused by
 `RawFields.problems()` rather than read as "all"), because the list is rebuilt

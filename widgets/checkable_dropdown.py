@@ -48,6 +48,9 @@ class CheckableDropdown(QWidget):
         self._labels: list[str] = []
         self._data: list[object] = []
         self._checked: list[bool] = []
+        #: Said at the top of the menu while it has no options, so an empty list reads as waiting rather than
+        #: as a menu of All and None that does nothing (``""``: say nothing).
+        self._empty_menu_text = ""
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -85,6 +88,10 @@ class CheckableDropdown(QWidget):
         self._data.clear()
         self._checked.clear()
         self._refresh_summary()
+
+    def setEmptyMenuText(self, text: str) -> None:
+        """What the menu says while it has no options; ``""`` for nothing."""
+        self._empty_menu_text = str(text or "")
 
     def checkedIndices(self) -> list[int]:
         return [i for i, on in enumerate(self._checked) if on]
@@ -141,6 +148,10 @@ class CheckableDropdown(QWidget):
 
     def _open_menu(self) -> None:
         menu = QMenu(self._button)
+        if not self._labels and self._empty_menu_text:
+            note = QAction(self._empty_menu_text, menu)
+            note.setEnabled(False)
+            menu.addAction(note)
         for i, label in enumerate(self._labels):
             cb = QCheckBox(label, menu)
             cb.setChecked(self._checked[i])

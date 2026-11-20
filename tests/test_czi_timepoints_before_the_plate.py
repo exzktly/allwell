@@ -149,3 +149,28 @@ def test_a_failed_early_read_still_reads_the_plate(controller, tmp_path, monkeyp
     _settle(page)
     assert page._timepoint_pick.source_tokens() == ["t0", "t1", "t2"]   # listed by the full read instead
     assert not page._timepoint_pick.is_reading()
+
+
+def test_the_menu_itself_says_the_timepoints_are_still_being_read(controller, tmp_path, monkeypatch):
+    """Asked for after the label fix: opening the dropdown while the timepoints are not known yet showed only
+    All and None. The menu's first line now says why it is empty, and goes once the timepoints are listed."""
+    from widgets import menu_exec
+
+    shown = []
+    monkeypatch.setattr(menu_exec, "exec_transient_menu",
+                        lambda menu, _pos: shown.append([a.text() for a in menu.actions() if a.text()]))
+    forget_plate_metadata()
+    released = _hold(monkeypatch, "source_timepoint_tokens")
+    page = controller.page
+    page._src_field.set_path(str(_split_plate(tmp_path)))
+    page._on_source_changed()
+    try:
+        assert _spin_until(page._timepoint_pick.is_reading)
+        page._timepoint_pick._button.click()
+        assert shown[-1][0].startswith("Reading the timepoints…"), shown[-1]
+    finally:
+        released.set()
+    _settle(page)
+    page._timepoint_pick._button.click()
+    assert shown[-1] == ["All", "None"], shown[-1]     # the checkboxes are widget actions, without text
+    assert not any(t.startswith("Reading") for t in shown[-1])

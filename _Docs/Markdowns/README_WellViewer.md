@@ -9712,7 +9712,7 @@ on the plate rather than supplying it.
    has been read, before the rest of the plate: the line under the source
    says *Reading the timepoints…*, then *Reading the rest of the plate (7 of
    96)…*, and you can choose timepoints during the second. Until they are
-   listed the menu says *Reading the timepoints…*; Convert is available
+   listed, the button and the menu both say *Reading the timepoints…*; Convert is available
    meanwhile, and a conversion started then converts every timepoint.
 
    Unlike the wells, the timepoint selection must match when you add to an

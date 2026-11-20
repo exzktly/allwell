@@ -23,6 +23,8 @@ from PySide6.QtWidgets import QWidget
 from widgets.checkable_dropdown import CheckableDropdown
 
 _MISSING_SUFFIX = " (not in this source)"
+#: The menu's first line while the source is being read and no timepoint is listed yet.
+_READING_MENU = "Reading the timepoints… they are listed here once the source has been read"
 
 
 class TimepointPicker(CheckableDropdown):
@@ -62,6 +64,7 @@ class TimepointPicker(CheckableDropdown):
         """
         tokens = [str(t) for t in tokens]
         self._reading = False
+        self.setEmptyMenuText("")
         if tokens == self._tokens:
             self._refresh_summary()
             return
@@ -80,6 +83,7 @@ class TimepointPicker(CheckableDropdown):
             self._tokens = []
             self._rebuild()
         self._refresh_summary()
+        self.setEmptyMenuText(_READING_MENU if self._reading else "")
 
     def is_reading(self) -> bool:
         return self._reading

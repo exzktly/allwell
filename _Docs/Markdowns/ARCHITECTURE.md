@@ -12595,7 +12595,10 @@ and one that outranks the kept frame or ties with it sets `outcome.frame_change`
 well again over every timepoint, with the step as its `reanalysed_because`. An earlier record holding a
 `roster_mismatch` timepoint in a circular well is never reused (`nanowell_task._has_a_step_off_timepoint`): it may
 be the wrong timepoint or the right one outvoted, and either way its rows would carry neighbours' addresses
-forward. When the
+forward. Nor is a record holding a timepoint the input no longer has (`_prior_state`, logged): a plate converted again
+without a damaged last frame and filled in over the failed run's folder found every timepoint it still holds
+finished, returned the well as up to date, and went on carrying the dropped timepoint's failure in its grid record,
+its run report and its identity verdicts. The well is analysed again over the timepoints the input holds. When the
 roster really differs (a rim nanowell hidden at the kept timepoints and seen at a new one, a band site a new timepoint
 shows empty) the task analyses the well again over every timepoint, records what the re-analysis changed (sites
 added and removed, measured on its result) as `array_radius.reanalysed_because`, and logs it as a warning; Validate
@@ -13079,7 +13082,11 @@ both its grid record and its sites table, a grid record that reads, and one spel
 `nanowell` block is carried without its `reanchor` and `plate_diameters` records (`carried_nanowell_block`), which
 describe one run's plate by its wells. **Subset** carries the tables of the wells it keeps, cut
 by `subset_compute.timepoint_kept` — the same test its images are cut by — and refuses a field selection,
-because the tables are per well and measured over all of its tiles together. **Merge Plates** carries both
+because the tables are per well and measured over all of its tiles together. It then runs the identity check on
+the tables it wrote (`nanowell_tables.recheck_identity`, which calls `nanowell_identity.audit` over the carried
+wells and logs each well's verdicts): the source's `<well>_identity.json` is a digest of the tables the subset has
+just narrowed, so carried it would read as not checked, and left behind QC said the check was never run on a
+dataset that was checked before it was cut. A check that cannot run is logged, never raised; the tables stay. **Merge Plates** carries both
 plates' tables, dataset 2's through the well remap, and tags each well's grid record with its `plate`; it
 refuses two plates whose sidecar `nanowell` blocks name different schemes or settings
 (`nanowell_block_conflict`) or whose `acquisition` blocks calibrate a shared timepoint differently, takes the
@@ -19827,6 +19834,15 @@ lock-only-around-the-pre-work-callback shape Concatenate uses), `_verify`
 (at least one measurement row written, and every kept row's
 `filename` present in the filtered `in/` archive), sidecar write, marker
 cleared last.
+
+**A subset does not carry the source run's description of itself.** `run_report` and `run_check`
+(`subset_compute.PER_RUN_BLOCKS`) record what one run made of the source's whole input — which wells, and which
+FOV-groups or timepoints, it failed — and neither can be narrowed from its own contents: a failed group is named by
+a nuclear file name or a timepoint token, and the counts beside it are of the source's input. Carried, a subset that
+left out a damaged last frame went on reporting that frame as missing at load, on Home and in Validate's evidence.
+So the subset's sidecar has neither (the reasoning `pipeline.sidecar.USER_SIDE_BLOCKS` gives for a run's own
+rewrite: a lost record is visible and recoverable, a stale one is neither), Home says it has no completeness record,
+and Validate writes one from what the subset holds. Every other block is carried.
 
 **Zero rows has three causes and `_verify` names the one it can see.** One
 message — "check that the filter actually matches data in the source dataset" —

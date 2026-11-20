@@ -53,7 +53,7 @@ from datasets.subset.subset_compute import (
 from datasets.core.member_names import data_member_basenames
 from datasets.core.nanowell_anchors_carry import AnchorSource, carry_anchors
 from util.well_token import canonical_well_label
-from datasets.core.nanowell_tables import carry_nanowell_tables
+from datasets.core.nanowell_tables import carry_nanowell_tables, recheck_identity
 
 
 def _null_log(_message: str) -> None:
@@ -370,6 +370,7 @@ def execute_plan(
     if nanowell_rows:
         emit(f"Carried the nanowell tables of {len(nanowell_rows)} well(s) "
              f"({sum(nanowell_rows.values()):,} site rows).")
+        recheck_identity(plan.dest.out_dir, nanowell_rows, emit)
     if acquisition is not None:
         write_record(plan.dest.root, filter_record_to_archives(
             plan.dest.root, acquisition, schema=":".join(plan.schema.fields), sep=plan.schema.sep))

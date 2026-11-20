@@ -44,8 +44,13 @@ from datasets.core.containers import (
 from datasets.core.member_names import discover_parsed_member
 from datasets.core.nanowell_tables import carried_nanowell_block, has_nanowell_tables, refuse_unusable_tables
 from datasets.core.dataset_paths import known_channel_tokens
+from pipeline.run_report import RUN_REPORT_BLOCK
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
+
+#: The sidecar blocks that describe one run of the source's whole input, which a subset does not carry
+#: (:func:`build_subset_plan`): the pipeline's per-well run report and the completeness record.
+PER_RUN_BLOCKS = (RUN_REPORT_BLOCK, "run_check")
 
 
 class SubsetError(Exception):
@@ -193,7 +198,14 @@ def build_subset_plan(
     if not wells_kept:
         raise SubsetError("No wells match the requested filter.")
 
-    merged_info = dict(info)
+    # ``run_report`` and ``run_check`` describe what one run made of the source's whole input — which wells and
+    # which FOV-groups or timepoints it failed. Carried, a subset that left out a damaged last frame went on
+    # reporting that frame's failure (Review's load warning, Home's record, Validate's evidence), and one that kept
+    # a few wells reported the plate's totals. Neither can be narrowed from its own contents: a failed group is
+    # named by a nuclear file name or a timepoint token, and the counts beside it are of the source's input. So
+    # neither is carried (the reasoning ``pipeline.sidecar.USER_SIDE_BLOCKS`` gives for a run's own rewrite): Home
+    # then says the subset has no completeness record, and Validate writes one from what the subset holds.
+    merged_info = {k: v for k, v in info.items() if k not in PER_RUN_BLOCKS}
     if "nanowell" in merged_info:
         merged_info["nanowell"] = carried_nanowell_block(merged_info["nanowell"])
     if filt.timepoint_labels is not None:

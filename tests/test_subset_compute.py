@@ -385,3 +385,33 @@ def test_the_resolved_filter_sets_are_computed_once(tmp_path):
     assert filt == twin and hash(filt) == hash(twin)
     assert sc.SubsetFilter().timepoint_hours is None
     assert sc.SubsetFilter().fov_tokens is None
+
+
+def test_a_subset_does_not_carry_the_source_run_s_failure_record(tmp_path):
+    """A subset that leaves out a damaged last timepoint must not go on reporting that timepoint's failure.
+
+    The source's ``run_report`` and ``run_check`` describe what one run made of the source's whole input. Copied
+    into the subset, Review's load warning, Home's completeness record and Validate's evidence all named the
+    dropped timepoint as missing from a dataset that no longer holds it. Neither block can be narrowed from its own
+    contents, so the subset carries neither, and every other block (the user's, the analysis's) is carried.
+    """
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    _build(src)
+    info_path = src / "out" / "pipeline_info.json"
+    info = json.loads(info_path.read_text())
+    info["run_report"] = {"wells": {"A01": {"well": "A01", "groups_total": 8, "groups_covered": 6,
+                                            "failed": ["72h"], "not_attempted": []}},
+                          "incomplete_wells": ["A01"], "groups_total": 8, "groups_covered": 6}
+    info["run_check"] = {"version": 1, "wells": {"A01": {"health": "partial", "missing": [["F001", "72h"]]}},
+                         "totals": {"partial": 1}, "findings": []}
+    info["notes"] = "kept"
+    info_path.write_text(json.dumps(info))
+
+    plan = sc.build_subset_plan(src, dest, sc.SubsetFilter(timepoint_labels=frozenset({"0h", "24h", "48h"})))
+    subset_apply.execute_plan(plan)
+
+    written = json.loads((dest / "out" / "pipeline_info.json").read_text())
+    assert "run_report" not in written, "the source run's per-well failures were carried into the subset"
+    assert "run_check" not in written, "the source run's completeness record was carried into the subset"
+    assert written["notes"] == "kept"
+    assert written["available_timepoints"] == ["0h", "24h", "48h"]

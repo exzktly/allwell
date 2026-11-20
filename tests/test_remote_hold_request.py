@@ -141,6 +141,85 @@ def test_a_node_that_waits_past_the_max_queue_wait_is_cancelled_and_reported(clu
     assert (cluster.hold_dir(host) / "release").exists()
 
 
+@pytest.mark.parametrize("raised_to, words", [(10, "10 min"), (0, "no limit")])
+def test_raising_the_max_queue_wait_while_the_node_is_queued_keeps_the_job_in_the_queue(
+        cluster, nodes, tmp_path, monkeypatch, raised_to, words):
+    """The Max queue wait is the app's alone — Slurm is never told it — so the request's wait reads it again on every
+    poll, from ``remotes.toml`` as Manage Remotes' Save writes it (``write_remote``), and a user who raises it, or sets
+    it to no limit, while the node is still queued keeps the job's place in the queue.
+
+    Wrong implementation: reading the limit once when the request is made — the edit reaches only the next request,
+    the job is cancelled at the old minute (``HoldQueueWaitSpent``), and the only way to wait longer is to queue again
+    at the back."""
+    from dataclasses import replace
+
+    from services.remote_config import write_remote
+
+    monkeypatch.setenv("ALLWELL_REMOTES", str(tmp_path / "remotes.toml"))
+    host = RemoteHost(**{**HOST, "queue_wait_timeout_min": 1})
+    write_remote(host)
+    pending = ("PENDING", "Priority", "")
+    sleep = _Script(cluster, [
+        pending, pending,                                               # 30 s of the 1 min
+        lambda: write_remote(replace(host, queue_wait_timeout_min=raised_to)),
+        *[pending] * 5,                                                 # on to 2 min: past the old limit
+        lambda: _granted_files(cluster, host),
+        ("RUNNING", "None", "gpu-node-1"),
+    ])
+    node = GrantedNode(host, cluster, log_fn=(lines := []).append, sleep=sleep, clock=sleep.clock)
+    nodes.append(node)
+
+    state = node.request()
+
+    assert state.phase in ("granted", "busy") and state.node == "gpu-node-1"
+    assert sleep.now >= 120, "the wait must have run past the limit it was requested with"
+    assert len(cluster.sbatch_calls()) == 1, "the job was queued once and kept its place"
+    assert cluster.scancels() == [], "nothing was cancelled"
+    said = [ln for ln in lines if "Max queue wait is now" in ln]
+    assert said == [f"[remote] granted node: Max queue wait is now {words} (was 1 min); job 4001 has waited 0 min, "
+                    "and it keeps its place in the queue.\n"], said
+
+
+def test_lowering_the_max_queue_wait_below_the_time_already_waited_ends_the_request_at_the_next_poll(
+        cluster, nodes, tmp_path, monkeypatch):
+    """The limit still counts from the request: lowered below the time already waited, it ends the wait at once and
+    cancels the job. Wrong implementation: reading the limit once (here, no limit) — the request waits for ever, which
+    the stand-in sleep fails after 80 naps."""
+    from dataclasses import replace
+
+    from services.remote_config import write_remote
+
+    monkeypatch.setenv("ALLWELL_REMOTES", str(tmp_path / "remotes.toml"))
+    host = RemoteHost(**{**HOST, "queue_wait_timeout_min": 0})
+    write_remote(host)
+    pending = ("PENDING", "Priority", "")
+    sleep = _Script(cluster, [*[pending] * 6, lambda: write_remote(replace(host, queue_wait_timeout_min=1))])
+    node = GrantedNode(host, cluster, log_fn=(lines := []).append, sleep=sleep, clock=sleep.clock)
+    nodes.append(node)
+
+    with pytest.raises(HoldQueueWaitSpent) as exc:
+        node.request()
+
+    assert "within 1 min" in str(exc.value)
+    assert sleep.now == 105, "ended at the poll after the edit, not later"
+    assert any("4001" in line for line in cluster.scancels()), "the queued job must be cancelled"
+    assert any("Max queue wait is now 1 min (was no limit)" in ln and "the request ends now" in ln for ln in lines)
+
+
+def test_a_max_queue_wait_saved_for_another_address_is_not_this_requests(cluster, nodes):
+    """A host saved under the same name with another address is another machine's setting; the request keeps the
+    limit it last saw. Wrong implementation: adopting it — here, no limit, and the request waits for ever."""
+    host = RemoteHost(**{**HOST, "queue_wait_timeout_min": 1})
+    elsewhere = RemoteHost(**{**HOST, "ssh_alias": "other-login", "queue_wait_timeout_min": 0})
+    sleep = _Script(cluster, [])
+    node = GrantedNode(host, cluster, log_fn=lambda _l: None, sleep=sleep, clock=sleep.clock,
+                       saved_host=lambda: elsewhere)
+    nodes.append(node)
+    with pytest.raises(HoldQueueWaitSpent):
+        node.request()
+    assert cluster.scancels()
+
+
 def test_a_node_that_fails_to_boot_is_not_asked_for_again(cluster, nodes):
     """Wrong implementation: resubmitting the same request, which Slurm may well give the same dead node."""
     host = RemoteHost(**{**HOST, "compute_launcher": HOST["compute_launcher"] + " --exclude=slow1"})

@@ -34,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from services.remote_config import RemoteHost, parse_slurm_time, render_slurm_time
+from services.remote_config import RemoteHost, load_remotes, parse_slurm_time, render_slurm_time
 from services.remote_heartbeat import _UploadHeartbeat
 from services.remote_hold_owner import claim_owner, orphaned_by, takeover_script
 from services.remote_jobs import _only_my_job
@@ -666,12 +666,17 @@ class GrantedNode:
 
     :meth:`request` blocks until the node is granted, the request fails, or :meth:`release` is called from another
     thread; run it on a worker.
+
+    *saved_host* answers the host's settings as they are saved now (``remotes.toml``, by default), or ``None`` when
+    they cannot be read; the request's wait reads the Max queue wait from it on every poll (:meth:`_queue_wait_now`).
     """
 
     def __init__(self, host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str], None],
                  on_state: Callable[[HoldState], None] | None = None,
-                 sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> None:
+                 sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic,
+                 saved_host: Callable[[], RemoteHost | None] | None = None) -> None:
         self.host = host
+        self._saved_host = saved_host or (lambda: _saved_host(self.host))
         self.paths = hold_paths(host)
         self._cache = cache
         self._sink = log_fn
@@ -692,6 +697,8 @@ class GrantedNode:
         #: The job this handle asked for or found. Release acts only on that job: the directory is shared by every
         #: window, and the job it names can have changed hands since.
         self.job_id = ""
+        #: The Max queue wait the current request is held to, in seconds (``0``: no limit) — :meth:`_queue_wait_now`.
+        self._queue_wait_said = queue_wait_seconds(host)
 
     def listen(self, *, log_fn: Callable[[str], None] | None = None,
                on_state: Callable[[HoldState], None] | None = None) -> None:
@@ -817,8 +824,8 @@ class GrantedNode:
     def _ask(self, options: list[str], user_excluded: list[str], limit_s: int) -> HoldState:
         script_text = compose_hold_script(
             self.paths, limit_s=limit_s, idle_release_s=int(self.host.granted_idle_release_min) * 60)
-        queue_wait = queue_wait_seconds(self.host)
         began = self._clock()
+        self._queue_wait_said = queue_wait_seconds(self.host)
         failed_nodes: list[str] = []
         while True:
             excluded = [*user_excluded, *failed_nodes]
@@ -835,7 +842,7 @@ class GrantedNode:
             self.transcript.add(f"{sent}  →  job {self.job_id}")
             self._log(f"[remote] granted node: asked the scheduler for a node (job {self.job_id}, "
                       f"time limit {_duration(limit_s)}).\n")
-            outcome = self._wait(began, queue_wait)
+            outcome = self._wait(began)
             if isinstance(outcome, HoldState):
                 # The state the wait saw granted, not a fresh read: a read that failed here raised out of the request,
                 # which then cancelled a node that had just been granted.
@@ -851,7 +858,30 @@ class GrantedNode:
             raise HoldError("the request was cancelled.")
         self._sleep(seconds)
 
-    def _wait(self, began: float, queue_wait: int) -> HoldState | str:
+    def _queue_wait_now(self, began: float) -> int:
+        """The host's Max queue wait as it is saved *now*, in seconds (``0``: no limit), read again on every poll.
+
+        The job is queued with no deadline of its own — Slurm is never told the Max queue wait; this wait is the only
+        thing that enforces it — so a user watching a request queue for longer than they expected can raise the limit
+        in Manage Remotes, or set it to 0, and keep the job's place in the queue. Read once at the request, as it
+        used to be, the edit reached only the next request, and the only way to wait longer was to release the job and
+        queue again at the back. The limit still counts from the request, so lowering it below the time already
+        waited ends the wait at the next poll. Settings that cannot be read, or a host no longer saved under this
+        name and address, keep the limit last seen. A change is said in the log once."""
+        saved = self._saved_host()
+        if saved is not None and saved.ssh_alias == self.host.ssh_alias:
+            now = queue_wait_seconds(saved)
+            if now != self._queue_wait_said:
+                waited = self._clock() - began
+                then = ("it is past that, so the request ends now" if now and waited > now
+                        else "it keeps its place in the queue")
+                self._log(f"[remote] granted node: Max queue wait is now {_queue_wait_words(now)} (was "
+                          f"{_queue_wait_words(self._queue_wait_said)}); job {self.job_id} has waited "
+                          f"{int(waited) // 60} min, and {then}.\n")
+                self._queue_wait_said = now
+        return self._queue_wait_said
+
+    def _wait(self, began: float) -> HoldState | str:
         """Poll until the hold is granted (the granted state), its node failed to boot (that node's name), or it cannot
         be.
 
@@ -871,6 +901,7 @@ class GrantedNode:
                 if unanswered == 1:
                     self._log(f"[remote] granted node: WARN {exc} — job {self.job_id} is still waiting in the queue "
                               f"as far as this app knows; looking again every {HOLD_POLL_S} s.\n")
+                queue_wait = self._queue_wait_now(began)
                 if queue_wait and self._clock() - began > queue_wait:
                     raise self._queue_wait_spent(queue_wait, self.job_id) from None
                 self._nap(HOLD_POLL_S)
@@ -888,6 +919,7 @@ class GrantedNode:
                 return state.node or "?"
             if state.phase == "ended":
                 raise HoldError(f"the node was not granted: {state.ended_reason}.")
+            queue_wait = self._queue_wait_now(began)
             if queue_wait and self._clock() - began > queue_wait:
                 raise self._queue_wait_spent(queue_wait, state.job_id)
             self._nap(HOLD_POLL_S)
@@ -993,6 +1025,18 @@ def step_launcher(target: StepTarget, *, srun: str = "srun") -> str:
 
 _NODES: dict[str, GrantedNode] = {}
 _NODES_LOCK = threading.Lock()
+
+
+def _saved_host(host: RemoteHost) -> RemoteHost | None:
+    """*host* as ``remotes.toml`` holds it now, or ``None`` when the file cannot be read or no longer names it."""
+    try:
+        return load_remotes().get(host.name)
+    except (OSError, ValueError):
+        return None
+
+
+def _queue_wait_words(seconds: int) -> str:
+    return "no limit" if seconds <= 0 else f"{seconds // 60} min"
 
 
 def node_for(host: RemoteHost, cache: DatasetCache, *, log_fn: Callable[[str], None],

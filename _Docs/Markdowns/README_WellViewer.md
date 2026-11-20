@@ -2105,6 +2105,18 @@ says so once and the app looks again at the next poll; the job keeps its place
 in the queue, and the log says when the host answers again. Only **Release**,
 *Max queue wait* or the scheduler ending the job end the request.
 
+**You can change *Max queue wait* while a requested node is still queued.** The
+limit is All-Well's own — the scheduler is never told it — and the request reads
+the saved value again at every look, so raising it in the host's settings, or
+setting it to 0 (no limit), lets the job keep its place in the queue instead of
+being cancelled at the old limit. The log says so: *Max queue wait is now 60 min
+(was 30 min); job 4001 has waited 28 min, and it keeps its place in the queue.*
+The limit still counts from the moment you asked for the node, so lowering it
+below the time already waited ends the request at the next look. Only the
+window that asked for the node keeps this clock. A run's own node request
+(rather than a requested node) takes the limit with it to the cluster when it
+starts, so an edit reaches only the next run.
+
 A run is told which node it is on in its log (*running on the granted node … — no
 queue wait*). A run that would outlast the node's time limit — its scheduler
 command's `--time`, scaled by its batches — gets a fresh node, with a fresh limit,

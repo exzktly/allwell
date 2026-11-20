@@ -166,6 +166,33 @@ def carry_nanowell_tables(src_out, dest_out, well_map: dict, *, keep_timepoint=N
     return written
 
 
+def recheck_identity(dest_out, wells, emit) -> dict:
+    """Run the nanowell identity check (``pipeline.nanowell_identity.audit``) over *wells* of a destination a tool
+    has just written, and say what it found through *emit*; ``{well: sidecar payload or None}``.
+
+    The check's sidecar (``nanowells/<well>_identity.json``) carries a digest of the sites table, the grid record
+    and the montages it was computed from, and a sidecar whose digest no longer matches is read as *not checked*.
+    A tool that narrows those tables therefore cannot carry the source's verdicts, and one that carries none leaves
+    QC reporting that the check was never run on a dataset that was checked before it was cut. The check reads only
+    what the destination now holds, so it is run on it here, the same code the pipeline runs after each well. A
+    failure is said, never raised: the tables are written and usable, only unchecked."""
+    wells = sorted(wells)
+    if not wells:
+        return {}
+    from pipeline.nanowell_identity import audit, summary_lines
+
+    try:
+        results = audit(dest_out, wells)
+    except Exception as exc:              # the destination is whole; only its identity verdicts are missing
+        emit(f"The nanowell identity check could not run on the written tables ({type(exc).__name__}: {exc}); "
+             f"QC will report it as not run until it is run from a terminal.")
+        return {}
+    emit(f"Ran the nanowell identity check on {len(wells)} well(s):")
+    for line in summary_lines(results):
+        emit(f"  {line}")
+    return results
+
+
 def _carry_template(src: Path, dest: Path, kept_timepoints: set) -> None:
     """Carry the well's kept earliest template (what a later incremental run falls back to) when the timepoint it
     was built at is still in the destination; without it, the next run builds one from the earliest kept."""

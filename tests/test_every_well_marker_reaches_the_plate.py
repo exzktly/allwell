@@ -120,6 +120,10 @@ ROSTER: dict[str, list[tuple]] = {
     # (above) is what the plate reads; this one only says why the well is in the pass
     "Well %s — its confluence is measured again against the empty reference this pass saved.":
         [((W,), "I", "note", "")],
+    # an incremental well whose output holds a timepoint its input no longer has: it is analysed again from the
+    # start, and that run's own lines (starting, done) are what the plate reads; this one only says why
+    "Well %s — the output holds timepoint(s) the input no longer does (%s), so every timepoint is analysed "
+    "again and the output rewritten without them.": [((W, "48h"), "I", "note", "")],
     # notes: true, worth reading in the log, and no change to what the well is
     "Well %-12s -> %s  (%d rows)": [((W, "m_A01.csv", 10), "I", "note", "")],          # the CSV it wrote
     "Well %-12s -> %s  (+%d row(s), merged)": [((W, "m_A01.csv", 10), "I", "note", "")],

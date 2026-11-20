@@ -687,9 +687,16 @@ which. When the second download does not all arrive, the well stays blue, its ho
 predates the re-anchoring, and the run keeps the remote copy so it is not lost. A well that has already turned
 green once can therefore go back to amber near the end of a batch; its earlier download is about to be replaced.
 
+**Leaving out a damaged last timepoint.** When the last frame of an acquisition is corrupt or missing (in every
+channel or only one), that timepoint fails in Analyze. Either way of leaving it out gives a dataset that reads as
+whole: convert again with that timepoint left out of the selection and run Analyze into the same output folder with
+*Fill in what's missing* — a well whose output still holds the dropped timepoint is analysed again over the ones it
+has, and the log says so — or cut the analysed dataset with *Subset*, which re-runs the identity check on what it
+keeps and leaves the completeness record to *Validate & Repair*.
+
 **Datasets tools and nanowell results.** *Subset* carries the nanowell tables of the wells and timepoints it
-keeps; it refuses a selection of fields, because a well's nanowell results are measured over all of its tiles
-together. *Merge Plates* carries both plates' tables, with dataset 2's wells renamed by the remap; it refuses two
+keeps, and runs the identity check again on them; it refuses a selection of fields, because a well's nanowell
+results are measured over all of its tiles together. *Merge Plates* carries both plates' tables, with dataset 2's wells renamed by the remap; it refuses two
 plates analysed under different nanowell settings, and says when only one plate has nanowell results (the
 other's wells then show on the Nanowells page as wells without a table). *Concatenate* supports the
 successive-imaging workflow: concatenate the analysed dataset with the new timepoint's raw images, then run
@@ -10516,6 +10523,15 @@ rows and the images agree about what a timepoint is. When a subset genuinely
 ends up with no measurement rows at all, the error says which of the three
 reasons it was: the rows could not be read against the filter at all, the images
 matched a filter the rows did not, or nothing in the source matched.
+
+A subset does not carry the source run's record of what failed or what was
+missing: that record describes the source's whole input, so a subset that
+leaves out a damaged timepoint would go on reporting it. Home therefore says
+the new dataset has no completeness record until you run **Validate & Repair**
+on it, which writes one from what the subset actually holds. A nanowell
+dataset's identity check is run again on the subset's own tables as part of the
+subset (the log lists each well's verdicts), so its QC page is checked from the
+start.
 
 Timepoints keep their original hours — a subset spanning 24h–72h stays
 labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-

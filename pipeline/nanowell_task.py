@@ -553,6 +553,15 @@ def _prior_state(prior_dir, well_label, csv_prefix, settings_key, timepoints, re
         return None
     if _has_a_step_off_timepoint(grid):
         return None
+    gone = sorted(set(grid.get("timepoints") or {}) - set(timepoints))
+    if gone:
+        # The output describes timepoints the input no longer holds: a plate converted again without a damaged last
+        # frame, analysed into the folder of the run that failed on it. Kept, the well read as up to date and its
+        # output went on carrying the dropped timepoint's failure, so the run, Review and Validate all reported a
+        # gap the input no longer has. The well is analysed again over the timepoints it holds now.
+        log.info("Well %s — the output holds timepoint(s) the input no longer does (%s), so every timepoint is "
+                 "analysed again and the output rewritten without them.", well_label, ", ".join(gone))
+        return None
     kept = {tp for tp in timepoints
             if grid.get("timepoints", {}).get(tp, {}).get("status") == nr.OK
             and grid["timepoints"][tp].get("record_digest") == nr.record_digest(record, well_label, tp)

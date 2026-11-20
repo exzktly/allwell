@@ -1325,10 +1325,12 @@ allwell/
 │   │                              containers, zip_passthrough, member_names,
 │   │                              concurrency, log_panel, tool_controller,
 │   │                              dataset_fields, equation_row, convert_marker, well_block,
+│   │                              raw_dataset (an in-only dataset, for Concatenate and Subset),
 │   │                              pending_inputs (an input a queued job has still to write)
 │   ├── concatenate/            ← Concatenate datasets (compute/apply/in_place/worker/view/controller/dashboard)
 │   ├── merge_plates/           ← Merge two plates into one, remapping wells
-│   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
+│   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint (and, for an
+│   │                              in-only dataset, channel), into a new folder or in place
 │   ├── import_loose/           ← Zip a loose image folder into per-well archives — the
 │   │                              one conversion step to the input layout Analyze reads;
 │   │                              zipper.py spawns pipeline/well_plate_zipper.py for the
@@ -18329,6 +18331,7 @@ deletable:
 | `datasets/core/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count) every tool below uses for its per-well `ThreadPoolExecutor`. It **re-exports** `pipeline.explode_common.pick_workers` rather than defining it: the exploders take it from there, and this module used to hold a second implementation of the same three lines under a comment saying it mirrored the first — which is a heuristic that will be tuned in one place and not the other. |
 | `datasets/core/convert_marker.py` | The resume marker the three **packed-file converters** share (Convert OME-TIFF, Convert CZI, Convert ND2) — `mapping_signature`, the marker read/write/clear trio, `converted_wells`, `ResumeState`, `resume_state` and `destination_problem`. It is a different question from `dataset_paths.make_dataset_api`'s, which the copy tools use: theirs is "did I leave leftovers here?", answerable from the presence of a file and cleared by rebuilding. This one is "may I carry on from what is here?", which is a question about **settings** — two different mappings of one source write *identical* filenames, so nothing on disk distinguishes an `A01.zip` made from scene 0 from one made from scene 7, and only a marker recording the mapping can tell a run that may finish another's work from one that must refuse. Each converter passes its own marker filename (a folder carrying *another* converter's leftovers is not a resume either) and its own list of mapping fields; the signature also carries the source's resolved path, size and mtime, so a file replaced at the same name — a re-export, a restore, the next plate saved over the last — is a different source. `workers` is deliberately not a mapping field: it changes how fast the conversion goes and nothing about what it writes, so refusing a resume over it would refuse one that was safe. A field in `OMITTED_WHEN_EMPTY` (`timepoint_subset`) is written only when set, so markers left before it existed still match a run that leaves it empty (§6.2c). |
 | `datasets/core/timepoint_picker.py` | `TimepointPicker` — the three converters' *Timepoints* dropdown: a `CheckableDropdown` of the source's own timepoint tokens whose `subset()` is `()` with everything ticked, `None` with nothing, and otherwise the ticked tokens; a restored token the source lacks stays listed as missing (§6.2c). |
+| `datasets/core/raw_dataset.py` | Qt-free reading of a *raw* dataset, shared by Concatenate and Subset (`in/` present, `out/` missing or holding only OS debris such as `.DS_Store`, judged by `datasets.core.member_names.is_os_junk_member`): `is_raw_dataset`, `raw_paths`, `unusable_reason` (each page's source-field hint, naming the asking tool in its closing sentence, and Concatenate `open_pair`'s first refusal: why a folder is neither an analysed nor a raw dataset — not there, loose images never converted, no `in/`, or an `out/` with files but no `pipeline_info.json` — each naming what to do), and Concatenate's `raw_info`, which infers the filename schema from the archives' member names (`util/schema_infer`) and returns a sidecar-shaped dict **only when the inference is confident and has a timepoint slot** — a guessed schema would shift the wrong filename field. `check_raw_compatible` compares separator and schema fields (`RAW_COMPAT_KEYS`) where analysed datasets compare the full sidecar. |
 | `datasets/core/nanowell_rim.py` | `step_against_roster` / `MIN_CRESCENT` / `site_address` — read a lattice step off a nanowell timepoint's rim from its sites table: the one way a step shows in tables that have rows only at the roster's addresses. Not proof (a bubble or glare over one side reads the same), so Validate's relabel moves only a timepoint the run flagged by it and Concatenate's link sets a timepoint aside for Analyze on it (§6.2i, §6b). Qt-free. |
 
 **Every copy tool refuses a dataset that spells one well two ways.** Subset,
@@ -18557,7 +18560,6 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 
 | Module | Role |
 |--------|------|
-| `raw_compute.py` | Qt-free reading of a *raw* dataset (`in/` present, `out/` missing or holding only OS debris such as `.DS_Store`, judged by `datasets.core.member_names.is_os_junk_member`): `is_raw_dataset`, `raw_paths`, `unusable_reason` (the page's field hint and `open_pair`'s first refusal: why a folder is neither an analysed nor a raw dataset — not there, loose images never converted, no `in/`, or an `out/` with files but no `pipeline_info.json` — each naming what to do), and `raw_info`, which infers the filename schema from the archives' member names (`util/schema_infer`) and returns a sidecar-shaped dict **only when the inference is confident and has a timepoint slot** — a guessed schema would shift the wrong filename field. `check_raw_compatible` compares separator and schema fields (`RAW_COMPAT_KEYS`) where analysed datasets compare the full sidecar. |
 | `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset from the gap (`compute_offset(…, gap_hours=)`), enumerates wells, and returns a `MergePlan`. Also owns the gap model (`default_gap`, `choose_gap`, `gap_preview`, `parse_gap_hours`), `scale_warning`, and `open_pair`, which classifies the pair as analysed, raw, or analysed + raw. The page calls `gap_preview` on every keystroke of the gap field, so it reads the pair through `_open_pair_for_preview`, which keeps the last few pairs' readings (a refusal included) keyed on the path as given and resolved, the sidecars, and each input container's size and modification time (an archive written in place, or an image added to a well folder, moves its own time and not the folder's): a raw pair's schema is inferred by opening every archive, which measured about 75 ms on two 60-well plates, and only the typed gap changes between keystrokes. The run never reads through it. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
 | `in_place.py` | Qt-free planner and executor for *Adding in place*: `in_place_refusal` / `structural_refusal` (which pairs qualify), `build_append_plan` (the shared `plan_pair` with dataset 1 as the destination and `MergePlan.in_place` set), `plan_wells` (each well's members and shifted names, refusing collisions before anything is written), `append_in_place` (the journalled, all-or-nothing run, ending with the source-file list) and `recover_dataset` (the undo a crash left, for the worker). |
 | `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. Copying goes through `core.containers.copy_container_members`, so a well that comes from one dataset only is a whole-file copy, and a merged well moves each member's compressed bytes straight from whichever side holds it — dataset 2's under a name whose timepoint field has been shifted, dataset 1's under its own. A timepoint offset changes the name in the member's header and nothing else, so there is nothing to decode on either side. It tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback, a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard, and a `sub_progress(well, done, total)` callback that drives that well's dial *within* the stage (fused across the well's two container passes by `core.containers.WellFraction`). `sub_progress` is the one callback deliberately left outside the callback lock: every call names its own well, so interleaving is harmless, and taking the lock once per member would serialise the parallel copy it reports on. Wells merge in parallel through a `ThreadPoolExecutor` (`pick_workers`) — each owns its own destination files, so `log`/`progress` calls before a well's work starts are the only thing serialised behind a lock; aggregating each future's result into `well_stats`/`dropped_members`/etc. and reporting the terminal `"merged"`/`"warned"` state both happen back on `execute_plan`'s own thread as futures complete, so that bookkeeping needs no lock at all. |
@@ -18583,10 +18585,10 @@ parses the text in-thread so
 the queue spec carries the text the user typed, and `show_job` restores it.
 `record_derivation` stores the gap and its source.
 
-A **raw** dataset has `in/` and no results (`raw_compute.is_raw_dataset`); an
+A **raw** dataset has `in/` and no results (`datasets.core.raw_dataset.is_raw_dataset`); an
 `out/` holding only Finder debris still counts as no results, because a folder a
 user has opened is never empty on macOS. `open_pair` first asks
-`raw_compute.unusable_reason` of each folder and refuses with that reason, so a
+`raw_dataset.unusable_reason` of each folder and refuses with that reason, so a
 folder that is neither shape is told which of the two it is closest to rather
 than the shared resolver's "needs both an 'in' and an 'out' folder". Two
 raw datasets merge to a raw destination: `execute_plan` takes a branch that
@@ -18708,7 +18710,7 @@ undo anything. Subset, Merge Plates and Validate open an analysed dataset
 through `dataset_paths.resolve_dataset`, which refuses — read-only, so it is
 safe from a page preview — while `in/` holds journals
 (`refuse_unfinished_append`); Import Loose's in-place mode refuses the same way;
-Concatenate's raw path (`raw_compute.raw_paths`) does not refuse, because its
+Concatenate's raw path (`raw_dataset.raw_paths`) does not refuse, because its
 worker recovers both datasets before planning; and the importers that write new
 datasets read source files, not an existing `in/`. The pipeline's own command
 line (`process_microscopy.main`) runs no recovery and refuses an input folder
@@ -19774,6 +19776,48 @@ four coupled timepoint-derived values §6b documents for Concatenate (the
 column, and the zip member's own name) never diverge here because nothing
 about a kept row or member is rewritten at all; filtering is a pure predicate
 (`subset_compute.member_matches` / `row_verdict`) over what's already there.
+
+**An in-only source** — `in/` and no analysis output, `datasets.core.raw_dataset.is_raw_dataset`, the plate a
+converter or Import Loose writes — takes its own path end to end: `build_subset_plan` hands it to
+`_build_raw_plan` and `apply.execute_plan` to `apply_raw.execute_raw_plan`. It has no `pipeline_info.json`, so
+`subset/raw_compute.resolve_raw_source` establishes the filename schema, in this order: the **acquisition record**
+(`in/acquisition.json`), accepted only when parsing every archive member under the schema reproduces exactly the
+record's tiles (`util.acquisition_record.validate_against_archives`) — the converters' own
+`experiment:channel:well:fov:timepoint` with `_` is tried, or the schema the user typed when there is one, and a
+typed schema that contradicts the record is refused rather than preferred, since the record was written from the
+source file; then a **typed schema** alone, which every image name must fit; then a **confident inference**
+(`util.schema_infer`, as Concatenate's raw path uses). With none of them only wells can be chosen — whole archives
+need no schema — and `require_axes` refuses a timepoint, FOV or channel filter by naming the field it cannot find.
+The result is a sidecar-shaped dict (`RawSource.info`), so `load_schema` and the page's pickers read it as they read
+a real sidecar, plus `available_channels`.
+
+Two filters exist only here. `SubsetFilter.channels` cuts by the member's channel token (case-insensitively, through
+`channel_tokens`); an analysed source refuses it, because its measurement tables and QC archives are per channel
+and nothing here rewrites them. And `timepoint_kept` accepts a member whose timepoint token is literally one of the
+labels ticked before trying hours, because a raw plate's picker offers its tokens as spelled and `pre` / `post`
+read as no hours at all. `_build_raw_plan` also checks each axis's ticked values against what the archives hold,
+so a filter that keeps no timepoint, FOV or channel is refused before anything is written.
+
+A raw subset stays raw: `in/` and no `out/` (no sidecar, no provenance log — a file under `out/` would make the
+folder read as a broken analysed dataset), and the page shows no *Open in Review*. Its sidecars are cut to the
+images kept: the acquisition record through `filter_record_to_archives`, which reads the archives as written; the
+hand-set nanowell anchors by well and timepoint (`carry_anchors`); and `INCOMPLETE_WELLS.txt` by well, with a log
+line saying its counts are the source's when a timepoint, FOV or channel was removed. A well whose kept members
+hold no image is not written.
+
+**Editing in place** (`SubsetPlan.in_place`, in-only sources only — on an analysed one the `out/` tables would go on
+describing the images removed) cuts the source's own archives. Each kept well whose members are not all kept is
+copied, kept members only, to a hidden `.<WELL>.zip.subset-staging` in `in/` (`durable=True`) and renamed over the
+archive, so the space an edit needs at any moment is that of the wells being rewritten then — never a second copy
+of the dataset — and nothing removed is kept anywhere. A well every member of which is kept is not touched; one left
+with no image, and every well not chosen, is deleted. Folder-form wells (`in/<WELL>/`) are refused, and so is an
+edit that would remove nothing. `IN_PLACE_MARKER` (`.aw_subset_in_place`) is written first with the schema and the
+filter and removed last: while it is there a copy from the folder is refused, and the same edit run again resumes
+with the stored schema (`resolve_raw_source(record_override={})`) — by then the archives no longer match the record —
+re-cutting an already-cut archive being a no-op. A different edit is refused until that one finishes. When a
+timepoint, FOV or channel is removed the converters' `.aw_converted` done marker is deleted too, since a later
+conversion topping the folder up would add wells holding what the others no longer do; a wells-only edit keeps it.
+A queued in-place job's output is its source (`services.job_kinds.planned_output`).
 
 **Both halves of that predicate resolve a timepoint the same way.**
 `member_matches` reads the *filename's* timepoint token; the row side used to

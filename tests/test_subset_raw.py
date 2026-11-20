@@ -246,3 +246,9 @@ def test_a_timepoint_token_that_does_not_read_as_hours_is_still_chosen_by_its_na
     _run(src, tmp_path / "dest", SubsetFilter(timepoint_labels=frozenset({"post"})),
          schema="experiment:channel:well:fov:timepoint", separator="_")
     assert _members(tmp_path / "dest", "A01") == _expected("A01", timepoints=("post",))
+
+
+def test_a_copy_with_no_destination_is_refused_rather_than_written_to_the_working_directory(tmp_path):
+    src = _raw(tmp_path / "src")
+    with pytest.raises(SubsetError, match="Choose a destination folder"):
+        build_subset_plan(src, "", SubsetFilter(wells=frozenset({"A01"})))

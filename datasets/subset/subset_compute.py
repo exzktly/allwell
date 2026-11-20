@@ -189,6 +189,9 @@ def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
 
 def _check_destination(src: DatasetPaths, dest_root: Path | str) -> tuple[DatasetPaths, bool]:
     """The destination of a copy, and whether it holds this tool's own failed attempt to clear."""
+    if not str(dest_root or "").strip():
+        # ``Path("")`` is the working directory, which no one chose.
+        raise SubsetError("Choose a destination folder for the subset.")
     dest_root = Path(dest_root)
     dest = DatasetPaths(root=dest_root, in_dir=dest_root / "in", out_dir=dest_root / "out")
 

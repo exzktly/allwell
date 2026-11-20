@@ -10441,7 +10441,7 @@ path touches a pixel. On a share that is one round trip per file, and doing it
 in `refresh_readout` froze the window for the duration, on a page whose whole
 job is to be looked at before a long run.
 
-So the page scans in two stages, both on a worker thread through
+So the page scans in three stages, all on a worker thread through
 `core.worker_bridge.run_off_thread`. The **peek**
 (`czi_read.peek_scene_wells` → `czi_set.peek_wells`) reads the 112-byte file
 header and the metadata segment it points at — measured at 6 KB for a
@@ -10449,7 +10449,18 @@ whole-plate file against 997 KB for the full read, and 46 KB against 1.05 MB
 for a 96-file split export — and names the wells. The plate is painted from it
 at once, with the verdict saying so, because a peek cannot know whether the
 file is sound, whether the files agree, or how many tiles a scene holds. The
-**full read** follows and replaces it.
+**timepoints** come next (`czi_import_compute.source_timepoint_tokens` →
+`czi_set.read_timepoint_tokens`): the full read takes them from one file — the
+first holding image tiles, a split export's members all covering the same
+timepoints — but returns only once every file's subblock directory has been
+read, which over a share kept the Timepoints picker empty for as long as that
+took while Convert, available throughout, converted every timepoint. So that
+one file is read on its own first, by the same rule (series roots dropped by
+name, a tileless master passed over), and the picker lists its tokens. Its
+layout goes into the `cached_layout` cache under the keys the full read asks
+for, so the full read pays nothing for it. If it fails, the full read still
+runs and lists them, or says why it could not. The **full read** follows and
+replaces the peek.
 
 **Neither of them gates the Run button.** `_ready_before_the_scan` decides
 that, from what a directory listing and the widgets can answer: a source that
@@ -11137,6 +11148,13 @@ top-up of such a folder although nothing about its settings differs.
 
 The picker is `datasets/core/timepoint_picker.TimepointPicker`, a
 `widgets.checkable_dropdown.CheckableDropdown` beside each page's stride box.
+While a page reads its source it is told so (`set_reading`, by the CZI and ND2
+pages, which read off the window's thread) and says *Reading the timepoints…*
+rather than the dropdown's *No timepoints ticked*, which over an empty list
+read as a picker that could not be used, and its menu's first line says the
+same (`CheckableDropdown.setEmptyMenuText`, a generic empty-menu note) instead
+of offering only All and None; listing tokens ends that state. With
+nothing listed and everything selected it says *Every timepoint*.
 It holds the selection as a value (`()` all, `None` nothing ticked — refused by
 `RawFields.problems()` rather than read as "all"), because the list is rebuilt
 whenever the source is read and a queued job's restored selection can arrive
@@ -11182,8 +11200,8 @@ unaffected.
 **What each page counts is the thing that actually takes the time.** The CZI
 page's two stages each walk the same file list, so `czi_set._per_file` ticks
 once per file as the pool yields it and the page counts files —
-`Reading the file headers (7 of 96)…`, then
-`Reading the rest of the plate (7 of 96)…`. The ND2 page reads one file, so a
+`Reading the file headers (7 of 96)…`, then `Reading the timepoints…` (one
+file, so no count), then `Reading the rest of the plate (7 of 96)…`. The ND2 page reads one file, so a
 file count would say nothing; it names the steps instead —
 `Opening Plate7.nd2…`, `Reading the channel names…`,
 `Reading the acquisition times…` — and counts only the one step with a real

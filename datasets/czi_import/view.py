@@ -55,6 +55,7 @@ from datasets.czi_import.czi_import_compute import (
     plan_conversion,
     read_source,
     resume_state,
+    source_timepoint_tokens,
 )
 from core.worker_bridge import run_off_thread
 from pipeline.czi_explode import WELL_SOURCES
@@ -755,6 +756,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._scan_delivered.discard(key)
         params = self.params()
         self._readout.setText("Reading the file headers…")
+        self._timepoint_pick.set_reading(True)
         # Convert stays available while the plate is read. The scan describes
         # the plate; it does not permit it — see ``_ready_before_the_scan``.
         self._set_verdict(_UNREAD_NOTE if self._ready_before_the_scan() else "",
@@ -810,12 +812,35 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # plate is drawn before the run rather than during it.
         if peek.wells and not self._running:
             self._dashboard.set_wells(peek.wells)
-        self._readout.setText("Reading the rest of the plate…")
+        self._readout.setText("Reading the timepoints…")
         self._set_verdict(peek.note(), "muted")
         # Still available, and now with the wells drawn to judge it by. The
         # peek's own note ends "not yet checked", which is the honest label
         # for a plate the page has described from headers alone.
         self._update_run_gate(self._ready_before_the_scan())
+
+        # The timepoints before the rest of the plate. They come from one file (the first holding images),
+        # and the full read below walks every file's directory first — on a split plate held on a network
+        # share, one round trip per file, during which the picker had nothing to list and Convert, available
+        # all the while, converted every timepoint. The file read here lands in the cache the full read asks.
+        def _times():
+            return source_timepoint_tokens(src, params)
+
+        self._scan_bridges[(generation, "times")] = run_off_thread(
+            _times,
+            on_done=lambda tokens: self._on_timepoints_read(generation, src, params, tokens),
+            on_failed=lambda _message: self._on_timepoints_read(generation, src, params, None),
+        )
+
+    def _on_timepoints_read(self, generation: int, src: str, params, tokens) -> None:
+        """List the timepoints (``None``: their file could not be read — the full read will say why), then read
+        the rest of the plate."""
+        self._delivered(generation, "times")
+        if generation != self._scan_generation:
+            return
+        if tokens is not None:
+            self._timepoint_pick.set_source_tokens(tokens)
+        self._readout.setText("Reading the rest of the plate…")
 
         def _full(report):
             return read_source(src, params, report=report)
@@ -860,6 +885,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # rescans (see ``_on_source_changed``); a keystroke is not a request to
         # go back to a filer that just refused.
         self._readout.setText("")
+        self._timepoint_pick.set_reading(False)
         self._set_verdict(f"Could not read the source: {message}", "error")
         self._dashboard.set_wells([])
         self._update_run_gate(False)
@@ -889,6 +915,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._scan_key = None
             self._czi_set = None
             self.stop_scanning()
+            self._timepoint_pick.set_reading(False)
             self._readout.setText(
                 "Choose a CZI file, or a folder of them, to see what it holds.")
             self._set_verdict("", "muted")
@@ -919,6 +946,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         problems = self.raw_fields().problems()
         if czi_set.problem:
             self._readout.setText("")
+            self._timepoint_pick.set_reading(False)
             self._set_verdict(czi_set.problem, "error")
             self._rebuild_channels([])
             self._dashboard.set_wells([])

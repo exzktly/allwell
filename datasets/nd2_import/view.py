@@ -631,6 +631,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._scan_bridges.pop(key, None)
             self._scan_delivered.discard(key)
         self._readout.setText("Reading the file…")
+        self._timepoint_pick.set_reading(True)
         self._set_verdict("", "muted")
         self._update_run_gate(False)
 
@@ -704,6 +705,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # fails, which clears it again: one scan per character typed. Recovery
         # is re-picking the source, which always rescans.
         self._readout.setText("")
+        self._timepoint_pick.set_reading(False)
         self._set_verdict(f"Could not read the file: {message}", "error")
         self._dashboard.set_wells([])
         self._update_run_gate(False)
@@ -732,6 +734,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self._scan_key = None
             self._layout = None
             self.stop_scanning()
+            self._timepoint_pick.set_reading(False)
             self._readout.setText("Choose an ND2 file to see what it holds.")
             self._set_verdict("", "muted")
             self._rebuild_channels([])
@@ -755,6 +758,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         unreadable = layout.warnings and not layout.n_positions
         if unreadable:
             self._readout.setText("")
+            self._timepoint_pick.set_reading(False)
             self._set_verdict(layout.warnings[0], "error")
             self._rebuild_channels([])
             self._dashboard.set_wells([])

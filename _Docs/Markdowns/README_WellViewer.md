@@ -9708,6 +9708,13 @@ on the plate rather than supplying it.
    of the timepoints, the menu lists it as *(not in this source)* and the run
    is refused naming it — untick it, or press **All**.
 
+   On a folder of files the timepoints are listed once the **first** file
+   has been read, before the rest of the plate: the line under the source
+   says *Reading the timepoints…*, then *Reading the rest of the plate (7 of
+   96)…*, and you can choose timepoints during the second. Until they are
+   listed, the button and the menu both say *Reading the timepoints…*; Convert is available
+   meanwhile, and a conversion started then converts every timepoint.
+
    Unlike the wells, the timepoint selection must match when you add to an
    existing dataset: each well's archive holds one image per converted
    timepoint, so wells converted under two different selections would make a

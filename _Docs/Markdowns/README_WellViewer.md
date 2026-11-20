@@ -2069,6 +2069,20 @@ waiting for a granted node another run is using.
 
 ### Keeping a node between runs
 
+The **server** icon in the title bar (to the left of the storage button, in
+every mode — Review, Analyze and Datasets) shows the granted node at a glance,
+and clicking it opens *Manage Remotes*:
+
+- **green** — a node is granted (idle, or in use by a run);
+- **yellow** — a node has been requested and is not ready yet (queued or
+  starting, or the scheduler did not answer);
+- **grey** — no node.
+
+Hover it to see which host each node is on. It shows what this window has heard:
+a node granted from another window appears once you select its host in
+*Manage Remotes*, and a node the cluster released on its own turns grey within
+about half a minute.
+
 On a cluster where the node you need is slow to get — a GPU node that has to
 boot, say — a run that fails after its node was granted used to give the node
 back, and running it again queued for a new one. **Request a node** in
@@ -4321,7 +4335,7 @@ offered yet.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ All-Well v…               ◫  ↻  ⛶  ⌂  ⛁  ▯  i                   │  ← title bar
+│ All-Well v…            ◫  ↻  ⛶  ⌂  ⛁  ≡●  ▯  i                  │  ← title bar
 ├──────────────┬──────────────────────────────────────────────────┤
 │ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …    │  ← one band
 ├──────────────┼──────────────────────────────────────────────────┤

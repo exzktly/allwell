@@ -79,6 +79,7 @@ def _shell(qapp, mode: str = "review", split=None):
             runtime=types.SimpleNamespace(split=split))
     shell = types.SimpleNamespace(
         _review_actions=box,
+        _remote_node_btn=IconButton("server"),
         _storage_btn=IconButton("hard-drive"),
         _help_btn=IconButton("info"),
         _review=review,
@@ -95,15 +96,17 @@ def _widgets(layout):
 
 
 def test_icons_land_on_the_header_row_in_order(qapp):
-    """Split toggle, its picker, the cluster, Storage, then Help — after the
-    header's stretch, so hard right on the wordmark's line."""
+    """Split toggle, its picker, the cluster, the remote-node indicator,
+    Storage, then Help — after the header's stretch, so hard right on the
+    wordmark's line."""
     band, _bl, split = _review_band(qapp)
     shell, box = _shell(qapp, split=split)
     row, layout = _band(qapp)
     AllWellApp._mount_review_actions(shell, row)
     ws = _widgets(layout)
-    assert ws[-5:] == [split.toggle_btn, split.pane_combo, box,
-                       shell._storage_btn, shell._help_btn]
+    assert ws[-6:] == [split.toggle_btn, split.pane_combo, box,
+                       shell._remote_node_btn, shell._storage_btn,
+                       shell._help_btn]
     stretch_at = next(i for i in range(layout.count())
                       if layout.itemAt(i).spacerItem() is not None)
     assert layout.indexOf(split.toggle_btn) > stretch_at
@@ -168,6 +171,7 @@ def test_sync_round_trips_across_modes(qapp):
         AllWellApp._sync_review_actions(shell)
         assert box.isVisibleTo(band) is (mode == "review")
         assert shell._help_btn.isVisibleTo(band) is True
+        assert shell._remote_node_btn.isVisibleTo(band) is True
 
 
 def test_help_mounts_when_there_is_no_cluster(qapp):

@@ -699,6 +699,9 @@ class GrantedNode:
         self.job_id = ""
         #: The Max queue wait the current request is held to, in seconds (``0``: no limit) — :meth:`_queue_wait_now`.
         self._queue_wait_said = queue_wait_seconds(host)
+        #: The last state the host reported (:meth:`state`), ``None`` before the first read and after :meth:`release`.
+        #: Read by the window's header indicator (:func:`node_summary`), which must not reach the host to draw itself.
+        self.last_state: HoldState | None = None
 
     def listen(self, *, log_fn: Callable[[str], None] | None = None,
                on_state: Callable[[HoldState], None] | None = None) -> None:
@@ -747,6 +750,7 @@ class GrantedNode:
                             f"{said[-1] if said else 'no output'}")
         state = parse_state(result.stdout or "")
         self._remember(state)
+        self.last_state = state
         if state.phase == "ended":
             self.stop_beating()                  # an idle release left this thread beating for a job that is gone
         return state
@@ -972,6 +976,7 @@ class GrantedNode:
             self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
                       "releases itself within two minutes of the app's last heartbeat.\n")
         self.owned, self.job_id = False, ""
+        self.last_state = None
         return "AW_SCANCELLED" in out
 
 
@@ -1058,6 +1063,35 @@ def live_nodes() -> list[GrantedNode]:
     """Every handle this process has made; the app releases them when it quits."""
     with _NODES_LOCK:
         return list(_NODES.values())
+
+
+#: Phases a node is ready in (the header indicator's green), and phases a node is asked for and not yet ready in (its
+#: yellow). Everything else — no hold, an ended one, no state read yet — is no node (grey).
+READY_PHASES = ("granted", "busy")
+PENDING_PHASES = ("queued", "starting", "unknown")
+
+
+def node_summary(nodes: list[GrantedNode] | None = None) -> tuple[str, list[str]]:
+    """What the window's header indicator shows: ``("ready" | "pending" | "none", one line per host with a node)``.
+
+    Built only from what this process last heard (:attr:`GrantedNode.last_state`), never by asking a host: the
+    indicator redraws every few seconds in every mode, and most users never configure a remote at all. The level is
+    the best of the hosts' — one ready node is green however many others are still queued."""
+    level, lines = "none", []
+    for node in live_nodes() if nodes is None else nodes:
+        state = node.last_state
+        if state is None:
+            continue
+        if state.phase in READY_PHASES:
+            level = "ready"
+            where = f" on {state.node}" if state.node else ""
+            lines.append(f"{node.host.name}: node {'in use by a run' if state.phase == 'busy' else 'granted'}{where}")
+        elif state.phase in PENDING_PHASES:
+            if level == "none":
+                level = "pending"
+            lines.append(f"{node.host.name}: node {'starting' if state.phase == 'starting' else 'requested, waiting'}"
+                         + (" (the scheduler did not answer)" if state.phase == "unknown" else ""))
+    return level, lines
 
 
 # ── a run's claim on the node ───────────────────────────────────────────────────────────────────────────────────────

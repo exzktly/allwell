@@ -549,6 +549,15 @@ class AllWellApp(QMainWindow):
             "files take, and clear them. Your data and analysis are not touched.")
         self._storage_btn.clicked.connect(self._open_storage_dialog)
         self._storage_dialog = None
+
+        # Remote node status, and the way into Manage Remotes, from every mode:
+        # a granted node bills by the hour whichever pane is showing, and the
+        # Analyze footer's "Manage remotes" link is out of sight everywhere
+        # else. The dot is green for a node granted, yellow for one asked for
+        # and not ready yet, grey for none (ui/remote_node_button.py).
+        from ui.remote_node_button import RemoteNodeButton
+        self._remote_node_btn = RemoteNodeButton()
+        self._remote_node_btn.clicked.connect(self._open_manage_remotes)
         self._help_drawer = None  # built lazily on first open
         self._help_content = None
         self._help_manual_view = None  # None in trimmed builds without the manual
@@ -1574,7 +1583,8 @@ class AllWellApp(QMainWindow):
 
         The header row holds the wordmark and the version pill and is otherwise
         empty, so the icons go there: Split View's toggle (and its right-pane
-        picker), the Review-only dataset cluster, Storage, and Help last. They
+        picker), the Review-only dataset cluster, the remote-node indicator,
+        Storage, and Help last. They
         used to sit at the right end of the mode band below, where every icon
         took width from the page tabs sharing that band — on a narrow window
         the tab strip scrolled while the header above it stood empty.
@@ -1598,6 +1608,7 @@ class AllWellApp(QMainWindow):
         for w in (getattr(split, "toggle_btn", None),
                   getattr(split, "pane_combo", None),
                   getattr(self, "_review_actions", None),
+                  getattr(self, "_remote_node_btn", None),
                   getattr(self, "_storage_btn", None),
                   getattr(self, "_help_btn", None)):
             if w is not None:
@@ -1750,6 +1761,24 @@ class AllWellApp(QMainWindow):
             dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _open_manage_remotes(self) -> None:
+        """Open Manage Remotes from the header's remote-node indicator.
+
+        Analyze's own opener is used, so the dialog is the same one the Analyze
+        footer opens and "Run on" is rebuilt from disk when it closes, whichever
+        mode it was opened from. The indicator is redrawn at once afterwards:
+        a node released in the dialog should not stay green for two seconds.
+        """
+        analyze = getattr(self, "_analyze", None)
+        if analyze is None:
+            return
+        try:
+            analyze.open_manage_remotes()
+        finally:
+            btn = getattr(self, "_remote_node_btn", None)
+            if btn is not None:
+                btn.update_status()
 
     def _reload_current_dataset(self) -> None:
         """Reopen the dataset Review has loaded, so live state is re-read from

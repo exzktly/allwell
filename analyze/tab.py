@@ -240,7 +240,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         self._dry_run_cleanup_cb.setEnabled(
             is_remote and self._cleanup_remote_cb.isChecked())
 
-    def _open_manage_remotes(self) -> None:
+    def open_manage_remotes(self) -> None:
         """Open the Manage Remotes dialog and rebuild "Run on" from disk after.
 
         The dialog is deleted once it closes. Left alive it stayed a child of

@@ -66,7 +66,7 @@ from datasets.concatenate.concatenate_compute import (
     refuse_same_folder,
     rewrite_member_name,
 )
-from datasets.concatenate.raw_compute import is_raw_dataset
+from datasets.core.raw_dataset import is_raw_dataset
 from datasets.core.concurrency import pick_workers
 from datasets.core.containers import WellFraction, copy_container_members
 from datasets.core.dataset_paths import DatasetPaths

@@ -14,7 +14,7 @@ import pytest
 
 from datasets.concatenate import apply
 from datasets.concatenate import concatenate_compute as cc
-from datasets.concatenate.raw_compute import is_raw_dataset
+from datasets.core.raw_dataset import is_raw_dataset
 
 
 def _raw(root, *, wells=("A01",), timepoints=("0h",), fields=("f0", "f1"),

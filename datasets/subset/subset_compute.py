@@ -13,6 +13,7 @@ rewritten at all**. Filtering is a pure predicate over what's already there.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -43,10 +44,19 @@ from datasets.core.containers import (
 )
 from datasets.core.member_names import discover_parsed_member
 from datasets.core.nanowell_tables import carried_nanowell_block, has_nanowell_tables, refuse_unusable_tables
-from datasets.core.dataset_paths import known_channel_tokens
+from datasets.core.dataset_paths import known_channel_tokens, refuse_unfinished_append
+from datasets.core.raw_dataset import is_raw_dataset, raw_paths
+from datasets.subset.raw_compute import RawSchemaError, RawSource, require_axes, resolve_raw_source
 from pipeline.run_report import RUN_REPORT_BLOCK
+from util.schema import DEFAULT_SEP
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
+
+#: Written at an in-only dataset's root while Subset edits it in place, holding the schema and the filter the
+#: edit is applying. Each well archive is replaced atomically, so an interrupted edit leaves every archive either
+#: as it was or as filtered; the marker is what lets the next run finish it with the same schema, since by then
+#: the archives no longer match the acquisition record the schema was checked against.
+IN_PLACE_MARKER = ".aw_subset_in_place"
 
 #: The sidecar blocks that describe one run of the source's whole input, which a subset does not carry
 #: (:func:`build_subset_plan`): the pipeline's per-well run report and the completeness record.
@@ -95,12 +105,19 @@ class SubsetFilter:
     wells: frozenset[str] | None = None
     timepoint_labels: frozenset[str] | None = None
     fovs: frozenset[str] | None = None
+    #: The channel tokens to keep, as the member names spell them. Only an in-only dataset can be cut by
+    #: channel: an analysed one has per-channel measurement columns and QC images a member filter cannot
+    #: narrow (:func:`build_subset_plan` refuses it there).
+    channels: frozenset[str] | None = None
     # Derived, not passed in: kept out of init/repr/eq so the filter's identity
     # and equality stay exactly what its three real fields say.
     timepoint_hours: frozenset[float] | None = field(
         init=False, repr=False, compare=False, default=None,
     )
     fov_tokens: frozenset[str] | None = field(
+        init=False, repr=False, compare=False, default=None,
+    )
+    channel_tokens: frozenset[str] | None = field(
         init=False, repr=False, compare=False, default=None,
     )
 
@@ -115,6 +132,20 @@ class SubsetFilter:
         if self.fovs is not None:
             tokens = frozenset(normalize_fov(f) for f in self.fovs)
         object.__setattr__(self, "fov_tokens", tokens)
+        object.__setattr__(self, "channel_tokens", None if self.channels is None
+                           else frozenset(c.strip().lower() for c in self.channels))
+
+    @property
+    def axes(self) -> set[str]:
+        """The axes beyond wells this filter cuts by — the schema fields it needs."""
+        return {axis for axis, value in (("timepoint", self.timepoint_labels), ("fov", self.fovs),
+                                         ("channel", self.channels)) if value is not None}
+
+    def as_json(self) -> dict:
+        """The filter as plain lists, for the in-place marker (``None`` stays "keep everything")."""
+        return {name: None if value is None else sorted(value)
+                for name, value in (("wells", self.wells), ("timepoints", self.timepoint_labels),
+                                    ("fovs", self.fovs), ("channels", self.channels))}
 
 
 @dataclass(frozen=True)
@@ -127,6 +158,17 @@ class SubsetPlan:
     wells_kept: tuple[str, ...]
     merged_info: dict
     dest_is_restart: bool = False
+    #: The source has only ``in/`` (:func:`datasets.core.raw_dataset.is_raw_dataset`); *raw_source* says how
+    #: its filenames were read, and the destination is written as a raw dataset too — ``in/`` and no ``out/``.
+    raw_source: RawSource | None = None
+    #: Edit the source's own archives instead of copying (in-only sources only); *dest* is then *src*.
+    in_place: bool = False
+    #: An earlier in-place edit of this source with this filter was interrupted; this run finishes it.
+    in_place_resume: bool = False
+
+    @property
+    def raw(self) -> bool:
+        return self.raw_source is not None
 
 
 def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
@@ -145,14 +187,8 @@ def _refuse_well_collisions(paths: DatasetPaths, label: str) -> None:
         raise SubsetError(f"{label} can't be copied. {message}")
 
 
-def build_subset_plan(
-    src_root: Path | str, dest_root: Path | str, filt: SubsetFilter,
-) -> SubsetPlan:
-    """Validate a source dataset and destination, and produce a
-    :class:`SubsetPlan`. Raises :class:`SubsetError` on any incompatibility.
-    Read-only — the destination is not created or cleared here.
-    """
-    src = resolve_dataset(src_root, label="source dataset")
+def _check_destination(src: DatasetPaths, dest_root: Path | str) -> tuple[DatasetPaths, bool]:
+    """The destination of a copy, and whether it holds this tool's own failed attempt to clear."""
     dest_root = Path(dest_root)
     dest = DatasetPaths(root=dest_root, in_dir=dest_root / "in", out_dir=dest_root / "out")
 
@@ -170,7 +206,35 @@ def build_subset_plan(
             f"The destination ({dest.root}) already has files that weren't "
             "created by a previous subset attempt — choose an empty folder."
         )
-    dest_is_restart = destination_is_failed_run(dest)
+    return dest, destination_is_failed_run(dest)
+
+
+def build_subset_plan(
+    src_root: Path | str, dest_root: Path | str, filt: SubsetFilter, *,
+    schema: str = "", separator: str = DEFAULT_SEP, in_place: bool = False,
+) -> SubsetPlan:
+    """Validate a source dataset and destination, and produce a
+    :class:`SubsetPlan`. Raises :class:`SubsetError` on any incompatibility.
+    Read-only — the destination is not created or cleared here.
+
+    An in-only source (no ``out/``) goes through :func:`_build_raw_plan`, which is the only path that takes
+    *schema* / *separator* (a filename schema the user typed), a channel filter, or *in_place*; an analysed
+    source's schema is the one its own ``pipeline_info.json`` states.
+    """
+    if is_raw_dataset(src_root):
+        return _build_raw_plan(Path(src_root), dest_root, filt, schema=schema, separator=separator,
+                               in_place=in_place)
+    if in_place:
+        raise SubsetError(
+            "Editing in place is only for a dataset that has not been analysed (an 'in' folder only). This one "
+            "has analysis results in 'out', which would go on describing the images removed. Subset it into a "
+            "new folder instead.")
+    if filt.channels is not None:
+        raise SubsetError(
+            "Choosing channels is only for a dataset that has not been analysed (an 'in' folder only). This "
+            "one's measurement tables and QC images are per channel, and Subset does not rewrite them.")
+    src = resolve_dataset(src_root, label="source dataset")
+    dest, dest_is_restart = _check_destination(src, dest_root)
 
     _refuse_well_collisions(src, "The source dataset")
     if has_nanowell_tables(src) and filt.fovs is not None:
@@ -226,6 +290,99 @@ def build_subset_plan(
     )
 
 
+def read_in_place_marker(root: Path | str) -> dict | None:
+    """The interrupted in-place edit recorded at *root*, or ``None``. An unreadable marker is an empty dict:
+    something was interrupted there, and what it was cannot be said."""
+    path = Path(root) / IN_PLACE_MARKER
+    if not path.is_file():
+        return None
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _describe_marker(marker: dict) -> str:
+    parts = []
+    for key, word in (("wells", "wells"), ("timepoints", "timepoints"), ("fovs", "FOVs"),
+                      ("channels", "channels")):
+        value = (marker.get("filter") or {}).get(key)
+        if value is not None:
+            parts.append(f"{word} {', '.join(map(str, value))}")
+    return "; ".join(parts) or "everything"
+
+
+def _kept_values(available: list[str], keep) -> list[str]:
+    return [value for value in available if keep(value)]
+
+
+def _build_raw_plan(src_root: Path, dest_root: Path | str, filt: SubsetFilter, *, schema: str,
+                    separator: str, in_place: bool) -> SubsetPlan:
+    """:func:`build_subset_plan` for a source holding only ``in/`` (see :mod:`datasets.subset.raw_compute`).
+
+    The values each axis keeps are checked against what the archives hold before anything is written, so a
+    filter that would keep no timepoint (or FOV, or channel) is refused here rather than emptying every well.
+    In place, a filter that keeps everything is refused too: it would rewrite nothing and say it had.
+    """
+    src = raw_paths(src_root)
+    refuse_unfinished_append(src.in_dir, label="The source dataset", error_cls=SubsetError)
+    _refuse_well_collisions(src, "The source dataset")
+    marker = read_in_place_marker(src.root)
+    resume = False
+    if marker is not None:
+        if not in_place:
+            raise SubsetError(
+                f"The source dataset ({src.root}) holds an interrupted in-place edit "
+                f"({_describe_marker(marker)}), so some of its archives are already cut and others are not. "
+                "Run the same in-place edit again to finish it before copying from it.")
+        if marker.get("filter") != filt.as_json():
+            raise SubsetError(
+                f"This dataset holds an interrupted in-place edit that kept {_describe_marker(marker)}. Run "
+                "that same edit again to finish it first; until then its archives are partly cut.")
+        schema, separator, resume = str(marker.get("schema") or ""), str(marker.get("separator") or ""), True
+    try:
+        source = resolve_raw_source(src, typed_schema=schema, typed_sep=separator,
+                                    record_override={} if resume else None)
+        require_axes(source, filt.axes)
+    except RawSchemaError as exc:
+        raise SubsetError(str(exc)) from exc
+
+    info = source.info
+    for axis, available, keep in (
+        ("timepoint", info["available_timepoints"], lambda t: timepoint_kept(t, filt)),
+        ("FOV", info["available_fovs"], lambda f: filt.fov_tokens is None or normalize_fov(f) in filt.fov_tokens),
+        ("channel", info["available_channels"],
+         lambda c: filt.channel_tokens is None or c.lower() in filt.channel_tokens),
+    ):
+        if available and not _kept_values(available, keep):
+            raise SubsetError(f"No {axis} the archives hold matches the requested filter.")
+
+    all_wells = set(in_containers(src))
+    wells_kept = tuple(sorted(all_wells if filt.wells is None else (all_wells & filt.wells)))
+    if not wells_kept:
+        raise SubsetError("No wells match the requested filter.")
+
+    if in_place:
+        folders = sorted(w for w, c in in_containers(src).items() if not c.is_file())
+        if folders:
+            raise SubsetError(
+                "Editing in place rewrites each well's zip archive, and this dataset keeps "
+                f"{len(folders)} well(s) as folders ({', '.join(folders[:3])}). Subset it into a new folder "
+                "instead.")
+        if not resume and len(wells_kept) == len(all_wells) and not filt.axes:
+            raise SubsetError("Nothing to remove: every well is chosen. Untick what the edit should delete.")
+        dest, dest_is_restart = src, False
+    else:
+        dest, dest_is_restart = _check_destination(src, dest_root)
+
+    return SubsetPlan(
+        src=src, dest=dest, schema=load_schema(info) if source.fields else PipelineSchema(),
+        channels=tuple(info.get("fluor_tokens") or ()), filt=filt, wells_kept=wells_kept, merged_info={},
+        dest_is_restart=dest_is_restart, raw_source=source, in_place=in_place, in_place_resume=resume,
+    )
+
+
 def missing_from_source(
     *,
     wells: list[str] | None,
@@ -234,6 +391,8 @@ def missing_from_source(
     source_wells: list[str],
     source_timepoints: list[str],
     source_fovs: list[str],
+    channels: list[str] | None = None,
+    source_channels: list[str] = (),
 ) -> list[str]:
     """What a queued Subset names that its source does not hold, as phrases.
 
@@ -263,6 +422,7 @@ def missing_from_source(
           lambda w: canonical_well_label(w) or w.strip().upper())
     check("timepoints", timepoints, source_timepoints, lambda t: t.strip())
     check("FOVs", fovs, source_fovs, lambda f: normalize_fov(f.strip()))
+    check("channels", channels, source_channels, lambda c: c.strip().lower())
     return out
 
 
@@ -285,13 +445,16 @@ def member_matches(
     kind of "not this dataset's business" file Concatenate also passes
     through untouched, not a reason to lose data silently.
     """
-    if filt.fovs is None and filt.timepoint_hours is None:
+    if filt.fovs is None and filt.timepoint_hours is None and filt.channel_tokens is None:
         return True
     parsed, _discovered_channel = discover_parsed_member(name, schema, channels)
     parts = parsed.stem.split(schema.sep)
     if len(parts) != len(schema.fields):
         return True
     if filt.fovs is not None and parsed.fov not in filt.fov_tokens:
+        return False
+    if (filt.channel_tokens is not None
+            and str(parsed.fields.get("channel", "")).strip().lower() not in filt.channel_tokens):
         return False
     return timepoint_kept(parsed.fields.get("timepoint", ""), filt)
 
@@ -301,6 +464,10 @@ def timepoint_kept(token: str, filt: SubsetFilter) -> bool:
     test the images and the nanowell tables are both cut by, so a kept table never names a timepoint whose
     images were left behind."""
     if filt.timepoint_hours is None:
+        return True
+    # The exact token first: a raw dataset's picker offers the tokens its member names spell, and one that does
+    # not read as hours (``t01``) is still the timepoint the user ticked.
+    if filt.timepoint_labels is not None and (token or "").strip() in filt.timepoint_labels:
         return True
     hours = parse_hours(token or "")
     return hours is not None and any(tp_close(hours, h) for h in filt.timepoint_hours)
@@ -392,6 +559,7 @@ def row_matches(
 
 
 __all__ = [
+    "IN_PLACE_MARKER",
     "IN_PROGRESS_MARKER",
     "SubsetError",
     "SubsetFilter",
@@ -404,6 +572,7 @@ __all__ = [
     "member_matches",
     "out_csvs",
     "out_zips",
+    "read_in_place_marker",
     "read_info",
     "resolve_dataset",
     "ROW_DROP",

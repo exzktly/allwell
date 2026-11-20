@@ -409,7 +409,7 @@ def test_appledouble_twins_are_not_read_as_timepoints(tmp_path):
     packed on a Mac does. Read as an image, ``._E_GFP_A01_f0_0h`` split into
     fields put ``f0`` in the timepoint slot, so a raw plate listed timepoints
     0h, f0, f1 and its default gap came out as one hour."""
-    from datasets.concatenate.raw_compute import raw_info, raw_paths
+    from datasets.core.raw_dataset import raw_info, raw_paths
     _raw(tmp_path / "d1", timepoints=("0h", "24h"))
     info = raw_info(raw_paths(tmp_path / "d1"), label="dataset 1", error_cls=cc.ConcatError)
     assert info["available_timepoints"] == ["0h", "24h"]

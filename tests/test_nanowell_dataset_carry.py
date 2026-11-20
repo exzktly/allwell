@@ -72,7 +72,9 @@ def test_subset_carries_the_tables_of_the_wells_and_timepoints_it_keeps(tmp_path
                                                                          ("24h", "2", "3")]
     # The template was built at 0h, which this subset leaves out: it is not carried, never left naming a
     # timepoint the destination does not have.
-    assert sorted(p.name for p in (tmp_path / "dest" / "out" / "nanowells").iterdir()) == ["B02.csv", "B02_grid.json"]
+    # The identity sidecar beside them is the check Subset runs on the tables it wrote, not a carried file.
+    assert sorted(p.name for p in (tmp_path / "dest" / "out" / "nanowells").iterdir()) == [
+        "B02.csv", "B02_grid.json", "B02_identity.json"]
     info = json.loads((tmp_path / "dest" / "out" / "pipeline_info.json").read_text())
     assert info["nanowell"]["settings"] == SETTINGS                     # Review reads the scheme from here
 

@@ -805,7 +805,14 @@ recognizer disturbs no walk — and `set_drag_scroll(…, False)` only clears
 `_awDragScroll`: the viewport's `_DragOwnerGuard` refuses every scroll from then
 on and releases the grab from a timer, once `QThread.loopLevel()` says no
 dialog's event loop is running (it asks again every `_RELEASE_RETRY_MS`
-otherwise), and a viewport turned on again before that keeps its one grab. Not
+otherwise), and a viewport turned on again before that keeps its one grab. A
+guard that has released its grab marks itself `_awGuardReleased` before its
+`deleteLater`, and `set_drag_scroll` looks a viewport's guard up through
+`_live_guard`, which passes over a marked one: until the deferred delete runs
+the released guard is still the viewport's child, and counted as live it left a
+viewport turned on again in that window grabbed with no guard at all — nothing
+refusing a drag that starts on a plate, and nothing to release the grab with
+(`tests/test_drag_scroll_guard_release.py`). Not
 covered: a slot that pumps `processEvents` itself (a batch export) is not a loop
 Qt counts, so a grab turned off during one can still be released under a
 replayed click. `tests/test_phone_form_swipe.py` holds the one grab and the

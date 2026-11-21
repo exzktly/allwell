@@ -599,6 +599,12 @@ class _DragOwnerGuard(QObject):
         QScroller.ungrabGesture(vp)
         vp.setProperty(_P_DRAG_GRABBED, None)
         vp.removeEventFilter(self)
+        # Marked before ``deleteLater``: until the deferred delete runs, this
+        # guard is still the viewport's child, and a ``set_drag_scroll(vp,
+        # True)`` in that window would find it, install no new one, and leave
+        # the fresh grab with no guard once this one is gone — and with
+        # nothing that could ever release it (``_live_guard``).
+        self.setProperty(_P_GUARD_RELEASED, True)
         self.deleteLater()
 
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
@@ -680,6 +686,10 @@ _P_DRAG_SCROLL = "_awDragScroll"
 #: time :func:`set_drag_scroll` waits before releasing a grab.
 _P_DRAG_GRABBED = "_awDragGrabbed"
 
+#: Set on a ``_DragOwnerGuard`` once it has released its viewport's grab and
+#: is waiting to be deleted: it no longer counts as the viewport's guard.
+_P_GUARD_RELEASED = "_awGuardReleased"
+
 #: How long a release waits before asking again whether a dialog's event loop
 #: is still running (``_DragOwnerGuard._release_grab``).
 _RELEASE_RETRY_MS = 200
@@ -743,6 +753,15 @@ def grab_every_scroll_area(on: bool) -> int:
     return n
 
 
+def _live_guard(viewport: QWidget) -> "_DragOwnerGuard | None":
+    """*viewport*'s guard, or ``None`` — never one that has already released
+    its grab and is only waiting for its deferred delete."""
+    for guard in viewport.findChildren(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly):
+        if not guard.property(_P_GUARD_RELEASED):
+            return guard
+    return None
+
+
 def set_drag_scroll(viewport: QWidget, on: bool) -> None:
     """Scroll *viewport*'s area by a left-button drag, or stop. Idempotent.
 
@@ -772,7 +791,7 @@ def set_drag_scroll(viewport: QWidget, on: bool) -> None:
     """
     from PySide6.QtWidgets import QScroller
     viewport.setProperty(_P_DRAG_SCROLL, bool(on))
-    guard = viewport.findChild(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly)
+    guard = _live_guard(viewport)
     if on:
         if not viewport.property(_P_DRAG_GRABBED):
             QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)

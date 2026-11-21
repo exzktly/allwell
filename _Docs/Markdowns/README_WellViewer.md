@@ -10241,7 +10241,10 @@ What it does to the data:
   accordingly, with dataset 2's timepoints rewritten throughout. Gating
   thresholds and sample definitions carry over from dataset 1 and apply to
   dataset 2's rows too — worth reviewing after the merge, since they were set
-  from dataset 1's imaging conditions.
+  from dataset 1's imaging conditions. Dataset 1's record of what its run
+  failed or left missing is not carried, since it says nothing of dataset 2's
+  timepoints: Home says the new dataset has no completeness record until you
+  run **Validate & Repair** on it (or analyse it).
 - **Carried-over cell-inclusion overrides are re-stamped against the copy.**
   Each override records a fingerprint of the segmentation it was made on, so a
   later re-run of the pipeline drops overrides that would otherwise re-attach to
@@ -10697,7 +10700,10 @@ cell-inclusion overrides. Gating thresholds carry over from dataset 1 (same
 "set under dataset 1's imaging conditions, worth reviewing" caveat as
 Concatenate); sample definitions from both datasets are merged, with dataset
 2's group/replicate-set names disambiguated rather than overwritten if they
-happen to share a name with one of dataset 1's.
+happen to share a name with one of dataset 1's. Neither plate's record of what
+its run failed or left missing is carried, since each describes one plate only:
+Home says the merged plate has no completeness record until you run
+**Validate & Repair** on it.
 
 It refuses when the two datasets weren't analysed the same way (same checks
 Concatenate applies), when a remap target isn't a valid 96-well position, when a

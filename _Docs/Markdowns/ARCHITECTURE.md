@@ -19937,13 +19937,18 @@ lock-only-around-the-pre-work-callback shape Concatenate uses), `_verify`
 cleared last.
 
 **A subset does not carry the source run's description of itself.** `run_report` and `run_check`
-(`subset_compute.PER_RUN_BLOCKS`) record what one run made of the source's whole input — which wells, and which
+(`pipeline.sidecar.PER_RUN_BLOCKS`, dropped by `without_per_run_blocks`) record what one run made of the source's whole input — which wells, and which
 FOV-groups or timepoints, it failed — and neither can be narrowed from its own contents: a failed group is named by
 a nuclear file name or a timepoint token, and the counts beside it are of the source's input. Carried, a subset that
 left out a damaged last frame went on reporting that frame as missing at load, on Home and in Validate's evidence.
 So the subset's sidecar has neither (the reasoning `pipeline.sidecar.USER_SIDE_BLOCKS` gives for a run's own
 rewrite: a lost record is visible and recoverable, a stale one is neither), Home says it has no completeness record,
-and Validate writes one from what the subset holds. Every other block is carried.
+and Validate writes one from what the subset holds. Every other block is carried. Concatenate (`merge_info`, and
+the analysed-plus-raw branch of `plan_pair`) and Merge plates (`build_plate_merge_plan`) start their sidecar from
+dataset 1's and drop the same two blocks, for the same reason: the result holds the other dataset's timepoints or
+wells, and a merged plate's well labels are remapped besides. Merge plates' `_UNMERGEABLE_BLOCKS` therefore does not
+list them, and `tests/test_sidecar_blocks_are_merge_rostered.py` counts a per-run block as covered;
+`tests/test_per_run_blocks_are_dropped.py` holds both tools to it.
 
 **Zero rows has three causes and `_verify` names the one it can see.** One
 message — "check that the filter actually matches data in the source dataset" —

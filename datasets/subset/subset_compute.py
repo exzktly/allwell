@@ -47,7 +47,7 @@ from datasets.core.nanowell_tables import carried_nanowell_block, has_nanowell_t
 from datasets.core.dataset_paths import known_channel_tokens, refuse_unfinished_append
 from datasets.core.raw_dataset import is_raw_dataset, raw_paths
 from datasets.subset.raw_compute import RawSchemaError, RawSource, require_axes, resolve_raw_source
-from pipeline.run_report import RUN_REPORT_BLOCK
+from pipeline.sidecar import without_per_run_blocks
 from util.schema import DEFAULT_SEP
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
@@ -57,10 +57,6 @@ IN_PROGRESS_MARKER = ".aw_subset_in_progress"
 #: as it was or as filtered; the marker is what lets the next run finish it with the same schema, since by then
 #: the archives no longer match the acquisition record the schema was checked against.
 IN_PLACE_MARKER = ".aw_subset_in_place"
-
-#: The sidecar blocks that describe one run of the source's whole input, which a subset does not carry
-#: (:func:`build_subset_plan`): the pipeline's per-well run report and the completeness record.
-PER_RUN_BLOCKS = (RUN_REPORT_BLOCK, "run_check")
 
 
 class SubsetError(Exception):
@@ -270,9 +266,9 @@ def build_subset_plan(
     # reporting that frame's failure (Review's load warning, Home's record, Validate's evidence), and one that kept
     # a few wells reported the plate's totals. Neither can be narrowed from its own contents: a failed group is
     # named by a nuclear file name or a timepoint token, and the counts beside it are of the source's input. So
-    # neither is carried (the reasoning ``pipeline.sidecar.USER_SIDE_BLOCKS`` gives for a run's own rewrite): Home
-    # then says the subset has no completeness record, and Validate writes one from what the subset holds.
-    merged_info = {k: v for k, v in info.items() if k not in PER_RUN_BLOCKS}
+    # neither is carried (``pipeline.sidecar.PER_RUN_BLOCKS``): Home then says the subset has no completeness
+    # record, and Validate writes one from what the subset holds.
+    merged_info = without_per_run_blocks(info)
     if "nanowell" in merged_info:
         merged_info["nanowell"] = carried_nanowell_block(merged_info["nanowell"])
     if filt.timepoint_labels is not None:

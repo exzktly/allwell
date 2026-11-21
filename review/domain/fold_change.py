@@ -529,12 +529,11 @@ def pts_to_mean_by_t(pts) -> dict[float, float]:
 
 
 def _match_control_mean(t: float, control_means: dict[float, float]) -> float | None:
-    """Resolve the control mean at timepoint *t* under relative tolerance.
+    """Resolve the control mean at timepoint *t*: an exact key, else one within ``domain.tp_match.tp_tolerance``.
 
-    Uses a relative-tolerance match (``abs(a - b) < 1e-3 * max(1, |a|, |b|)``)
-    instead of the previous absolute 1e-6 — the bar tp combo formats
-    its items with ``:.4g`` so fractional timepoints lose precision
-    when parsed back, which the old tolerance rejected.
+    That tolerance is the rounding error of the ``:.4g`` label the bar's
+    timepoint combo spells a value with, so a fractional timepoint parsed back
+    from its text still matches, and two real frames a few minutes apart do not.
     """
     if not control_means:
         return None

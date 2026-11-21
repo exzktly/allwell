@@ -90,10 +90,13 @@ _VIZ_TOOLTIPS = {
     sp_state.VIZ_COLONY_METRIC_DIST:
         "One violin per colony (sorted by median), showing the within-colony "
         "spread of the selected metric. The top-left callout gives the "
-        "variance decomposition: ICC = σ²_between / σ²_total. ICC near 1 "
-        "means variability is almost entirely between colonies (colony "
-        "identity carries the signal); ICC near 0 means variability lives "
-        "inside colonies (colony identity is uninformative).",
+        "intraclass correlation ICC(1), the one-way ANOVA estimate "
+        "(MSB − MSW) / (MSB + (n₀ − 1)·MSW), beside σ²_between and σ²_within. "
+        "ICC near 1 means variability is almost entirely between colonies "
+        "(colony identity carries the signal); ICC near 0 means colony "
+        "identity tells you nothing about it, and it can dip slightly below "
+        "zero by chance. It is not σ²_between / σ²_total, which on pure "
+        "noise is fixed by the colony sizes.",
     sp_state.VIZ_RADIAL_PROFILE:
         "The selected metric binned by normalised radial position (r/R = 0 at "
         "the colony centroid, 1 at the outermost cell). Points ± SEM answer "

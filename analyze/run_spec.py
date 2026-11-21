@@ -92,8 +92,15 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
             return orphan
         # Before `resume_aware_spec`, which reads the output folder the input
         # resolves to — and before any UI state is touched, like every other
-        # refusal here. The scan reads a bounded sample of names (the same one
-        # the form's Detect button reads on this thread), so it is not a walk.
+        # refusal here. It runs on this (the GUI) thread, and with either
+        # run-time box ticked it is an enumeration, not a sample: both
+        # `resolve_detection` and `add_detected_channels` list the input's
+        # names up to `run_detect._ENUMERATE_LIMIT` (500,000), every per-well
+        # zip's member list included — about 0.2 s for 96 zips of 500 members
+        # on a local disk, and longer on a network share. It stays here because
+        # every caller (Run, the queue, the resume card) needs its refusal
+        # before the run starts; moving it to a worker means making start_run
+        # asynchronous for all of them. Neither box ticked, nothing is read.
         # The listed channels are read before full detection replaces them, so
         # "add the input's channels" adds to what the form listed.
         listed = list(spec.opts.get("fluor_tokens") or [])

@@ -112,6 +112,15 @@ def _texts(ctx, gid=None):
     return out
 
 
+def _prose(texts) -> str:
+    """*texts* as one run of prose: the lines joined and their whitespace collapsed.
+
+    A figure breaks each footer or report line to its own width, and that width follows the page's size, so the same
+    sentence is one line on one screen and two on another (the Statistics report also indents a continuation). A test
+    of what a sentence *says* reads it from this, so it does not depend on where the figure happened to break it."""
+    return " ".join(" ".join(texts).split())
+
+
 # ── V1b: states ──────────────────────────────────────────────────────────────
 def test_with_no_wells_selected_the_page_says_which_wells_have_nanowell_tables(qtbot, tmp_path):
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))
@@ -233,7 +242,9 @@ def test_along_wells_draws_one_timepoint_with_the_statistic_over_wells(page, qtb
     axis.setCurrentIndex(1)
     st = page.state.feature_slice("nanowell")
     assert st.axis == "wells" and st.model.timepoint == "t_a"
-    assert page.widgets.get("_nw_tp_cb").isVisible() and page.widgets.get("_nw_control_cb").isVisible()
+    # The Timepoint is offered; *vs* is not, since nothing on the Distribution view reads it (tracker row B5).
+    assert page.widgets.get("_nw_tp_cb").isVisible()
+    assert page.widgets.get("_nw_control_cb").isVisible() is False, "vs is offered on Distribution, which reads none"
     # No control chosen: nothing per-well is drawn beside the swarms, so the footer claims no interval.
     assert not any("t interval" in t for t in _texts(page, "nw-footer"))
 

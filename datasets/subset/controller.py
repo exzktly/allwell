@@ -76,6 +76,22 @@ class SubsetController(DestinationToolController):
         channels = None if self.page.all_channels_selected() else frozenset(self.page.selected_channels())
         filt = SubsetFilter(wells=wells or None, timepoint_labels=tps, fovs=fovs, channels=channels)
         in_place = self.page.in_place()
+        schema, separator = self.page.typed_schema(), self.page.typed_separator()
+        if self.page.interrupted_edit() is not None:
+            # Finishing an interrupted in-place edit: the filter it recorded, never one read off the pickers. Its
+            # archives are partly cut, and any other filter would delete images that edit meant to keep.
+            recorded = self.page.interrupted_filter()
+            if recorded is None:
+                # An unreadable record: the page says so and offers no run. A queued job that reached here is still
+                # told it ended, or the queue would wait on it for the rest of the session.
+                message = ("This dataset holds an interrupted in-place edit whose record can't be read; nothing was "
+                           "run.")
+                self.page.append_log(f"✗ {message}")
+                self.jobFinished.emit(False, message, "")
+                return
+            marker = self.page.interrupted_edit()
+            filt, in_place = recorded, True
+            schema, separator = str(marker.get("schema") or ""), str(marker.get("separator") or "")
 
         self.page.clear_log()
         self.page.dashboard.reset()
@@ -93,8 +109,7 @@ class SubsetController(DestinationToolController):
         self.page.set_running(True)
 
         worker = SubsetWorker(self.page.source_path(), "" if in_place else dest_path, filt,
-                              schema=self.page.typed_schema(), separator=self.page.typed_separator(),
-                              in_place=in_place)
+                              schema=schema, separator=separator, in_place=in_place)
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
         worker.wellStage.connect(self._on_well_stage)
@@ -242,6 +257,8 @@ class SubsetController(DestinationToolController):
     def _on_finished(self) -> None:
         self.page.set_running(False)
         self.page._plate.setEnabled(True)
+        # A cancelled or failed in-place run leaves an interrupted edit, and a finished one removes it.
+        self.page.refresh_interrupted_edit()
         self.page.revalidate_fields()
         ok, message, dest_root = self._last_result
         try:

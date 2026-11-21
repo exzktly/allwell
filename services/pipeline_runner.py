@@ -1653,7 +1653,9 @@ class PipelineRunner:
 
     @property
     def waiting_for_granted_node(self) -> bool:
-        """Whether the run is waiting for the granted node it claimed to be granted (``RemoteRunner.node_pending``).
+        """Whether the run is waiting for the granted node it claimed to be granted: ``RemoteRunner.node_pending``
+        while it stages and uploads, and ``RemoteRunner.awaiting_granted_node`` while ``GrantedRun.await_node`` waits
+        at the launch, which clears ``node_wait`` as it begins.
 
         That wait is a queue wait the stream does not announce as one: the run is staged and uploaded, and nothing
         is launched until the node is granted, so the host holds no pidfile and no job id for the run yet. The
@@ -1661,6 +1663,10 @@ class PipelineRunner:
         gone (reported: "<host> holds no job id or pid for this run" while the run waited for its node).
         """
         remote = self._remote_runner
+        if getattr(remote, "awaiting_granted_node", False):
+            # Inside `GrantedRun.await_node`, where the run spends the wait: `node_wait` is already cleared there,
+            # so `node_pending` alone would say False for exactly the stretch this property exists for.
+            return True
         pending = getattr(remote, "node_pending", None)
         return bool(pending()) if callable(pending) else False
 

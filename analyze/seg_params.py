@@ -403,16 +403,26 @@ class AnalyzeSegParamsMixin:
 
     # ── hints + validation for the selected routine ──────────────────────────
 
-    def _segmentation_validation_errors(self, *, channels: bool = True) -> list[str]:
+    def _segmentation_validation_errors(self, *, channels: bool = True,
+                                        phase: bool | None = None) -> list[str]:
         """What stops the selected routine running, as user-facing sentences.
 
         *channels* False skips every check that compares the form's channel
         tokens with each other — the segmentation channel, the Phase mark —
-        because run-time detection is about to replace those tokens, and
+        because the channel list is settled when the run starts, and
         ``services.run_detect.channel_option_errors`` asks the same questions
-        of the detected ones. What detection cannot supply (a cytoplasm token
-        for watershed, a positive minimum area) is still required here.
+        of the list it settles on. What detection cannot supply (a cytoplasm
+        token for watershed, a positive minimum area) is still required here.
+
+        *phase* (default: *channels*) is whether the label-free method's
+        Phase mark is required on the form. Only full run-time detection can
+        supply one; adding the input's channels to the listed ones adds them
+        as quantified only, so with that option alone the mark is still the
+        form's to set, and a run without it would fail on the pipeline's
+        ``--phase_token`` check after launching.
         """
+        if phase is None:
+            phase = channels
         errors: list[str] = []
         method = self._seg_method()
         if method == "stardist_seeded_watershed_cell":
@@ -428,7 +438,7 @@ class AnalyzeSegParamsMixin:
                     errors.append("Minimum nucleus area must be a positive integer.")
             except ValueError:
                 errors.append("Minimum nucleus area must be a positive integer.")
-        elif method == "cellpose_labelfree" and channels:
+        elif method == "cellpose_labelfree" and phase:
             if not self._phase_token():
                 errors.append(
                     "Label-free segmentation requires exactly one channel marked "
@@ -549,7 +559,8 @@ class AnalyzeSegParamsMixin:
             cell = self._nuclear_row_widget
             row = cell.parentWidget()
             (row if row is not None and row.objectName() == "AnalyzeFormRow" else cell).setVisible(not phase_locked)
-        errors = self._segmentation_validation_errors(channels=not self._channels_settled_at_run())
+        errors = self._segmentation_validation_errors(
+            channels=not self._channels_settled_at_run(), phase=not self._auto_detect_on())
         if errors:
             self._set_status(self._segmentation_hint_lbl, "  ".join(errors), error=True)
             return

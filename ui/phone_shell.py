@@ -599,6 +599,12 @@ class _DragOwnerGuard(QObject):
         QScroller.ungrabGesture(vp)
         vp.setProperty(_P_DRAG_GRABBED, None)
         vp.removeEventFilter(self)
+        # Marked before ``deleteLater``: until the deferred delete runs, this
+        # guard is still the viewport's child, and a ``set_drag_scroll(vp,
+        # True)`` in that window would find it, install no new one, and leave
+        # the fresh grab with no guard once this one is gone — and with
+        # nothing that could ever release it (``_live_guard``).
+        self.setProperty(_P_GUARD_RELEASED, True)
         self.deleteLater()
 
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
@@ -680,6 +686,10 @@ _P_DRAG_SCROLL = "_awDragScroll"
 #: time :func:`set_drag_scroll` waits before releasing a grab.
 _P_DRAG_GRABBED = "_awDragGrabbed"
 
+#: Set on a ``_DragOwnerGuard`` once it has released its viewport's grab and
+#: is waiting to be deleted: it no longer counts as the viewport's guard.
+_P_GUARD_RELEASED = "_awGuardReleased"
+
 #: How long a release waits before asking again whether a dialog's event loop
 #: is still running (``_DragOwnerGuard._release_grab``).
 _RELEASE_RETRY_MS = 200
@@ -743,6 +753,15 @@ def grab_every_scroll_area(on: bool) -> int:
     return n
 
 
+def _live_guard(viewport: QWidget) -> "_DragOwnerGuard | None":
+    """*viewport*'s guard, or ``None`` — never one that has already released
+    its grab and is only waiting for its deferred delete."""
+    for guard in viewport.findChildren(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly):
+        if not guard.property(_P_GUARD_RELEASED):
+            return guard
+    return None
+
+
 def set_drag_scroll(viewport: QWidget, on: bool) -> None:
     """Scroll *viewport*'s area by a left-button drag, or stop. Idempotent.
 
@@ -772,7 +791,7 @@ def set_drag_scroll(viewport: QWidget, on: bool) -> None:
     """
     from PySide6.QtWidgets import QScroller
     viewport.setProperty(_P_DRAG_SCROLL, bool(on))
-    guard = viewport.findChild(_DragOwnerGuard, options=Qt.FindDirectChildrenOnly)
+    guard = _live_guard(viewport)
     if on:
         if not viewport.property(_P_DRAG_GRABBED):
             QScroller.grabGesture(viewport, QScroller.LeftMouseButtonGesture)
@@ -1912,9 +1931,15 @@ class PhoneShell(QObject):
         screen = self._win.screen() or QGuiApplication.primaryScreen()
         return screen.availableGeometry() if screen is not None else QRect(0, 0, 1640, 980)
 
+    def _dpr(self) -> float:
+        """The window's screen's device pixel ratio: ``phone_layout`` names the
+        iPhone Duo by its device pixels, and ``_avail`` is logical."""
+        screen = self._win.screen() or QGuiApplication.primaryScreen()
+        return float(screen.devicePixelRatio()) if screen is not None else 1.0
+
     def _remember_desk_window(self) -> None:
         avail = self._avail()
-        desk_screen = not phone_layout.is_phone_shaped(avail.width(), avail.height())
+        desk_screen = not phone_layout.is_phone_shaped(avail.width(), avail.height(), self._dpr())
         self._desk_state = {
             "navigator_open": self._h.navigator_open(),
             # A geometry captured on a phone-shaped desktop is a phone's, and
@@ -2025,8 +2050,9 @@ class PhoneShell(QObject):
         w, h = avail.width(), avail.height()
         # Offered on a phone-shaped screen; kept, once on, on a near-square one
         # too (``phone_layout.keeps_phone_layout``).
-        phone_shaped = (phone_layout.keeps_phone_layout(w, h) if phone_layout.is_on()
-                        else phone_layout.is_phone_shaped(w, h))
+        dpr = self._dpr()
+        phone_shaped = (phone_layout.keeps_phone_layout(w, h, dpr) if phone_layout.is_on()
+                        else phone_layout.is_phone_shaped(w, h, dpr))
         mismatch = phone_shaped != phone_layout.is_on()
         if not mismatch or self._banner_dismissed_for == phone_shaped:
             self._hide_banner()

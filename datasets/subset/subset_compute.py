@@ -47,7 +47,7 @@ from datasets.core.nanowell_tables import carried_nanowell_block, has_nanowell_t
 from datasets.core.dataset_paths import known_channel_tokens, refuse_unfinished_append
 from datasets.core.raw_dataset import is_raw_dataset, raw_paths
 from datasets.subset.raw_compute import RawSchemaError, RawSource, require_axes, resolve_raw_source
-from pipeline.run_report import RUN_REPORT_BLOCK
+from pipeline.sidecar import without_per_run_blocks
 from util.schema import DEFAULT_SEP
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
@@ -57,10 +57,6 @@ IN_PROGRESS_MARKER = ".aw_subset_in_progress"
 #: as it was or as filtered; the marker is what lets the next run finish it with the same schema, since by then
 #: the archives no longer match the acquisition record the schema was checked against.
 IN_PLACE_MARKER = ".aw_subset_in_place"
-
-#: The sidecar blocks that describe one run of the source's whole input, which a subset does not carry
-#: (:func:`build_subset_plan`): the pipeline's per-well run report and the completeness record.
-PER_RUN_BLOCKS = (RUN_REPORT_BLOCK, "run_check")
 
 
 class SubsetError(Exception):
@@ -146,6 +142,26 @@ class SubsetFilter:
         return {name: None if value is None else sorted(value)
                 for name, value in (("wells", self.wells), ("timepoints", self.timepoint_labels),
                                     ("fovs", self.fovs), ("channels", self.channels))}
+
+    @classmethod
+    def from_json(cls, data) -> SubsetFilter | None:
+        """The filter :meth:`as_json` wrote, or ``None`` when *data* is not one (an unreadable in-place marker).
+
+        Exact, not lenient: the filter an interrupted in-place edit is finished with decides which images are
+        deleted, so a key missing, an unknown key, or a value that is not a list of strings refuses the whole
+        thing rather than reading as "keep everything" on that axis.
+        """
+        names = ("wells", "timepoints", "fovs", "channels")
+        if not isinstance(data, dict) or set(data) != set(names):
+            return None
+        values = {}
+        for name in names:
+            value = data[name]
+            if value is not None and not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
+                return None
+            values[name] = None if value is None else frozenset(value)
+        return cls(wells=values["wells"], timepoint_labels=values["timepoints"], fovs=values["fovs"],
+                   channels=values["channels"])
 
 
 @dataclass(frozen=True)
@@ -270,9 +286,9 @@ def build_subset_plan(
     # reporting that frame's failure (Review's load warning, Home's record, Validate's evidence), and one that kept
     # a few wells reported the plate's totals. Neither can be narrowed from its own contents: a failed group is
     # named by a nuclear file name or a timepoint token, and the counts beside it are of the source's input. So
-    # neither is carried (the reasoning ``pipeline.sidecar.USER_SIDE_BLOCKS`` gives for a run's own rewrite): Home
-    # then says the subset has no completeness record, and Validate writes one from what the subset holds.
-    merged_info = {k: v for k, v in info.items() if k not in PER_RUN_BLOCKS}
+    # neither is carried (``pipeline.sidecar.PER_RUN_BLOCKS``): Home then says the subset has no completeness
+    # record, and Validate writes one from what the subset holds.
+    merged_info = without_per_run_blocks(info)
     if "nanowell" in merged_info:
         merged_info["nanowell"] = carried_nanowell_block(merged_info["nanowell"])
     if filt.timepoint_labels is not None:
@@ -306,7 +322,8 @@ def read_in_place_marker(root: Path | str) -> dict | None:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _describe_marker(marker: dict) -> str:
+def describe_in_place_marker(marker: dict) -> str:
+    """What an interrupted in-place edit keeps, as the page and the refusals say it."""
     parts = []
     for key, word in (("wells", "wells"), ("timepoints", "timepoints"), ("fovs", "FOVs"),
                       ("channels", "channels")):
@@ -337,11 +354,11 @@ def _build_raw_plan(src_root: Path, dest_root: Path | str, filt: SubsetFilter, *
         if not in_place:
             raise SubsetError(
                 f"The source dataset ({src.root}) holds an interrupted in-place edit "
-                f"({_describe_marker(marker)}), so some of its archives are already cut and others are not. "
+                f"({describe_in_place_marker(marker)}), so some of its archives are already cut and others are not. "
                 "Run the same in-place edit again to finish it before copying from it.")
         if marker.get("filter") != filt.as_json():
             raise SubsetError(
-                f"This dataset holds an interrupted in-place edit that kept {_describe_marker(marker)}. Run "
+                f"This dataset holds an interrupted in-place edit that kept {describe_in_place_marker(marker)}. Run "
                 "that same edit again to finish it first; until then its archives are partly cut.")
         schema, separator, resume = str(marker.get("schema") or ""), str(marker.get("separator") or ""), True
     try:
@@ -568,6 +585,7 @@ __all__ = [
     "SubsetFilter",
     "SubsetPlan",
     "build_subset_plan",
+    "describe_in_place_marker",
     "destination_has_marker",
     "destination_has_unrecognized_content",
     "destination_is_failed_run",

@@ -299,3 +299,16 @@ def test_summary_metrics_catalog_shape():
               "local_density_median", "colony_size_mean", "hull_area_median",
               "packing_density_median", "icc"}
     assert keys == fields
+
+
+def test_the_per_colony_tooltip_names_the_icc_the_callout_prints():
+    """The hover help for Per-colony distribution described ICC as σ²_between / σ²_total — the eta-squared ratio
+    ``variance_decomposition`` no longer reports because on pure noise it is fixed by the colony sizes. It names the
+    ICC(1) the callout prints."""
+    pytest.importorskip("PySide6")
+    from review.features.spatial import state as sp_state
+    from review.features.spatial.tab_view import _VIZ_TOOLTIPS
+
+    tip = _VIZ_TOOLTIPS[sp_state.VIZ_COLONY_METRIC_DIST]
+    assert "ICC(1), the one-way ANOVA estimate (MSB − MSW) / (MSB + (n₀ − 1)·MSW)" in tip
+    assert "ICC = σ²_between / σ²_total" not in tip

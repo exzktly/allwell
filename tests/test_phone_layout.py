@@ -542,8 +542,12 @@ def test_fitted_rect_moves_first_and_shrinks_only_when_it_must():
 # ── startup ─────────────────────────────────────────────────────────────────
 
 class _Screen:
-    def __init__(self, w, h):
+    def __init__(self, w, h, dpr=1.0):
         self._r = QRect(0, 0, w, h)
+        self._dpr = dpr
+
+    def devicePixelRatio(self):
+        return self._dpr
 
     def availableGeometry(self):
         return self._r
@@ -620,6 +624,18 @@ def test_the_banner_offers_the_layout_the_screen_fits(qapp, app_sheet, monkeypat
     the Duo's shape (every iPad), or using the offer's rule to decide when phone layout already on is kept, which
     offered a half-resolution Duo the desk back."""
     assert _offers(qapp, monkeypatch, w, h, on=on) == offered
+
+
+@pytest.mark.parametrize("dpr", [1.25, 1.5])
+def test_the_banner_offers_the_duo_phone_layout_under_display_scaling(qapp, app_sheet, monkeypatch, dpr):
+    """The Duo's unfolded screen at its own 1878 x 2670, with Windows' display scale at 125 % or 150 %: Qt's
+    logical available size (1502 x 2088, 1252 x 1732 less a taskbar) names no Duo side. Through the shell's real
+    offer, which must read the screen's device pixel ratio. Wrong implementation: comparing the logical size
+    against the Duo's device pixels, which offered nothing here."""
+    from PySide6.QtGui import QScreen
+    monkeypatch.setattr(QScreen, "devicePixelRatio", lambda self: dpr)
+    w, h = int(1878 / dpr), int(2670 / dpr) - 48
+    assert _offers(qapp, monkeypatch, w, h, on=False) == "phone"
 
 
 def test_startup_honours_a_chosen_text_size_and_an_off_preference():

@@ -34,6 +34,7 @@ from datasets.core.well_block import block_shift_well_map as _block_shift
 from pathlib import Path
 
 from util.acquisition_record import AcquisitionRecordError, merge_plate_records, read_record
+from pipeline.sidecar import without_per_run_blocks
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.well_token import canonical_well_label
 from domain.image_identity import PipelineSchema, load_schema
@@ -231,7 +232,8 @@ def merge_sample_definitions(info1: dict, info2: dict, *, well_map: dict[str, st
 #: Written by hand, and for most of its life unguarded: a block nobody
 #: remembered to add here was silently kept from plate 1 and dropped from
 #: plate 2, with no warning, because the merged sidecar starts as
-#: ``dict(info1)``. ``run_report`` was missing for exactly that reason.
+#: ``dict(info1)``. ``pipeline.sidecar.PER_RUN_BLOCKS`` (the run report and the
+#: completeness record) are not here because neither plate's is carried at all.
 #: ``tests/test_sidecar_blocks_are_merge_rostered.py`` now holds this roster
 #: against the ``*_BLOCK`` constants the pipeline declares, so a new block is
 #: covered by having been named.
@@ -240,10 +242,6 @@ _UNMERGEABLE_BLOCKS: tuple[tuple[str, str], ...] = (
     ("ratios", "ratio metrics"),
     ("qc_options", "QC parameters"),
     ("smfish_thresholds", "smFISH thresholds"),
-    # Per-well coverage accounting: how many FOV-groups each well was expected
-    # to yield against how many it did. Counted under one run's input, so the
-    # merged plate cannot carry one of the two and call it both.
-    ("run_report", "run coverage"),
     # Per-field image-quality metrics. Worse than merely unmergeable: merging
     # also remaps well labels, so plate 1's block would be keyed on the labels
     # it had before the remap and would mis-attribute the half it kept.
@@ -485,7 +483,9 @@ def build_plate_merge_plan(
     merged_timepoints = sorted(_ordered_union(tp1, tp2), key=tp_sort_key)
     merged_fovs = _ordered_union(info1.get("available_fovs", []) or [], info2.get("available_fovs", []) or [])
 
-    merged_info = dict(info1)
+    # Plate 1's run report and completeness record describe one run of plate 1's input, keyed on its labels before
+    # the remap, and say nothing of plate 2's wells (``pipeline.sidecar.PER_RUN_BLOCKS``): neither is carried.
+    merged_info = without_per_run_blocks(info1)
     merged_info["available_timepoints"] = merged_timepoints
     merged_info["available_fovs"] = merged_fovs
     for key in ("fluor_tokens", "smfish_tokens", "shape_features"):

@@ -252,3 +252,16 @@ def test_a_copy_with_no_destination_is_refused_rather_than_written_to_the_workin
     src = _raw(tmp_path / "src")
     with pytest.raises(SubsetError, match="Choose a destination folder"):
         build_subset_plan(src, "", SubsetFilter(wells=frozenset({"A01"})))
+
+
+def test_a_filter_read_back_from_an_in_place_marker_is_the_one_written_or_none():
+    """The filter an interrupted edit is finished with decides what is deleted, so reading it back is exact: what
+    ``as_json`` wrote comes back equal, and anything else is ``None`` rather than "keep everything" on an axis."""
+    filt = SubsetFilter(wells=frozenset({"A01", "B01"}), timepoint_labels=frozenset({"pre", "48h"}),
+                        channels=frozenset({"GFP"}))
+    assert SubsetFilter.from_json(filt.as_json()) == filt
+    assert SubsetFilter.from_json(filt.as_json()).channel_tokens == frozenset({"gfp"})
+    full = filt.as_json()
+    for broken in ({}, None, [], {k: v for k, v in full.items() if k != "fovs"}, {**full, "extra": None},
+                   {**full, "wells": "A01"}, {**full, "timepoints": [24]}):
+        assert SubsetFilter.from_json(broken) is None, broken

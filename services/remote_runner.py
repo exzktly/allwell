@@ -238,6 +238,9 @@ class RemoteRunner:
         #: Set while the run has claimed a granted node that is still being granted (``GrantedRun.await_node``): the
         #: run stages and uploads meanwhile, and :meth:`await_granted_node` waits for the node before the launch.
         self.node_wait: Callable[[], None] | None = None
+        #: True for the whole of ``GrantedRun.await_node``'s wait for that node, which clears :attr:`node_wait` as it
+        #: begins: nothing is launched until the wait ends, so the host has no pid or job id of the run to find.
+        self.awaiting_granted_node = False
 
     def launcher(self) -> str:
         """The scheduler command this run launches with: a step on the granted node when there is one, else the host's.

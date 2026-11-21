@@ -38,6 +38,7 @@ from datetime import datetime
 from pathlib import Path
 
 from util.aw_safe import swallow
+from pipeline.sidecar import without_per_run_blocks
 from util.acquisition_record import AcquisitionRecordError, read_record
 from util.csv_gz import open_csv_text
 from util.timepoint import parse_hours, sort_key
@@ -739,9 +740,12 @@ def merge_info(info1: dict, info2: dict, *, offset_hours: float, tp_format: Time
     ``sample_definitions``, ``ratios``, ``notes``) come from dataset 1 — the
     wells and channels are shared, so they transfer unchanged. Timepoints are
     dataset 1's followed by dataset 2's remapped labels; the token lists are
-    unioned.
+    unioned. Dataset 1's run report and completeness record
+    (``pipeline.sidecar.PER_RUN_BLOCKS``) are not carried: they describe one
+    run of dataset 1's input, not the concatenation, which holds dataset 2's
+    timepoints too.
     """
-    merged = dict(info1)
+    merged = without_per_run_blocks(info1)
 
     ds1_tps = [str(t).strip() for t in info1.get("available_timepoints", []) or [] if str(t).strip()]
     ds2_tps = [
@@ -985,7 +989,7 @@ def plan_pair(ds1: DatasetPaths, ds2: DatasetPaths, info1: dict, info2: dict, ki
     )
     # Dataset 2's inferred sidecar is a reading of filenames, not an analysis:
     # nothing of it (channel tokens, say) belongs in dataset 1's sidecar.
-    merged_info = (dict(info1) if ds2_raw
+    merged_info = (without_per_run_blocks(info1) if ds2_raw
                    else merge_info(info1, info2, offset_hours=offset, tp_format=tp_format))
     if "nanowell" in merged_info:
         merged_info["nanowell"] = carried_nanowell_block(merged_info["nanowell"])

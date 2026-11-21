@@ -166,6 +166,67 @@ def test_the_max_queue_wait_counts_from_the_claim(cluster):
     run.release()
 
 
+@pytest.mark.parametrize("raised_to, words", [(10, "10 min"), (0, "no limit")])
+def test_raising_the_max_queue_wait_reaches_the_run_waiting_for_the_node(cluster, tmp_path, monkeypatch,
+                                                                         raised_to, words):
+    """The request in Manage Remotes reads the Max queue wait again on every poll, so raising it keeps the node's job
+    in the queue (``test_remote_hold_request.py``). The run that claimed that job while it queued waits for the same
+    job, and must take the same edit. Wrong implementation: the run holding the limit it started with — the node is
+    granted at 2 min, but the run has already failed at 1 min with ``HoldQueueWaitSpent``."""
+    from dataclasses import replace
+
+    from services.remote_config import write_remote
+
+    monkeypatch.setenv("ALLWELL_REMOTES", str(tmp_path / "remotes.toml"))
+    host = RemoteHost(**{**HOST, "queue_wait_timeout_min": 1})
+    write_remote(host)
+    _queued(cluster, host)
+    lines: list[str] = []
+    pending = ("PENDING", "Priority", "")
+    sleep = Script(cluster, [pending, lambda: write_remote(replace(host, queue_wait_timeout_min=raised_to)),
+                             *[pending] * 6, lambda: _grant(cluster, host)])
+    runner, run = _run(cluster, host, sleep, lines)
+    run.claim()
+    try:
+        try:
+            runner.await_granted_node()
+        except HoldQueueWaitSpent as spent:
+            raise AssertionError(f"the run kept the Max queue wait it started with: {spent}") from None
+        assert sleep.now == 135.0, sleep.now
+        assert runner.step_target is not None and runner.step_target.job_id == "4001"
+        assert [ln for ln in lines if "Max queue wait is now" in ln] == [
+            f"[remote] granted node: Max queue wait is now {words} (was 1 min) for this run's wait for the granted "
+            "node.\n"]
+    finally:
+        run.release()
+
+
+def test_the_run_reads_as_waiting_for_the_node_for_the_whole_of_await_node(cluster):
+    """While ``await_node`` waits — after the upload, before anything is launched — the run is waiting for its
+    granted node, which is what the silence check reads (``PipelineRunner.waiting_for_granted_node``) to leave the
+    host alone. Wrong implementation: answering from ``node_wait`` alone, which ``await_node`` clears as it begins,
+    so the answer is False for the whole of the wait. The silence check itself, through the Analyze tab, is
+    ``test_a_silent_remote_stream_is_noticed.py``."""
+    from services.pipeline_runner import PipelineRunner
+
+    host = RemoteHost(**HOST)
+    _queued(cluster, host)
+    seen: list[tuple[bool, bool]] = []      # (waiting_for_granted_node, node_pending) inside the wait
+    pipeline = PipelineRunner()
+    sleep = Script(cluster, [lambda: seen.append((pipeline.waiting_for_granted_node, runner.node_pending())),
+                             lambda: _grant(cluster, host)])
+    runner, run = _run(cluster, host, sleep, [])
+    pipeline._remote, pipeline._remote_runner = host, runner
+    run.claim()
+    try:
+        assert pipeline.waiting_for_granted_node        # staging and uploading: `node_wait` is set
+        runner.await_granted_node()
+        assert seen == [(True, False)], "inside await_node's wait the run read as not waiting for its node"
+        assert not pipeline.waiting_for_granted_node    # granted: the run launches, and a silence is asked about
+    finally:
+        run.release()
+
+
 # ── the order, through the real PipelineRunner ─────────────────────────────────────────────────────────────────
 
 SCHEMA = "experiment:channel:well:fov:timepoint"

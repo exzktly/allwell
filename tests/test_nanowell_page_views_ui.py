@@ -25,7 +25,7 @@ from PySide6.QtTest import QTest  # noqa: E402
 
 from review.features.nanowell import controller as nwc  # noqa: E402
 from tests.test_nanowell_cli import WELL as RUN_WELL  # noqa: E402
-from tests.test_nanowell_page import _loaded, _page, _texts, _write_nanowell_dataset  # noqa: E402
+from tests.test_nanowell_page import _loaded, _page, _prose, _texts, _write_nanowell_dataset  # noqa: E402
 from tests.test_nanowell_review_load import run_with_a_cell  # noqa: E402,F401  (module fixture)
 
 PITCH = 143.0
@@ -254,7 +254,10 @@ def test_a_per_nanowell_metric_on_trajectories_is_greyed_and_says_what_is_drawn(
     index = [metric_cb.itemData(i) for i in range(metric_cb.count())].index("occupancy_class")
     assert not metric_cb.model().item(index).isEnabled()
     said = "Occupancy at baseline (cells) has one value per nanowell, not one per timepoint, so Trajectories shows Cell count."
-    assert any(line.startswith(said) for line in _fig_texts(page, "nw-traj-footer"))
+    # The footer is written from the bottom up, one broken line each; read it top to bottom, as on screen.
+    fig = page.widgets.get("_nw_fig")
+    footer = sorted((t for t in fig.texts if t.get_gid() == "nw-traj-footer"), key=lambda t: -t.get_position()[1])
+    assert said in _prose([t.get_text() for t in footer])
 
 
 def test_position_keeps_its_timepoint_control_for_a_per_nanowell_metric(page, qtbot):

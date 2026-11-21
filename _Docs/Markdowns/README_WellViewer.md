@@ -1161,7 +1161,9 @@ Any string  preserved as-is and sorted lexicographically
   listing it in a row. The segmentation channel is not added as a fluorescent
   channel (except for Label-free, which quantifies the phase channel too), and
   a channel already listed in another letter case (`gfp` for `GFP`) is not
-  added twice. With the box ticked the rows may be left blank. The Analyze log
+  added twice. With the box ticked the rows may be left blank — except that
+  Label-free still needs one row marked Phase, since an added channel never
+  gets that role. The Analyze log
   and the run's status line say which channels were added; a job in the Job
   Queue says "adds the input's channels when it runs" on its row. If the
   filenames cannot be read for channels — the schema has no *channel* field, or
@@ -1361,7 +1363,7 @@ special combined case described below.
 | **`sliding_disk`** (Rolling disk) | Isotropic-disk white top-hat at full resolution: `img − opening(img, disk)`. | **The default** (the command line's too). A disk of the given radius flattens regions wider than ~2·radius (treated as background) and preserves narrower ones (kept as signal), isotropically — no square terracing. Built from a decomposed disk so it stays fast (~2 s on a 1024² frame). |
 | **`fov_median`** (Field median) | `img − median(img)`. | Subtracts a **single scalar**, the median intensity of the whole field of view. Most pixels in a field are background, so the median is a robust flat-background estimate (insensitive to bright cells/debris). Removes a **uniform offset only** — it does *not* flatten spatial gradients (use a morphological method or `empty_well` for that). No radius and no reference well needed; the cheapest correction. |
 | **`empty_well`** (From blank well(s)) | `img − B`. | Subtracts a *measured* per-channel additive background `B` — the **per-pixel median** of the empty/background well's images, Gaussian-smoothed and kept at its measured level (not normalized). Before it is subtracted, `B` is fitted to each frame's own background (a scale and an offset), which absorbs an exposure difference or a pedestal between the blank and the plate; the fit is made on the frame's background pixels only, so it needs at least a fifth of the field to be free of cells. No-op if no field is available for the channel. Requires a Background well. |
-| **`fft_bandpass`** (FFT band-pass) | 2-D FFT Butterworth high-pass. | Removes low-frequency background (illumination, gradients, large blobs) whatever the object size. The radius is the large-structure cutoff; **Segmentation small px** / **Other small px** are an optional high-frequency cutoff for a true band-pass (`0` = high-pass only). The filtered frame is re-referenced to its own median before it is floored at zero, so the background sits at zero whatever share of the field the cells cover; use a radius several times the cell size, because structure wider than the radius is removed from the cells too. |
+| **`fft_bandpass`** (FFT band-pass) | 2-D FFT Butterworth high-pass. | Removes low-frequency background (illumination, gradients, large blobs) whatever the object size. The radius is the large-structure cutoff; **Segmentation small px** / **Other small px** are an optional high-frequency cutoff for a true band-pass (`0` = high-pass only). The filtered frame is re-referenced to its background level before it is floored at zero — the level of its dimmest fifth, widened to every pixel within the background's own noise — so the background sits at zero as long as at least a fifth of the field is background (up to about 80% cover); use a radius several times the cell size, because structure wider than the radius is removed from the cells too. |
 
 The **Segmentation-channel radius** / **Other channels' radius** entries set the
 background length scale (in px) for the methods that take one (`robust_mesh`,
@@ -2135,8 +2137,10 @@ setting it to 0 (no limit), lets the job keep its place in the queue instead of
 being cancelled at the old limit. The log says so: *Max queue wait is now 60 min
 (was 30 min); job 4001 has waited 28 min, and it keeps its place in the queue.*
 The limit still counts from the moment you asked for the node, so lowering it
-below the time already waited ends the request at the next look. Only the
-window that asked for the node keeps this clock. A run's own node request
+below the time already waited ends the request at the next look. A run that
+claimed the node while it was still queued waits for the same job, and reads the
+saved limit at every look as well, so raising it keeps that run waiting too
+rather than failing it at the old limit. A run's own node request
 (rather than a requested node) takes the limit with it to the cluster when it
 starts, so an edit reaches only the next run.
 
@@ -6954,6 +6958,11 @@ the sentence names it.
     it did. With **Seam** and *Identity contradicted*, *Count-disagreeing* and *Partly visible* are the flags the run
     marks a nanowell with without removing it: a Subset of them set to *no* at the Timepoint leaves the same flagged
     nanowells out of every view, so the Distribution view and the Statistics tests compare the same nanowells.
+    *No* keeps only the nanowells the run recorded as not flagged. A nanowell with no value for the flag at that
+    timepoint is left out too, since nothing says it is clean: the run records no *Count-disagreeing* for any
+    nanowell of a tile in which no cell stood alone (so no typical cell area could be measured), and no *Partly
+    visible* for a nanowell it did not measure. The figure counts these apart from the flagged ones, under "with no
+    value for a condition" in its Subset sentence.
   - **scatter gate** — *inside* or *outside* a gate you drew on the Scatter Plot over two nanowell metrics (with
     Observations set to Nanowells, or on its "Nanowell ▸" axes). Read at a timepoint like a metric: each nanowell at
     a timepoint is one point on that scatter, and *inside* means the point lies in the box. The condition follows
@@ -7001,7 +7010,8 @@ the sentence names it.
   part of the figure, so a plot sent to Saved Plots, exported or put on a slide still says which nanowells it shows.
   It names a saved subset only while the conditions drawn are exactly the saved ones, and it follows a rename on the
   next redraw. Batch Export's Nanowells figures and the Scatter Plot's nanowell scatter carry the same line.
-- **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Timepoint** (on *Along x: Wells*) — the timepoint drawn. **vs**, the group to compare against, is offered on the
+  **Statistics** view only: the Distribution view writes no comparison beside its swarms.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
   wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and
@@ -7374,8 +7384,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
      rising early; a whole curve moved sideways is a general shift instead.
   2. **Higher Criticism — supporting.** Every well's highest excess score on one plot, then one plot per comparison
      of each well's excess score over its nanowells, most extreme first. A well whose most extreme nanowells are all
-     past every control value gets **no HC score** — Higher Criticism leaves those out by definition — and is
-     marked so on both plots rather than left out. The group's HC p is then computed from its other wells, and
+     past all but a few control values gets **no HC score** — Higher Criticism leaves those out by definition — and
+     is marked so on both plots rather than left out; so does a well of fewer than 10 nanowells, which is too small
+     for Higher Criticism, and its mark says that instead. The group's HC p is then computed from its other wells, and
      says so: *p = 0.25 — from D01, D03; D02 has no HC score*. That p is still valid, but it says nothing about the
      unscored well, which is usually the strongest; the exceedance test is the one that counts it.
   3. **Shape test — supporting.** Every well's upper-tail Anderson–Darling score against the control wells, on one
@@ -10239,7 +10250,10 @@ What it does to the data:
   accordingly, with dataset 2's timepoints rewritten throughout. Gating
   thresholds and sample definitions carry over from dataset 1 and apply to
   dataset 2's rows too — worth reviewing after the merge, since they were set
-  from dataset 1's imaging conditions.
+  from dataset 1's imaging conditions. Dataset 1's record of what its run
+  failed or left missing is not carried, since it says nothing of dataset 2's
+  timepoints: Home says the new dataset has no completeness record until you
+  run **Validate & Repair** on it (or analyse it).
 - **Carried-over cell-inclusion overrides are re-stamped against the copy.**
   Each override records a fingerprint of the segmentation it was made on, so a
   later re-run of the pipeline drops overrides that would otherwise re-attach to
@@ -10555,8 +10569,11 @@ Analyze has run on it. The page then shows three more things:
   own and then swapped in, so the edit needs only that much free space, never
   room for a second copy. Nothing removed is kept anywhere, and it cannot be
   undone. A well left with no images, and any well you untick, is deleted. If
-  the edit is interrupted, run the same edit again to finish it; until then
-  Subset refuses to copy from the half-edited folder. Edit in place is not
+  the edit is interrupted (cancelled, or the app closed part-way), choosing the
+  folder again shows a warning naming what that edit keeps, with its choices
+  shown and locked, and the button reads **Finish the interrupted edit**:
+  pressing it finishes exactly that edit and nothing else. Until then Subset
+  refuses to copy from the half-edited folder. Edit in place is not
   offered for an analysed dataset, whose results would go on describing the
   images removed.
 
@@ -10695,7 +10712,10 @@ cell-inclusion overrides. Gating thresholds carry over from dataset 1 (same
 "set under dataset 1's imaging conditions, worth reviewing" caveat as
 Concatenate); sample definitions from both datasets are merged, with dataset
 2's group/replicate-set names disambiguated rather than overwritten if they
-happen to share a name with one of dataset 1's.
+happen to share a name with one of dataset 1's. Neither plate's record of what
+its run failed or left missing is carried, since each describes one plate only:
+Home says the merged plate has no completeness record until you run
+**Validate & Repair** on it.
 
 It refuses when the two datasets weren't analysed the same way (same checks
 Concatenate applies), when a remap target isn't a valid 96-well position, when a
@@ -11027,7 +11047,8 @@ the same, once, for the new shape.
 
 **On the iPhone Duo**, phone layout works folded and unfolded, and All-Well
 recognises both screens and offers phone layout on either, whichever way the
-phone is held. If the remote desktop is set to a resolution other than the
+phone is held, and at any display scale the remote desktop uses (100 %,
+125 %, 150 % and so on). If the remote desktop is set to a resolution other than the
 Duo's own and no offer appears, tap the phone icon to switch. Buttons stay a
 thumb's size and text stays at the chosen text size on each.
 
@@ -11285,7 +11306,10 @@ flag is a condition there (*Count-disagreeing*, *Partly visible*, *Seam*, *Ident
 with a flag set to *no* at the Timepoint leaves those nanowells out of every view at once — the Distribution view,
 the other Statistics tests and this one — so what you compare is the same set of nanowells everywhere, and the
 figures name the Subset at their top left. Leaving a flag out guards against a miscount or a nanowell that is not
-what it seems, at the cost of fewer nanowells.
+what it seems, at the cost of fewer nanowells. A nanowell with no value for the flag at that timepoint is left out
+as well, not kept as unflagged: a whole tile in which no cell stood alone has no *Count-disagreeing* value, for
+example. The Subset's sentence (in Details on this page) counts such nanowells separately, as "with no value for a
+condition", beside those outside the subset.
 
 When these leave the control group, every treatment group, or every group with no nanowell at all, the test does
 not run and the figure says, for each group, how many nanowells were excluded and why; a treatment group they empty
@@ -11586,7 +11610,7 @@ estimate of ρ.
 | q < 0.05 | **rare responders detected** |
 | otherwise, or no nanowell in any well past the cutoff | **rare responders not detected** |
 | no group p (fewer than 3 control or 2 treatment wells for its regression) while nanowells are past the cutoff | **cannot be decided with these wells** — with the wells it needs |
-| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** |
+| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** — because the control cutoff sits on a tie |
 | Fewer than 2 wells on a side | **too few wells to test the group** |
 
 Higher Criticism (B) and the upper-tail shape test (C) are reported beside the verdict as supporting evidence and
@@ -11637,8 +11661,9 @@ The figure then reads from the top:
      per number of starting cells, from the occupancy ramp.
    * **Higher Criticism** (supporting): each well's highest score, then each comparison's curves, most extreme
      nanowells first. A curve rising well above the grey bundle near the left edge is a sparse excess. A well whose
-     most extreme nanowells are all past every control value has **no HC score**, said on both plots; the group's
-     HC p then names the wells it was computed from.
+     most extreme nanowells are all past all but a few control values has **no HC score**, said on both plots, as
+     does a well of fewer than 10 nanowells (too small for it, and said so); the group's HC p then names the wells
+     it was computed from.
    * **Shape test** (supporting): each well's upper-tail Anderson–Darling score.
    * **Pooled shape test** (description only): for each comparison, the gap between the control's and the group's
      cumulative shares, shaded — what the test sums. It treats every nanowell as independent, says so in its heading, and its p is not

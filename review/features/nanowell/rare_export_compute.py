@@ -221,11 +221,21 @@ def why_undecided(unit, params) -> str:
     reason, which used to be only in the line under the panels; ``""`` for any other verdict."""
     if unit.interpretation != UNDECIDED:
         return ""
+    # In the order ``rare_report_compute.interpret`` decides it. A cutoff on a tie is undecided only when no nanowell
+    # is past it, and with nothing past the cutoff the regression has nothing to fit, so its p is always NaN there:
+    # asked first, the missing p would blame the regression for what the tie did.
+    kt, _nt, kc, _nc = counts_of(unit)
+    if kt + kc == 0 and getattr(unit, "tie_note", ""):
+        return TIE_UNDECIDED
     if unit.exceedance and not math.isfinite(unit.primary.p):
         need = needs(unit, params)
         return ("the deciding test " + need[len("it "):].rstrip(".") if need.startswith("it needs ")
                 else "the deciding test's regression could not be fitted")
-    return "the control cutoff sits on a tie, so no nanowell could be counted past it"
+    return TIE_UNDECIDED
+
+
+#: The headline's reason for "cannot be decided" when the control cutoff sits on a tie (``rare_design_compute``).
+TIE_UNDECIDED = "the control cutoff sits on a tie, so no nanowell could be counted past it"
 
 
 def _floor_note(perm) -> str:
@@ -423,8 +433,9 @@ def scored_note(unit, key: str, *, short: bool = False) -> str:
     ``""`` when every well was scored, or none was (then there is no p to qualify).
 
     The group statistic is the mean over the treatment wells that have a score, against the same mean under every
-    relabelling of the wells, so the p is valid, but it describes the scored wells only. A well HC cannot score is the
-    one whose most extreme nanowells are all past every control value — the strongest responders — so without this
+    relabelling of the wells, so the p is valid, but it describes the scored wells only. A well HC cannot score is
+    usually one whose most extreme nanowells are all past all but a few control values — the strongest responders —
+    though a well of too few nanowells has no score either (``rare_hc_compute.unscored_reason``), so without this
     a reader would take a p computed without that well for HC having looked at the whole group and found nothing."""
     if key not in _WELL_SCORE or (key == "hc" and unit.hc_perm is None) or (key == "shape" and unit.a2_perm is None):
         return ""

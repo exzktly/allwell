@@ -35,6 +35,9 @@ relative error combines in quadrature:
 
     (σ_Y / Y)² = (σ_X / X)² + (σ_C / C)² + (σ_B / B)²    (B = t0)
 
+at every timepoint but the baseline's own, where the value is the baseline
+over itself and exact (``spread_at_baseline``).
+
 The relevant helpers (``scale_bar_value``, ``normalize_pts``) accept
 denominator spreads via ``control_spread`` / ``t0_spread`` /
 ``control_stats``. When a denominator spread isn't supplied it
@@ -68,7 +71,7 @@ import math
 from typing import NamedTuple
 from collections.abc import Callable
 from review.domain.stats_compute import compute_rep_stats
-from domain.tp_match import tp_tolerance
+from domain.tp_match import tp_close, tp_tolerance
 from review.domain.numeric import is_number
 from review.domain.stats_compute import compute_rep_per_fov_stats
 from review.domain.stats_compute import compute_rep_n_above_stats
@@ -374,6 +377,39 @@ def _baseline_usable(value, *, op: str) -> bool:
     return True if op == "subtract" else v != 0.0
 
 
+def spread_at_baseline(value, spread, t, baseline_t):
+    """*spread*, or ``0.0`` for the vs-t0 value at the baseline timepoint itself.
+
+    There the quantity is the baseline divided by (or less) itself — exactly 1
+    (or 0) whatever the noise in the measurement, control stacking included,
+    since the same post-control value is on both sides. Folding the
+    baseline's own error in quadrature, as every other timepoint does, gave
+    that point √2 times its relative error around a value that cannot vary.
+    *baseline_t* is the timepoint the baseline was resolved to, ``None`` when
+    there is none; an undefined *value* keeps its spread. Shared by the line
+    path (:func:`normalize_pts`, :func:`_normalize_field`) and the bar path's
+    collectors, so a bar at t0 and the line's point at t0 carry the same bar.
+    """
+    if baseline_t is not None and _as_finite(value) is not None and tp_close(float(t), float(baseline_t)):
+        return 0.0
+    return spread
+
+
+def _exact_at_baseline(pts, base_t, val_idx: int, spread_idx: int | None) -> list:
+    """*pts* with the spread of the point at *base_t* set by :func:`spread_at_baseline` (when it carries one)."""
+    out = []
+    for pt in pts:
+        slot = _spread_slot(pt, spread_idx)
+        if slot is not None and len(pt) > val_idx:
+            spread = spread_at_baseline(pt[val_idx], pt[slot], pt[0], base_t)
+            if spread is not pt[slot]:
+                new = list(pt)
+                new[slot] = spread
+                pt = tuple(new)
+        out.append(pt)
+    return out
+
+
 def _baseline_point(pts, baseline_tp: float | None, value_of) -> tuple | None:
     """The point a member's vs-t0 step is taken against, or ``None`` when it has no measured point at all.
 
@@ -426,8 +462,8 @@ def _undefined_field(pt, val_idx: int, spread_idx: int | None) -> tuple:
 def _field_baseline(
     pts, val_idx: int, baseline_tp: float | None, *, op: str = "ratio",
     spread_idx: int | None = None,
-) -> tuple[float | None, float]:
-    """``(baseline_val, baseline_spread)`` for a field's vs-t0 step.
+) -> tuple[float | None, float, float | None]:
+    """``(baseline_val, baseline_spread, baseline_t)`` for a field's vs-t0 step.
 
     Mirrors the mean baseline logic in :func:`normalize_pts`: the point
     :func:`_baseline_point` names, and that point's
@@ -438,23 +474,20 @@ def _field_baseline(
     point actually carries (``_spread_slot``) and an undefined one counts as
     0.0, "denominator treated as exact", exactly as the mean step treats it.
 
-    ``(None, 0.0)`` when the member has no measured point; ``(nan, 0.0)`` when
-    the baseline point's value cannot serve under *op* (zero, for a ratio), so
-    the caller makes the field undefined.
+    ``(None, 0.0, None)`` when the member has no measured point;
+    ``(nan, 0.0, t)`` when the baseline point's value cannot serve under *op*
+    (zero, for a ratio), so the caller makes the field undefined.
     """
-    def _with_spread(pt) -> tuple[float, float]:
-        slot = _spread_slot(pt, spread_idx)
-        spread = _as_finite(pt[slot]) if slot is not None else None
-        return float(pt[val_idx]), (spread if spread is not None else 0.0)
-
     pt = _baseline_point(pts, baseline_tp, lambda p: p[val_idx] if len(p) > val_idx else None)
     if pt is None:
-        return None, 0.0
+        return None, 0.0, None
     v = pt[val_idx] if len(pt) > val_idx else None
     if not _baseline_usable(v, op=op):
         _warn_unusable_baseline(pt, v, f"value in field {val_idx}")
-        return float("nan"), 0.0
-    return _with_spread(pt)
+        return float("nan"), 0.0, float(pt[0])
+    slot = _spread_slot(pt, spread_idx)
+    spread = _as_finite(pt[slot]) if slot is not None else None
+    return float(v), (spread if spread is not None else 0.0), float(pt[0])
 
 
 def _normalize_field(
@@ -502,8 +535,8 @@ def _normalize_field(
 
     # Step B: vs-t0 baseline (uses each member's own post-control values).
     if use_t0:
-        base, base_spread = _field_baseline(pts, val_idx, baseline_tp, op=op_t0,
-                                            spread_idx=spread_idx)
+        base, base_spread, base_t = _field_baseline(pts, val_idx, baseline_tp, op=op_t0,
+                                                    spread_idx=spread_idx)
         if base is not None and not math.isfinite(base):
             pts = [_undefined_field(pt, val_idx, spread_idx) for pt in pts]
         elif base is not None:
@@ -514,6 +547,7 @@ def _normalize_field(
                 pts = [_scale_field(pt, val_idx, spread_idx, base,
                                     factor_rel_err_sq=_rel_err_sq(base, base_spread))
                        for pt in pts]
+            pts = _exact_at_baseline(pts, base_t, val_idx, spread_idx)
     return pts
 
 
@@ -529,12 +563,11 @@ def pts_to_mean_by_t(pts) -> dict[float, float]:
 
 
 def _match_control_mean(t: float, control_means: dict[float, float]) -> float | None:
-    """Resolve the control mean at timepoint *t* under relative tolerance.
+    """Resolve the control mean at timepoint *t*: an exact key, else one within ``domain.tp_match.tp_tolerance``.
 
-    Uses a relative-tolerance match (``abs(a - b) < 1e-3 * max(1, |a|, |b|)``)
-    instead of the previous absolute 1e-6 — the bar tp combo formats
-    its items with ``:.4g`` so fractional timepoints lose precision
-    when parsed back, which the old tolerance rejected.
+    That tolerance is the rounding error of the ``:.4g`` label the bar's
+    timepoint combo spells a value with, so a fractional timepoint parsed back
+    from its text still matches, and two real frames a few minutes apart do not.
     """
     if not control_means:
         return None
@@ -659,8 +692,9 @@ def normalize_pts(
         stage1 = list(pts)
 
     # Step 2: baseline normalization (uses post-control values). The
-    # baseline's own spread folds into every downstream point's spread via
-    # the same quadrature formula.
+    # baseline's own spread folds into every other point's spread via the
+    # same quadrature formula; the baseline point itself is exact
+    # (``spread_at_baseline``).
     #
     # ``baseline_tp`` (when finite) names the exact timepoint to use as the
     # divisor — its mean / spread are pulled from the point at that tp
@@ -687,13 +721,14 @@ def normalize_pts(
         elif baseline is None:
             stage2 = stage1
         elif effective_op_t0 == "subtract":
-            stage2 = [_subtract_pt(pt, baseline, shift_spread=baseline_spread)
-                      for pt in stage1]
+            stage2 = _exact_at_baseline(
+                [_subtract_pt(pt, baseline, shift_spread=baseline_spread) for pt in stage1],
+                float(base_pt[0]), 1, 2)
         else:
             baseline_rel_err_sq = _rel_err_sq(baseline, baseline_spread)
-            stage2 = [_scale_pt(pt, baseline,
-                                factor_rel_err_sq=baseline_rel_err_sq)
-                      for pt in stage1]
+            stage2 = _exact_at_baseline(
+                [_scale_pt(pt, baseline, factor_rel_err_sq=baseline_rel_err_sq) for pt in stage1],
+                float(base_pt[0]), 1, 2)
     else:
         stage2 = stage1
 
@@ -1658,9 +1693,10 @@ def member_baseline_value(
     """Member baseline honouring *baseline_tp* (audit S1).
 
     Picks the member's own mean at ``baseline_tp`` when set and sampled;
-    otherwise falls back to the earliest finite mean — matching
-    :func:`baseline_from_points` / :func:`member_first_tp_value` so the
-    per-cell overlay baseline agrees with the bar's.
+    otherwise the earliest measured mean — matching
+    :func:`baseline_from_points` so the per-cell overlay baseline agrees with
+    the bar's. ``NaN`` when that point's mean cannot serve under *op*, as the
+    bar is then undefined too; ``None`` for a member with no measured mean.
 
     That agreement is why *op* is a parameter. This is the sixth baseline
     finder in the file, and it was the one left behind when the other five were
@@ -1676,15 +1712,18 @@ def member_baseline_value(
     )
     if not series:
         return None
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for t, m in series.items():
-            if (abs(float(t) - tgt) <= tp_tolerance(float(t), tgt)
-                    and _baseline_usable(m, op=op)):
-                return float(m)
-        # Requested tp not sampled — fall through to earliest (mirrors the bar).
-    earliest = min(series)
-    return series[earliest]
+    # The bar's rule (``_resolve_baseline``): the point is chosen by timepoint,
+    # never by whether its value can divide, and a baseline that cannot serve
+    # under *op* (zero, for a ratio) makes the member undefined — ``NaN``, which
+    # ``scale_for`` reads as missing — rather than taken against an earlier
+    # timepoint under a "vs t0" axis whose bar reads undefined.
+    pt = _baseline_point([(float(t), m) for t, m in series.items()], baseline_tp, lambda q: q[1])
+    if pt is None:
+        return None
+    if not _baseline_usable(pt[1], op=op):
+        _warn_unusable_baseline(pt, pt[1], "mean")
+        return float("nan")
+    return float(pt[1])
 
 
 def member_first_tp_value(

@@ -14,7 +14,7 @@ pytest.importorskip("PySide6")
 
 from review.features.nanowell import _rare_controller as rc  # noqa: E402
 from review.features.nanowell import statistics_compute as sc  # noqa: E402
-from tests.test_nanowell_page import _loaded, _page, _texts, _write_nanowell_dataset  # noqa: E402
+from tests.test_nanowell_page import _loaded, _page, _prose, _texts, _write_nanowell_dataset  # noqa: E402
 
 N_SITES = 60
 RESPONDERS = (5, 17, 33, 48)
@@ -247,7 +247,7 @@ def test_a_sample_test_whose_vs_well_is_hidden_says_it_compared_every_pair(group
     assert not any("vs A01" in t for t in _texts(page, sc.GID_NOTE))
     _hide(page, "ctrl")
     qtbot.waitUntil(lambda: any("vs A01" in t for t in _texts(page, sc.GID_NOTE)), timeout=10000)
-    note = " ".join(_texts(page, sc.GID_NOTE))
+    note = _prose(_texts(page, sc.GID_NOTE))
     assert ("vs A01 is not drawn: its group ctrl is hidden on the plate, so every pair is compared instead. Hidden on "
             "the plate: ctrl (A01, A02, A03).") in note
 

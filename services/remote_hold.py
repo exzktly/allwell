@@ -40,6 +40,7 @@ from services.remote_hold_owner import claim_owner, orphaned_by, takeover_script
 from services.remote_jobs import _only_my_job
 from services.run_evidence import APP_SILENT_RELEASE
 from services.slurm_ids import HOLDS_DIRNAME
+from util.aw_safe import swallow
 from services.remote_srun_retry import (
     ALLOCATION_GRANTED,
     BOOT_RETRY_PAUSE_S,
@@ -699,7 +700,8 @@ class GrantedNode:
         self.job_id = ""
         #: The Max queue wait the current request is held to, in seconds (``0``: no limit) — :meth:`_queue_wait_now`.
         self._queue_wait_said = queue_wait_seconds(host)
-        #: The last state the host reported (:meth:`state`), ``None`` before the first read and after :meth:`release`.
+        #: The last state the host reported (:meth:`state`), ``None`` before the first read and after a :meth:`release`
+        #: that cancelled the job or found it another user's; a release that left a node running reads it again.
         #: Read by the window's header indicator (:func:`node_summary`), which must not reach the host to draw itself.
         self.last_state: HoldState | None = None
 
@@ -976,7 +978,15 @@ class GrantedNode:
             self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
                       "releases itself within two minutes of the app's last heartbeat.\n")
         self.owned, self.job_id = False, ""
-        self.last_state = None
+        if "AW_SCANCELLED" in out or "AW_NOTMINE" in out:
+            # Cancelled, or not this user's job: no node of this user's to show.
+            self.last_state = None
+        else:
+            # Left alone for another window's node, or a cancel the host did not confirm: a node is still up there
+            # (and billing), so what the header indicator shows is read again rather than forgotten; a host that does
+            # not answer keeps the last answer, and the indicator's own re-read turns it grey once the node ends.
+            with swallow("reading the granted node again after a release that left it running"):
+                self.state()
         return "AW_SCANCELLED" in out
 
 
@@ -1286,8 +1296,13 @@ class GrantedRun:
 
     def __init__(self, runner, *, batch_size: int, nanowell: bool, log_fn: Callable[[str], None],
                  stop_event: threading.Event, sleep: Callable[[float], None] = time.sleep,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic,
+                 saved_host: Callable[[], RemoteHost | None] | None = None) -> None:
+        """*saved_host* answers the host's settings as they are saved now (``remotes.toml`` by default), or ``None``
+        when they cannot be read: :meth:`await_node` reads the Max queue wait from it on every poll, as the request in
+        Manage Remotes does (``GrantedNode._queue_wait_now``)."""
         self._runner = runner
+        self._saved_host = saved_host or (lambda: _saved_host(self._runner.host))
         self._batch_size = batch_size
         self._nanowell = nanowell
         self._log = log_fn
@@ -1318,8 +1333,38 @@ class GrantedRun:
         before it was granted — the run then asks for a node of its own, as it would had there been no hold. A
         node that failed to boot is waited on while Manage Remotes' request asks for another. Raises
         :class:`HoldError` on Stop and :class:`HoldQueueWaitSpent` when the host's Max queue wait, counted from the
-        claim, runs out."""
+        claim, runs out.
+
+        The runner's ``awaiting_granted_node`` is set for the whole of the wait, and ``node_wait`` is cleared at its
+        start so a launch site can never re-enter it. The flag is what the silence check reads
+        (``PipelineRunner.waiting_for_granted_node``): nothing is launched until the wait ends, so the host holds no
+        pid or job id of this run to find, and a probe would report a run that is only queued as gone.
+
+        The Max queue wait is read again on every poll from the host's saved settings, the way the request in Manage
+        Remotes reads it (``GrantedNode._queue_wait_now``): the node is that request's job, and raising the limit
+        there to keep its place in the queue must not leave the run that claimed it failing at the old one. The limit
+        still counts from the claim; settings that cannot be read, or a host saved under another address, keep the
+        limit last seen."""
         self._runner.node_wait = None
+        self._runner.awaiting_granted_node = True
+        try:
+            self._await_node()
+        finally:
+            self._runner.awaiting_granted_node = False
+
+    def _queue_wait_now(self, wait_s: int) -> int:
+        """The host's Max queue wait as saved now, or *wait_s* (the last seen) when it cannot be read (see
+        :meth:`await_node`)."""
+        saved = self._saved_host()
+        if saved is None or saved.ssh_alias != self._runner.host.ssh_alias:
+            return wait_s
+        now = queue_wait_seconds(saved)
+        if now != wait_s:
+            self._log(f"[remote] granted node: Max queue wait is now {_queue_wait_words(now)} (was "
+                      f"{_queue_wait_words(wait_s)}) for this run's wait for the granted node.\n")
+        return now
+
+    def _await_node(self) -> None:
         wait_s, said, boot_failed_at = queue_wait_seconds(self._runner.host), False, None
         while self.lease is not None and self.lease.pending:
             lease = self.lease
@@ -1350,6 +1395,7 @@ class GrantedRun:
                 said = True
             if self._stop.is_set():
                 raise HoldError("the run was stopped while it waited for the granted node.")
+            wait_s = self._queue_wait_now(wait_s)
             if wait_s and self._clock() - self._claimed_at > wait_s:
                 raise HoldQueueWaitSpent(f"the granted node was not granted within {wait_s // 60} min, this host's "
                                          "Max queue wait; no node of its own is asked for beside it.")

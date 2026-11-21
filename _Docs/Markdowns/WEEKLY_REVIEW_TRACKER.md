@@ -1,0 +1,71 @@
+# Review of the pull requests merged 14 – 20 November — findings and remediation tracker
+
+**This document is temporary.** It is a remediation tracker in the sense of CLAUDE.md §6.1: one row per finding,
+updated in the same commit series as the work, closed only with evidence, and deleted by the pull request that
+closes its last row (which says so in its body).
+
+It records an adversarial review of the thirty pull requests merged into `main` between 14 and 20 November
+(#1334 – #1363), reviewed against `main` at `0519b40` for (1) scientific validity and consistency of calculations,
+gates and inclusion criteria, (2) adherence to CLAUDE.md and ARCHITECTURE.md, and (3) implementation accuracy,
+including whether each diff does what its pull request body says.
+
+## How the findings were produced
+
+The pull requests were split among five scoped reviewers by area. Each finding below was reproduced against
+`main` with a probe script (or, where marked *plausible*, read but not run), and the *Evidence* column records what
+the probe printed. Probes lived in the session's scratch directory, not in the repository.
+
+States:
+
+- `todo` — the wrong output was reproduced by a probe; not yet fixed.
+- `done` — fixed, with a regression test that was watched failing on the unfixed code. The test is named.
+- `decision` — the behaviour is a design choice that belongs to the user; the row states the options and what was
+  done in the meantime.
+- `declined` — measured and found not to be a defect, with the reason.
+
+Recount with `grep -c '| \`todo\` |'` and so on. No total is typed here.
+
+Severity: **High** — a silently wrong result a user would act on, or data left damaged. **Medium** — wrong, or a
+crash, in an edge case a user can reach. **Low** — an inconsistency or a misleading label.
+
+## Findings
+
+### Pipeline and Review calculations (#1343, #1345)
+
+| Id | PR | Sev | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| A1 | #1343 | Medium | `pipeline/background.py::fft_bandpass` re-references the filtered frame to its **median**. Once cells cover more than half the field the median is a cell pixel, so the cells are subtracted to about zero. README says the background sits at zero "whatever share of the field the cells cover". | 1024² frame, background 100, cells +500: cell mean 487 / 477 / 469 / 437 at 4 / 24 / 37 / 48 % cover, then **34.7** at 56 % (pre-PR code: 212.8). | Estimate the level from the background tail (seed from the lowest pixels, sigma-clipped growth), as `_match_background_scale` does; regression test at 56 % and 70 % cover. | `todo` |
+| A2 | #1343 | Medium | `review/features/lineplot/controller.py::_paint_series` draws the fraction and Events panels inside `if agg_times:`, so a series with no ON cell at any timepoint (typically the negative control) still draws nothing there, despite F3 keeping zero-fraction timepoints. | Three points, mean NaN, frac 0, n_above 0: `_paint_series` returns `(False, False, False)`, 0 fraction lines, 0 Events lines. | Draw the fraction and Events blocks independently of `agg_times`. | `todo` |
+| A3 | #1343 | Medium | `review/domain/spatial_compute.py`: with `fields`, Ripley's `r_max` is 0.25 × the smallest side over **every** field's bounding box, so one sparse field collapses the radius range for the whole well. | Field 1: 300 cells on 1000²; field 2: 2 cells. `r_max` 248.3 alone, **1.25 px** with both. | Take `r_max` from fields with enough cells (or per field); regression test against field 1 alone. | `todo` |
+| A4 | #1343 | Low | `review/domain/fold_change.py::member_baseline_value` still falls back to the earliest timepoint when the baseline value is unusable (ratio over a zero mean), which S5a removed everywhere else; the per-cell overlay is then normalised to a different timepoint than its bar. | Means {0: 5, 24: 0, 48: 3}, baseline 24, ratio: returns **5.0**; `baseline_from_points_resolved` gives `(24.0, nan, 0.0)`. | Resolve through the same baseline helper and return NaN when unusable. | `todo` |
+| A5 | #1343 | Low | The Spatial "Per-colony distribution" tooltip (`review/features/spatial/tab_view.py`) still defines ICC as σ²_between / σ²_total, the ratio F1 replaced with ICC(1); `_match_control_mean`'s docstring still describes the removed tolerance rule. | grep. | Reword both. | `todo` |
+| A6 | #1343 | Low | Under vs-t0 ratio the baseline's own spread is added to every point **including the baseline point**, where FC = x0/x0 is exactly 1; S5 extended this from the mean to the fraction and Events fields. | t0 point: mean 1.0 ± 0.1414, frac 1.0 ± 0.1414 (pre-PR frac ± 0.10). | The baseline point carries zero spread on the line and bar paths. | `todo` |
+
+### Nanowells Statistics and Rare responders (#1334 – #1353, #1359)
+
+| Id | PR | Sev | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| B1 | #1341 | Medium | `rare_export_compute.why_undecided` can never give the "cutoff sits on a tie" reason: a tie is undecided only when no nanowell is past the cutoff, where the exceedance p is always NaN, and the `needs()` branch is checked first. The headline then says "the regression could not be fitted", contradicting the deciding line beneath it. | 5 % of control and 30 % of treatment exactly at the cutoff: headline "…regression could not be fitted", deciding line "no nanowell in any well was past the cutoff". | Check `kt + kc == 0 and tie_note` first, as `interpret` does. | `todo` |
+| B2 | #1341, #1342 | Medium | `rare_hc_compute.unscored_reason` ignores that HC+ needs `int(alpha0·n) ≥ 1`. A well with fewer than 10 nanowells (alpha0 0.1) is called "past every control value", or "none of its 0 most extreme nanowells…". | 8 p-values with one 0.001: `BEYOND_CONTROLS`; 8 ordinary: "none of its 0 most extreme nanowells". | Say first that the well has too few nanowells for HC, with the count needed. | `todo` |
+| B3 | #1341 | Low | `BEYOND_CONTROLS` says "past every control value", but `p ≤ 1/n` allows a few control values to reach them. | Arithmetic on `p = (1 + ge) / (N + 1)`. | Reword to "past all but a few control values". | `todo` |
+| B4 | #1352 | Medium | A run-flag Subset condition "<flag> = no" leaves out nanowells whose flag is **NA** (count-disagreement on a tile with no isolated cell, unmeasured sites), where the Rare responders menu it replaced kept them; the manual says it leaves out "the same flagged nanowells", and the PR body names the wrong behaviour change. | `subset_compute.apply` on True / False / None / NaN rows: every flag kept only the False row. | Decision: NA → "not flagged" (old behaviour), or keep "undecided" (§7 #3) and say so in the manual. | `todo` |
+| B5 | #1353 | Medium | The **vs** control is still shown on Distribution, Along x: Wells, but #1353 removed its only reader there, so it changes nothing; the manual and tooltip still promise a comparison. | Rendering with control "", "control", "treated": identical figures (37 texts). | Show **vs** on Statistics only; correct the manual and tooltip. | `todo` |
+
+### Analyze, remote and queue (#1349 – #1362)
+
+| Id | PR | Sev | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| C1 | #1357 | High | `services/remote_hold.GrantedRun.await_node` clears `runner.node_wait` as its first statement, so `waiting_for_granted_node` is False for the whole real wait; a wait over 20 minutes still reports "the run is not running there any more". The PR's test set `node_wait` and never entered `await_node`. | Probe through a real `GrantedRun`: inside the loop `waiting_for_granted_node False`, and the "holds no job id or pid" line was logged after 45 minutes. | A flag held for the duration of the wait loop (try/finally), read by `node_pending()`. | `todo` |
+| C2 | #1356 | Medium | `GrantedRun.await_node` reads Max queue wait once, so a run that claimed a still-queued requested node keeps the old limit when the user raises it, though #1356 says raising it keeps the place in the queue. | Limit 1 min, saved 0 mid-wait: `HoldQueueWaitSpent` at t = 75 s. | Re-read the limit each poll through the same lookup the request uses. | `todo` |
+| C3 | #1349 | Medium | With "Also add channels found in the input at run time" ticked, the form skips the label-free "exactly one Phase channel" check, but adding channels never supplies a phase channel, so Run launches and the pipeline exits on `--phase_token is required`. | Real `AnalyzeTab`: box off → Segmentation Error; box on → no problems, launched with `phase_token ''`. | Skip the Phase check only under full auto-detect. | `todo` |
+| C4 | #1358 | Medium | Subset now drops `run_report` / `run_check` (they describe one run of the whole input), but Concatenate's `merge_info` and Merge plates' `merged_info` still carry dataset 1's copies into a dataset with other timepoints or wells. | `merge_info` output still carries both blocks, describing A01 of plate 1 only. | Share `PER_RUN_BLOCKS` from `datasets/core` and strip it in all three tools. | `todo` |
+| C5 | #1362 | Low | `GrantedNode.release` clears `last_state` on every branch, including "left alone", "left running" and a failed cancel, so the header dot goes grey while a node is still up and is never re-read. | Read, not run (plausible). | Clear it only when the node was cancelled. | `todo` |
+| C6 | #1349 | Low | `analyze/run_spec.py`'s comment says the run-time channel scan "is not a walk", but `add_detected_channels` samples up to 500,000 names (zip listings included) on the GUI thread at every Run with the box ticked. | Read, not timed (plausible). | Correct the comment, and bound or move the scan. | `todo` |
+
+### Datasets, CZI import and phone layout (#1340 – #1363)
+
+| Id | PR | Sev | Finding | Evidence | Proposed fix | State |
+|---|---|---|---|---|---|---|
+| D1 | #1360 | High | An interrupted in-place Subset edit cannot be finished from the page: the page resolves the source without the marker's schema and with the (now mismatching) acquisition record, so the pickers stay empty and the run is refused with "Run that same edit again". Only the compute API resumes. | Cancelled after one well of three: page resolve raises `RawSchemaError`; the page-shaped filter is refused with "interrupted in-place edit". | When the marker is present, the page resolves with the marker's schema, pre-sets its filter and offers to finish the edit; resume accepts marker wells already removed. | `todo` |
+| D2 | #1355 | Medium | `ui/phone_shell._DragOwnerGuard._release_grab` calls `deleteLater()` while the guard is still the viewport's child, so `set_drag_scroll(vp, True)` in that window re-grabs, finds the dying guard, installs none, and the grab can then never be released. | Offscreen probe: after the deferred delete `grabbed True guard False`; after off again still grabbed. | Detach the guard (remove filter, unparent) before `deleteLater()`. | `todo` |
+| D3 | #1363 | Low | `core/phone_layout.is_duo_resolution` compares logical sizes against the Duo's physical pixels, so at 125 % / 150 % Windows scaling the Duo is no longer offered phone layout. | Inner screen at 1.25: (1502, 2088) not offered; outer at 1.25: not offered. | Compare in physical pixels (logical × device pixel ratio). | `todo` |

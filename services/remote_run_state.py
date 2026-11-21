@@ -48,9 +48,11 @@ def _canonical_well_from_path(stem: str) -> str | None:
 
 
 NANOWELL_REMOTE_INCREMENTAL_REFUSAL = (
-    "An incremental nanowell run cannot run on a remote host yet: the remote would analyse the new timepoints "
-    "without the earlier ones' roster and template, and its tables would replace yours. Run it incrementally "
-    "on this computer, or run the remote plate in full (untick Incremental).")
+    "\"Fill in what's missing\" cannot run a nanowell plate on a remote host: the remote would analyse the new "
+    "timepoints without the earlier ones' roster and template, and its tables would replace yours. Set \"If a "
+    "well already has output\" to \"Skip it\" instead. On a remote host that works well by well, on whole wells: "
+    "every well already completed here is skipped, and every other well (unfinished, or with new timepoints) is "
+    "sent whole and analysed again in full. Or run \"Fill in what's missing\" on this computer.")
 
 
 

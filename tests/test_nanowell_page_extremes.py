@@ -186,7 +186,8 @@ def test_the_view_draws_the_ranked_rows_at_the_latest_timepoint_with_their_crops
     assert len(_images(page)) == 6 * 3                                       # a crop per row and timepoint
     # Each crop carries the fold change at its own timepoint: the top row's is 1×, 1×, 4×.
     assert _texts(page, "nw-extremes-value")[:3] == ["1×", "1×", "4×"]
-    caption = _texts(page, "nw-extremes-caption")[0]
+    # The caption is broken to the figure's width, which follows the page's size; read it as one run of prose.
+    caption = " ".join(_texts(page, "nw-extremes-caption")[0].split())
     # The fixture's wells hold fewer nanowells than rim focus needs to judge one, and the caption says so first.
     unjudged = re.match(r"Focus unchecked: \d+ under 10 rims in the well\. ", caption)
     assert unjudged
@@ -255,5 +256,5 @@ def test_a_crop_read_that_failed_says_why_in_its_panels(page, qtbot, monkeypatch
     monkeypatch.setattr(nwc, "crops_for_sites", broken)
     _loaded(qtbot, page)
     nwc.set_view(page, "extremes")
-    qtbot.waitUntil(lambda: any("disk gone" in t for t in _texts(page, "nw-extremes-missing")), timeout=10000)
+    qtbot.waitUntil(lambda: any("disk gone" in " ".join(t.split()) for t in _texts(page, "nw-extremes-missing")), timeout=10000)
     assert _images(page) == []

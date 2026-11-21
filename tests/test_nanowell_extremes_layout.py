@@ -106,7 +106,7 @@ def test_the_montage_shows_only_the_timepoints_chosen_and_always_the_ranked_one(
     assert page.state.feature_slice("nanowell").extremes_tps == ["t_c", "t_d"]
     assert _fig_texts(page, "nw-extremes-tp")[:2] == ["0 h", "10 h · ranked"]
     assert page.widgets.get("_nw_extremes_tps_btn").text() == "Timepoints: 2 of 3"
-    assert any("Timepoints not shown: t_a." in t for t in _fig_texts(page, "nw-extremes-caption"))
+    assert any("Timepoints not shown: t_a." in " ".join(t.split()) for t in _fig_texts(page, "nw-extremes-caption"))
     nwc.set_extremes_timepoints(page, [])
     assert _fig_texts(page, "nw-extremes-tp")[:3] == ["0 h", "5 h", "10 h · ranked"]
     assert page.widgets.get("_nw_extremes_tps_btn").text() == "Timepoints: all"

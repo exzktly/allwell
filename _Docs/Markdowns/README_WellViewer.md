@@ -2133,8 +2133,10 @@ setting it to 0 (no limit), lets the job keep its place in the queue instead of
 being cancelled at the old limit. The log says so: *Max queue wait is now 60 min
 (was 30 min); job 4001 has waited 28 min, and it keeps its place in the queue.*
 The limit still counts from the moment you asked for the node, so lowering it
-below the time already waited ends the request at the next look. Only the
-window that asked for the node keeps this clock. A run's own node request
+below the time already waited ends the request at the next look. A run that
+claimed the node while it was still queued waits for the same job, and reads the
+saved limit at every look as well, so raising it keeps that run waiting too
+rather than failing it at the old limit. A run's own node request
 (rather than a requested node) takes the limit with it to the cluster when it
 starts, so an edit reaches only the next run.
 

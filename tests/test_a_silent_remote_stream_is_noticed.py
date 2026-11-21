@@ -164,3 +164,53 @@ def test_a_probe_during_the_granted_node_wait_does_not_call_the_run_gone(setup):
     assert _probe_answer(tab, runner, logged) == [
         "[remote] no-output check: the scheduler lists job 4242 as RUNNING; the run is still going there, so it "
         "is only quiet; nothing to do.\n"]
+
+
+def test_a_run_inside_the_real_wait_for_its_granted_node_is_not_probed(setup, tmp_path, monkeypatch):
+    """The wait itself happens inside ``GrantedRun.await_node``, which clears ``node_wait`` as it begins: the test
+    above sets ``node_wait`` by hand, a state the app is in only while it stages and uploads. Driven here through the
+    real ``await_node``, with its log lines in the run's stream, quiet for 45 minutes while the node queues. Wrong
+    implementation: the silence check reading ``node_wait`` alone — it then probes, and the host, which holds no pid
+    or job id for a run not yet launched, is reported as having lost it."""
+    import threading
+
+    from services.remote_hold import GrantedRun, HoldState
+
+    tab, runner, host, logged = setup
+    monkeypatch.setenv("ALLWELL_REMOTES", str(tmp_path / "no-remotes.toml"))   # no saved settings to re-read
+    host.write(PIDFILE, "")
+    host.write(PIDFILE + ".slurm", "")
+
+    class _QueuedLease:
+        """A claim on a node the scheduler has not granted yet; granted at the second look."""
+
+        target = None
+
+        def __init__(self):
+            self.state = HoldState(phase="queued", job_id="777")
+
+        @property
+        def pending(self):
+            return self.state.phase not in ("granted", "busy")
+
+        def refresh(self):
+            pass
+
+    remote = runner._remote_runner
+    inside: list[str] = []
+
+    def nap(_seconds):
+        tab._poll_log()
+        _quiet_for(runner, 45 * 60)
+        tab._check_stream()
+        inside.append("probed" if runner._silence_probe is not None else "left alone")
+        granted.lease.state = HoldState(phase="granted", job_id="777", node="n1")
+
+    granted = GrantedRun(remote, batch_size=0, nanowell=False, log_fn=lambda s: runner._enqueue(("line", s)),
+                         stop_event=threading.Event(), sleep=nap, clock=lambda: 0.0)
+    granted.lease = _QueuedLease()
+    remote.node_wait = granted.await_node            # what `GrantedRun.claim` does for a lease still queued
+    remote.await_granted_node()                      # what each launch site calls
+
+    assert inside == ["left alone"], "the run was probed while it waited for its granted node"
+    assert not any("No output" in t or "no-output check" in t for t in logged), logged

@@ -9281,7 +9281,11 @@ raises `DetectionError` rather than running the listed channels as if the input
 had been checked, and the merged list is held against `channel_option_errors`.
 Its one-line note joins the detection summary in `_detection_note`, so it is
 logged, shown on the dashboard and carried as the finished job's message. The
-pre-run report's coverage scan applies the same union on its worker.
+pre-run report's coverage scan applies the same union on its worker; `start_run`
+itself runs it, like `resolve_detection`, on the GUI thread, because every caller
+needs its refusal before the run starts — an enumeration of up to
+`_ENUMERATE_LIMIT` names (about 0.2 s for 96 zips of 500 members on a local disk,
+longer on a network share), paid only with one of the two boxes ticked.
 `_channels_settled_at_run()` (either box ticked) is what defers the
 "at least one channel" and channel-comparing segmentation checks, so the rows
 may be left blank. The label-free method's Phase mark is the exception: only

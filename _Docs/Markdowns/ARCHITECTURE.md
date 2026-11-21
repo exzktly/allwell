@@ -7977,7 +7977,10 @@ density search a cell's own field, `detect_colonies` clusters each field on its
 own with the frame's one ε (from the within-field distances) and numbers the
 colonies on from field to field so a colony never spans two, and `ripley_l`
 estimates K(r) per field in that field's window and pools it weighted by cell
-count, drawing each simulated pattern the same way. The Spatial map still draws
+count, drawing each simulated pattern the same way; its default radius range
+runs to a quarter of the shorter side of the cell-count-weighted median field's
+window, so a sparse field of two or three cells cannot shrink it for the well.
+The Spatial map still draws
 the fields over one another in one panel. The renderer labels axes, nearest-neighbour
 distances and Ripley's radius with the payload's unit (`renderer.in_unit`). A
 nanowell cell table has a `timepoint` label and no `timepoint_hours`, so
@@ -22769,15 +22772,19 @@ fraction and events panels against t=24, under a single axis label.
 load-bearing word. There are six baseline finders in `fold_change.py` — the line
 path's `_field_baseline`, the bar path's four `baseline_*_from_points*` variants,
 and `member_baseline_value`, which the per-cell overlay uses and whose docstring
-promises it agrees with the bar's. All six go through the predicate, and the
-operation is threaded in from the collector at every live call site. Converting a
-subset is worse than converting none: the first pass took the line path only, so
-the symptom survived intact on the bar tab, and the pass after it left
-`member_baseline_value` resolving a different timepoint from the bar it is drawn
-over — in exactly the case its own docstring says the two agree. (Two of the four
-`baseline_*_from_points*` variants have no production caller today; they take the
-parameter so a future one cannot reintroduce the split.) The ratio-mode fall-through remains (it is arithmetic, not
-a choice) but now says so in the log.
+promises it agrees with the bar's. All six go through the predicate and through one
+rule for which point is the baseline (`_baseline_point`): the point at the named
+timepoint, or the member's earliest measured one, chosen by timepoint and never by
+whether its value can divide. A baseline that cannot serve makes the member
+undefined on that panel, on every path: `NaN` points on the line, an undefined bar,
+and a `NaN` t0 from `member_baseline_value`, which the overlay's `scale_for` reads
+as missing, so the cells drawn over an undefined bar are not normalised against
+another timepoint. A finder converted alone is the failure this rules out: one
+panel or one overlay normalised against a different timepoint from the figure it
+sits in, under one axis label. The operation is threaded in from the collector at
+every live call site. (Two of the four `baseline_*_from_points*` variants have no
+production caller today; they take the parameter so a future one cannot
+reintroduce the split.) Each unusable baseline is logged.
 
 **Two conventions for "undefined" were live at once.** `scale_bar_value`'s
 docstring states that an undefined input spread stays undefined through
@@ -22934,6 +22941,15 @@ don't have a meaningful denominator uncertainty can omit them; that
 recovers the legacy "treat denominator as exact" `spread / factor`
 behaviour and is the backwards-compatible default.
 
+The formula is for every timepoint **but the baseline's own**. There the
+vs-t0 value is the baseline over (or less) itself — exactly 1 (or 0), control
+stacking included, since the same post-control value is on both sides — so it
+carries no spread: `fold_change.spread_at_baseline` sets it to 0.0 on the line
+path (`normalize_pts`, `_normalize_field`) and on all three bar collectors (the
+tab's replicate-set and per-well bars and Batch Export's), each from the
+timepoint its baseline resolved to. Applying the quadrature there drew a band of
+√2 times the baseline's relative error around a value that cannot vary.
+
 The formula holds for **every panel on both tabs**, and two rules keep it so.
 The t0 baseline's own spread is folded into the fraction and Events fields
 exactly as into the mean: `_field_baseline` returns the baseline point's
@@ -22994,6 +23010,10 @@ Line tab — lineplot_controller.redraw_line_plots(…) →
       bars do). A replicate set keeps a timepoint whenever it has a
       mean or a fraction there (``set_measured_at``, which the batch
       line runner shares) and drops it only when it holds no cell.
+      ``_paint_series`` draws the Fraction and Events panels whether
+      or not the trace has a mean anywhere, so a member with no ON
+      cell at any timepoint (a negative control) is a line at zero on
+      both and absent from the Mean panel only.
    2. ``fold_change_pairing.control_denominators(…)`` builds one
       ``ControlDenominators`` for the pass; ``denoms.series_for(member)``
       then answers with that member's control, its outcome, and the

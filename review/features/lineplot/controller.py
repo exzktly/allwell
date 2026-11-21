@@ -605,49 +605,54 @@ def _paint_series(axes: LineAxes, series, *, fov_active: bool,
         if value_labels:
             annotate_series(ax_mean, agg_times, agg_means, agg_errs,
                             fmt=value_label_format, color=color)
-        vf = [(p.t, p.frac, p.frac_spread) for p in series.points if p.has_frac]
-        if vf:
-            vt2, vf2, vfe = zip(*vf)
-            _tag(ax_frac.plot(
-                vt2, vf2, color=color, lw=2,
-                markersize=3, label=series.display, zorder=3, **_mark("s"),
-            ))
-            if any(e > 0 for e in vfe):
-                # FOV / replicate spread present (e.g. "FOV errors" mode):
-                # draw a ±error band around the fraction line, matching the
-                # mean subplot — NOT a fill down to the x-axis (which read as
-                # "colouring the area underneath" and carried no error info).
-                lo = [max(0.0, f - e) for f, e in zip(vf2, vfe)]
-                hi = [f + e for f, e in zip(vf2, vfe)]
-                ax_frac.fill_between(
-                    vt2, lo, hi, color=color, alpha=0.15, zorder=2,
-                )
-            else:
-                # No spread (single FOV / no error mode): keep the light
-                # area shading under the curve as before.
-                ax_frac.fill_between(
-                    vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
-                )
-            if value_labels:
-                annotate_series(ax_frac, vt2, vf2, vfe,
-                                fmt=value_label_format, color=color)
         any_ts = True
-        # N events panel
-        vn = _events_points(series, fov_active=fov_active)
-        if vn:
-            vnt, vnv, vne = zip(*vn)
-            _tag(ax_n.plot(
-                vnt, vnv, color=color, lw=2,
-                markersize=3, label=series.display, zorder=3, **_mark("^"),
-            ))
-            if any(e > 0 for e in vne):
-                lo = [max(0.0, v - e) for v, e in zip(vnv, vne)]
-                hi = [v + e for v, e in zip(vnv, vne)]
-                ax_n.fill_between(vnt, lo, hi, color=color, alpha=0.15, zorder=2)
-            if value_labels:
-                annotate_series(ax_n, vnt, vnv, vne,
-                                fmt=value_label_format, color=color)
-            any_n = True
+    # The fraction and Events panels are drawn whether or not the trace has a mean anywhere: the mean is that of
+    # the ON cells, so a member with no ON cell at any timepoint (a negative control) has none, while its
+    # fraction and its event count are a measured 0 at every one of them (``set_measured_at``).
+    vf = [(p.t, p.frac, p.frac_spread) for p in series.points if p.has_frac]
+    if vf:
+        any_ts = True
+        vt2, vf2, vfe = zip(*vf)
+        _tag(ax_frac.plot(
+            vt2, vf2, color=color, lw=2,
+            markersize=3, label=series.display, zorder=3, **_mark("s"),
+        ))
+        if any(e > 0 for e in vfe):
+            # FOV / replicate spread present (e.g. "FOV errors" mode):
+            # draw a ±error band around the fraction line, matching the
+            # mean subplot — NOT a fill down to the x-axis (which read as
+            # "colouring the area underneath" and carried no error info).
+            lo = [max(0.0, f - e) for f, e in zip(vf2, vfe)]
+            hi = [f + e for f, e in zip(vf2, vfe)]
+            ax_frac.fill_between(
+                vt2, lo, hi, color=color, alpha=0.15, zorder=2,
+            )
+        else:
+            # No spread (single FOV / no error mode): keep the light
+            # area shading under the curve as before.
+            ax_frac.fill_between(
+                vt2, 0, vf2, color=color, alpha=0.10, zorder=2,
+            )
+        if value_labels:
+            annotate_series(ax_frac, vt2, vf2, vfe,
+                            fmt=value_label_format, color=color)
+    # N events panel
+    vn = _events_points(series, fov_active=fov_active)
+    if vn:
+        any_ts = True
+        vnt, vnv, vne = zip(*vn)
+        _tag(ax_n.plot(
+            vnt, vnv, color=color, lw=2,
+            markersize=3, label=series.display, zorder=3, **_mark("^"),
+        ))
+        if any(e > 0 for e in vne):
+            lo = [max(0.0, v - e) for v, e in zip(vnv, vne)]
+            hi = [v + e for v, e in zip(vnv, vne)]
+            ax_n.fill_between(vnt, lo, hi, color=color, alpha=0.15, zorder=2)
+        if value_labels:
+            annotate_series(ax_n, vnt, vnv, vne,
+                            fmt=value_label_format, color=color)
+        any_n = True
     # ``np.asarray`` rather than assuming: the field is an array, but a caller
     # handing in a plain list must not silently draw nothing — and an array's
     # truthiness raises, so the emptiness test is on ``.size``.

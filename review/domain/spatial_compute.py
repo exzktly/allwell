@@ -162,6 +162,14 @@ class RipleyResult:
     n_points: int
 
 
+def _weighted_median(values, weights) -> float:
+    """The weighted median of *values*: the smallest value at which the cumulative weight reaches half the total."""
+    order = np.argsort(np.asarray(values, dtype=float), kind="stable")
+    vals = np.asarray(values, dtype=float)[order]
+    cum = np.cumsum(np.asarray(weights, dtype=float)[order])
+    return float(vals[int(np.searchsorted(cum, 0.5 * cum[-1]))])
+
+
 def ripley_l(
     points: np.ndarray,
     *,
@@ -185,6 +193,10 @@ def ripley_l(
     by each field's cell count, and every simulated pattern is drawn and pooled
     the same way. Pairs are never counted across fields, whose coordinates do
     not share a frame. A field with fewer than two cells contributes nothing.
+    The default *r_max* is a quarter of the window's shorter side — for several
+    fields, of the cell-count-weighted median field's, so a sparse field of two
+    or three cells close together (a window a few pixels across) cannot shrink
+    the radii read for the whole well to that size.
     """
     pts = _as_points(points)
     n = pts.shape[0]
@@ -208,7 +220,7 @@ def ripley_l(
     areas = [w * h for w, h in sides]
     sizes = [b.shape[0] for b in blocks]
     if r_max is None:
-        r_max = 0.25 * min(min(w, h) for w, h in sides)
+        r_max = 0.25 * _weighted_median([min(w, h) for w, h in sides], sizes)
     r_max = max(float(r_max), 1e-9)
     r = np.linspace(r_max / n_r, r_max, n_r)
 

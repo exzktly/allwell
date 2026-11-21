@@ -74,3 +74,19 @@ def test_fft_bandpass_does_not_depend_on_how_many_cells_share_the_field():
         means.append(float(subtract_background(image, 200, "fft_bandpass")[cells].mean()))
     assert max(means) - min(means) < 0.03 * TRUE_MEAN, means     # was 493 -> 337, a third of the signal
     assert min(means) > 0.93 * TRUE_MEAN, means
+
+
+@pytest.mark.parametrize("cover", [0.04, 0.48, 0.56, 0.70])
+def test_fft_bandpass_reads_the_cells_on_either_side_of_half_cover(cover):
+    """The re-reference level is the background's, not the frame's median.
+
+    Past half cover the median of the filtered frame is a cell pixel, and taking
+    it as the zero subtracted the cells from themselves: identical cells of mean
+    500 read about 35 at 56% cover. The level is now taken from the frame's low
+    tail (``_background_tail_level``), which is background up to 80% cover.
+    """
+    flat = np.full((SIZE, SIZE), 300.0, np.float32)
+    image, cells = _field(cover, flat)
+    assert abs(cells.mean() - cover) < 0.06, "the fixture covers what it says"
+    corrected = subtract_background(image, 200, "fft_bandpass")
+    assert float(corrected[cells].mean()) == pytest.approx(TRUE_MEAN, rel=0.03)

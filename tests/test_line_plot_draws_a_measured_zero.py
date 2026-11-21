@@ -24,6 +24,8 @@ CUT = 50.0
 CELLS = {
     "A01": {"0h": [20, 21, 22, 23], "24h": [60, 61, 62, 20], "48h": [70, 71, 72, 73]},
     "A02": {"0h": [20, 21, 22, 23], "24h": [60, 20, 21, 22], "48h": [70, 71, 72, 73]},
+    # A negative control: no cell above the cut at any timepoint, so it has no mean anywhere.
+    "A03": {"0h": [20, 21, 22, 23], "24h": [24, 25, 26, 27], "48h": [30, 31, 32, 33]},
 }
 HOURS = {"0h": 0.0, "24h": 24.0, "48h": 48.0}
 
@@ -124,3 +126,34 @@ def test_a_count_that_was_not_computed_is_not_drawn_as_zero():
         LinePoint(t=48.0, mean=nan, spread=0.0, frac=nan, n_above=1.5, has_mean=False, has_frac=False),
     ])
     assert _events_points(series, fov_active=False) == [(0.0, 0.0, 0.0), (48.0, 1.5, 0.0)]
+
+
+def test_a_member_with_no_on_cell_anywhere_still_draws_its_zeros(ctx):
+    """The negative control: no ON cell at any timepoint, so no mean at any, and a measured 0 at every one.
+
+    The fraction and Events panels were drawn only for a trace with a mean somewhere, so this member — the
+    reference a reader compares every other curve's fraction against — vanished from both while its points held
+    the zeros.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from review.features.lineplot.controller import LineAxes, _paint_series
+
+    ctx.state.selection.selections = [{"name": "Neg", "wells": ["A03"], "hidden": False}]
+    ctx.state.selection.selected_wells = {"A03"}
+    series = _tab_series(ctx)
+    fig, axs = plt.subplots(1, 4)
+    try:
+        axes = LineAxes(*axs)
+        painted = _paint_series(axes, series, fov_active=False)
+        lines = {name: [([float(x) for x in ln.get_xdata()], [float(y) for y in ln.get_ydata()])
+                        for ln in ax.lines]
+                 for name, ax in (("mean", axes.mean), ("frac", axes.frac), ("n", axes.n))}
+    finally:
+        plt.close(fig)
+    assert lines["mean"] == []                                  # not computed, and not drawn as zero
+    assert lines["frac"] == [([0.0, 24.0, 48.0], [0.0, 0.0, 0.0])]
+    assert lines["n"] == [([0.0, 24.0, 48.0], [0.0, 0.0, 0.0])]
+    assert painted == (True, False, True)                       # so the finaliser places the panels' legends

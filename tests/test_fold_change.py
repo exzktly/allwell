@@ -507,9 +507,10 @@ def test_normalize_pts_t0_with_baseline_spread_propagates():
     pts = [(0.0, 50.0, 5.0, 0.5, 5, 10), (1.0, 100.0, 10.0, 0.5, 5, 10)]
     out = normalize_pts(pts, use_t0=True)
     # Baseline: (50, 5) → rel err 0.1.
-    # out[0]: mean = 50/50 = 1; spread = 1 * sqrt(0.01 + 0.01) = sqrt(0.02)
+    # out[0] is the baseline over itself: exactly 1, with no spread — the same
+    # value on both sides of the ratio cannot vary against itself.
     assert math.isclose(out[0][1], 1.0)
-    assert math.isclose(out[0][2], math.sqrt(0.02))
+    assert out[0][2] == 0.0
     # out[1]: mean = 100/50 = 2; spread = 2 * sqrt(0.01 + 0.01) = 2*sqrt(0.02)
     assert math.isclose(out[1][1], 2.0)
     assert math.isclose(out[1][2], 2.0 * math.sqrt(0.02))

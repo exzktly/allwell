@@ -1658,9 +1658,10 @@ def member_baseline_value(
     """Member baseline honouring *baseline_tp* (audit S1).
 
     Picks the member's own mean at ``baseline_tp`` when set and sampled;
-    otherwise falls back to the earliest finite mean — matching
-    :func:`baseline_from_points` / :func:`member_first_tp_value` so the
-    per-cell overlay baseline agrees with the bar's.
+    otherwise the earliest measured mean — matching
+    :func:`baseline_from_points` so the per-cell overlay baseline agrees with
+    the bar's. ``NaN`` when that point's mean cannot serve under *op*, as the
+    bar is then undefined too; ``None`` for a member with no measured mean.
 
     That agreement is why *op* is a parameter. This is the sixth baseline
     finder in the file, and it was the one left behind when the other five were
@@ -1676,15 +1677,18 @@ def member_baseline_value(
     )
     if not series:
         return None
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for t, m in series.items():
-            if (abs(float(t) - tgt) <= tp_tolerance(float(t), tgt)
-                    and _baseline_usable(m, op=op)):
-                return float(m)
-        # Requested tp not sampled — fall through to earliest (mirrors the bar).
-    earliest = min(series)
-    return series[earliest]
+    # The bar's rule (``_resolve_baseline``): the point is chosen by timepoint,
+    # never by whether its value can divide, and a baseline that cannot serve
+    # under *op* (zero, for a ratio) makes the member undefined — ``NaN``, which
+    # ``scale_for`` reads as missing — rather than taken against an earlier
+    # timepoint under a "vs t0" axis whose bar reads undefined.
+    pt = _baseline_point([(float(t), m) for t, m in series.items()], baseline_tp, lambda q: q[1])
+    if pt is None:
+        return None
+    if not _baseline_usable(pt[1], op=op):
+        _warn_unusable_baseline(pt, pt[1], "mean")
+        return float("nan")
+    return float(pt[1])
 
 
 def member_first_tp_value(

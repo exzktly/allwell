@@ -227,6 +227,32 @@ def test_the_bar_s_resolvers_name_the_requested_timepoint_and_say_it_cannot_divi
     assert fc.baseline_frac_from_points_resolved([], baseline_tp=0.0, op="ratio") == (None, None, 0.0)
 
 
+def test_the_per_cell_overlay_is_undefined_where_its_bar_is(monkeypatch):
+    """The violin / beeswarm overlay resolves its t0 by the bar's rule.
+
+    The member's mean is 0.0 at the named baseline (24 h) and 5.0 at the earliest timepoint. Its bar is undefined
+    there (``baseline_from_points_resolved`` gives NaN). The overlay's ``member_baseline_value`` skipped the unusable
+    baseline and returned the 0 h mean, so the cells were drawn divided by 5.0 under a "vs t0" axis over a bar that
+    reads undefined. Reached through ``build_cell_scaling``, the resolver the overlay calls.
+    """
+    series = {0.0: 5.0, 24.0: 0.0, 48.0: 3.0}
+    monkeypatch.setattr(fc, "member_mean_series", lambda *a, **k: dict(series))
+    bar = fc.baseline_from_points_resolved([(t, m, 0.1) for t, m in series.items()], baseline_tp=24.0, op="ratio")
+    assert bar[0] == 24.0 and math.isnan(bar[1])
+    scale_for = fc.build_cell_scaling(
+        None, ["A01"], fc_state=(False, "", True), threshold=0.0, val_col="gfp_mean_intensity", use_sem=False,
+        per_fov_spread=False, fluor_gates=None, op_t0="ratio", baseline_tp=24.0)
+    spec = scale_for("A01", 48.0)
+    assert spec.missing is True
+    assert math.isnan(spec.t0_mean)
+    # The rule is the bar's in the ordinary case too: a timepoint the member does not sample is its earliest.
+    assert fc.member_baseline_value(None, "A01", baseline_tp=12.0, threshold=0.0, val_col="x", use_sem=False,
+                                    per_fov_spread=False, fluor_gates=None, op="ratio") == 5.0
+    # And subtracting a zero baseline is defined.
+    assert fc.member_baseline_value(None, "A01", baseline_tp=24.0, threshold=0.0, val_col="x", use_sem=False,
+                                    per_fov_spread=False, fluor_gates=None, op="subtract") == 0.0
+
+
 def test_the_tabs_agree_that_a_set_with_no_on_cells_at_t0_has_no_fraction_ratio(ctx, monkeypatch):
     """Through both tabs' real collectors: with the cut above every control cell at t0, the replicate-set bar read
     NaN while the curve read 1.0 at 24 h (normalised against 24 h, under an axis labelled "vs t0")."""

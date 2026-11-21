@@ -22743,15 +22743,19 @@ fraction and events panels against t=24, under a single axis label.
 load-bearing word. There are six baseline finders in `fold_change.py` — the line
 path's `_field_baseline`, the bar path's four `baseline_*_from_points*` variants,
 and `member_baseline_value`, which the per-cell overlay uses and whose docstring
-promises it agrees with the bar's. All six go through the predicate, and the
-operation is threaded in from the collector at every live call site. Converting a
-subset is worse than converting none: the first pass took the line path only, so
-the symptom survived intact on the bar tab, and the pass after it left
-`member_baseline_value` resolving a different timepoint from the bar it is drawn
-over — in exactly the case its own docstring says the two agree. (Two of the four
-`baseline_*_from_points*` variants have no production caller today; they take the
-parameter so a future one cannot reintroduce the split.) The ratio-mode fall-through remains (it is arithmetic, not
-a choice) but now says so in the log.
+promises it agrees with the bar's. All six go through the predicate and through one
+rule for which point is the baseline (`_baseline_point`): the point at the named
+timepoint, or the member's earliest measured one, chosen by timepoint and never by
+whether its value can divide. A baseline that cannot serve makes the member
+undefined on that panel, on every path: `NaN` points on the line, an undefined bar,
+and a `NaN` t0 from `member_baseline_value`, which the overlay's `scale_for` reads
+as missing, so the cells drawn over an undefined bar are not normalised against
+another timepoint. A finder converted alone is the failure this rules out: one
+panel or one overlay normalised against a different timepoint from the figure it
+sits in, under one axis label. The operation is threaded in from the collector at
+every live call site. (Two of the four `baseline_*_from_points*` variants have no
+production caller today; they take the parameter so a future one cannot
+reintroduce the split.) Each unusable baseline is logged.
 
 **Two conventions for "undefined" were live at once.** `scale_bar_value`'s
 docstring states that an undefined input spread stays undefined through

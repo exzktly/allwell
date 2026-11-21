@@ -10553,8 +10553,11 @@ Analyze has run on it. The page then shows three more things:
   own and then swapped in, so the edit needs only that much free space, never
   room for a second copy. Nothing removed is kept anywhere, and it cannot be
   undone. A well left with no images, and any well you untick, is deleted. If
-  the edit is interrupted, run the same edit again to finish it; until then
-  Subset refuses to copy from the half-edited folder. Edit in place is not
+  the edit is interrupted (cancelled, or the app closed part-way), choosing the
+  folder again shows a warning naming what that edit keeps, with its choices
+  shown and locked, and the button reads **Finish the interrupted edit**:
+  pressing it finishes exactly that edit and nothing else. Until then Subset
+  refuses to copy from the half-edited folder. Edit in place is not
   offered for an analysed dataset, whose results would go on describing the
   images removed.
 

@@ -19880,7 +19880,17 @@ with no image, and every well not chosen, is deleted. Folder-form wells (`in/<WE
 edit that would remove nothing. `IN_PLACE_MARKER` (`.aw_subset_in_place`) is written first with the schema and the
 filter and removed last: while it is there a copy from the folder is refused, and the same edit run again resumes
 with the stored schema (`resolve_raw_source(record_override={})`) — by then the archives no longer match the record —
-re-cutting an already-cut archive being a no-op. A different edit is refused until that one finishes. When a
+re-cutting an already-cut archive being a no-op. A different edit is refused until that one finishes. The page
+finishes it with the recorded filter, never one read off its pickers: `SubsetPage` reads the marker on every source
+load and after every run (`refresh_interrupted_edit`), resolves the pickers with the stored schema and no record
+check exactly as the planner does, shows the recorded choice with the wells, timepoints, FOVs, channels, schema and
+Edit in place locked, relabels the run **Finish the interrupted edit**, and offers no queueing; `SubsetController._launch`
+then builds the filter from the marker (`SubsetFilter.from_json`, which refuses anything that is not exactly what
+`as_json` wrote). A marker that cannot be read is shown and offers no run, since what it was keeping is unknown.
+Rebuilding the filter from the pickers could not work — the partly cut archives no longer match the record the
+pickers would otherwise be read from — and could not be safe, since any other filter deletes images that edit meant
+to keep; the planner's equality check against the marker refuses one regardless
+(`tests/test_subset_raw_page.py`). When a
 timepoint, FOV or channel is removed the converters' `.aw_converted` done marker is deleted too, since a later
 conversion topping the folder up would add wells holding what the others no longer do; a wells-only edit keeps it.
 A queued in-place job's output is its source (`services.job_kinds.planned_output`).

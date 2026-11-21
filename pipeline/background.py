@@ -177,6 +177,39 @@ _BG_CLIP_SIGMA = 3.0
 _BG_SEED_PERCENT = 20.0
 
 
+def _background_tail_level(values: np.ndarray) -> float:
+    """The level of a frame's background among *values*, whatever share of them the cells are.
+
+    The rule :func:`_match_background_scale` fits a blank by, for a frame with
+    no blank: start from the lowest :data:`_BG_SEED_PERCENT` of the values, which
+    is background up to that much cover, then grow the set to every value within
+    :data:`_BG_CLIP_SIGMA` robust standard deviations of its centre — the
+    standard deviation measured on the set's lower half, which cells (bright
+    outliers) cannot reach — until it stops changing. The level is the final
+    set's median. A plain median of the frame is the background only while the
+    cells cover less than half of it; past that it is a cell value. Needs a
+    fifth of the frame to be background, as the empty-well fit does.
+    """
+    v = np.asarray(values, dtype=np.float64).ravel()
+    v = v[np.isfinite(v)]
+    if v.size == 0:
+        return 0.0
+    mask = v <= float(np.percentile(v, _BG_SEED_PERCENT))
+    centre = float(np.median(v[mask]))
+    for _round in range(_BG_CLIP_ROUNDS):
+        inside = v[mask]
+        below = inside[inside <= centre]
+        sigma = 1.4826 * float(np.median(centre - below)) if below.size else 0.0
+        if not np.isfinite(sigma) or sigma <= 0.0:
+            break
+        keep = np.abs(v - centre) <= _BG_CLIP_SIGMA * sigma
+        if not keep.any() or bool(np.array_equal(keep, mask)):
+            break
+        mask = keep
+        centre = float(np.median(v[mask]))
+    return centre
+
+
 def _fit_line(x: np.ndarray, y: np.ndarray) -> tuple[float, float] | None:
     """Least-squares ``y = a·x + c`` with ``a`` clamped to ``[0.05, 20]``; ``None`` on a degenerate fit.
 
@@ -497,12 +530,14 @@ def subtract_background(image, radius: int, method: str = "sliding_disk",
         # below zero the background sits, and flooring it there took that much
         # off every cell (identical cells of mean 500 read 493 with 20 cells in
         # the field and 337 with 3,000, at radius 200). Re-reference to the
-        # filtered frame's median, the same background level ``fov_median``
-        # uses, so the background is what sits at zero.
+        # filtered frame's background level (:func:`_background_tail_level`),
+        # so the background is what sits at zero. Not its median: past half
+        # cover the median is a cell pixel, and identical cells of mean 500
+        # read 35 at 56% cover.
         # Only when the high-pass ran: with no usable cutoff the frame comes
         # back unchanged (and says so), and has no mean removed to put back.
         finite = filtered[np.isfinite(filtered)]
-        level = float(np.median(finite)) if finite.size and int(radius) > 1 else 0.0
+        level = _background_tail_level(finite) if finite.size and int(radius) > 1 else 0.0
         return _floor_after_subtract(filtered - level)
     if method == "fov_median":
         finite = img[np.isfinite(img)]

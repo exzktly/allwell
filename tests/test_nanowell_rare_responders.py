@@ -869,10 +869,9 @@ def _value_table(wells):
     return pd.DataFrame(rows)
 
 
-def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
-    """Responders lower on a fold change with a few dead control nanowells (fc = 0, 3 %, more than the 1 % tail):
-    the cutoff lands on 0 and nothing can be strictly below it, so every count is 0. That is a test that could not
-    count, not a finding of none — while 40 % of the treatment's nanowells died."""
+def _floor_tie_result():
+    """Responders lower on a fold change with a few dead control nanowells (fc = 0, 3 %, more than the 1 % tail),
+    four wells a side, while 40 % of the treatment's nanowells died."""
     rng = np.random.default_rng(0)
 
     def well(p_dead, n=200):
@@ -881,14 +880,36 @@ def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
         return v
 
     wells = [(f"C{i}", "ctrl", well(0.03)) for i in range(4)] + [(f"T{i}", "drug", well(0.40)) for i in range(4)]
-    res = rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
-                     value_label="Count fold change")
+    return rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
+                      value_label="Count fold change")
+
+
+def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
+    """The cutoff lands on 0 and nothing can be strictly below it, so every count is 0. That is a test that could not
+    count, not a finding of none."""
+    res = _floor_tie_result()
     unit = res.units[0]
     assert sum(c.k for c in unit.primary.counts) == 0
     assert unit.interpretation == rr.UNDECIDED
     assert "sits on a tie" in unit.tie_note
     from review.features.nanowell.rare_export_compute import caveats
     assert unit.tie_note in caveats(unit, res.prepared.params, "Count fold change")
+
+
+def test_the_headline_of_a_tie_says_the_tie_not_a_regression_that_never_ran():
+    """Review row B1: a tie is undecided only when no nanowell is past the cutoff, where the regression has nothing to
+    fit and the exceedance p is always NaN. The headline's reason asked about the NaN p first, so it read "the
+    deciding test's regression could not be fitted" above a deciding line saying nothing was past the cutoff. Four
+    wells a side, so the regression's well counts are met and only the tie can be the reason."""
+    from review.features.nanowell.rare_export_compute import TIE_UNDECIDED, deciding_line, headline, why_undecided
+
+    res = _floor_tie_result()
+    unit, params = res.units[0], res.prepared.params
+    assert unit.interpretation == rr.UNDECIDED and unit.tie_note and math.isnan(unit.primary.p)
+    assert why_undecided(unit, params) == TIE_UNDECIDED
+    assert headline(unit, params).startswith(f"drug: {rr.UNDECIDED} — {TIE_UNDECIDED}. 0 of 800 drug nanowells")
+    assert deciding_line(unit, 1, params) == ("Deciding: exceedance test not tested — no nanowell in any well was "
+                                              "past the cutoff.")
 
 
 def test_a_continuous_cutoff_is_not_called_a_tie():

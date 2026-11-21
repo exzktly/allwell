@@ -221,11 +221,21 @@ def why_undecided(unit, params) -> str:
     reason, which used to be only in the line under the panels; ``""`` for any other verdict."""
     if unit.interpretation != UNDECIDED:
         return ""
+    # In the order ``rare_report_compute.interpret`` decides it. A cutoff on a tie is undecided only when no nanowell
+    # is past it, and with nothing past the cutoff the regression has nothing to fit, so its p is always NaN there:
+    # asked first, the missing p would blame the regression for what the tie did.
+    kt, _nt, kc, _nc = counts_of(unit)
+    if kt + kc == 0 and getattr(unit, "tie_note", ""):
+        return TIE_UNDECIDED
     if unit.exceedance and not math.isfinite(unit.primary.p):
         need = needs(unit, params)
         return ("the deciding test " + need[len("it "):].rstrip(".") if need.startswith("it needs ")
                 else "the deciding test's regression could not be fitted")
-    return "the control cutoff sits on a tie, so no nanowell could be counted past it"
+    return TIE_UNDECIDED
+
+
+#: The headline's reason for "cannot be decided" when the control cutoff sits on a tie (``rare_design_compute``).
+TIE_UNDECIDED = "the control cutoff sits on a tie, so no nanowell could be counted past it"
 
 
 def _floor_note(perm) -> str:

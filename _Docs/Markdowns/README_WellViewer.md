@@ -11584,7 +11584,7 @@ estimate of ρ.
 | q < 0.05 | **rare responders detected** |
 | otherwise, or no nanowell in any well past the cutoff | **rare responders not detected** |
 | no group p (fewer than 3 control or 2 treatment wells for its regression) while nanowells are past the cutoff | **cannot be decided with these wells** — with the wells it needs |
-| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** |
+| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** — because the control cutoff sits on a tie |
 | Fewer than 2 wells on a side | **too few wells to test the group** |
 
 Higher Criticism (B) and the upper-tail shape test (C) are reported beside the verdict as supporting evidence and

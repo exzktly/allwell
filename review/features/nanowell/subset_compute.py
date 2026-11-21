@@ -128,7 +128,9 @@ ROW_FLAGS = {
 #: The run's own per-row flags among :data:`ROW_FLAGS`, each read as it is written in the site table: the cell count
 #: and the area's estimate of it disagree, or the nanowell is cut by the image's edge. With *Seam* and *Identity
 #: contradicted* they are the flags the run marks a nanowell with without removing it; every view draws such
-#: nanowells unless a Subset leaves them out, the Statistics tests (Rare responders among them) included.
+#: nanowells unless a Subset leaves them out, the Statistics tests (Rare responders among them) included. A cell the
+#: run left empty (no isolated cell on the tile to estimate a count from; a site it did not measure) is no value, so
+#: *no* does not keep that nanowell: it is counted under "no value for a condition", never taken as unflagged.
 _RUN_FLAGS = ("count_disagreement", "partially_visible")
 #: Which group of the editor each property is listed under.
 _ROW_FLAG_GROUPS = {"found": "Tracking", "tp_unaddressed": "Tracking", "identity_out": "Tracking",

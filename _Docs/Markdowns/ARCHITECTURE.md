@@ -22965,6 +22965,10 @@ Line tab — lineplot_controller.redraw_line_plots(…) →
       bars do). A replicate set keeps a timepoint whenever it has a
       mean or a fraction there (``set_measured_at``, which the batch
       line runner shares) and drops it only when it holds no cell.
+      ``_paint_series`` draws the Fraction and Events panels whether
+      or not the trace has a mean anywhere, so a member with no ON
+      cell at any timepoint (a negative control) is a line at zero on
+      both and absent from the Mean panel only.
    2. ``fold_change_pairing.control_denominators(…)`` builds one
       ``ControlDenominators`` for the pass; ``denoms.series_for(member)``
       then answers with that member's control, its outcome, and the

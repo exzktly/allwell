@@ -82,7 +82,13 @@ class SubsetController(DestinationToolController):
             # archives are partly cut, and any other filter would delete images that edit meant to keep.
             recorded = self.page.interrupted_filter()
             if recorded is None:
-                return                                  # an unreadable record; the page says so and offers no run
+                # An unreadable record: the page says so and offers no run. A queued job that reached here is still
+                # told it ended, or the queue would wait on it for the rest of the session.
+                message = ("This dataset holds an interrupted in-place edit whose record can't be read; nothing was "
+                           "run.")
+                self.page.append_log(f"✗ {message}")
+                self.jobFinished.emit(False, message, "")
+                return
             marker = self.page.interrupted_edit()
             filt, in_place = recorded, True
             schema, separator = str(marker.get("schema") or ""), str(marker.get("separator") or "")

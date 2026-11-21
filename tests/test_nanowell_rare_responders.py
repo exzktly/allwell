@@ -869,10 +869,9 @@ def _value_table(wells):
     return pd.DataFrame(rows)
 
 
-def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
-    """Responders lower on a fold change with a few dead control nanowells (fc = 0, 3 %, more than the 1 % tail):
-    the cutoff lands on 0 and nothing can be strictly below it, so every count is 0. That is a test that could not
-    count, not a finding of none — while 40 % of the treatment's nanowells died."""
+def _floor_tie_result():
+    """Responders lower on a fold change with a few dead control nanowells (fc = 0, 3 %, more than the 1 % tail),
+    four wells a side, while 40 % of the treatment's nanowells died."""
     rng = np.random.default_rng(0)
 
     def well(p_dead, n=200):
@@ -881,14 +880,36 @@ def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
         return v
 
     wells = [(f"C{i}", "ctrl", well(0.03)) for i in range(4)] + [(f"T{i}", "drug", well(0.40)) for i in range(4)]
-    res = rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
-                     value_label="Count fold change")
+    return rr.analyse(_value_table(wells), RareParams(control="ctrl", direction="lower"),
+                      value_label="Count fold change")
+
+
+def test_a_cutoff_on_a_floor_tie_is_undecided_not_a_negative():
+    """The cutoff lands on 0 and nothing can be strictly below it, so every count is 0. That is a test that could not
+    count, not a finding of none."""
+    res = _floor_tie_result()
     unit = res.units[0]
     assert sum(c.k for c in unit.primary.counts) == 0
     assert unit.interpretation == rr.UNDECIDED
     assert "sits on a tie" in unit.tie_note
     from review.features.nanowell.rare_export_compute import caveats
     assert unit.tie_note in caveats(unit, res.prepared.params, "Count fold change")
+
+
+def test_the_headline_of_a_tie_says_the_tie_not_a_regression_that_never_ran():
+    """Review row B1: a tie is undecided only when no nanowell is past the cutoff, where the regression has nothing to
+    fit and the exceedance p is always NaN. The headline's reason asked about the NaN p first, so it read "the
+    deciding test's regression could not be fitted" above a deciding line saying nothing was past the cutoff. Four
+    wells a side, so the regression's well counts are met and only the tie can be the reason."""
+    from review.features.nanowell.rare_export_compute import TIE_UNDECIDED, deciding_line, headline, why_undecided
+
+    res = _floor_tie_result()
+    unit, params = res.units[0], res.prepared.params
+    assert unit.interpretation == rr.UNDECIDED and unit.tie_note and math.isnan(unit.primary.p)
+    assert why_undecided(unit, params) == TIE_UNDECIDED
+    assert headline(unit, params).startswith(f"drug: {rr.UNDECIDED} — {TIE_UNDECIDED}. 0 of 800 drug nanowells")
+    assert deciding_line(unit, 1, params) == ("Deciding: exceedance test not tested — no nanowell in any well was "
+                                              "past the cutoff.")
 
 
 def test_a_continuous_cutoff_is_not_called_a_tie():
@@ -1171,9 +1192,30 @@ def test_a_well_whose_top_nanowells_are_past_every_control_is_marked_as_having_n
     title = _panel(fig, "nw-rare-panel:hc:0").get_title().replace("\n", " ")
     assert title.startswith("colour: drug wells · grey: control no HC score: ")
     for w in unit.treated:
-        assert f"{w.key.split(':', 1)[-1]} (its most extreme nanowells are past every control value" in title
+        assert f"{w.key.split(':', 1)[-1]} (its most extreme nanowells are past all but a few control values" in title
     # A well that simply has nothing extreme is not blamed on the controls.
     assert hc.unscored_reason(np.array([0.5, 0.6, 0.9, 1.0]), 0.5).startswith("no HC score: none of its 2 most")
+
+
+def test_a_well_too_small_for_hc_is_said_to_be_too_small_not_beyond_the_controls():
+    """Review row B2: HC+ maximises over ``i <= alpha0·n``, so at alpha0 0.1 a well of fewer than 10 nanowells has no
+    index at all, whatever its values. Its reason must say so — not call its top nanowell past every control value,
+    nor count "its 0 most extreme nanowells"."""
+    small = "no HC score: a well needs at least 10 nanowells for HC, and it has 8"
+    extreme_top = np.array([0.001, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
+    assert hc.hc_plus(extreme_top, 0.1)[5] == small
+    assert hc.hc_plus(np.array([0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95]), 0.1)[5] == small
+    # From ten nanowells the size no longer decides: the top one past the controls is that reason, and a well with
+    # nothing extreme is told so with its one index counted.
+    assert hc.hc_plus(np.r_[0.001, np.linspace(0.3, 0.9, 9)], 0.1)[5] == hc.BEYOND_CONTROLS
+    assert hc.hc_plus(np.r_[1.0, np.ones(9)], 0.1)[5] == ("no HC score: none of its 1 most extreme nanowells has "
+                                                          "1/n < p < 1")
+    # And on a real result: eight nanowells a treatment well, the top one far past 300 control ones.
+    wells = [(f"C{i}", "ctrl", np.linspace(1.0, 2.0, 100) + i * 0.001) for i in range(3)]
+    wells += [(f"T{i}", "drug", np.r_[50.0, np.linspace(1.0, 2.0, 7)]) for i in range(3)]
+    unit = rr.analyse(_value_table(wells), RareParams(control="ctrl")).units[0]
+    assert {unit.hc[w.key].reason for w in unit.treated} == {small}
+    assert hc.min_nanowells(0.1) == 10 and hc.min_nanowells(0.5) == 2 and hc.min_nanowells(1.0) == 1
 
 
 def test_what_qualifies_the_whole_result_is_drawn_at_the_top_not_below_the_fold():

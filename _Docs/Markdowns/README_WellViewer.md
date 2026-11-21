@@ -7372,8 +7372,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
      rising early; a whole curve moved sideways is a general shift instead.
   2. **Higher Criticism — supporting.** Every well's highest excess score on one plot, then one plot per comparison
      of each well's excess score over its nanowells, most extreme first. A well whose most extreme nanowells are all
-     past every control value gets **no HC score** — Higher Criticism leaves those out by definition — and is
-     marked so on both plots rather than left out. The group's HC p is then computed from its other wells, and
+     past all but a few control values gets **no HC score** — Higher Criticism leaves those out by definition — and
+     is marked so on both plots rather than left out; so does a well of fewer than 10 nanowells, which is too small
+     for Higher Criticism, and its mark says that instead. The group's HC p is then computed from its other wells, and
      says so: *p = 0.25 — from D01, D03; D02 has no HC score*. That p is still valid, but it says nothing about the
      unscored well, which is usually the strongest; the exceedance test is the one that counts it.
   3. **Shape test — supporting.** Every well's upper-tail Anderson–Darling score against the control wells, on one
@@ -11584,7 +11585,7 @@ estimate of ρ.
 | q < 0.05 | **rare responders detected** |
 | otherwise, or no nanowell in any well past the cutoff | **rare responders not detected** |
 | no group p (fewer than 3 control or 2 treatment wells for its regression) while nanowells are past the cutoff | **cannot be decided with these wells** — with the wells it needs |
-| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** |
+| no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** — because the control cutoff sits on a tie |
 | Fewer than 2 wells on a side | **too few wells to test the group** |
 
 Higher Criticism (B) and the upper-tail shape test (C) are reported beside the verdict as supporting evidence and
@@ -11635,8 +11636,9 @@ The figure then reads from the top:
      per number of starting cells, from the occupancy ramp.
    * **Higher Criticism** (supporting): each well's highest score, then each comparison's curves, most extreme
      nanowells first. A curve rising well above the grey bundle near the left edge is a sparse excess. A well whose
-     most extreme nanowells are all past every control value has **no HC score**, said on both plots; the group's
-     HC p then names the wells it was computed from.
+     most extreme nanowells are all past all but a few control values has **no HC score**, said on both plots, as
+     does a well of fewer than 10 nanowells (too small for it, and said so); the group's HC p then names the wells
+     it was computed from.
    * **Shape test** (supporting): each well's upper-tail Anderson–Darling score.
    * **Pooled shape test** (description only): for each comparison, the gap between the control's and the group's
      cumulative shares, shaded — what the test sums. It treats every nanowell as independent, says so in its heading, and its p is not

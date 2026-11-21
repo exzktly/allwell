@@ -14312,9 +14312,12 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 * `rare_hc_compute` (Test B) — per-nanowell p-values against the stratum's pool, the HC+ statistic over
   `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when
   the pool cannot resolve the `1/n` scale (two or fewer control wells, or a pool under three times a well's size).
-  A well with no qualifying index says why in plain words (`unscored_reason`): `BEYOND_CONTROLS` when its top
-  `alpha0·n` nanowells are all at p ≤ 1/n — past every control value, since an empirical p's floor 1/(N+1) is
-  below 1/n whenever the pool is larger than the well — which are the strongest responders there are. HC+ keeps
+  A well with no qualifying index says why in plain words (`unscored_reason`). First its size: with `alpha0·n < 1`
+  no index exists whatever the values, so a well of fewer than `min_nanowells(alpha0)` nanowells (10 at the default
+  0.1) is said to be too small, never to be beyond the controls. Otherwise `BEYOND_CONTROLS` when its top
+  `alpha0·n` nanowells are all at p ≤ 1/n — past all but a few control values (`p = (1 + #) / (N + 1) ≤ 1/n` lets
+  up to `(N + 1)/n − 1` of them reach a nanowell), and past every one when the pool holds fewer than twice the well's nanowells —
+  which are the strongest responders there are. HC+ keeps
   its definition; the figure marks such a well "no HC score" with that reason rather than leaving it undrawn.
   The group statistic is the mean over the treatment wells that have a score, so such a well is left out of it: the
   permutation p stays valid (every relabelling is scored by the same rule) but describes the scored wells only, and

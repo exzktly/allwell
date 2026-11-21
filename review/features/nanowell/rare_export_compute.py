@@ -433,8 +433,9 @@ def scored_note(unit, key: str, *, short: bool = False) -> str:
     ``""`` when every well was scored, or none was (then there is no p to qualify).
 
     The group statistic is the mean over the treatment wells that have a score, against the same mean under every
-    relabelling of the wells, so the p is valid, but it describes the scored wells only. A well HC cannot score is the
-    one whose most extreme nanowells are all past every control value — the strongest responders — so without this
+    relabelling of the wells, so the p is valid, but it describes the scored wells only. A well HC cannot score is
+    usually one whose most extreme nanowells are all past all but a few control values — the strongest responders —
+    though a well of too few nanowells has no score either (``rare_hc_compute.unscored_reason``), so without this
     a reader would take a p computed without that well for HC having looked at the whole group and found nothing."""
     if key not in _WELL_SCORE or (key == "hc" and unit.hc_perm is None) or (key == "shape" and unit.a2_perm is None):
         return ""

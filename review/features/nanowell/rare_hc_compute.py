@@ -70,17 +70,32 @@ class HC:
     reason: str = ""
 
 
-#: Why a well has no HC score when its most extreme nanowells are all at p ≤ 1/n — past (nearly) every control value,
-#: the strongest responders there are. HC+ leaves those out by definition, so the figure marks the well with this
-#: rather than leaving it undrawn.
-BEYOND_CONTROLS = "no HC score: its most extreme nanowells are past every control value, and HC leaves out p ≤ 1/n"
+#: Why a well has no HC score when its most extreme nanowells are all at p ≤ 1/n — past all but a few control values
+#: (``p = (1 + #{control >= x}) / (N + 1) <= 1/n`` lets up to ``(N + 1)/n − 1`` control values reach them), the
+#: strongest responders there are. HC+ leaves those out by definition, so the figure marks the well with this rather
+#: than leaving it undrawn.
+BEYOND_CONTROLS = ("no HC score: its most extreme nanowells are past all but a few control values (p ≤ 1/n), "
+                   "which HC leaves out")
+
+
+def min_nanowells(alpha0: float) -> int:
+    """The fewest nanowells a well needs for HC+ to have any index to maximise over: the smallest *n* with
+    ``alpha0·n >= 1``, the condition :func:`hc_plus` applies to ``i = 1`` (10 at the default ``alpha0 = 0.1``)."""
+    n = max(1, math.ceil(1.0 / alpha0))
+    while alpha0 * n < 1.0:                              # 1/alpha0 rounded down by floating point
+        n += 1
+    return n
 
 
 def unscored_reason(ps: np.ndarray, alpha0: float) -> str:
-    """Why no index of the sorted p-values *ps* qualifies for HC+: :data:`BEYOND_CONTROLS` when the top
-    ``alpha0·n`` are all at or below 1/n, else that none of them is below 1 (nothing extreme to score)."""
+    """Why no index of the sorted p-values *ps* qualifies for HC+. First the well's size: with ``alpha0·n < 1`` no
+    index qualifies whatever the values, so a well of fewer than :func:`min_nanowells` says that, and is never called
+    beyond the controls for being small. Then :data:`BEYOND_CONTROLS` when the top ``alpha0·n`` are all at or below
+    1/n, else that none of them is below 1 (nothing extreme to score)."""
     n = len(ps)
-    top = ps[: max(1, int(alpha0 * n))]
+    if alpha0 * n < 1.0:
+        return f"no HC score: a well needs at least {min_nanowells(alpha0)} nanowells for HC, and it has {n}"
+    top = ps[: int(alpha0 * n)]
     if (top <= 1.0 / n).all():
         return BEYOND_CONTROLS
     return f"no HC score: none of its {int(alpha0 * n)} most extreme nanowells has 1/n < p < 1"

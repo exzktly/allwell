@@ -192,9 +192,10 @@ def test_a_remote_incremental_nanowell_run_is_refused():
                 local_output_dir="/tmp/x", local_input_mode=LocalInputMode.ZIP)
     _RemoteRun(**args, nanowell=True)
     _RemoteRun(**args, incremental=True)
-    with pytest.raises(ValueError, match="An incremental nanowell run cannot run on a remote host yet"):
+    with pytest.raises(ValueError, match="cannot run a nanowell plate on a remote host"):
         _RemoteRun(**args, nanowell=True, incremental=True)
-    assert NANOWELL_REMOTE_INCREMENTAL_REFUSAL.endswith("(untick Incremental).")
+    assert 'Set "If a well already has output" to "Skip it" instead' in NANOWELL_REMOTE_INCREMENTAL_REFUSAL
+    assert "well by well, on whole wells" in NANOWELL_REMOTE_INCREMENTAL_REFUSAL
 
 
 def test_a_nanowell_well_s_completion_line_is_the_one_the_fetcher_and_the_progress_count_read(tmp_path, monkeypatch,

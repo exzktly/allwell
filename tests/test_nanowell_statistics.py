@@ -170,7 +170,7 @@ def test_the_views_choices_are_kept_and_a_damaged_block_restores_the_defaults():
 # ── the page ─────────────────────────────────────────────────────────────────
 pytest.importorskip("PySide6")
 
-from tests.test_nanowell_page import _loaded, _page, _texts, _write_nanowell_dataset  # noqa: E402
+from tests.test_nanowell_page import _loaded, _page, _prose, _texts, _write_nanowell_dataset  # noqa: E402
 
 #: Four wells, two timepoints, four nanowells each; None is occluded. A01 and A02 are alike, B01 and B02 are not.
 PLATE = {"A01": {"t_c": [1, 2, 0, None], "t_a": [2, 4, 3, 1]},
@@ -316,7 +316,7 @@ def test_ticking_the_cohort_on_statistics_states_it_even_when_no_value_moves(pag
     assert not any(n.startswith("Fixed cohort") for n in _report(page, sc.GID_NOTE))
     page.widgets.get("_nw_cohort_box").setChecked(True)
     assert state.cohort is True
-    notes = _report(page, sc.GID_NOTE)
+    notes = _prose(_report(page, sc.GID_NOTE))
     assert ("Fixed cohort: only the 7 of 8 nanowells with a value at every timepoint of their well are used; the "
             "rest are counted as outside the fixed cohort.") in notes, notes
     page.widgets.get("_nw_cohort_box").setChecked(False)

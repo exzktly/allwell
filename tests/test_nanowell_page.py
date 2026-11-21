@@ -112,6 +112,15 @@ def _texts(ctx, gid=None):
     return out
 
 
+def _prose(texts) -> str:
+    """*texts* as one run of prose: the lines joined and their whitespace collapsed.
+
+    A figure breaks each footer or report line to its own width, and that width follows the page's size, so the same
+    sentence is one line on one screen and two on another (the Statistics report also indents a continuation). A test
+    of what a sentence *says* reads it from this, so it does not depend on where the figure happened to break it."""
+    return " ".join(" ".join(texts).split())
+
+
 # ── V1b: states ──────────────────────────────────────────────────────────────
 def test_with_no_wells_selected_the_page_says_which_wells_have_nanowell_tables(qtbot, tmp_path):
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))

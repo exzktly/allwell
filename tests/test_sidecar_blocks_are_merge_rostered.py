@@ -31,6 +31,7 @@ import pytest
 from tests._repo_scan import REPO_ROOT, parse_source
 
 from datasets.merge_plates.merge_plates_compute import _UNMERGEABLE_BLOCKS
+from pipeline.sidecar import PER_RUN_BLOCKS
 
 #: Blocks a merge may legitimately carry across, with the reason. An exemption
 #: is a row with a reason, never an absence — a block left off on purpose and a
@@ -73,7 +74,10 @@ def test_the_scan_finds_the_blocks_it_is_supposed_to():
 @pytest.mark.parametrize("key", sorted(_declared_blocks()))
 def test_every_declared_block_is_rostered_or_exempt(key):
     rostered = {k for k, _label in _UNMERGEABLE_BLOCKS}
-    assert key in rostered or key in _MERGEABLE, (
+    # A per-run block (``pipeline.sidecar.PER_RUN_BLOCKS``) is carried by no
+    # merge at all — ``test_per_run_blocks_are_dropped.py`` holds that — so
+    # there is no plate 1 copy kept for the warning to name.
+    assert key in rostered or key in _MERGEABLE or key in PER_RUN_BLOCKS, (
         f"pipeline declares the sidecar block {key!r} and merge_plates does not "
         f"know about it. A merged plate will silently keep plate 1's copy and "
         f"drop plate 2's, with no warning. Add it to _UNMERGEABLE_BLOCKS with "

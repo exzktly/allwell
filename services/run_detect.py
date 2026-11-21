@@ -389,6 +389,14 @@ def channel_option_errors(opts: dict) -> list[str]:
         errors.append(f"The Cellpose nuclei channel is {nuc_channel!r}, which {where}.")
 
     phase = str(opts.get("phase_token") or "").strip()
+    if method in LABELFREE_METHODS and not phase:
+        # Run-time detection always names one for this method or refuses; the
+        # other path here — adding the input's channels to the listed ones —
+        # adds them as quantified only, so a form with no Phase mark reaches
+        # this point without one, and the pipeline would refuse its argv.
+        errors.append(
+            "Label-free segmentation needs a channel marked 'Phase' (the "
+            "brightfield image to segment), and none is.")
     for slot in phase_role_conflicts(
             method, phase_token=phase, nuclear_token=nuclear,
             cytoplasm_token=str(opts.get("cytoplasm_token") or "")):

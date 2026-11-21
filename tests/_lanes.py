@@ -352,7 +352,7 @@ REMOTE_FILES: dict[str, str] = {
     "test_a_crashed_windows_claim_is_taken_over.py": "A claim on the granted node left by a crashed All-Well on this computer is taken over at once, unless its run's step is still on the node",
     "test_a_queued_granted_node_overlaps_the_upload.py": "A run claims a granted node that is still queued at once, uploads the plate meanwhile, and waits for the grant only at launch",
     "test_quitting_gives_back_the_granted_node.py": "Quitting releases the nodes this window asked for, only stops beating for one it found, and cannot hang on a silent host",
-    "test_remote_node_indicator_reads.py": "The granted node keeps the state its host last reported, which the window header's indicator reads; release forgets it",
+    "test_remote_node_indicator_reads.py": "The granted node keeps the state its host last reported, which the window header's indicator reads; a release forgets it only when no node of the user's is left",
     "test_manage_remotes_granted_node.py": "Manage Remotes' Granted node panel: Request, Release (asking first while a run uses the node), Test the node, and finding a node already granted",
     "test_a_failed_run_is_rerun_on_the_same_granted_node.py": "Request a node, run, fail, run again: the same node, no second allocation, and the end of a run never cancels the node",
     "test_a_run_never_cancels_the_granted_node.py": "A run on a granted node ends its own step; no cancel, probe, sweep or clean-up of a run releases the node",

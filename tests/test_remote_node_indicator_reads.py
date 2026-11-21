@@ -85,3 +85,51 @@ def test_a_node_the_host_ended_reads_as_none(cluster):
     cluster.set_job(4001, "CANCELLED", "None", "")
     assert node.state().phase == "ended"
     assert node_summary() == ("none", [])
+
+
+def test_a_release_that_left_another_window_s_node_alone_still_shows_that_node(cluster):
+    """The hold directory is shared by every window: once another window has asked for a node there, this handle's
+    release answers ``AW_MOVED`` and leaves that node running — and billing. Wrong implementation: forgetting the
+    state on every release, which turns the dot grey ("No remote node") while the host holds a granted node, and,
+    with nothing live left to re-read, keeps it grey."""
+    host = RemoteHost(**HOST)
+    _seed(cluster, host)
+    node = node_for(host, cluster, log_fn=(lines := []).append)
+    node.attach()
+    _seed(cluster, host, job=4002, node="gpu-node-2")      # another window's request, granted since
+    node.release("test")
+    assert any("no longer the one this window asked for" in ln for ln in lines), lines
+    assert node_summary() == ("ready", ["gpu: node granted on gpu-node-2"])
+
+
+def test_a_release_the_host_did_not_confirm_keeps_the_node_shown(cluster, monkeypatch):
+    """A cancel the host answered with a failure leaves the node up until its own two-minute rule ends it. Wrong
+    implementation: reading the attempt as done and showing no node for those minutes."""
+    host = RemoteHost(**HOST)
+    _seed(cluster, host)
+    node = node_for(host, cluster, log_fn=(lines := []).append)
+    node.attach()
+    real = cluster._ssh_script
+
+    def cancel_fails(script, **kw):
+        if "AW_SCANCELLED" in script:
+            import subprocess
+            return subprocess.CompletedProcess(["ssh"], 255, "", "ssh: connect to host: Connection reset")
+        return real(script, **kw)
+
+    monkeypatch.setattr(cluster, "_ssh_script", cancel_fails)
+    assert node.release("test") is False
+    assert any("could not release it (ssh exit 255)" in ln for ln in lines), lines
+    assert node_summary() == ("ready", ["gpu: node granted on gpu-node-1"])
+
+
+def test_a_release_of_another_user_s_job_forgets_it(cluster, monkeypatch):
+    """``AW_NOTMINE``: the job in the directory is not this user's, so it is not this user's node to show."""
+    host = RemoteHost(**HOST)
+    _seed(cluster, host)
+    node = node_for(host, cluster, log_fn=(lines := []).append)
+    node.attach()
+    (cluster.fake / "squeue.owner").write_text("someone-else", encoding="utf-8")
+    node.release("test")
+    assert any("belongs to another user" in ln for ln in lines), lines
+    assert node_summary() == ("none", [])

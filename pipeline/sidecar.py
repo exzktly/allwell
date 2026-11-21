@@ -45,6 +45,21 @@ USER_SIDE_BLOCKS: tuple[str, ...] = (
 )
 
 
+#: Sidecar keys that describe what one run made of one dataset's whole input: the per-well run report (which wells,
+#: FOV-groups and timepoints it failed, against what it expected) and the completeness record (``run_check``).
+#: Neither can be narrowed or combined from its own contents — a failed group is named by a nuclear file name or a
+#: timepoint token, and the counts beside it are of that input — so a Datasets tool that writes a dataset holding
+#: other wells or timepoints (Subset, Concatenate, Merge plates) carries neither, for the reason given above for a
+#: run's own rewrite. Home then reports no completeness record, and Validate writes one from what the new dataset
+#: holds.
+PER_RUN_BLOCKS: tuple[str, ...] = ("run_report", "run_check")
+
+
+def without_per_run_blocks(info: dict) -> dict:
+    """A copy of the sidecar *info* without :data:`PER_RUN_BLOCKS`."""
+    return {k: v for k, v in info.items() if k not in PER_RUN_BLOCKS}
+
+
 def read_user_blocks(info_path) -> dict:
     """The user-side blocks currently in *info_path*, or ``{}``.
 

@@ -76,3 +76,24 @@ def test_a_long_message_on_a_wide_window_is_placed_for_its_shown_width(qapp):
     assert not toast._label.wordWrap(), "a message that fits the window stays on one line"
     toast.close()
     host.close()
+
+
+def test_a_toast_shown_before_its_window_is_fitted_to_the_window_once_it_shows(qapp):
+    """A toast raised during a load, while its window is not yet shown, has no host width to fit and takes the
+    screen's. The window then appears, narrower than the screen, and the toast must fit it: a resize or move of the
+    window had already happened before it was shown, so only the show itself can tell the toast. The slow lane's
+    page-render test met this toast on the iPhone Duo folded, its text running past its own width."""
+    host = QWidget()
+    host.resize(432, 600)
+    host.move(0, 0)
+    toast = Toast(host, _LONG)
+    toast.popup()
+    qapp.processEvents()
+    assert toast.width() > 432, "premise: with its window hidden, the toast is fitted to the screen"
+    host.show()
+    qapp.processEvents()
+    left, right = _span(toast, host)
+    assert 0 <= left and right <= 432, f"the toast spans {left}..{right} of a 432px window shown after it"
+    assert toast._label.wordWrap(), "the message should wrap inside the window it is now over"
+    toast.close()
+    host.close()

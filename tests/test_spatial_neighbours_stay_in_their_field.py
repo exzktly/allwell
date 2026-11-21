@@ -107,6 +107,23 @@ TRIANGLE_AND_SCRAPS = np.array([
 ])
 
 
+def test_a_sparse_field_does_not_shrink_ripley_s_radii_for_the_whole_well():
+    """A field of two cells 100 px apart and 5 px off a line has a window 5 px across.
+
+    The default radius range was a quarter of the *smallest* field's shorter side, so that one field cut the radii
+    read for all 302 cells to 1.25 px. It is the cell-count-weighted median field's, which here is the 300-cell
+    field's own.
+    """
+    rng = np.random.default_rng(0)
+    dense = rng.uniform(0.0, 1000.0, size=(300, 2))
+    sparse = np.array([[10.0, 10.0], [110.0, 15.0]])
+    fields = np.array(["1"] * 300 + ["2"] * 2)
+    alone = spc.ripley_l(dense)
+    pooled = spc.ripley_l(np.vstack([dense, sparse]), fields=fields)
+    assert float(pooled.r.max()) == pytest.approx(float(alone.r.max()))
+    assert float(alone.r.max()) == pytest.approx(0.25 * float(np.ptp(dense, axis=0).min()))
+
+
 def test_a_colony_too_small_for_a_hull_has_no_hull_area():
     labels = spc.detect_colonies(TRIANGLE_AND_SCRAPS, method=spc.METHOD_SINGLE_LINKAGE, eps=6.0).labels
     stats = spc.colony_stats(TRIANGLE_AND_SCRAPS, labels)

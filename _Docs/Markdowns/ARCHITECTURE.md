@@ -7964,7 +7964,10 @@ density search a cell's own field, `detect_colonies` clusters each field on its
 own with the frame's one ε (from the within-field distances) and numbers the
 colonies on from field to field so a colony never spans two, and `ripley_l`
 estimates K(r) per field in that field's window and pools it weighted by cell
-count, drawing each simulated pattern the same way. The Spatial map still draws
+count, drawing each simulated pattern the same way; its default radius range
+runs to a quarter of the shorter side of the cell-count-weighted median field's
+window, so a sparse field of two or three cells cannot shrink it for the well.
+The Spatial map still draws
 the fields over one another in one panel. The renderer labels axes, nearest-neighbour
 distances and Ripley's radius with the payload's unit (`renderer.in_unit`). A
 nanowell cell table has a `timepoint` label and no `timepoint_hours`, so

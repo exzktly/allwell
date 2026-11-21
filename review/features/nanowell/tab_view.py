@@ -239,7 +239,8 @@ _ZOOM_OUT_TIP = "Zoom out, about the centre of the view."
 _ZOOM_IN_TIP = "Zoom in, about the centre of the view."
 _ONE_TIP = "One image pixel per screen pixel, about the centre of the view."
 _LATTICE_REASON = "Lattice positions have no image under them: choose Positions ▸ Measured."
-_CONTROL_TIP = "Compare each group's centre with this group's, computed the same way (× ratio, or a difference on log₂)."
+_CONTROL_TIP = ("The group every other group is tested against on the Statistics view, with wells as the replicate "
+                "unit.")
 
 
 def baseline_moving_greyed(st, column: str | None) -> str | None:
@@ -665,7 +666,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             refresh_statistics_controls(st, statistics, stats_view)
             distribution = view == "distribution"
             wells_axis = distribution and (st.axis == "wells" or per_nanowell)
-            compares = wells_axis or stats_view             # the views that compare wells at one timepoint
+            at_one_timepoint = wells_axis or stats_view     # the views that draw wells at one timepoint
+            # Only the Statistics view compares groups with a control: Distribution draws nothing beside a swarm,
+            # so a *vs* there would change no figure.
+            compares = stats_view
             array = view == "array"
             # Shown on every view that has a metric at all, and only greyed on the Array view when no layer draws
             # it: hidden, they came and went with the Layers menu and every control after them jumped sideways.
@@ -710,7 +714,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             cut = st.thresholds.get(column) if column else None
             responding_edit.setText("" if cut is None else format_cut(cut))
             grp_responding.setVisible(distribution)
-            shows_tp = ((compares and not per_nanowell) or view == "position"
+            shows_tp = ((at_one_timepoint and not per_nanowell) or view == "position"
                         or view in RANKED_WELL_VIEWS or view in ONE_WELL_VIEWS)
             shows_well = view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS
             _show_where(grp_where, well_part, tp_cb, shows_well, shows_tp,

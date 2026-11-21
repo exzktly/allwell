@@ -233,7 +233,9 @@ def test_along_wells_draws_one_timepoint_with_the_statistic_over_wells(page, qtb
     axis.setCurrentIndex(1)
     st = page.state.feature_slice("nanowell")
     assert st.axis == "wells" and st.model.timepoint == "t_a"
-    assert page.widgets.get("_nw_tp_cb").isVisible() and page.widgets.get("_nw_control_cb").isVisible()
+    # The Timepoint is offered; *vs* is not, since nothing on the Distribution view reads it (tracker row B5).
+    assert page.widgets.get("_nw_tp_cb").isVisible()
+    assert page.widgets.get("_nw_control_cb").isVisible() is False, "vs is offered on Distribution, which reads none"
     # No control chosen: nothing per-well is drawn beside the swarms, so the footer claims no interval.
     assert not any("t interval" in t for t in _texts(page, "nw-footer"))
 

@@ -7004,7 +7004,8 @@ the sentence names it.
   part of the figure, so a plot sent to Saved Plots, exported or put on a slide still says which nanowells it shows.
   It names a saved subset only while the conditions drawn are exactly the saved ones, and it follows a rename on the
   next redraw. Batch Export's Nanowells figures and the Scatter Plot's nanowell scatter carry the same line.
-- **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Timepoint** (on *Along x: Wells*) — the timepoint drawn. **vs**, the group to compare against, is offered on the
+  **Statistics** view only: the Distribution view writes no comparison beside its swarms.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
   wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and

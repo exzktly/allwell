@@ -1931,9 +1931,15 @@ class PhoneShell(QObject):
         screen = self._win.screen() or QGuiApplication.primaryScreen()
         return screen.availableGeometry() if screen is not None else QRect(0, 0, 1640, 980)
 
+    def _dpr(self) -> float:
+        """The window's screen's device pixel ratio: ``phone_layout`` names the
+        iPhone Duo by its device pixels, and ``_avail`` is logical."""
+        screen = self._win.screen() or QGuiApplication.primaryScreen()
+        return float(screen.devicePixelRatio()) if screen is not None else 1.0
+
     def _remember_desk_window(self) -> None:
         avail = self._avail()
-        desk_screen = not phone_layout.is_phone_shaped(avail.width(), avail.height())
+        desk_screen = not phone_layout.is_phone_shaped(avail.width(), avail.height(), self._dpr())
         self._desk_state = {
             "navigator_open": self._h.navigator_open(),
             # A geometry captured on a phone-shaped desktop is a phone's, and
@@ -2044,8 +2050,9 @@ class PhoneShell(QObject):
         w, h = avail.width(), avail.height()
         # Offered on a phone-shaped screen; kept, once on, on a near-square one
         # too (``phone_layout.keeps_phone_layout``).
-        phone_shaped = (phone_layout.keeps_phone_layout(w, h) if phone_layout.is_on()
-                        else phone_layout.is_phone_shaped(w, h))
+        dpr = self._dpr()
+        phone_shaped = (phone_layout.keeps_phone_layout(w, h, dpr) if phone_layout.is_on()
+                        else phone_layout.is_phone_shaped(w, h, dpr))
         mismatch = phone_shaped != phone_layout.is_on()
         if not mismatch or self._banner_dismissed_for == phone_shaped:
             self._hide_banner()

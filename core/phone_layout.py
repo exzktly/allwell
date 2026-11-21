@@ -68,7 +68,11 @@ FOLD_MAX_ASPECT = 1.47
 #: is there when it is not. The size tested is the *available* geometry, which
 #: the Windows taskbar takes a strip from, so one side must match exactly and
 #: the other may fall short by up to this many pixels: 48 px of taskbar at
-#: 100 % scaling, 120 px at 250 %.
+#: 100 % scaling, 120 px at 250 %. Both figures are *device* pixels, and so is
+#: the comparison: Qt reports the available geometry in logical pixels, which a
+#: display scale of 125 % or 150 % turns into a size the Duo's pixels do not
+#: name (1878 × 2670 at 150 % is 1252 × 1780), so the caller passes the
+#: screen's device pixel ratio and :func:`is_duo_resolution` multiplies back.
 DUO_TASKBAR_SLACK_PX = 160
 
 #: Touch sizes, in phone points. 44 pt is the smallest target a thumb hits
@@ -208,8 +212,9 @@ def follow(owner, fn: Callable[[bool], None]) -> None:
     add_listener(_listener)
 
 
-def is_phone_shaped(width: int, height: int) -> bool:
-    """Does a screen of this available size look like a phone?
+def is_phone_shaped(width: int, height: int, dpr: float = 1.0) -> bool:
+    """Does a screen of this available size (logical pixels, as Qt reports
+    it; *dpr* is the screen's ``devicePixelRatio()``) look like a phone?
 
     Too small in either direction to hold the desktop window; upright at a
     phone's proportions (``PHONE_UPRIGHT_MIN_ASPECT``); one of the iPhone
@@ -226,7 +231,7 @@ def is_phone_shaped(width: int, height: int) -> bool:
         return True
     if height > width and height / width >= PHONE_UPRIGHT_MIN_ASPECT:
         return True
-    if is_duo_resolution(width, height):
+    if is_duo_resolution(width, height, dpr):
         return True
     # Sideways at full resolution a phone is the size of a monitor, but not
     # its shape: phones are 19.5:9 or longer (2.17), monitors 16:9 (1.78) or
@@ -235,20 +240,28 @@ def is_phone_shaped(width: int, height: int) -> bool:
     return width / height >= PHONE_MIN_ASPECT and height < PHONE_MAX_SHORT_SIDE
 
 
-def is_duo_resolution(width: int, height: int) -> bool:
+def is_duo_resolution(width: int, height: int, dpr: float = 1.0) -> bool:
     """Is a screen of this available size one of the iPhone Duo's screens at
     its own resolution, either way up — less at most a taskbar's strip off one
-    side (``DUO_TASKBAR_SLACK_PX``, which says why not by shape)?"""
-    short, long = sorted((width, height))
+    side (``DUO_TASKBAR_SLACK_PX``, which says why not by shape)?
+
+    *width* and *height* are logical pixels and *dpr* the screen's device
+    pixel ratio; the Duo's resolutions are device pixels, so the size is
+    compared at ``logical × dpr``. Qt rounds a logical size to whole pixels,
+    so the side that must match exactly may be off by less than *dpr*.
+    """
+    dpr = dpr if dpr and dpr > 0 else 1.0
+    short, long = sorted((width * dpr, height * dpr))
     slack = DUO_TASKBAR_SLACK_PX
+    exact = dpr if dpr > 1.0 else 0.0     # a logical size rounded to whole pixels: off by under dpr
     for n_short, n_long in (DUO_INNER_PX, DUO_OUTER_PX):
-        if ((short == n_short and n_long - slack <= long <= n_long)
-                or (long == n_long and n_short - slack <= short <= n_short)):
+        if ((abs(short - n_short) <= exact and n_long - slack <= long <= n_long + exact)
+                or (abs(long - n_long) <= exact and n_short - slack <= short <= n_short + exact)):
             return True
     return False
 
 
-def keeps_phone_layout(width: int, height: int) -> bool:
+def keeps_phone_layout(width: int, height: int, dpr: float = 1.0) -> bool:
     """Is a screen of this available size one phone layout, once on, stays on?
 
     Every phone-shaped screen, and every near-square one too
@@ -257,7 +270,7 @@ def keeps_phone_layout(width: int, height: int) -> bool:
     has turned it on there, a banner offering the desk back and a launch that
     reopens at the desk would undo their choice. An iPad on which the user
     turned phone layout on is held to it the same way."""
-    return is_phone_shaped(width, height) or is_fold_shaped(width, height)
+    return is_phone_shaped(width, height, dpr) or is_fold_shaped(width, height)
 
 
 def duo_screen(width: int, height: int) -> str | None:

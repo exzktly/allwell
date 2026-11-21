@@ -897,7 +897,13 @@ desk window; upright at a phone's proportions, at least 1.6 times taller than
 wide (`PHONE_UPRIGHT_MIN_ASPECT`; phones are 16:9, 1.78, or longer); one of the
 Duo's screens at the Duo's own resolution (`is_duo_resolution`: either way up,
 one side exact and the other up to 160 px short of it for the taskbar's strip
-off the available geometry, `DUO_TASKBAR_SLACK_PX`); or sideways at a phone's
+off the available geometry, `DUO_TASKBAR_SLACK_PX`). The Duo's resolutions are
+device pixels and Qt's available geometry is logical, so every caller passes the
+screen's `devicePixelRatio()` and the comparison is made at logical × ratio,
+with the exact side allowed to be off by less than the ratio for Qt's rounding:
+at a 125 % or 150 % display scale the Duo's own desktop arrives as 1502 × 2088
+or 1252 × 1732, which names no Duo side
+(`tests/test_duo_offer_follows_display_scaling.py`); or sideways at a phone's
 proportions — at least 1.95:1 with a short side under 1,300 px; phones are
 19.5:9 (2.17) or longer, monitors 16:9 (1.78) or 16:10. It does not use the
 Duo's shape: every iPad is between 4:3 (1.33) and 1.52 : 1, the Duo's own two

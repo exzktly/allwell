@@ -11025,7 +11025,8 @@ the same, once, for the new shape.
 
 **On the iPhone Duo**, phone layout works folded and unfolded, and All-Well
 recognises both screens and offers phone layout on either, whichever way the
-phone is held. If the remote desktop is set to a resolution other than the
+phone is held, and at any display scale the remote desktop uses (100 %,
+125 %, 150 % and so on). If the remote desktop is set to a resolution other than the
 Duo's own and no offer appears, tap the phone icon to switch. Buttons stay a
 thumb's size and text stays at the chosen text size on each.
 

@@ -48,8 +48,11 @@ from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 from datasets.subset.dashboard import SubsetDashboard
 from datasets.subset.subset_compute import (
+    SubsetFilter,
+    describe_in_place_marker,
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
+    read_in_place_marker,
 )
 from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
@@ -94,6 +97,7 @@ _IN_PLACE_WARNING = (
     "own, so it needs only that well's room on disk.")
 _RUN_LABEL = "▶  Subset"
 _RUN_IN_PLACE_LABEL = "▶  Remove from dataset"
+_RUN_FINISH_LABEL = "▶  Finish the interrupted edit"
 
 
 class SubsetPage(LogPanelMixin, QWidget):
@@ -125,6 +129,11 @@ class SubsetPage(LogPanelMixin, QWidget):
         # What set_selected_timepoints / set_selected_fovs were last asked for,
         # since the current source was set (see set_selected_timepoints).
         self._requested: dict = {}
+        # The interrupted in-place edit the source holds (``.aw_subset_in_place``'s contents), or ``None``.
+        # While there is one the page offers only to finish it, with the filter it recorded: its archives are
+        # partly cut, so they no longer match the acquisition record the pickers would be read from, and a
+        # filter rebuilt from the pickers could delete images the interrupted edit meant to keep.
+        self._interrupted: dict | None = None
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -297,6 +306,11 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._in_place_warning.setWordWrap(True)
         self._in_place_warning.setVisible(False)
         box.addWidget(self._in_place_warning)
+        self._interrupted_note = QLabel("", self._raw_box)
+        self._interrupted_note.setObjectName("Warn")
+        self._interrupted_note.setWordWrap(True)
+        self._interrupted_note.setVisible(False)
+        box.addWidget(self._interrupted_note)
         self._raw_box.setVisible(False)
         outer.addWidget(self._raw_box)
 
@@ -352,6 +366,28 @@ class SubsetPage(LogPanelMixin, QWidget):
 
     def in_place(self) -> bool:
         return self._raw and self._in_place_cb.isChecked()
+
+    def interrupted_edit(self) -> dict | None:
+        """The interrupted in-place edit the source holds, or ``None``: its marker's contents, ``{}`` when the
+        marker cannot be read (:func:`~datasets.subset.subset_compute.read_in_place_marker`)."""
+        return self._interrupted if self._raw else None
+
+    def interrupted_filter(self) -> SubsetFilter | None:
+        """The filter the interrupted edit recorded — what finishing it keeps — or ``None`` when there is no
+        interrupted edit or its record cannot be read."""
+        marker = self.interrupted_edit()
+        return None if not marker else SubsetFilter.from_json(marker.get("filter"))
+
+    def refresh_interrupted_edit(self) -> None:
+        """Re-read whether the source holds an interrupted in-place edit, and show the page for it. For the
+        controller once a run ends: a cancelled in-place run leaves one, a finished one removes it."""
+        src = self.source_path()
+        self._interrupted = read_in_place_marker(src) if self._raw and src else None
+        self._apply_interrupted_state()
+        if not self._running:
+            self._run_btn.setText(self._run_label())
+            set_variant(self._run_btn, "danger" if self.in_place() else "primary")
+        self._refresh_run_enabled()
 
     def typed_schema(self) -> str:
         return self._schema_edit.text().strip() if self._raw else ""
@@ -464,7 +500,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._running = running
         self._run_btn.setEnabled(not running and self._inputs_ready()
                                  and not self.has_pending_inputs())
-        self._queue_btn.setEnabled(not running and self._inputs_ready())
+        self._queue_btn.setEnabled(not running and self._inputs_ready() and self.interrupted_edit() is None)
         self._run_btn.setText("Subsetting…" if running else self._run_label())
         # Locked alongside the plate (SubsetController._launch) — picking a
         # new source mid-run fires sourceChanged, which repaints the plate
@@ -577,6 +613,7 @@ class SubsetPage(LogPanelMixin, QWidget):
             # the run checks them against the real folder when it starts.
             asked = self._requested.get("channels")
             self._raw = bool(self._requested.get("raw"))
+            self._interrupted = None                    # a folder not written yet holds no interrupted edit
             self._raw_box.setVisible(self._raw)
             self._schema_note.setText("")
             self._show_channels(list(asked or []) if self._raw else None)
@@ -590,6 +627,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         info = {}
         self._raw = bool(src) and is_raw_dataset(src)
         self._raw_box.setVisible(self._raw)
+        self._interrupted = read_in_place_marker(src) if self._raw else None
         if self._raw:
             info = self._raw_info(src)
         elif src:
@@ -623,13 +661,66 @@ class SubsetPage(LogPanelMixin, QWidget):
 
         fovs = sorted({str(f).strip() for f in info.get("available_fovs", []) or [] if str(f).strip()})
         self._rebuild_checks(self._fov_flow, self._fov_checks, fovs, self._fov_hint)
+        self._apply_interrupted_state()
         self._on_in_place_toggled(self._in_place_cb.isChecked())
 
+    def _apply_interrupted_state(self) -> None:
+        """Show the page for an interrupted in-place edit, or give the controls back once there is none.
+
+        The run then finishes that edit with the filter it recorded (``SubsetController._launch`` reads
+        :meth:`interrupted_filter`), so every control that would choose a different one is shown at the recorded
+        choice and locked: the wells, timepoints, FOVs and channels, the schema, and Edit in place itself.
+        """
+        marker = self.interrupted_edit()
+        finishing = marker is not None
+        filt = self.interrupted_filter()
+        if finishing:
+            if filt is None:
+                text = ("This dataset holds an interrupted in-place edit whose record (.aw_subset_in_place) can't "
+                        "be read, so Subset can't tell what it was keeping. Some archives may already be cut. "
+                        "Nothing can be run on it here until that is settled by hand.")
+            else:
+                text = (f"This dataset holds an interrupted in-place edit that keeps "
+                        f"{describe_in_place_marker(marker)}. Some of its archives are already cut and others "
+                        "are not. Run it again to finish it; nothing else can be done with this dataset until "
+                        "then.")
+                self._show_recorded_choice(filt)
+            self._interrupted_note.setText(text)
+            self._in_place_cb.setChecked(True)
+        self._interrupted_note.setVisible(finishing)
+        self._in_place_cb.setEnabled(not finishing)
+        self._schema_edit.setEnabled(not finishing)
+        self._sep_edit.setEnabled(not finishing)
+        if not self._running:
+            self._plate.setEnabled(not finishing)
+        for checks in (self._tp_checks, self._fov_checks, self._ch_checks):
+            for cb in checks.values():
+                cb.setEnabled(not finishing)
+
+    def _show_recorded_choice(self, filt: SubsetFilter) -> None:
+        """Tick what the interrupted edit keeps. Shown only: the run reads the recorded filter, not these."""
+        if filt.wells is not None:
+            self._plate.setSelectedWellIds([w for w in self._source_wells if w in filt.wells])
+        for checks, kept, norm in ((self._tp_checks, filt.timepoint_labels, str),
+                                   (self._fov_checks, filt.fovs, str),
+                                   (self._ch_checks, filt.channel_tokens, str.lower)):
+            for label, cb in checks.items():
+                cb.setChecked(kept is None or norm(label) in kept)
+
     def _raw_info(self, src: str) -> dict:
-        """The pickers' values for an in-only source, and the schema note saying where they came from."""
+        """The pickers' values for an in-only source, and the schema note saying where they came from.
+
+        With an interrupted in-place edit the schema is the one the edit recorded and the record is not checked
+        (the partly cut archives no longer match it) — the same reading ``build_subset_plan`` resumes with.
+        """
+        marker = self._interrupted
         try:
-            source = resolve_raw_source(raw_paths(src), typed_schema=self._schema_edit.text().strip(),
-                                        typed_sep=self.typed_separator())
+            if marker:
+                source = resolve_raw_source(raw_paths(src), typed_schema=str(marker.get("schema") or ""),
+                                            typed_sep=str(marker.get("separator") or ""), record_override={})
+            else:
+                source = resolve_raw_source(raw_paths(src), typed_schema=self._schema_edit.text().strip(),
+                                            typed_sep=self.typed_separator())
         except RawSchemaError as exc:
             self._schema_note.setObjectName("Error")
             self._schema_note.setText(f"{exc} Only wells can be chosen until the schema is settled.")
@@ -656,6 +747,8 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._update_status_preview()
 
     def _run_label(self) -> str:
+        if self.interrupted_edit() is not None:
+            return _RUN_FINISH_LABEL
         return _RUN_IN_PLACE_LABEL if self.in_place() else _RUN_LABEL
 
     def _on_in_place_toggled(self, _on: bool) -> None:
@@ -726,6 +819,9 @@ class SubsetPage(LogPanelMixin, QWidget):
         hint.setVisible(not labels)
 
     def _inputs_ready(self) -> bool:
+        if self.interrupted_edit() is not None:
+            # Finishing reads the recorded filter, not the pickers; an unreadable record cannot be finished.
+            return self._src_field.is_valid() and self.interrupted_filter() is not None
         destination_ok = self.in_place() or (
             self._dest_field.is_valid() and self.destination_path() != self.source_path())
         return (
@@ -745,7 +841,8 @@ class SubsetPage(LogPanelMixin, QWidget):
         pending = self.has_pending_inputs()
         self._run_btn.setEnabled(self._inputs_ready() and not pending)
         self._run_btn.setToolTip(RUN_WAITS if pending else "")
-        self._queue_btn.setEnabled(self._inputs_ready())
+        # Not queued: a queued job is rebuilt from the pickers, and finishing must use the recorded filter.
+        self._queue_btn.setEnabled(self._inputs_ready() and self.interrupted_edit() is None)
 
     def _update_status_preview(self) -> None:
         # The status strip (no plate map of its own — see SubsetDashboard's
@@ -770,7 +867,9 @@ class SubsetPage(LogPanelMixin, QWidget):
         wells = self.selected_wells()
         self.dashboard.reset()
         self.dashboard.set_wells(wells)
-        if self.in_place():
+        if self.interrupted_edit() is not None:
+            self.dashboard.set_headline("Ready to finish the interrupted in-place edit.")
+        elif self.in_place():
             dropped = len(self._source_wells) - len(wells)
             self.dashboard.set_headline(
                 f"Ready to edit in place — {len(wells)} well(s) kept"

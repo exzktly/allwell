@@ -147,6 +147,26 @@ class SubsetFilter:
                 for name, value in (("wells", self.wells), ("timepoints", self.timepoint_labels),
                                     ("fovs", self.fovs), ("channels", self.channels))}
 
+    @classmethod
+    def from_json(cls, data) -> SubsetFilter | None:
+        """The filter :meth:`as_json` wrote, or ``None`` when *data* is not one (an unreadable in-place marker).
+
+        Exact, not lenient: the filter an interrupted in-place edit is finished with decides which images are
+        deleted, so a key missing, an unknown key, or a value that is not a list of strings refuses the whole
+        thing rather than reading as "keep everything" on that axis.
+        """
+        names = ("wells", "timepoints", "fovs", "channels")
+        if not isinstance(data, dict) or set(data) != set(names):
+            return None
+        values = {}
+        for name in names:
+            value = data[name]
+            if value is not None and not (isinstance(value, list) and all(isinstance(v, str) for v in value)):
+                return None
+            values[name] = None if value is None else frozenset(value)
+        return cls(wells=values["wells"], timepoint_labels=values["timepoints"], fovs=values["fovs"],
+                   channels=values["channels"])
+
 
 @dataclass(frozen=True)
 class SubsetPlan:
@@ -306,7 +326,8 @@ def read_in_place_marker(root: Path | str) -> dict | None:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _describe_marker(marker: dict) -> str:
+def describe_in_place_marker(marker: dict) -> str:
+    """What an interrupted in-place edit keeps, as the page and the refusals say it."""
     parts = []
     for key, word in (("wells", "wells"), ("timepoints", "timepoints"), ("fovs", "FOVs"),
                       ("channels", "channels")):
@@ -337,11 +358,11 @@ def _build_raw_plan(src_root: Path, dest_root: Path | str, filt: SubsetFilter, *
         if not in_place:
             raise SubsetError(
                 f"The source dataset ({src.root}) holds an interrupted in-place edit "
-                f"({_describe_marker(marker)}), so some of its archives are already cut and others are not. "
+                f"({describe_in_place_marker(marker)}), so some of its archives are already cut and others are not. "
                 "Run the same in-place edit again to finish it before copying from it.")
         if marker.get("filter") != filt.as_json():
             raise SubsetError(
-                f"This dataset holds an interrupted in-place edit that kept {_describe_marker(marker)}. Run "
+                f"This dataset holds an interrupted in-place edit that kept {describe_in_place_marker(marker)}. Run "
                 "that same edit again to finish it first; until then its archives are partly cut.")
         schema, separator, resume = str(marker.get("schema") or ""), str(marker.get("separator") or ""), True
     try:
@@ -568,6 +589,7 @@ __all__ = [
     "SubsetFilter",
     "SubsetPlan",
     "build_subset_plan",
+    "describe_in_place_marker",
     "destination_has_marker",
     "destination_has_unrecognized_content",
     "destination_is_failed_run",

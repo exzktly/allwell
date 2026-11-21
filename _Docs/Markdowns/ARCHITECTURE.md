@@ -805,7 +805,14 @@ recognizer disturbs no walk — and `set_drag_scroll(…, False)` only clears
 `_awDragScroll`: the viewport's `_DragOwnerGuard` refuses every scroll from then
 on and releases the grab from a timer, once `QThread.loopLevel()` says no
 dialog's event loop is running (it asks again every `_RELEASE_RETRY_MS`
-otherwise), and a viewport turned on again before that keeps its one grab. Not
+otherwise), and a viewport turned on again before that keeps its one grab. A
+guard that has released its grab marks itself `_awGuardReleased` before its
+`deleteLater`, and `set_drag_scroll` looks a viewport's guard up through
+`_live_guard`, which passes over a marked one: until the deferred delete runs
+the released guard is still the viewport's child, and counted as live it left a
+viewport turned on again in that window grabbed with no guard at all — nothing
+refusing a drag that starts on a plate, and nothing to release the grab with
+(`tests/test_drag_scroll_guard_release.py`). Not
 covered: a slot that pumps `processEvents` itself (a batch export) is not a loop
 Qt counts, so a grab turned off during one can still be released under a
 replayed click. `tests/test_phone_form_swipe.py` holds the one grab and the
@@ -890,7 +897,13 @@ desk window; upright at a phone's proportions, at least 1.6 times taller than
 wide (`PHONE_UPRIGHT_MIN_ASPECT`; phones are 16:9, 1.78, or longer); one of the
 Duo's screens at the Duo's own resolution (`is_duo_resolution`: either way up,
 one side exact and the other up to 160 px short of it for the taskbar's strip
-off the available geometry, `DUO_TASKBAR_SLACK_PX`); or sideways at a phone's
+off the available geometry, `DUO_TASKBAR_SLACK_PX`). The Duo's resolutions are
+device pixels and Qt's available geometry is logical, so every caller passes the
+screen's `devicePixelRatio()` and the comparison is made at logical × ratio,
+with the exact side allowed to be off by less than the ratio for Qt's rounding:
+at a 125 % or 150 % display scale the Duo's own desktop arrives as 1502 × 2088
+or 1252 × 1732, which names no Duo side
+(`tests/test_duo_offer_follows_display_scaling.py`); or sideways at a phone's
 proportions — at least 1.95:1 with a short side under 1,300 px; phones are
 19.5:9 (2.17) or longer, monitors 16:9 (1.78) or 16:10. It does not use the
 Duo's shape: every iPad is between 4:3 (1.33) and 1.52 : 1, the Duo's own two
@@ -19873,7 +19886,17 @@ with no image, and every well not chosen, is deleted. Folder-form wells (`in/<WE
 edit that would remove nothing. `IN_PLACE_MARKER` (`.aw_subset_in_place`) is written first with the schema and the
 filter and removed last: while it is there a copy from the folder is refused, and the same edit run again resumes
 with the stored schema (`resolve_raw_source(record_override={})`) — by then the archives no longer match the record —
-re-cutting an already-cut archive being a no-op. A different edit is refused until that one finishes. When a
+re-cutting an already-cut archive being a no-op. A different edit is refused until that one finishes. The page
+finishes it with the recorded filter, never one read off its pickers: `SubsetPage` reads the marker on every source
+load and after every run (`refresh_interrupted_edit`), resolves the pickers with the stored schema and no record
+check exactly as the planner does, shows the recorded choice with the wells, timepoints, FOVs, channels, schema and
+Edit in place locked, relabels the run **Finish the interrupted edit**, and offers no queueing; `SubsetController._launch`
+then builds the filter from the marker (`SubsetFilter.from_json`, which refuses anything that is not exactly what
+`as_json` wrote). A marker that cannot be read is shown and offers no run, since what it was keeping is unknown.
+Rebuilding the filter from the pickers could not work — the partly cut archives no longer match the record the
+pickers would otherwise be read from — and could not be safe, since any other filter deletes images that edit meant
+to keep; the planner's equality check against the marker refuses one regardless
+(`tests/test_subset_raw_page.py`). When a
 timepoint, FOV or channel is removed the converters' `.aw_converted` done marker is deleted too, since a later
 conversion topping the folder up would add wells holding what the others no longer do; a wells-only edit keeps it.
 A queued in-place job's output is its source (`services.job_kinds.planned_output`).

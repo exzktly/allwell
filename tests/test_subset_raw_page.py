@@ -140,3 +140,137 @@ def test_a_queued_in_place_job_round_trips_and_names_its_source_as_output(qapp, 
     assert again._last_result[0], again._last_result
     assert _members(src, "B01") == sorted(namer("B01", t, f, "GFP") for t in TPS for f in ("f0", "f1"))
     again.shutdown()
+
+
+def _interrupt(src, filt):
+    """Leave *src* as an in-place edit cancelled after its first well: one archive cut, the rest as they were."""
+    from datasets.subset.apply import execute_plan
+    from datasets.subset.subset_compute import SubsetError, build_subset_plan
+
+    plan = build_subset_plan(src, "", filt, in_place=True)
+    calls = []
+    with pytest.raises(SubsetError, match="Cancelled"):
+        execute_plan(plan, is_cancelled=lambda: bool(calls.append(1)) or len(calls) > 1, workers=1)
+
+
+def test_an_interrupted_in_place_edit_is_finished_from_the_page(qapp, tmp_path):
+    """The report: an in-place edit cancelled part-way could not be finished from the page. The page read the
+    partly cut archives against the acquisition record, which they no longer match, so its pickers came up empty
+    and the run it offered was refused with "Run that same edit again" — while the same marker refused every copy,
+    leaving the dataset half-cut with no way on from the app. Wrong implementation: rebuilding the filter from the
+    pickers, which cannot offer what the edit recorded."""
+    from datasets.subset.subset_compute import IN_PLACE_MARKER, SubsetFilter
+
+    src = _raw(tmp_path / "src")
+    _interrupt(src, SubsetFilter(wells=frozenset({"A01", "A02"}), timepoint_labels=frozenset({"48h"})))
+    assert (src / IN_PLACE_MARKER).exists()
+
+    ctrl, page = _page_for(src)
+    page._in_place_cb.setChecked(True)                  # what a user finishing an in-place edit would tick
+    assert page._run_btn.isEnabled()
+    page.runRequested.emit()
+    run_worker_to_completion(ctrl)
+    assert ctrl._last_result[0], ctrl._last_result
+    assert sorted(p.name for p in (src / "in").glob("*.zip")) == ["A01.zip", "A02.zip"]
+    for well in ("A01", "A02"):
+        assert _members(src, well) == _expected(well, timepoints=("48h",))
+    assert not (src / IN_PLACE_MARKER).exists()
+    assert page.interrupted_edit() is None and page._interrupted_note.isHidden()
+
+
+def test_the_page_says_what_an_interrupted_edit_keeps_and_offers_only_to_finish_it(qapp, tmp_path):
+    from datasets.subset.subset_compute import SubsetFilter
+
+    src = _raw(tmp_path / "src")
+    _interrupt(src, SubsetFilter(wells=frozenset({"A01", "A02"}), timepoint_labels=frozenset({"48h"})))
+    ctrl, page = _page_for(src)
+    assert page.interrupted_edit() is not None
+    assert "interrupted in-place edit that keeps wells A01, A02; timepoints 48h" in page._interrupted_note.text()
+    assert page._run_btn.text() == "▶  Finish the interrupted edit"
+    assert page._run_btn.isEnabled() and not page._queue_btn.isEnabled()
+    assert page.in_place() and page._dest_field.isHidden()
+    assert page.selected_timepoints() == ["48h"]        # the recorded choice, shown
+    assert sorted(page.selected_wells()) == ["A01", "A02"]
+    page.runRequested.emit()
+    run_worker_to_completion(ctrl)
+    assert ctrl._last_result[0], ctrl._last_result
+    assert page._run_btn.text() == "▶  Remove from dataset"
+    ctrl.shutdown()
+
+
+def test_finishing_an_interrupted_edit_keeps_what_it_recorded_whatever_the_pickers_say(qapp, tmp_path):
+    """Finishing deletes images, so it must delete exactly what the interrupted edit set out to, never what the
+    pickers happen to hold. Wrong implementation: a finish that reads the plate and the checkboxes — here it would
+    delete A02 and the remaining 24h images, neither of which the recorded edit removes."""
+    from datasets.subset.subset_compute import SubsetFilter
+
+    src = _raw(tmp_path / "src")
+    _interrupt(src, SubsetFilter(wells=frozenset({"A01", "A02"}), timepoint_labels=frozenset({"24h", "48h"})))
+    ctrl, page = _page_for(src)
+    page._in_place_cb.setChecked(True)
+    # Forced past the lock: a stray signal, or a later change that forgets it, must still not widen the deletion.
+    page._plate.setSelectedWellIds(["A01"])
+    for label, cb in page._tp_checks.items():
+        cb.setChecked(label == "48h")
+    page.runRequested.emit()
+    run_worker_to_completion(ctrl)
+    assert ctrl._last_result[0], ctrl._last_result
+    assert sorted(p.name for p in (src / "in").glob("*.zip")) == ["A01.zip", "A02.zip"]
+    for well in ("A01", "A02"):
+        assert _members(src, well) == _expected(well, timepoints=("24h", "48h"))
+    # And the page locks what it shows.
+    page._on_source_changed()
+    assert page.interrupted_edit() is None              # finished: the controls are the user's again
+    _interrupt(src, SubsetFilter(timepoint_labels=frozenset({"48h"})))
+    page._on_source_changed()
+    assert not page._plate.isEnabled() and not page._in_place_cb.isEnabled()
+    assert all(not cb.isEnabled() for cb in page._tp_checks.values())
+    ctrl.shutdown()
+
+
+def test_an_unreadable_interrupted_edit_is_shown_and_offers_no_run(qapp, tmp_path):
+    """A marker that cannot be read says an edit was interrupted but not what it kept: nothing may run on it."""
+    from datasets.subset.subset_compute import IN_PLACE_MARKER
+
+    src = _raw(tmp_path / "src")
+    (src / IN_PLACE_MARKER).write_text("{not json", encoding="utf-8")
+    before = {well: _members(src, well) for well in WELLS}
+    ctrl, page = _page_for(src)
+    assert "can't be read" in page._interrupted_note.text()
+    assert not page._run_btn.isEnabled()
+    page.runRequested.emit()                            # forced: the controller refuses it too
+    assert ctrl._worker is None
+    assert {well: _members(src, well) for well in WELLS} == before
+    ctrl.shutdown()
+
+
+def test_a_cancelled_in_place_run_turns_the_page_to_finishing_it(qapp, tmp_path, monkeypatch):
+    """Through the real controller and worker: an Edit in place cancelled after one well leaves the page offering
+    only to finish that edit, and finishing it from there completes the cut."""
+    from datasets.subset.subset_compute import IN_PLACE_MARKER
+    from datasets.subset.worker import SubsetWorker
+
+    src = _raw(tmp_path / "src")
+    ctrl, page = _page_for(src)
+    page._in_place_cb.setChecked(True)
+    page._tp_checks["0h"].setChecked(False)
+    asked = []
+    monkeypatch.setattr(SubsetWorker, "isInterruptionRequested", lambda self: bool(asked.append(1)) or len(asked) > 1)
+    page.runRequested.emit()
+    run_worker_to_completion(ctrl)
+    assert not ctrl._last_result[0] and ctrl._last_result[1].startswith("Cancelled"), ctrl._last_result
+    assert (src / IN_PLACE_MARKER).exists()
+    assert page._run_btn.text() == "▶  Finish the interrupted edit" and page._run_btn.isEnabled()
+    ctrl.shutdown()
+
+    # The next session: the same folder opened afresh, as after a restart.
+    monkeypatch.setattr(SubsetWorker, "isInterruptionRequested", lambda self: False)
+    ctrl, page = _page_for(src)
+    page._in_place_cb.setChecked(True)
+    page.runRequested.emit()
+    run_worker_to_completion(ctrl)
+    assert ctrl._last_result[0], ctrl._last_result
+    for well in WELLS:
+        assert _members(src, well) == _expected(well, timepoints=("24h", "48h"))
+    assert not (src / IN_PLACE_MARKER).exists()
+    ctrl.shutdown()

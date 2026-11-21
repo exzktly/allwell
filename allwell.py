@@ -2302,7 +2302,8 @@ class AllWellApp(QMainWindow):
         avail = screen.availableGeometry() if screen is not None else None
         if phone_layout.is_on() or (
                 avail is not None
-                and phone_layout.is_phone_shaped(avail.width(), avail.height())):
+                and phone_layout.is_phone_shaped(avail.width(), avail.height(),
+                                                 screen.devicePixelRatio())):
             return
         try:
             s = self._qsettings()
@@ -2430,7 +2431,8 @@ def _phone_layout_at_startup(app) -> bool:
         if screen is None:
             return False
         avail = screen.availableGeometry()
-        if not phone_layout.keeps_phone_layout(avail.width(), avail.height()):
+        if not phone_layout.keeps_phone_layout(avail.width(), avail.height(),
+                                               screen.devicePixelRatio()):
             return False
         size = phone_layout.parse_text_size(
             s.value(phone_layout.KEY_TEXT_SIZE, phone_layout.DEFAULT_TEXT_SIZE))

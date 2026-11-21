@@ -523,13 +523,12 @@ def _notes(model: DistributionModel, metric: str, time_source: str | None) -> No
     if model.integer:
         model.notes.append("Whole-number values are packed within ±0.4 of their value.")
     # Along x: Wells draws no line and no comparison with the control, so neither is footnoted there.
-    if model.axis == WELLS:
-        pass
-    elif any(n.startswith("Fixed cohort") for n in model.alerts):
-        model.notes.append(f"The line joins each well's {stat} over its fixed cohort, the same nanowells at every "
-                           "timepoint.")
-    else:
-        model.notes.append(f"The line joins each well's {stat} over the nanowells with a value at that timepoint.")
+    if model.axis != WELLS:
+        if any(n.startswith("Fixed cohort") for n in model.alerts):
+            model.notes.append(f"The line joins each well's {stat} over its fixed cohort, the same nanowells at "
+                               "every timepoint.")
+        else:
+            model.notes.append(f"The line joins each well's {stat} over the nanowells with a value at that timepoint.")
     # A cut set is a result, written whatever the page's Notes switch; "not computed" is only how to get one.
     (model.notes if model.responding_above is None else model.alerts).append(responding_note(model))
     if model.decoration.colours:

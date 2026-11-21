@@ -6952,6 +6952,11 @@ the sentence names it.
     it did. With **Seam** and *Identity contradicted*, *Count-disagreeing* and *Partly visible* are the flags the run
     marks a nanowell with without removing it: a Subset of them set to *no* at the Timepoint leaves the same flagged
     nanowells out of every view, so the Distribution view and the Statistics tests compare the same nanowells.
+    *No* keeps only the nanowells the run recorded as not flagged. A nanowell with no value for the flag at that
+    timepoint is left out too, since nothing says it is clean: the run records no *Count-disagreeing* for any
+    nanowell of a tile in which no cell stood alone (so no typical cell area could be measured), and no *Partly
+    visible* for a nanowell it did not measure. The figure counts these apart from the flagged ones, under "with no
+    value for a condition" in its Subset sentence.
   - **scatter gate** — *inside* or *outside* a gate you drew on the Scatter Plot over two nanowell metrics (with
     Observations set to Nanowells, or on its "Nanowell ▸" axes). Read at a timepoint like a metric: each nanowell at
     a timepoint is one point on that scatter, and *inside* means the point lies in the box. The condition follows
@@ -6999,7 +7004,8 @@ the sentence names it.
   part of the figure, so a plot sent to Saved Plots, exported or put on a slide still says which nanowells it shows.
   It names a saved subset only while the conditions drawn are exactly the saved ones, and it follows a rename on the
   next redraw. Batch Export's Nanowells figures and the Scatter Plot's nanowell scatter carry the same line.
-- **Timepoint** and **vs** (on *Along x: Wells*) — the timepoint drawn, and a group to compare against.
+- **Timepoint** (on *Along x: Wells*) — the timepoint drawn. **vs**, the group to compare against, is offered on the
+  **Statistics** view only: the Distribution view writes no comparison beside its swarms.
 - **Names.** Wells and groups are called what every other tab calls them: a replicate group by its name, a well by
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
   wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and
@@ -11284,7 +11290,10 @@ flag is a condition there (*Count-disagreeing*, *Partly visible*, *Seam*, *Ident
 with a flag set to *no* at the Timepoint leaves those nanowells out of every view at once — the Distribution view,
 the other Statistics tests and this one — so what you compare is the same set of nanowells everywhere, and the
 figures name the Subset at their top left. Leaving a flag out guards against a miscount or a nanowell that is not
-what it seems, at the cost of fewer nanowells.
+what it seems, at the cost of fewer nanowells. A nanowell with no value for the flag at that timepoint is left out
+as well, not kept as unflagged: a whole tile in which no cell stood alone has no *Count-disagreeing* value, for
+example. The Subset's sentence (in Details on this page) counts such nanowells separately, as "with no value for a
+condition", beside those outside the subset.
 
 When these leave the control group, every treatment group, or every group with no nanowell at all, the test does
 not run and the figure says, for each group, how many nanowells were excluded and why; a treatment group they empty

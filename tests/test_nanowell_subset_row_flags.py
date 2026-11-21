@@ -292,3 +292,26 @@ def test_count_disagreeing_and_partly_visible_are_conditions_read_from_the_run_s
     clean = (C("count_disagreement", "no", at="tp:t_a"), C("partially_visible", "no", at="tp:t_a"))
     assert _kept(metrics, *clean)[0] == [("A01", 0), ("A01", 2), ("A01", 4)]
     assert _kept(metrics.drop(columns=["count_disagreement"]), C("count_disagreement", "no", at="tp:t_a"))[0] == []
+
+
+@pytest.mark.parametrize("name", ["count_disagreement", "partially_visible", "fused"])
+def test_a_run_flag_with_no_value_decides_nothing_and_the_figure_counts_it(tmp_path, name):
+    """A run flag the site table holds no value for is undecided, not "not flagged" (CLAUDE.md §7 #3): the run writes
+    no ``count_disagreement`` for a tile with no isolated cell to estimate a cell's area from, and no
+    ``partially_visible`` for a site it did not measure. So *<flag> = no* keeps only the nanowells the run said
+    were not flagged; one with no value is left out with the flagged one, and the figure's Subset sentence counts it
+    apart from them, under "no value for a condition", as the manual says. Pending the user's choice between this and
+    the Rare responders test's old menu, which kept such nanowells (tracker row B4).
+
+    Nanowell 0 is not flagged at t_a, 1 is flagged, 2 has no value; every other timepoint is unflagged."""
+    rows = []
+    for q in range(3):
+        for tp in TPS:
+            row = _row(tp, q, 0, n=2, c=0.2, gfp=200.0)
+            row[name] = ({0: False, 1: True, 2: None}[q]) if tp == "t_a" else False
+            rows.append(row)
+    metrics = site_metrics(load_nanowell_data(_dataset(tmp_path, {"A01": rows}, starts=STARTS)))
+    kept, done = _kept(metrics, C(name, "no", at="tp:t_a"))
+    assert kept == _in_a01(0)
+    assert (done.total, done.kept, done.outside, done.unknown) == (3, 1, 1, 1)
+    assert ": 1 of 3 nanowells kept — 1 outside the subset, 1 with no value for a condition." in ss.note(done)

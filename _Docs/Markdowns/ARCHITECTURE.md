@@ -13681,7 +13681,10 @@ holds), `rim_out_of_focus` (not
 `n_cells`), and the run's own per-row flags `count_disagreement` (*Count-disagreeing*) and `partially_visible` (*Partly
 visible*), each read from the site table's column of that name (`_RUN_FLAGS`) — with `fused` and `identity_out`, the
 flags the run marks a nanowell with without removing it, so a Subset is how every view, the Rare responders test
-among them, leaves the same flagged nanowells out. Each is read from its own column by `_row_flag` so that none stands in for another: `run_state` is
+among them, leaves the same flagged nanowells out. A missing value in one of those columns (the run writes no
+`count_disagreement` for a tile with no isolated cell, no `partially_visible` for an unmeasured site) is no value, not
+*no*: *<flag> = no* leaves such a nanowell out with the flagged ones and `note` counts it under "no value for a
+condition" (`test_nanowell_subset_row_flags.py::test_a_run_flag_with_no_value_decides_nothing_and_the_figure_counts_it`). Each is read from its own column by `_row_flag` so that none stands in for another: `run_state` is
 `state` as `_addressed_grid` left it, copied by `site_metrics` before Cell Gating (`field_excluded`) and the
 rim-focus rule (`out_of_focus`) overwrite `state`, so a nanowell in a field left out is still `found`. A table
 without the column a property reads answers no value on every row rather than *no*. A numeric field is compared by `ge` / `le` / `eq` / `between` /

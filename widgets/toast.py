@@ -130,7 +130,9 @@ class Toast(QWidget):
             self._place()
 
     def eventFilter(self, watched, event) -> bool:
-        if event.type() in (QEvent.Resize, QEvent.Move) and self.isVisible():
+        # A show too: a toast raised while its host was hidden was fitted to the screen, and the host's resizes and
+        # moves before it appeared reached nobody, so its first show is the toast's only chance to fit it.
+        if event.type() in (QEvent.Resize, QEvent.Move, QEvent.Show) and self.isVisible():
             self._fit()
             self._place()
         return False
@@ -157,8 +159,13 @@ class Toast(QWidget):
         self.setMaximumWidth(_QWIDGETSIZE_MAX)
         self.layout().invalidate()
         hint = self.sizeHint()
-        if hint.width() <= room:
-            self.resize(hint)
+        # The window's own hint can be a stale one from an earlier fit (a toast raised over a hidden host, fitted to
+        # the screen and then to the host once it shows, read 396px for a 1004px line), so the one-line width is
+        # measured from the label, which knows its text, plus the layout's margins around it.
+        margins = self.layout().contentsMargins()
+        one_line = self._label.sizeHint().width() + margins.left() + margins.right()
+        if max(hint.width(), one_line) <= room:
+            self.resize(max(hint.width(), one_line), hint.height())
             return
         self._label.setWordWrap(True)
         self.setFixedWidth(room)

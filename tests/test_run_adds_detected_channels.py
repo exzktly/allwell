@@ -202,3 +202,40 @@ def test_with_full_detection_too_the_listed_channels_are_kept(tab, tmp_path):
     assert tab._detection_note.startswith("Detected schema")
     assert ("Added channels found in the input: Cy5, GFP, mCherry (beside the 1 "
             "listed)") in tab._detection_note
+
+
+def _label_free_without_a_phase_mark(tab, raw):
+    tab._input_edit.setText(str(raw))
+    tab._schema_picker.setSeparator("_")
+    tab._schema_picker.setSchema(_SCHEMA["filename_schema"])
+    tab._nuclear_token_edit.setText("DAPI")
+    _set_rows(tab, ["GFP"])                      # no row marked Phase
+    tab._seg_method_cb.setCurrentIndex(tab._seg_method_cb.findData("cellpose_labelfree"))
+    assert tab._seg_method() == "cellpose_labelfree"
+    tab._add_detected_channels_cb.setChecked(True)
+
+
+def test_with_the_box_ticked_label_free_still_needs_a_phase_mark_on_the_form(tab, tmp_path):
+    """Adding the input's channels adds them as quantified only, so it never supplies the Phase channel the
+    label-free method segments; only full run-time detection does. Wrong implementation: treating the box like
+    full detection and skipping the check — the form then shows nothing, and the pipeline refuses its argv
+    (``--phase_token is required``) after the run has launched."""
+    _label_free_without_a_phase_mark(tab, _plate(tmp_path / "p"))
+    problems = [(p.title, p.message) for p in tab._run_problems(live=True)]
+    assert ("Segmentation Error",
+            "Label-free segmentation requires exactly one channel marked 'Phase' (the brightfield image "
+            "to segment).") in problems, problems
+    # Under full detection the mark is detection's to supply, so the form does not ask for it.
+    tab._auto_detect_cb.setChecked(True)
+    assert "Segmentation Error" not in [p.title for p in tab._run_problems(live=True)]
+
+
+def test_with_the_box_ticked_a_label_free_run_without_a_phase_channel_is_refused_at_start(tab, tmp_path):
+    """The queue and the resume card reach ``start_run`` without the form's check, so the run-time union refuses
+    it too, before anything launches."""
+    _label_free_without_a_phase_mark(tab, _plate(tmp_path / "p"))
+    error = tab.start_run(tab._collect_run_spec())
+    assert tab.started == [], "the run was launched with no phase channel for the label-free method"
+    assert error is not None and error.endswith(
+        "But this job's settings do not fit those channels:\n• Label-free segmentation needs a channel marked "
+        "'Phase' (the brightfield image to segment), and none is."), error

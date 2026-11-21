@@ -104,7 +104,8 @@ class AnalyzeRunProblemsMixin:
         if not settled_at_run and not self._fluor_tokens_list():
             problems.append(RunProblem("Channels", "Channel Error",
                                        "At least one channel is required."))
-        seg_errors = self._segmentation_validation_errors(channels=not settled_at_run)
+        seg_errors = self._segmentation_validation_errors(channels=not settled_at_run,
+                                                          phase=not detect)
         if seg_errors:
             problems.append(RunProblem("Segmentation", "Segmentation Error",
                                        "\n".join(seg_errors)))

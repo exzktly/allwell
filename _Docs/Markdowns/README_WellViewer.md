@@ -1159,7 +1159,9 @@ Any string  preserved as-is and sorted lexicographically
   listing it in a row. The segmentation channel is not added as a fluorescent
   channel (except for Label-free, which quantifies the phase channel too), and
   a channel already listed in another letter case (`gfp` for `GFP`) is not
-  added twice. With the box ticked the rows may be left blank. The Analyze log
+  added twice. With the box ticked the rows may be left blank — except that
+  Label-free still needs one row marked Phase, since an added channel never
+  gets that role. The Analyze log
   and the run's status line say which channels were added; a job in the Job
   Queue says "adds the input's channels when it runs" on its row. If the
   filenames cannot be read for channels — the schema has no *channel* field, or

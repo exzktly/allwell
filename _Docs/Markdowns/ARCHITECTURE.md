@@ -9282,7 +9282,11 @@ logged, shown on the dashboard and carried as the finished job's message. The
 pre-run report's coverage scan applies the same union on its worker.
 `_channels_settled_at_run()` (either box ticked) is what defers the
 "at least one channel" and channel-comparing segmentation checks, so the rows
-may be left blank. `tests/test_run_adds_detected_channels.py`.
+may be left blank. The label-free method's Phase mark is the exception: only
+full detection supplies one, so `_segmentation_validation_errors(phase=…)` still
+requires it on the form unless detection is on, and `channel_option_errors`
+refuses a label-free run with no `phase_token` at run time, for the queue and
+resume paths that skip the form. `tests/test_run_adds_detected_channels.py`.
 
 Validation follows the same split. `_validate_run_request(for_queue=…)` lives in
 `AnalyzeRunMixin` beside `validate_for_queue`. With detection on, it skips the

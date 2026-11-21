@@ -40,6 +40,7 @@ from services.remote_hold_owner import claim_owner, orphaned_by, takeover_script
 from services.remote_jobs import _only_my_job
 from services.run_evidence import APP_SILENT_RELEASE
 from services.slurm_ids import HOLDS_DIRNAME
+from util.aw_safe import swallow
 from services.remote_srun_retry import (
     ALLOCATION_GRANTED,
     BOOT_RETRY_PAUSE_S,
@@ -699,7 +700,8 @@ class GrantedNode:
         self.job_id = ""
         #: The Max queue wait the current request is held to, in seconds (``0``: no limit) — :meth:`_queue_wait_now`.
         self._queue_wait_said = queue_wait_seconds(host)
-        #: The last state the host reported (:meth:`state`), ``None`` before the first read and after :meth:`release`.
+        #: The last state the host reported (:meth:`state`), ``None`` before the first read and after a :meth:`release`
+        #: that cancelled the job or found it another user's; a release that left a node running reads it again.
         #: Read by the window's header indicator (:func:`node_summary`), which must not reach the host to draw itself.
         self.last_state: HoldState | None = None
 
@@ -976,7 +978,15 @@ class GrantedNode:
             self._log(f"[remote] granted node: WARN could not release it (ssh exit {result.returncode}); it "
                       "releases itself within two minutes of the app's last heartbeat.\n")
         self.owned, self.job_id = False, ""
-        self.last_state = None
+        if "AW_SCANCELLED" in out or "AW_NOTMINE" in out:
+            # Cancelled, or not this user's job: no node of this user's to show.
+            self.last_state = None
+        else:
+            # Left alone for another window's node, or a cancel the host did not confirm: a node is still up there
+            # (and billing), so what the header indicator shows is read again rather than forgotten; a host that does
+            # not answer keeps the last answer, and the indicator's own re-read turns it grey once the node ends.
+            with swallow("reading the granted node again after a release that left it running"):
+                self.state()
         return "AW_SCANCELLED" in out
 
 

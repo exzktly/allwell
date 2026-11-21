@@ -6860,7 +6860,9 @@ and not ready (queued, starting, or the scheduler did not answer), and
 `text_muted` when there is none; one ready node wins over others still queued.
 It reads `services.remote_hold.node_summary`, which is built only from each
 handle's `GrantedNode.last_state` — the state the host last reported to
-`state()`, cleared by `release()` — so redrawing it every `SUMMARY_MS` (2 s)
+`state()`, cleared by a `release()` that cancelled the job or found it another
+user's, and read again by one that left a node running (`AW_MOVED`: another
+window's node in the shared directory; or a cancel the host did not confirm) — so redrawing it every `SUMMARY_MS` (2 s)
 never reaches a host. Whoever already talks to the host keeps that current
 (the Manage Remotes panel's poll, a request's own wait, a run's claim); the
 button adds one read of its own, `refresh_live_nodes`, every `LIVE_REFRESH_MS`

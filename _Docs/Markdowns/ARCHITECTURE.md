@@ -22912,6 +22912,15 @@ don't have a meaningful denominator uncertainty can omit them; that
 recovers the legacy "treat denominator as exact" `spread / factor`
 behaviour and is the backwards-compatible default.
 
+The formula is for every timepoint **but the baseline's own**. There the
+vs-t0 value is the baseline over (or less) itself — exactly 1 (or 0), control
+stacking included, since the same post-control value is on both sides — so it
+carries no spread: `fold_change.spread_at_baseline` sets it to 0.0 on the line
+path (`normalize_pts`, `_normalize_field`) and on all three bar collectors (the
+tab's replicate-set and per-well bars and Batch Export's), each from the
+timepoint its baseline resolved to. Applying the quadrature there drew a band of
+√2 times the baseline's relative error around a value that cannot vary.
+
 The formula holds for **every panel on both tabs**, and two rules keep it so.
 The t0 baseline's own spread is folded into the fraction and Events fields
 exactly as into the mean: `_field_baseline` returns the baseline point's

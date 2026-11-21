@@ -69,6 +69,19 @@ def test_ratio_to_t0_folds_the_baseline_s_spread_into_the_fraction_and_events(n_
         pytest.approx(10.0), pytest.approx(expected_frac))
 
 
+@pytest.mark.parametrize("op_t0, exact", [("ratio", 1.0), ("subtract", 0.0)])
+def test_the_point_at_the_baseline_is_exact_and_the_others_keep_their_spread(op_t0, exact):
+    """At t0 every panel is the baseline over itself: exactly 1 (or 0), with no spread. The baseline's own error was
+    folded in there as at every other timepoint, so the t0 mean read 1.0 ± 0.14 and the fraction 1.0 ± 0.71."""
+    t0, t24 = fc.normalize_pts([T0, T24], use_t0=True, baseline_tp=0.0, normalize_frac_n=True, op_t0=op_t0)
+    assert (t0[1], t0[2], t0[3], t0[6], t0[4], t0[9]) == (exact, 0.0, exact, 0.0, exact, 0.0)
+    ref = fc.normalize_pts([T0, T24], use_t0=True, baseline_tp=0.0, normalize_frac_n=True, op_t0=op_t0)[1]
+    assert t24 == ref                                                    # the same call: deterministic
+    if op_t0 == "ratio":
+        assert t24[2] == pytest.approx(_quad_ratio(30.0, 6.0, 20.0, 2.0))   # other points unchanged
+        assert t24[6] == pytest.approx(_quad_ratio(0.80, 0.27, 0.08, 0.04))
+
+
 def test_subtracting_t0_folds_the_baseline_s_spread_into_the_fraction():
     out = fc.normalize_pts([T0, T24], use_t0=True, baseline_tp=0.0, normalize_frac_n=True, op_t0="subtract")[1]
     assert (out[3], out[6]) == (pytest.approx(0.72), pytest.approx(math.hypot(0.27, 0.04)))
@@ -143,8 +156,8 @@ def ctx(tmp_path_factory):
     return c
 
 
-def _both_tabs(ctx, state, *, op_ctrl="ratio"):
-    """``{member: (bar panels, line panels)}`` at 24 h, each ``(mean, spread, frac, spread, events, spread)``."""
+def _both_tabs(ctx, state, *, op_ctrl="ratio", at=24.0):
+    """``{member: (bar panels, line panels)}`` at *at* h, each ``(mean, spread, frac, spread, events, spread)``."""
     from review.features.barplot.collect import collect_bar_items
     from review.features.lineplot.controller import collect_line_series
 
@@ -152,11 +165,11 @@ def _both_tabs(ctx, state, *, op_ctrl="ratio"):
     plot.fc_vs_control_on, plot.fc_control, plot.fc_vs_t0_on = state.vs_control_on, state.control, state.vs_t0_on
     plot.fc_op_ctrl, plot.fc_op_t0, plot.fc_baseline_tp = op_ctrl, "ratio", "0"
     ctx.state.stats_cache.cache.clear()
-    grouped, items, _label = collect_bar_items(ctx, 24.0, fc_state=state, fc_baseline_tp=0.0)
+    grouped, items, _label = collect_bar_items(ctx, at, fc_state=state, fc_baseline_tp=0.0)
     assert grouped, "the bar tab is not drawing the replicate sets"
     series, _ = collect_line_series(ctx, threshold=THRESHOLD, use_sem=False, include_cdf=False,
                                     fc_state=state, fc_baseline_tp=0.0)
-    line = {s.key: next(p for p in s.points if abs(p.t - 24.0) < 1e-6) for s in series}
+    line = {s.key: next(p for p in s.points if abs(p.t - at) < 1e-6) for s in series}
     return {it.key: ((it.mean, it.spread, it.frac, it.frac_spread, it.n_above, it.n_above_spread),
                      (line[it.key].mean, line[it.key].spread, line[it.key].frac, line[it.key].frac_spread,
                       line[it.key].n_above, line[it.key].n_above_spread))
@@ -274,8 +287,8 @@ def test_the_tabs_agree_that_a_set_with_no_on_cells_at_t0_has_no_fraction_ratio(
 
 # ── the Bar tab and Batch Export's bar figure draw the same numbers ─────────────────────────────────────────────────
 
-def _batch_bars(ctx, state, *, op_ctrl="ratio"):
-    """Batch Export's bar items for the same three sets at 24 h, keyed like the tab's."""
+def _batch_bars(ctx, state, *, op_ctrl="ratio", at=24.0):
+    """Batch Export's bar items for the same three sets at *at* h, keyed like the tab's."""
     from review.domain.batch_models import BarGroup
     from review.domain.plot_members import plot_replicate_sets_loaded
     from review.features.barplot.collect import collect_bar_items_for_group
@@ -286,7 +299,7 @@ def _batch_bars(ctx, state, *, op_ctrl="ratio"):
     ctx.state.stats_cache.cache.clear()
     group = BarGroup("all", members=list(plot_replicate_sets_loaded(ctx)))
     items = collect_bar_items_for_group(
-        ctx, group, 24.0, val_col="gfp_mean_intensity", threshold=THRESHOLD, use_sem=False,
+        ctx, group, at, val_col="gfp_mean_intensity", threshold=THRESHOLD, use_sem=False,
         per_fov_spread=False, fc_state=state, fc_baseline_tp=0.0)
     return {it.display: (it.mean, it.spread, it.frac, it.frac_spread, it.n_above, it.n_above_spread) for it in items}
 
@@ -311,3 +324,19 @@ def test_batch_export_s_bars_are_the_bar_tab_s(ctx, case):
         assert batch[member] == pytest.approx(tab[member], nan_ok=True), (member, tab[member], batch[member])
     if case == "ratio to t0":
         assert tab["TRT"][0] == pytest.approx(1.9138, abs=1e-4)     # the number the probe printed for Batch Export
+
+
+def test_every_bar_and_line_point_at_the_baseline_timepoint_has_no_spread(ctx):
+    """Through the Bar tab's, the Line tab's and Batch Export's real collectors, at the baseline timepoint itself."""
+    from review.domain.fold_change_state import FoldChangeState
+
+    state = FoldChangeState(vs_t0_on=True)
+    found = _both_tabs(ctx, state, at=0.0)
+    batch = _batch_bars(ctx, state, at=0.0)
+    for member in ("CTRL", "TRT"):
+        bar, line = found[member]
+        for panels in (bar, line, batch[member]):
+            assert panels == pytest.approx((1.0, 0.0, 1.0, 0.0, 1.0, 0.0)), (member, panels)
+    # ... and the timepoint after it keeps the propagated spread the two tabs agree on.
+    later = _both_tabs(ctx, state)
+    assert later["CTRL"][1][3] == pytest.approx(12.5906, abs=1e-4)

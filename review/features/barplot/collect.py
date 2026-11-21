@@ -255,7 +255,7 @@ def _fc_scale(value, err, *, eff_ctrl, eff_ctrl_spread, t0, t0_spread,
 
 def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
                      fc_vs_ctrl, fc_vs_t0, baseline_tp, per_fov_spread,
-                     fc_op_ctrl, fc_op_t0, fc_order, baseline_ctrl):
+                     fc_op_ctrl, fc_op_t0, fc_order, baseline_ctrl, target_t=None):
     """Fold-change one batch-group bar's three panels.
 
     The batch counterpart of what ``_items_for_tp`` does on the tab, kept out
@@ -276,6 +276,9 @@ def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
     or with both axes on, carried numbers that did not match the tab it was
     exported from, on every bar.
 
+    *target_t* is the bar's timepoint: the bar at its own baseline timepoint is
+    the baseline over itself and carries no spread (``spread_at_baseline``).
+
     Returns ``(mean, spread, frac, frac_spread, n_above, n_above_spread)``.
     """
     ctrl_stats, ctrl_frac, ctrl_n = ctrl
@@ -295,6 +298,7 @@ def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
         return (*mean_pair, *frac_pair, *n_pair)
 
     t0_mean = t0_spread = t0_frac = t0_frac_spread = t0_n = t0_n_spread = None
+    rtp_m = rtp_f = rtp_n = None
     if fc_vs_t0:
         _stack_kw = dict(fc_order=fc_order, fc_op_ctrl=fc_op_ctrl,
                          fc_op_t0=fc_op_t0)
@@ -332,6 +336,10 @@ def _scale_group_bar(mean_pair, frac_pair, n_pair, *, pts, ctrl, outcome,
                       t0=t0_frac, t0_spread=t0_frac_spread, **_fc_kw)
     n, ns = _fc_scale(*n_pair, eff_ctrl=eff_n, eff_ctrl_spread=eff_n_s,
                       t0=t0_n, t0_spread=t0_n_spread, **_fc_kw)
+    if fc_vs_t0 and target_t is not None:
+        s = _fc.spread_at_baseline(m, s, target_t, rtp_m)
+        fs = _fc.spread_at_baseline(f, fs, target_t, rtp_f)
+        ns = _fc.spread_at_baseline(n, ns, target_t, rtp_n)
     # Each panel drops on its own denominator, as on the tab.
     if nan_frac:
         f, fs = float("nan"), 0.0
@@ -505,6 +513,11 @@ class _Denominators:
     t0_frac_spread: float | None = None
     t0_n: float | None = None
     t0_n_spread: float | None = None
+    #: The timepoint each baseline resolved to, ``None`` until one did: the bar
+    #: *at* that timepoint is the baseline over itself, exact (``spread_at_baseline``).
+    t0_mean_tp: float | None = None
+    t0_frac_tp: float | None = None
+    t0_n_tp: float | None = None
 
     @classmethod
     def from_control(cls, stats, frac, n) -> _Denominators:
@@ -535,7 +548,7 @@ class _Denominators:
 
 
 def _fold_panels(raw: _Panels, d: _Denominators, nan_flags: tuple,
-                 req: _BarRequest) -> _Panels:
+                 req: _BarRequest, target_t: float) -> _Panels:
     """Apply fold-change to one bar's three panels, or say it cannot be done.
 
     *nan_flags* is ``panel_nan_flags``' answer: the whole bar undefined because
@@ -558,6 +571,11 @@ def _fold_panels(raw: _Panels, d: _Denominators, nan_flags: tuple,
     n, ns = _fc_scale(raw.n, raw.n_spread, eff_ctrl=d.ctrl_n,
                       eff_ctrl_spread=d.ctrl_n_spread, t0=d.t0_n,
                       t0_spread=d.t0_n_spread, **kw)
+    if req.fc_vs_t0:
+        # The bar at its own baseline timepoint is that baseline over itself.
+        s = _fc.spread_at_baseline(m, s, target_t, d.t0_mean_tp)
+        fs = _fc.spread_at_baseline(f, fs, target_t, d.t0_frac_tp)
+        ns = _fc.spread_at_baseline(n, ns, target_t, d.t0_n_tp)
     if nan_frac:
         f, fs = float("nan"), 0.0
     if nan_n:
@@ -723,7 +741,7 @@ class _BarCollector:
         # baseline.
         if req.fc_vs_t0 and not nan_flags[0]:
             self._rset_baselines(d, rset.name, rset_per_fov, fc_ref)
-        panels = _fold_panels(raw, d, nan_flags, req)
+        panels = _fold_panels(raw, d, nan_flags, req, target_t)
         gk = rset_disp if req.group_mode == "well" else tp_str
         return _bar_item(rset.name, display, color, panels, target_t=target_t,
                          group_key=gk, fc_ref=fc_ref, fc_outcome=fc_outcome,
@@ -762,6 +780,7 @@ class _BarCollector:
             _fc.member_first_tp_stats_resolved, name, rset_per_fov)
         if stats is not None:
             resolved_tp, d.t0_mean, d.t0_mean_spread = stats
+            d.t0_mean_tp = resolved_tp
             if stack:
                 d.stack_mean(self.ctrl_cache.stats_at(fc_ref, resolved_tp),
                              req.stack_kw)
@@ -769,6 +788,7 @@ class _BarCollector:
             _fc.member_first_tp_frac_resolved, name, req.per_fov_spread)
         if fstats is not None:
             resolved_tp_f, d.t0_frac, d.t0_frac_spread = fstats
+            d.t0_frac_tp = resolved_tp_f
             if stack:
                 d.stack_frac(self.ctrl_cache.frac_at(fc_ref, resolved_tp_f),
                              req.stack_kw)
@@ -776,6 +796,7 @@ class _BarCollector:
             _fc.member_first_tp_n_resolved, name, req.per_fov_spread)
         if nstats is not None:
             resolved_tp_n, d.t0_n, d.t0_n_spread = nstats
+            d.t0_n_tp = resolved_tp_n
             if stack:
                 d.stack_n(self.ctrl_cache.n_at(fc_ref, resolved_tp_n),
                           req.stack_kw)
@@ -851,7 +872,7 @@ class _BarCollector:
         raw = _well_panels(matched[0], req.per_fov_spread)
         if req.fc_vs_t0 and not nan_flags[0]:
             self._well_baselines(d, pts, fc_ref)
-        panels = _fold_panels(raw, d, nan_flags, req)
+        panels = _fold_panels(raw, d, nan_flags, req, target_t)
         # ``n_above_total`` stays ``None`` here: it means "the cross-well total
         # behind a replicate aggregation", and one well is not an aggregation
         # of anything. Setting it filled the CSV's replicate columns for a
@@ -880,6 +901,7 @@ class _BarCollector:
             pts, per_fov_spread=req.per_fov_spread, baseline_tp=req.fc_baseline_tp,
             op=req.fc_op_t0,
         )
+        d.t0_mean_tp, d.t0_frac_tp, d.t0_n_tp = resolved_tp, resolved_tp_f, resolved_tp_n
         if not (req.fc_vs_ctrl and fc_ref is not None):
             return
         if resolved_tp is not None and d.t0_mean is not None:
@@ -1214,7 +1236,8 @@ def collect_bar_items_for_group(
                     fc_vs_t0=fc_vs_t0, baseline_tp=fc_baseline_tp,
                     per_fov_spread=per_fov_spread,
                     fc_op_ctrl=fc_op_ctrl, fc_op_t0=fc_op_t0, fc_order=fc_order,
-                    baseline_ctrl=lambda tp, _k=key: denoms.baseline_at(_k, tp))
+                    baseline_ctrl=lambda tp, _k=key: denoms.baseline_at(_k, tp),
+                    target_t=target_t)
                 has_mean = not math.isnan(m)
                 # See the note in the rep-set branch above: a fraction of zero
                 # is a measurement even when the above-threshold mean is not.

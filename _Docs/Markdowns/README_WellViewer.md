@@ -11253,8 +11253,11 @@ always takes **groups** of wells, from Sample Definitions, and always uses the w
   is not part of.
 - **Group tests shuffle whole wells.** When treatment and control labels are permuted, whole wells change
   label, never single nanowells, so the shuffle preserves everything that wells share.
-- **Asymptotic formulas are not used.** Textbook null distributions for these statistics assume independent
-  samples. The test reads its null from the plate in front of it instead.
+- **The supporting tests use no asymptotic formula.** Textbook null distributions for Higher Criticism and the
+  shape statistic assume independent samples; those two tests read their null from the plate in front of them
+  instead. The exceedance test is the exception: its p-value comes from large-sample theory (the likelihood-ratio
+  statistic referred to the normal curve), which is why the report prints a p from relabeling whole wells beside it
+  and says when the wells are few.
 
 The cost is honesty about replication: with three control wells, the strongest result a per-well comparison can
 give is 1 in 4. The report always states the smallest p-value the design could reach.
@@ -11367,9 +11370,25 @@ The report gives:
 
 - the **odds ratio** OR = exp(β1): how many times higher the odds of exceeding T are in a treatment well, with
   its **95 % interval**;
-- **ρ**, so the reader can see how much the wells disagree;
-- a **one-sided** p-value from the likelihood-ratio test of β1 > 0. Only an *excess* of fast growers counts; a
-  treatment that slows growth gives p near 1, not a small p.
+- **ρ**, so the reader can see how much the wells disagree. When the wells of each group agree as closely as
+  counting alone allows, the best ρ is zero and the report says **ρ ≈ 0** in words; it does not print a number such
+  as 1e-06. The test is then the one that treats nanowells as independent;
+- **z**, the signed root of the likelihood-ratio statistic, and the **one-sided** p-value it gives for β1 > 0.
+  Only an *excess* of fast growers counts; a treatment that slows growth gives p near 1, not a small p;
+- **a p on wells alone**: the mean share of nanowells past the cutoff in the treatment wells, against every way of
+  relabeling whole wells (a random sample of them when there are too many to list). It rests on no large-sample
+  approximation and on no estimate of ρ, and it cannot go below one over the number of relabelings: 1/70 with
+  four control and four treatment wells.
+
+**How far to trust the p with few wells.** The exceedance p is a large-sample approximation. On simulated plates
+where the treatment does nothing, with four to eight wells a group, 7 to 8 % of plates gave p below 0.05 where 5 %
+is promised, and the excess is larger further out: 1.5 to 4 times too many below 0.01 and 0.001. The reason is that
+ρ is estimated from a handful of wells and usually comes out too small. With 16 wells or fewer in a comparison the
+report says so beside the verdict and gives the relabeling p in the same sentence. A p far below 0.05 with a
+relabeling p at its floor is strong evidence; a p just below 0.05 is not.
+
+An interval whose end cannot be found, because the likelihood stays flat as the odds ratio grows (no control
+nanowell past the cutoff), is reported as unbounded (0 or ∞), never as a very large number.
 
 With wells on more than one plate, a **plate** term is added, so a plate that runs fast cannot pass for a
 treatment.
@@ -11381,7 +11400,8 @@ variance; anti-conservative"*. Fisher treats every nanowell as independent, so i
 wells differ; it is shown for orientation and the interpretation never rests on it.
 
 **Sensitivity percentiles.** The test is run at the **95th, 99th and 99.9th** percentiles and every result is
-shown. Choosing the percentile that happens to give the smallest p after seeing the data would turn three tests
+shown: the 99th in full, the other two on a line of their own in Details (*at other cutoffs*), each with its odds
+ratio and p. Choosing the percentile that happens to give the smallest p after seeing the data would turn three tests
 into one unreported search. The 99th is the primary result; the others say whether the conclusion depends on the
 bar.
 

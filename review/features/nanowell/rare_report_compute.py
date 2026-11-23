@@ -184,6 +184,8 @@ def _run_unit(plate, treatment, controls, treated, params: RareParams) -> Unit:
     for q in percentiles:
         unit.exceedance[q] = ex.exceedance_test(controls, treated, q, params.fixed_threshold,
                                                 bb_allowed=bb, group_allowed=group)
+    if bb and unit.primary.method == ex.BB_LABEL and math.isfinite(unit.primary.p):
+        unit.primary.perm = _permute(unit, ex.rate_statistic(params.percentile, params.fixed_threshold), params)
     _run_hc(unit, controls, treated, full, params)
     _run_ad(unit, controls, treated, full, params)
     return unit
@@ -269,6 +271,9 @@ def _row(unit: Unit) -> dict:
         "n_control_wells": len(unit.controls), "group_inference": unit.group_allowed, "refusal": unit.refusal,
         "exceedance_method": a.method, "percentile": a.percentile, "exceedance_or": a.odds_ratio,
         "exceedance_or_ci_low": a.ci[0], "exceedance_or_ci_high": a.ci[1], "rho": a.rho, "exceedance_p": a.p,
+        "exceedance_z": a.z, "exceedance_lrt": a.lrt, "rho_null": a.rho_null, "rho_at_zero": a.rho_zero,
+        "exceedance_perm_p": _p(a.perm), "exceedance_perm_min_p": a.perm.min_p if a.perm else math.nan,
+        "exceedance_perm_exhaustive": a.perm.exhaustive if a.perm else False,
         "exceedance_q": unit.q.get("exceedance", math.nan), "exceedance_min_p_per_well": a.min_p,
         "fisher_p_anticonservative": a.fisher_p, "fisher_or": a.fisher_or,
         "hc_mean": mean_hc, "hc_p": _p(unit.hc_perm), "hc_q": unit.q.get("hc", math.nan),

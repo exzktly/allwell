@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 
 from review.features.nanowell import rare_hc_compute as hc
-from review.features.nanowell.rare_exceedance_compute import BB_LABEL, FISHER_LABEL
+from review.features.nanowell.rare_exceedance_compute import BB_LABEL, FISHER_LABEL, SMALL_SAMPLE_WELLS
 from review.features.nanowell.rare_null_compute import pool
 from review.features.nanowell.rare_report_compute import UNDECIDED, significant
 from review.features.nanowell.rare_ad_compute import SCHOLZ_LABEL
@@ -58,6 +58,13 @@ def _or_text(r) -> str:
             f"{_num(r['exceedance_or_ci_high'])})")
 
 
+def _rho_text(r) -> str:
+    """ρ as the report prints it: a ρ estimated at zero is said as that, never as a number such as ``1e-06``."""
+    if r.get("rho_at_zero"):
+        return "ρ ≈ 0 (the wells of each group agree as closely as counting alone allows)"
+    return f"ρ {_num(r['rho'])}"
+
+
 def _perm_text(p, q, n, exhaustive, floor, undefined: str) -> str:
     if not math.isfinite(p):
         return undefined
@@ -80,8 +87,17 @@ def _unit_lines(result, unit, r) -> list[str]:
         method = "beta-binomial regression" if r["exceedance_method"].startswith("beta-binomial") else r["exceedance_method"]
         lines.append(f"  {NAME_A} at the control's {r['percentile']:g}th percentile ({method}): {kt} of {nt} "
                      f"{r['treatment']} vs {kc} of {nc} control nanowells past the cutoff; odds of being past it "
-                     f"{_or_text(r)}; spread between wells ρ {_num(r['rho'])}; p {_num(r['exceedance_p'])}, "
-                     f"q {_num(r['exceedance_q'])}")
+                     f"{_or_text(r)}; spread between wells {_rho_text(r)}; z {_num(r['exceedance_z'])}, "
+                     f"p {_num(r['exceedance_p'])}, q {_num(r['exceedance_q'])}")
+        if math.isfinite(r["exceedance_perm_p"]):
+            lines.append("    on wells alone (the mean share past the cutoff, against "
+                         f"{'every relabeling' if r['exceedance_perm_exhaustive'] else 'a random sample of relabelings'}"
+                         f" of the wells): p {_num(r['exceedance_perm_p'])}; lowest possible "
+                         f"{_num(r['exceedance_perm_min_p'])}")
+        others = [(q, a) for q, a in sorted(unit.exceedance.items()) if q != r["percentile"] and math.isfinite(a.p)]
+        if others:
+            lines.append("    at other cutoffs: " + "; ".join(
+                f"the control's {q:g}th percentile, odds {_num(a.odds_ratio)}, p {_num(a.p)}" for q, a in others))
         lines.append(f"    for comparison, {FISHER_LABEL}: p {_num(r['fisher_p_anticonservative'])}")
     # A permutation that never ran (too few wells for a group test) is said as such, not as an undefined statistic.
     lines.append(f"  {NAME_B}: mean score {_num(r['hc_mean'])} over the {r['treatment']} wells; "
@@ -321,6 +337,13 @@ def caveats(unit, params, value_label: str = "") -> list[str]:
         exact = (f" (on wells alone, p ≥ {_num(perm.min_p)})" if perm is not None and perm.exhaustive else "")
         out.append("No control nanowell was past the cutoff, so the spread between wells could not be estimated: "
                    f"the {NAME_A.lower()}'s p treats nanowells as independent and overstates the evidence" + exact + ".")
+    elif a.method == BB_LABEL and math.isfinite(a.p) and len(unit.controls) + len(unit.treated) <= SMALL_SAMPLE_WELLS:
+        zero = ("the spread between wells was estimated at zero, so it treats nanowells as independent, and "
+                if a.rho_zero else "")
+        wells_p = (f" Relabeling whole wells gives p = {_num(a.perm.p)} (lowest possible {_num(a.perm.min_p)})."
+                   if a.perm is not None and math.isfinite(a.perm.p) else "")
+        out.append(f"{wells}, the {NAME_A.lower()}'s p is a large-sample approximation: {zero}it tends to come out "
+                   "too small, most of all when it is very small." + wells_p)
     full = pool(unit.controls)
     unseen = 0
     for w in unit.treated:

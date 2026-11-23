@@ -15,7 +15,9 @@ treatment wells): ``k_w ~ BetaBinomial(n_w, p_w, ρ)``, ``logit p_w = β0 + β1�
 maximum likelihood. ρ is the intra-well correlation, the overdispersion that makes the wells — not the nanowells —
 the replicate unit; with ρ → 0 the model is the binomial that treats nanowells as independent. ``β1 > 0`` is tested
 by the one-sided likelihood-ratio test (the signed root ``z = sign(β1)·√(2Δℓ)``, ``p = 1 − Φ(z)``). The odds ratio is
-``exp(β1)``, with a 95 % profile-likelihood interval. The per-well counts already sit against per-stratum thresholds,
+``exp(β1)``, with a 95 % profile-likelihood interval. That p is a large-sample approximation and runs small with few
+wells, so the report prints beside it a p from relabeling whole wells (:func:`rate_statistic`), and a ρ estimated at
+zero is flagged (``ExceedanceResult.rho_zero``) because the test is then the binomial one. The per-well counts already sit against per-stratum thresholds,
 so under the null every stratum's exceedance rate is the same ``1 − percentile``; the stratum is therefore not a
 covariate by default (adding it would treat a well's strata as independent replicates of it).
 
@@ -43,9 +45,25 @@ FISHER_LABEL = "Fisher exact, one-sided — ignores between-well variance; anti-
 BB_LABEL = "beta-binomial regression, one-sided likelihood-ratio test"
 EMPIRICAL_LABEL = "empirical null of control wells' leave-one-out exceedance rates"
 #: Bounds on the regression coefficients and on logit(ρ): a separated design (no treatment exceedance at all)
-#: drives β1 to a bound, which is reported as such rather than as a number.
+#: drives β1 to a bound, which is reported as such rather than as a number. ρ at its lower bound is reported through
+#: ``ExceedanceResult.rho_zero``.
 COEF_BOUND = 25.0
 RHO_LOGIT_BOUND = 14.0
+#: The finite-difference step the optimiser takes for its gradient. The log-likelihood subtracts two ``betaln`` terms
+#: whose arguments reach 1e4-1e6 as ρ → 0, which leaves rounding noise of about 1e-8 in it; scipy's default step is
+#: also 1e-8, so its gradient there is noise and every start "converges" wherever it stands, up to 0.05 short of the
+#: maximum. A step of 1e-5 is far above the noise and far below any feature of the surface.
+GRADIENT_STEP = 1e-5
+#: A design effect ``1 + (n̄ − 1)·ρ`` below this is ρ estimated at zero: the fit is then the binomial that treats the
+#: nanowells as independent, and the report says so instead of printing ρ as a number such as 1e-06.
+RHO_ZERO_DESIGN_EFFECT = 1.01
+#: A profile-interval end past this odds ratio (or its reciprocal) is the search having found a root on a likelihood
+#: that is flat to the bound, which is an unbounded end and is reported as one.
+OR_UNBOUNDED = 1e6
+#: With this many wells or fewer in the comparison, the report says the likelihood-ratio p is a large-sample
+#: approximation and prints the whole-well relabeling p beside it. Simulated null plates of 4 + 4 to 8 + 8 wells
+#: gave 7-8 % below p = 0.05 on beta-binomial counts, and 1.5-4 times the nominal rate at p = 0.01 and 0.001.
+SMALL_SAMPLE_WELLS = 16
 #: Below this many control values in a stratum, the percentile cannot be resolved: it is the pool's top values.
 def min_pool_for(percentile: float) -> int:
     return int(math.ceil(100.0 / (100.0 - percentile)))
@@ -146,7 +164,7 @@ def fit_bb(k, n, X, fixed: dict | None = None) -> BBFit:
         if 0 in free:
             x0[free.index(0)] = logit(rate) - sum(X[:, j].mean() * v for j, v in fixed.items())
         x0[-1] = theta0
-        res = optimize.minimize(nll, x0, method="L-BFGS-B", bounds=bounds)
+        res = optimize.minimize(nll, x0, method="L-BFGS-B", bounds=bounds, options={"eps": GRADIENT_STEP})
         if best is None or res.fun < best.fun:
             best = res
     coef, theta = unpack(best.x)
@@ -186,6 +204,10 @@ class ExceedanceResult:
     rho: float = math.nan
     beta1: float = math.nan
     lrt: float = math.nan
+    z: float = math.nan                  # the signed root of the likelihood-ratio statistic: sign(β1)·√lrt
+    rho_null: float = math.nan           # ρ of the fit without a treatment effect (it absorbs a real gap)
+    rho_zero: bool = False               # ρ was estimated at zero: the p treats nanowells as independent
+    perm: object = None                  # rare_null_compute.Permutation of the mean exceedance rate, when run
     fisher_p: float = math.nan
     fisher_or: float = math.nan
     min_p: float = math.nan              # the smallest p the empirical null can give a single well
@@ -211,6 +233,8 @@ def _profile_ci(k, n, X, full: BBFit, level: float = 0.95) -> tuple[float, float
                 found = optimize.brentq(gap, min(edge, nxt), max(edge, nxt), xtol=1e-4)
                 break
             edge, step = nxt, step * 1.6
+        if found is not None and abs(found) > math.log(OR_UNBOUNDED):
+            found = None
         ends.append(found if found is not None else direction * math.inf)
     return math.exp(ends[0]) if np.isfinite(ends[0]) else 0.0, math.exp(ends[1]) if np.isfinite(ends[1]) else math.inf
 
@@ -233,6 +257,8 @@ def beta_binomial_test(counts: list[WellCount], percentile: float, *, ci: bool =
     lrt = max(0.0, 2.0 * (full.loglik - null.loglik))
     z = math.copysign(math.sqrt(lrt), full.coef[1])
     result.beta1, result.lrt, result.rho = float(full.coef[1]), lrt, full.rho
+    result.z, result.rho_null = z, null.rho
+    result.rho_zero = 1.0 + (float(n.mean()) - 1.0) * full.rho < RHO_ZERO_DESIGN_EFFECT
     result.p = float(stats.norm.sf(z))
     # One arm with no exceedance at all separates the design: the likelihood keeps rising as the odds ratio runs off
     # to 0 or ∞, and wherever the optimiser stopped is no estimate. Say so, never print that number.
@@ -311,6 +337,16 @@ def exceedance_test(controls: list[Well], treated: list[Well], percentile: float
             result.notes.append(f"stratum {', '.join(small)}: fewer than {min_pool_for(percentile)} control "
                                 f"nanowells, so its {percentile:g}th percentile is the pool's top value(s)")
     return result
+
+
+def rate_statistic(percentile: float, fixed: float | None):
+    """``statistic(well, pooled_controls) -> rate`` for :func:`rare_null_compute.permutation_test`: the share of the
+    well's nanowells above the pool's threshold. Its mean over the treatment wells, against every relabeling of whole
+    wells, is a p for the exceedance question that rests on no large-sample approximation and on no estimate of ρ."""
+    def statistic(well: Well, pooled: dict) -> float:
+        k, n, _per = count(well, threshold_of(pooled, percentile, fixed))
+        return k / n if n else math.nan
+    return statistic
 
 
 def counts_frame(result: ExceedanceResult) -> pd.DataFrame:

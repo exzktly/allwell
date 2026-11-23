@@ -14336,7 +14336,17 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 * `rare_exceedance_compute` (Test A, primary) — per-stratum percentile thresholds (leave-one-out for control wells,
   or a fixed threshold chosen beforehand), each well's count above them, and a beta-binomial regression with an
   optional plate term tested one-sided by the signed-root likelihood ratio, with the odds ratio, its profile
-  interval and ρ. With fewer than three control or two treatment wells it falls back to per-well empirical p-values
+  interval and ρ. Three things keep its numbers from saying more than they know. The optimiser's finite-difference
+  step is `GRADIENT_STEP` (1e-5), because the log-likelihood carries about 1e-8 of rounding noise as ρ → 0 and
+  scipy's default step is the same size, which left every start "converged" up to 0.05 short of the maximum. A ρ
+  whose design effect `1 + (n̄ − 1)·ρ` is under `RHO_ZERO_DESIGN_EFFECT` sets `ExceedanceResult.rho_zero`, and the
+  report prints "ρ ≈ 0" in words. A profile-interval end past `OR_UNBOUNDED` is a root found on a flat likelihood
+  and is returned as unbounded. `rate_statistic` gives `rare_null_compute.permutation_test` the share of a well's
+  nanowells past the pool's threshold, so `rare_report_compute._run_unit` attaches a whole-well relabeling p
+  (`ExceedanceResult.perm`) to the primary result; with `SMALL_SAMPLE_WELLS` wells or fewer,
+  `rare_export_compute.caveats` says beside the verdict that the likelihood-ratio p is a large-sample approximation
+  and quotes that relabeling p. `tests/test_nanowell_rare_reference_values.py` pins the fit against the closed-form
+  binomial limit and the relabeling p against a brute-force enumeration, on one worked example. With fewer than three control or two treatment wells it falls back to per-well empirical p-values
   and a Fisher test labelled anti-conservative, on which no interpretation rests.
 * `rare_hc_compute` (Test B) — per-nanowell p-values against the stratum's pool, the HC+ statistic over
   `i ≤ alpha0·n` with `p_(i) > 1/n`, the index and p threshold it picks, the candidate nanowells, and a warning when

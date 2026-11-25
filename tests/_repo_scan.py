@@ -25,7 +25,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Package directories holding application code. `tests/` is excluded (a test
 #: may build the very thing a guard forbids in order to measure it), and
-#: `_Docs/`, `assets/`, `profiles/` hold no Python.
+#: `_Docs/`, `assets/`, `profiles/` hold no application Python (`_Docs/` holds build
+#: hooks and the teaching material's reproduction scripts, neither imported by the app).
 #:
 #: `scripts/` used to be excluded as "dev tooling, not shipped". That was not
 #: true of all of it: it held the 1,225-line remote bootstrap (now `services/remote_bootstrap.py`), is listed in

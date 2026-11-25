@@ -25,9 +25,10 @@ from tests._repo_scan import PACKAGE_ROOTS, REPO_ROOT
 #:
 #: ``tests`` is excluded by ``_repo_scan``'s own contract — a test may build the
 #: very thing a guard forbids in order to measure it. ``_Docs`` holds no app
-#: code either: its only Python is the four PyInstaller hooks under
+#: code either: its Python is the four PyInstaller hooks under
 #: ``_Docs/_Installation/hooks/``, which run inside the build's own interpreter
-#: and never ship.
+#: and never ship, and the scripts under ``_Docs/teaching/``, which rebuild the
+#: teaching material's numbers and import the app but are never imported by it.
 _NOT_APP_CODE = {"tests", "_Docs"}
 
 #: Directory names that are never source, wherever they appear.

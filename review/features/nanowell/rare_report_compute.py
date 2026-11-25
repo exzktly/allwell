@@ -18,7 +18,9 @@
 * **Multiple testing**: Benjamini–Hochberg across every unit of one donor (across every unit when the groups are not
   split by donor), separately for each test's group p-values.
 * **Interpretation** (:func:`interpret`): the exceedance test alone decides — "detected" when it is significant
-  after correction, "cannot be decided" when it has no group p while nanowells are past the cutoff or when the
+  after correction and, in a small design (``rare_exceedance_compute.SMALL_SAMPLE_WELLS`` wells or fewer, where the
+  regression's p is a large-sample approximation that comes out too small), its relabeling p corrected the same way
+  is significant too (:func:`small_design_gate`), "cannot be decided" when it has no group p while nanowells are past the cutoff or when the
   cutoff sits on a tie that hides the treatment (``rare_design_compute``), "not detected" otherwise. HC and AD are
   supporting evidence and never change the verdict.
 * **Responders** (:func:`responders`): every treatment nanowell past the control cutoff, with its crop path, for
@@ -86,6 +88,11 @@ class Unit:
     family: str = ""
     control_name: str = ""
     family_n: int = 0
+    #: How many units of this unit's family have a relabeling p — the m its relabeling q is corrected over — and, in a
+    #: small design whose regression called it significant, why the relabeling test did not confirm it
+    #: (:data:`GATE_FLOOR`, :data:`GATE_NOT_CONFIRMED`, :data:`GATE_NO_RELABELING`; ``""`` otherwise).
+    relabel_m: int = 0
+    gate: str = ""
     #: +1, or -1 when the analysed values are negated to read the bottom tail (``Prepared.sign``): a figure or sentence
     #: shows ``sign * value`` and ``sign * threshold``.
     sign: int = 1
@@ -281,6 +288,52 @@ def _bh_by_family(units: list[Unit]) -> None:
         _bh(members, "exceedance", [u.primary.p for u in members])
         _bh(members, "hc", [_p(u.hc_perm) for u in members])
         _bh(members, "ad", [_p(u.a2_perm) for u in members])
+        relabel = [_relabel_p(u) for u in members]
+        _bh(members, "relabel", relabel)
+        for unit in members:
+            unit.relabel_m = int(np.isfinite(relabel).sum())
+
+
+def _relabel_p(unit: Unit) -> float:
+    """The exceedance test's whole-well relabeling p (``ExceedanceResult.perm``), NaN when it has none."""
+    perm = unit.primary.perm if unit.exceedance else None
+    return perm.p if perm is not None and math.isfinite(perm.p) else math.nan
+
+
+#: Why a small design's verdict is not "detected" although its regression is significant (:attr:`Unit.gate`).
+GATE_FLOOR = "floor"                    # the relabeling test cannot reach the level with this many wells and groups
+GATE_NOT_CONFIRMED = "not_confirmed"    # it could have, and did not
+GATE_NO_RELABELING = "no_relabeling"    # it could not be computed
+
+
+def small_design(unit: Unit) -> bool:
+    """Whether *unit* compares :data:`rare_exceedance_compute.SMALL_SAMPLE_WELLS` wells or fewer by regression — the
+    designs whose regression p is too small (7-8 % below 0.05 on null plates of 4 + 4 to 8 + 8 wells)."""
+    return (bool(unit.exceedance) and unit.primary.method == ex.BB_LABEL
+            and len(unit.controls) + len(unit.treated) <= ex.SMALL_SAMPLE_WELLS)
+
+
+def at_relabel_floor(unit: Unit) -> bool:
+    """Whether *unit*'s relabeling p is already the lowest its wells allow (``1 / labelings``): every relabeling puts
+    its treatment wells highest, so no stronger effect on these wells could lower it."""
+    perm = unit.primary.perm if unit.exceedance else None
+    return (perm is not None and math.isfinite(perm.p) and math.isfinite(perm.min_p)
+            and perm.p <= perm.min_p * (1 + 1e-9))
+
+
+def small_design_gate(unit: Unit, fdr: float) -> str:
+    """``""`` when a significant regression stands as "detected"; else why the relabeling test stops it: a small
+    design must also have its whole-well relabeling q below *fdr* — exact whatever the regression gets wrong. A unit
+    whose relabeling p is already at its floor (:func:`at_relabel_floor`) and still corrects to *fdr* or above is
+    :data:`GATE_FLOOR`: the wells cannot say more, which the verdict calls undecided. Benjamini–Hochberg divides by
+    rank, so several groups at the floor can pass where a lone one cannot (3 of 4 at 1/70: q = 0.019)."""
+    if not small_design(unit):
+        return ""
+    if not np.isfinite(_relabel_p(unit)):
+        return GATE_NO_RELABELING
+    if significant(unit, "relabel", fdr):
+        return ""
+    return GATE_FLOOR if at_relabel_floor(unit) else GATE_NOT_CONFIRMED
 
 
 def significant(unit: Unit, test: str, fdr: float) -> bool:
@@ -290,13 +343,19 @@ def significant(unit: Unit, test: str, fdr: float) -> bool:
 
 
 def interpret(unit: Unit, fdr: float) -> str:
-    """The verdict, decided by the exceedance test alone (:data:`DETECTED`). What the design cannot show — a
-    permutation floor above *fdr*, a regression that could not estimate the spread between wells — is said beside
-    the verdict (``rare_export_compute.caveats``), not folded into it."""
+    """The verdict, decided by the exceedance test alone (:data:`DETECTED`) — in a small design by its regression and
+    its whole-well relabeling together (:func:`small_design_gate`, recorded on :attr:`Unit.gate`): a relabeling that
+    cannot reach *fdr* with these wells leaves the verdict :data:`UNDECIDED`, and one that could and did not leaves it
+    :data:`NOT_DETECTED`. What the supporting tests' design cannot show is said beside the verdict
+    (``rare_export_compute.caveats``), not folded into it."""
+    unit.gate = ""
     if not unit.group_allowed:
         return INSUFFICIENT
     if significant(unit, "exceedance", fdr):
-        return DETECTED
+        unit.gate = small_design_gate(unit, fdr)
+        if not unit.gate:
+            return DETECTED
+        return NOT_DETECTED if unit.gate == GATE_NOT_CONFIRMED else UNDECIDED
     past = sum(c.k for c in unit.primary.counts) if unit.exceedance else 0
     if past and not np.isfinite(unit.primary.p):
         return UNDECIDED                    # nanowells past the cutoff, and no group p to weigh them: not a "no"
@@ -324,6 +383,7 @@ def _row(unit: Unit) -> dict:
         "exceedance_z": a.z, "exceedance_lrt": a.lrt, "rho_null": a.rho_null, "rho_at_zero": a.rho_zero,
         "exceedance_perm_p": _p(a.perm), "exceedance_perm_min_p": a.perm.min_p if a.perm else math.nan,
         "exceedance_perm_exhaustive": a.perm.exhaustive if a.perm else False,
+        "exceedance_perm_q": unit.q.get("relabel", math.nan), "small_design_gate": unit.gate,
         "exceedance_q": unit.q.get("exceedance", math.nan), "exceedance_min_p_per_well": a.min_p,
         "fisher_p_anticonservative": a.fisher_p, "fisher_or": a.fisher_or,
         "hc_mean": mean_hc, "hc_p": _p(unit.hc_perm), "hc_q": unit.q.get("hc", math.nan),

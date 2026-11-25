@@ -130,7 +130,7 @@ def test_with_few_wells_the_report_says_the_p_is_approximate_and_gives_the_relab
     assert ("With 4 control and 4 drug wells, the exceedance test's p is a large-sample approximation: the spread "
             "between wells was estimated at zero, so it treats nanowells as independent, and it tends to come out too "
             "small, most of all when it is very small. Relabeling whole wells gives p = 0.0143 (lowest possible "
-            "0.0143).") in rx.caveats(unit, params)
+            "0.0143). With this few wells, detected needs both q below 0.05.") in rx.caveats(unit, params)
 
 
 def test_the_caveat_does_not_claim_a_zero_spread_where_one_was_estimated():

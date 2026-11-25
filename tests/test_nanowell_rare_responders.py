@@ -696,9 +696,11 @@ def test_the_spiked_plate_leads_with_counts_and_names_every_limit_of_the_design(
     unit = res.units[0]
     assert sorted(res.responders["nanowell_id"].astype(int)) == sorted([5, 17, 33, 48] * 2)
     text = rx.unit_text(res, unit)
-    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) rose above "
-                                       "the control cutoff (its top 1%) on fold change (Nt / N0), against 0 of 180 "
-                                       "control nanowells (0.0%)")
+    # Three control and two drug wells: the relabeling floor is 0.1, so the regression alone cannot call it detected.
+    assert unit.interpretation == rr.UNDECIDED and unit.gate == rr.GATE_FLOOR
+    assert text["headline"].startswith("drug: cannot be decided with these wells — with 3 + 2 wells the regression")
+    assert ("8 of 120 drug nanowells (6.7%) rose above the control cutoff (its top 1%) on fold change (Nt / N0), "
+            "against 0 of 180 control nanowells (0.0%)") in text["headline"]
     assert text["lines"] == [
         _deciding(unit),
         # Unstratified, the control pool (180) is larger than a well (60), so every spiked nanowell falls at p ≤ 1/n,
@@ -774,7 +776,7 @@ def test_the_figure_draws_counts_and_fold_changes_not_p_values_and_logarithms():
     assert exceed.get_ylim()[0] == 0
     assert hc_ax.get_title() == "colour: drug wells · grey: control"          # its p is in its row and caption
     heads = [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-rare-unit"]
-    assert heads and heads[0].startswith("drug: rare responders detected. 8 of 120")
+    assert heads and heads[0].startswith("drug: cannot be decided with these wells — with 3 + 2 wells the regression") and "8 of 120" in heads[0]
     # The deciding test's p is in its own row's heading, and in the caption of each of its panels.
     p_line = next(t.get_text() for t in fig.texts if t.get_gid() == "nw-rare-test-p:exceedance")
     assert p_line == f"drug: {_deciding(res.units[0])[len('Deciding: exceedance test '):].rstrip('.')}"
@@ -825,12 +827,16 @@ def test_the_value_is_the_page_s_metric_with_no_strata_and_direction_reads_eithe
     lower = rr.analyse(table, rr.RareParams(control="ctrl", direction="lower"), value_label="GFP brightness")
     higher = rr.analyse(table, rr.RareParams(control="ctrl"), value_label="GFP brightness")
     assert lower.prepared.strata == [ALL] and lower.prepared.sign == -1
-    assert lower.units[0].interpretation == rr.DETECTED and higher.units[0].interpretation == rr.NOT_DETECTED
+    # The lower tail holds the effect: significant by regression, at the relabeling floor of 3 + 2 wells (undecided);
+    # the upper tail holds nothing.
+    assert lower.units[0].interpretation == rr.UNDECIDED and higher.units[0].interpretation == rr.NOT_DETECTED
+    assert lower.units[0].gate == rr.GATE_FLOOR and higher.units[0].gate == ""
     assert sorted(lower.responders["nanowell_id"].astype(int)) == sorted([5, 17, 33, 48] * 2)
     assert (lower.responders["fc"] == 9.0).all()                         # flagged at the value as measured
     text = rx.unit_text(lower, lower.units[0])
-    assert text["headline"].startswith("drug: rare responders detected. 8 of 120 drug nanowells (6.7%) fell below "
-                                       "the control cutoff (its bottom 1%) on GFP brightness")
+    assert text["headline"].startswith("drug: cannot be decided with these wells — with 3 + 2 wells the regression")
+    assert ("8 of 120 drug nanowells (6.7%) fell below the control cutoff (its bottom 1%) on GFP brightness"
+            in text["headline"])
     assert any(c.startswith("GFP brightness is a level, not a change from the Baseline: nanowells that started "
                             "lower") for c in text["caveats"])
     fig = _laid_out(lower, 14.5)

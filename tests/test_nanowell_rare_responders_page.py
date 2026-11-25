@@ -46,6 +46,13 @@ def page(qtbot, tmp_path, monkeypatch):
     return ctx
 
 
+def rx_num(st) -> str:
+    """The drawn result's exceedance q as the report writes it."""
+    from review.features.nanowell import rare_export_compute as rx
+
+    return rx._num(st.rare_results[next(reversed(st.rare_results))].units[0].q["exceedance"])
+
+
 def _choose(ctx, name, data):
     combo = ctx.widgets.get(name)
     index = combo.findData(data)
@@ -77,9 +84,14 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     _choose(page, "_nw_control_cb", "ctrl")
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
     # The figure leads with the answer in counts; each test's row lists its p; under the panels, the caveats; the full
-    # report is in Details, under the figure.
+    # report is in Details, under the figure. Three control and two drug wells have 10 relabelings, so the relabeling
+    # p cannot go below 0.1: with this few wells the regression alone cannot call it detected, and the headline says
+    # why before its counts.
     assert [t.replace("\n", " ") for t in _texts(page, "nw-rare-unit")] == [
-        "drug: rare responders detected. 8 of 120 drug nanowells (6.7%) rose above the control cutoff (its top 1%) on "
+        "drug: cannot be decided with these wells — with 3 + 2 wells the regression's q = "
+        f"{rx_num(st)} needs relabeling the wells to agree, and relabeling gives p = 0.1, the lowest 3 + 2 wells allow "
+        "(1 in 10), which corrected across the 1 group tested is q = 0.1. These wells cannot say more: add control "
+        "wells, or test fewer groups. 8 of 120 drug nanowells (6.7%) rose above the control cutoff (its top 1%) on "
         "cell count, against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells."]
     figure = " ".join(_texts(page, "nw-rare-line"))
     # The p is the result's own (its last digit depends on the platform's numeric libraries: 0.00072 here, 0.000717
@@ -98,7 +110,7 @@ def test_the_rare_test_runs_from_the_band_and_reports_on_the_figure(page, qtbot)
     assert page.widgets.get("_nw_details_summary").text().startswith("Rare responders: 1 treatment(s)")
     page.widgets.get("_nw_details_btn").setChecked(True)
     details = page.widgets.get("_nw_details_body").text()
-    assert "drug (all plates): 2 drug vs 3 control wells — rare responders detected" in details
+    assert "drug (all plates): 2 drug vs 3 control wells — cannot be decided with these wells" in details
     assert "anti-conservative" in details and "uncalibrated" in details
     assert f"{rc.VALUE_NOTE} Timepoint: t_a · 5 h." in details      # its hours, as the Timepoint control names it
     assert rc.UNIT_IGNORED in details
@@ -224,7 +236,7 @@ def test_a_control_hidden_on_the_plate_is_named_with_how_to_show_it_again(groupe
     assert nwc.nanowell_empty_reason(page) is None
     assert st.control == "ctrl"                          # the choice under vs survives the group being hidden
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-line")), timeout=30000)
-    assert _texts(page, "nw-rare-unit")[0].startswith("drug: rare responders detected.")
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: cannot be decided with these wells — with 3 + 2 wells the regression")
 
 
 def test_only_the_control_drawn_names_the_hidden_treatment(grouped_page, qtbot):
@@ -363,7 +375,7 @@ def test_the_page_s_metric_and_direction_drive_the_test(page, qtbot):
                     timeout=30000)
     assert not any("is a level" in t for t in _texts(page, "nw-rare-line"))
     qtbot.waitUntil(lambda: {row["fc"] for row in st.rare_flagged} == {30.0}, timeout=30000)
-    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders detected.")
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: cannot be decided with these wells — with 3 + 2 wells the regression")
 
     _choose(page, "_nw_rare_direction_cb", "lower")
     assert st.rare_direction == "lower"
@@ -425,7 +437,7 @@ def test_flagged_nanowells_are_tested_as_every_view_draws_them_and_the_test_has_
     assert page.widgets.get_or_none("_nw_rare_qc_btn") is None
     qtbot.waitUntil(lambda: bool(_texts(page, "nw-rare-unit") or _texts(page, "nw-rare-why")), timeout=30000)
     assert not _texts(page, "nw-rare-why"), _texts(page, "nw-rare-why")         # no group emptied by its flags
-    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: rare responders detected.")
+    assert _texts(page, "nw-rare-unit")[0].replace("\n", " ").startswith("drug: cannot be decided with these wells — with 3 + 2 wells the regression")
     assert st.rare_footer.counts.endswith("300 nanowells kept, 0 excluded")
     assert not any("QC" in t for t in _texts(page, "nw-rare-line"))
 

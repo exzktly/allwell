@@ -14461,7 +14461,12 @@ it asks for "the control group". **Choosing the test with no control preselects 
 (`controller.set_stats_test` → `rc.guess_control`: exactly one group whose name has a word of `CONTROL_WORDS`;
 two or none and nothing is guessed), recorded in `NanowellState.control_guessed` — never saved, cleared when the user
 chooses a control (`set_control`) — and the figure says so under its groups line, at the top (`render_rare_page(lead=)`, never below the fold). **The verdict is decided by the
-exceedance test alone** (`rare_report_compute.interpret`: `DETECTED` when its q is below the FDR; `UNDECIDED` when
+exceedance test alone** (`rare_report_compute.interpret`: `DETECTED` when its q is below the FDR — and, in a design
+of `rare_exceedance_compute.SMALL_SAMPLE_WELLS` (16) wells or fewer, when its whole-well relabeling q is too
+(`small_design_gate`: the relabeling p is corrected by Benjamini–Hochberg within the donor family as `Unit.q["relabel"]`
+over `Unit.relabel_m` units; a regression the relabeling does not confirm is `UNDECIDED` when the relabeling p is
+already at its floor, `at_relabel_floor`, and `NOT_DETECTED` otherwise, recorded on `Unit.gate` and written into
+the headline by `rare_export_compute.gate_reason` and into the table as `exceedance_perm_q` / `small_design_gate`); `UNDECIDED` when
 it has no group p — too few wells for its regression, said by `rare_export_compute.needs` — while nanowells are past
 the cutoff, since a test that did not run is not a negative, and likewise when nothing is past a cutoff that sits on
 a tie hiding the treatment (`rare_design_compute.cutoff_on_tie`); `NOT_DETECTED` otherwise or when no nanowell passed the

@@ -202,7 +202,7 @@ def treatments_lost(exclusions: pd.DataFrame | None, control: str, tested) -> li
     return out
 
 
-def _run_unit(plate, treatment, controls, treated, family, control, params: RareParams) -> Unit:
+def _run_unit(plate, treatment, controls, treated, params: RareParams, family: str = "", control: str = "") -> Unit:
     n_c, n_t = len(controls), len(treated)
     group = n_c >= params.min_wells_per_condition and n_t >= params.min_wells_per_condition
     bb = group and n_c >= params.min_controls_bb and n_t >= params.min_treated_bb
@@ -419,7 +419,8 @@ def analyse(data, params: RareParams | None = None, *, validate: bool = False,
     params = prepared.params
     wells = wells_from(prepared.kept)
     lost: list = []
-    units = [_run_unit(*spec, params) for spec in _units(wells, params, prepared.exclusions, lost)]
+    units = [_run_unit(*spec[:4], params, family=spec[4], control=spec[5])
+             for spec in _units(wells, params, prepared.exclusions, lost)]
     unstratified = list(prepared.strata) == [ALL]
     for u in units:
         u.sign = prepared.sign

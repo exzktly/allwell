@@ -13,7 +13,10 @@
 * **Per unit**: Test A (``rare_exceedance_compute``) at the primary percentile and at each sensitivity percentile,
   all of them shown, none chosen after the fact; Test B (``rare_hc_compute``) and Test C (``rare_ad_compute``),
   each with a per-well empirical p against the control wells' leave-one-out values and a whole-well permutation p.
-* **Multiple testing**: Benjamini–Hochberg across every unit, separately for each test's group p-values.
+* **Donors** (``RareParams.families``, from ``rare_donor_compute``): when the groups come from several donors, each
+  treatment is tested against its own donor's control, and each family's units are corrected among themselves.
+* **Multiple testing**: Benjamini–Hochberg across every unit of one donor (across every unit when the groups are not
+  split by donor), separately for each test's group p-values.
 * **Interpretation** (:func:`interpret`): the exceedance test alone decides — "detected" when it is significant
   after correction, "cannot be decided" when it has no group p while nanowells are past the cutoff or when the
   cutoff sits on a tie that hides the treatment (``rare_design_compute``), "not detected" otherwise. HC and AD are
@@ -78,6 +81,11 @@ class Unit:
     q: dict = field(default_factory=dict)                # "exceedance" / "hc" / "ad" -> BH q
     interpretation: str = ""
     thresholds: dict = field(default_factory=dict)       # stratum -> primary threshold (from all control wells)
+    #: The donor this unit belongs to (``Donor 1``) when the groups are split by donor, ``""`` when they are not;
+    #: its control group's name; and how many units its Benjamini–Hochberg family holds (:func:`_bh_by_family`).
+    family: str = ""
+    control_name: str = ""
+    family_n: int = 0
     #: +1, or -1 when the analysed values are negated to read the bottom tail (``Prepared.sign``): a figure or sentence
     #: shows ``sign * value`` and ``sign * threshold``.
     sign: int = 1
@@ -116,30 +124,54 @@ def _reasons_text(exclusions: pd.DataFrame) -> str:
     return ", ".join(f"{reason}: {n:,}" for reason, n in exclusion_counts(exclusions).items())
 
 
-def _units(wells: dict[str, Well], params: RareParams,
-           exclusions: pd.DataFrame | None = None) -> list[tuple[str, str, list, list]]:
-    """``(plate, treatment, control wells, treated wells)`` per unit. A control with no kept nanowell raises, saying
-    why: never labelled in the table at all, or labelled but every nanowell of it excluded — then naming the
-    exclusions by reason (*exclusions*, ``Prepared.exclusions``), since "no such condition" would blame the label for
-    what QC, a missing value or the moving average did."""
+def _units(wells: dict[str, Well], params: RareParams, exclusions: pd.DataFrame | None = None,
+           lost: list | None = None) -> list[tuple]:
+    """``(plate, treatment, control wells, treated wells, family, control)`` per unit: every condition against
+    ``params.control``, or — with ``params.families`` — each family's treatments against that family's control. A
+    family that cannot be tested (its control lost every nanowell, or no treatment of it kept one) is said in *lost*
+    and the others are still tested; with no family left, or no families and a control that cannot be tested, this
+    raises (:func:`_units_against`)."""
+    if not params.families:
+        return [(*spec, "", params.control) for spec in _units_against(wells, params.control, None, params, exclusions)]
+    out = []
+    for label, control, treatments in params.families:
+        try:
+            specs = _units_against(wells, control, set(treatments), params, exclusions)
+        except ValueError as exc:
+            if lost is None:
+                raise
+            lost.append(f"{label}: not tested — {exc}")
+            continue
+        out += [(*spec, label, control) for spec in specs]
+    if not out:
+        raise ValueError("no donor has a group left to test: " + "; ".join(lost or []))
+    return out
+
+
+def _units_against(wells: dict[str, Well], control: str, only: set | None, params: RareParams,
+                   exclusions: pd.DataFrame | None = None) -> list[tuple[str, str, list, list]]:
+    """``(plate, treatment, control wells, treated wells)`` per unit, every condition (or each of *only*) against
+    *control*. A control with no kept nanowell raises, saying why: never labelled in the table at all, or labelled
+    but every nanowell of it excluded — then naming the exclusions by reason (*exclusions*, ``Prepared.exclusions``),
+    since "no such condition" would blame the label for what QC, a missing value or the moving average did."""
     conditions = sorted({w.condition for w in wells.values()})
-    if params.control not in conditions:
+    if control not in conditions:
         excluded = exclusions if exclusions is not None else pd.DataFrame(columns=["condition", "reason"])
         if not wells and len(excluded):
             raise ValueError(f"every one of the {len(excluded):,} nanowells was excluded before testing, so nothing "
                              f"is left to test ({_reasons_text(excluded)})")
-        mine = excluded[excluded["condition"].astype(str) == str(params.control)]
+        mine = excluded[excluded["condition"].astype(str) == str(control)]
         if len(mine):
-            raise ValueError(f"every one of the {len(mine):,} nanowells of the control {params.control!r} was "
+            raise ValueError(f"every one of the {len(mine):,} nanowells of the control {control!r} was "
                              f"excluded before testing ({_reasons_text(mine)})")
-        raise ValueError(f"no well is labelled with the control condition {params.control!r}; conditions found: "
+        raise ValueError(f"no well is labelled with the control condition {control!r}; conditions found: "
                          + (", ".join(conditions) or "none"))
-    treatments = [c for c in conditions if c != params.control]
+    treatments = [c for c in conditions if c != control and (only is None or c in only)]
     out = []
     plates = sorted({w.plate for w in wells.values()}) if params.by_plate else ["all"]
     for plate in plates:
         here = [w for w in wells.values() if plate == "all" or w.plate == plate]
-        controls = [w for w in here if w.condition == params.control]
+        controls = [w for w in here if w.condition == control]
         for t in treatments:
             treated = [w for w in here if w.condition == t]
             if treated:
@@ -147,7 +179,10 @@ def _units(wells: dict[str, Well], params: RareParams,
     if not out:
         # Every treatment group lost every nanowell while the control kept some: there is nothing to test, and a
         # figure with no group on it says nothing of why — name each group and what excluded it.
-        lost = treatments_lost(exclusions, params.control, set(treatments))
+        mine = exclusions
+        if only is not None and exclusions is not None and len(exclusions):
+            mine = exclusions[exclusions["condition"].astype(str).isin({str(c) for c in only})]
+        lost = treatments_lost(mine, control, set(treatments))
         raise ValueError("no treatment group has a nanowell left to test: " + "; ".join(lost) if lost else
                          "no treatment group is drawn beside the control")
     return out
@@ -167,11 +202,11 @@ def treatments_lost(exclusions: pd.DataFrame | None, control: str, tested) -> li
     return out
 
 
-def _run_unit(plate, treatment, controls, treated, params: RareParams) -> Unit:
+def _run_unit(plate, treatment, controls, treated, params: RareParams, family: str = "", control: str = "") -> Unit:
     n_c, n_t = len(controls), len(treated)
     group = n_c >= params.min_wells_per_condition and n_t >= params.min_wells_per_condition
     bb = group and n_c >= params.min_controls_bb and n_t >= params.min_treated_bb
-    unit = Unit(plate, treatment, controls, treated, group, bb)
+    unit = Unit(plate, treatment, controls, treated, group, bb, family=family, control_name=control)
     unit._primary_q = params.percentile
     if not group:
         unit.refusal = (f"{n_c} control and {n_t} treatment well(s); group-level inference needs at least "
@@ -234,6 +269,20 @@ def _bh(units: list[Unit], key: str, ps: list[float]) -> None:
         unit.q[key] = q if q is not None else math.nan
 
 
+def _bh_by_family(units: list[Unit]) -> None:
+    """Benjamini–Hochberg for each test within each donor's units (:attr:`Unit.family`; one family of every unit when
+    the groups are not split by donor), and each unit told how many units its family holds."""
+    families: dict = {}
+    for unit in units:
+        families.setdefault(unit.family, []).append(unit)
+    for members in families.values():
+        for unit in members:
+            unit.family_n = len(members)
+        _bh(members, "exceedance", [u.primary.p for u in members])
+        _bh(members, "hc", [_p(u.hc_perm) for u in members])
+        _bh(members, "ad", [_p(u.a2_perm) for u in members])
+
+
 def significant(unit: Unit, test: str, fdr: float) -> bool:
     """Whether *test* (``"exceedance"``, ``"hc"`` or ``"ad"``) is significant for *unit*: its q below *fdr*."""
     q = unit.q.get(test, math.nan)
@@ -267,7 +316,8 @@ def _row(unit: Unit) -> dict:
     mean_hc = _finite_mean([unit.hc[w.key].value for w in unit.treated])
     mean_a2 = _finite_mean([unit.a2[w.key][0] for w in unit.treated])
     return {
-        "treatment": unit.treatment, "plate": unit.plate, "n_treatment_wells": len(unit.treated),
+        "treatment": unit.treatment, "plate": unit.plate, "donor": unit.family, "control": unit.control_name,
+        "n_treatment_wells": len(unit.treated),
         "n_control_wells": len(unit.controls), "group_inference": unit.group_allowed, "refusal": unit.refusal,
         "exceedance_method": a.method, "percentile": a.percentile, "exceedance_or": a.odds_ratio,
         "exceedance_or_ci_low": a.ci[0], "exceedance_or_ci_high": a.ci[1], "rho": a.rho, "exceedance_p": a.p,
@@ -368,21 +418,25 @@ def analyse(data, params: RareParams | None = None, *, validate: bool = False,
     prepared = data if isinstance(data, Prepared) else prepare(data, params, value_label=value_label)
     params = prepared.params
     wells = wells_from(prepared.kept)
-    units = [_run_unit(*spec, params) for spec in _units(wells, params, prepared.exclusions)]
+    lost: list = []
+    units = [_run_unit(*spec[:4], params, family=spec[4], control=spec[5])
+             for spec in _units(wells, params, prepared.exclusions, lost)]
     unstratified = list(prepared.strata) == [ALL]
     for u in units:
         u.sign = prepared.sign
         if unstratified:
             u.loading_note = design.loading_differs(prepared.kept, [w.key for w in u.controls],
                                                     [w.key for w in u.treated])
-    _bh(units, "exceedance", [u.primary.p for u in units])
-    _bh(units, "hc", [_p(u.hc_perm) for u in units])
-    _bh(units, "ad", [_p(u.a2_perm) for u in units])
+    _bh_by_family(units)
     for u in units:
         u.interpretation = interpret(u, params.fdr)
     warnings = [f"{u.label}: {u.refusal}" for u in units if u.refusal]
     # A treatment group the exclusions emptied is not tested; said, so it is never silently missing from the figure.
-    warnings += treatments_lost(prepared.exclusions, params.control, {u.treatment for u in units})
+    warnings += lost                                     # a donor that could not be tested at all
+    # Every family's control, and the groups of a family *lost* already names, are not said again.
+    said = {params.control} | {name for f in params.families for name in (f[1], *f[2])
+                               if not any(u.family == f[0] for u in units)} | {f[1] for f in params.families}
+    warnings += treatments_lost(prepared.exclusions, params.control, {u.treatment for u in units} | said)
     warnings += [f"{u.label}: {u.resolution}" for u in units if u.resolution]
     result = RareResult(prepared, units, pd.DataFrame([_row(u) for u in units]), _sensitivity(units),
                         _per_well(units), responders(units, prepared), parameter_log(prepared, units), warnings)

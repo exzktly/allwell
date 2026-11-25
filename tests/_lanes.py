@@ -306,6 +306,8 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_rare_timepoint_is_the_views.py": "the Rare responders test resolves the page's Timepoint as the sample tests do",
     "test_nanowell_rare_per_nanowell_metric.py": "the Rare responders test keeps the nanowells the sample tests keep for a per-nanowell metric",
     "test_nanowell_rare_reference_values.py": "the exceedance test's fit, z, p and interval against a worked example, and the few-wells caveat",
+    "test_nanowell_rare_donor.py": "the Rare responders test per donor: each donor's own control, BH within each donor",
+    "test_nanowell_rare_donor_page.py": "the Rare responders test's Donor combo on the real Statistics view",
     "test_nanowell_statistics_pan_zoom.py": "a pan or zoom on the Statistics figure stays; an empty click redraws nothing",
     "test_nanowell_baseline_window_says_why.py": "a Baseline average that can never be complete says so on every view",
     "test_nanowell_subset.py": "The Nanowells page's *Subset*: any number of conditions — starting cells, a metric at a …",

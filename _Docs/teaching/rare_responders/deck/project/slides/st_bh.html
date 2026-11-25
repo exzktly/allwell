@@ -1,0 +1,37 @@
+<section id="st_bh" data-transition="fade">
+<div class="headrow">
+<div class="head">
+<p class="eyebrow">Backup · step 6 · Benjamini–Hochberg</p>
+<h2>Testing 3 molecules means correcting their p-values</h2>
+</div>
+<div class="minimap" style="height:108px">
+<svg aria-label="The six steps of slide 11 in miniature; the ones this slide covers are filled: 6 correct" width="520" height="108" viewBox="0 0 520 108" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="160" height="44" rx="10" fill="#ECF1F8" stroke="#2F6BDB" stroke-width="2"/><rect x="178" y="2" width="160" height="44" rx="10" fill="#ECF1F8" stroke="#2F6BDB" stroke-width="2"/><rect x="354" y="2" width="160" height="44" rx="10" fill="#ECF1F8" stroke="#2F6BDB" stroke-width="2"/><rect x="354" y="60" width="160" height="44" rx="10" fill="#ECF1F8" stroke="#2F6BDB" stroke-width="2"/><rect x="178" y="60" width="160" height="44" rx="10" fill="#ECF1F8" stroke="#2F6BDB" stroke-width="2"/><rect x="2" y="60" width="160" height="44" rx="10" fill="#2F6BDB" stroke="#2F6BDB" stroke-width="2"/><path d="M164 24 h7 M340 24 h7 M432 48 v5 M350 82 h-7 M174 82 h-7" stroke="#2F6BDB" stroke-width="2.5"/><path d="M170 19 l6 5 l-6 5 Z M346 19 l6 5 l-6 5 Z M427 52 l5 6 l5 -6 Z M344 77 l-6 5 l6 5 Z M168 77 l-6 5 l6 5 Z" fill="#2F6BDB"/></svg>
+<p class="mm" style="left:2px; top:9px; width:160px; ">1 cutoff</p>
+<p class="mm" style="left:178px; top:9px; width:160px; ">2 count K</p>
+<p class="mm" style="left:354px; top:9px; width:160px; ">3 fit</p>
+<p class="mm" style="left:354px; top:67px; width:160px; ">4 fit, δ = 0</p>
+<p class="mm" style="left:178px; top:67px; width:160px; ">5 p-value</p>
+<p class="mm" style="left:2px; top:67px; width:160px; color:#F7F5F0; font-weight:700">6 correct</p>
+</div>
+</div>
+<div class="stage" style="margin-bottom:-49px; padding-bottom:49px;">
+<svg aria-label="Left, a table for molecules A, C and B: p, rank, the limit 0.05 times rank over 3, corrected q and whether called. Right, the three p-values plotted against rank on a log scale with the limit drawn as orange steps: A falls far below its step and is called; C and B lie above theirs." width="1664" height="680" viewBox="0 0 1664 680" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="158" width="1030" height="2" fill="#C9D3E0"/><path d="M1200 130 V420 H1650" stroke="#1B2A41" stroke-width="2.5" fill="none"/><path d="M1200.0 233.1 L1350.0 233.1 L1350.0 215.7 L1500.0 215.7 L1500.0 205.5 L1650.0 205.5" stroke="#E07A2F" stroke-width="4" fill="none"/><circle cx="1275.0" cy="367.4" r="12" fill="#8E5BD0" stroke="#1B2A41" stroke-width="2"/><circle cx="1425.0" cy="210.5" r="12" fill="#C9B6E6" stroke="#1B2A41" stroke-width="2"/><circle cx="1575.0" cy="174.6" r="12" fill="#C9B6E6" stroke="#1B2A41" stroke-width="2"/><line x1="1192" y1="420.0" x2="1200" y2="420.0" stroke="#1B2A41" stroke-width="2.5"/><line x1="1192" y1="304.0" x2="1200" y2="304.0" stroke="#1B2A41" stroke-width="2.5"/><line x1="1192" y1="130.0" x2="1200" y2="130.0" stroke="#1B2A41" stroke-width="2.5"/></svg>
+<p class="lab left small" style="left:0px; top:0px; width:1664px; line-height:1.25; color:#1B2A41; --i:1">Testing 3 molecules that do nothing, each at p &lt; 0.05: at least one false call 14&#160;% of the time if the tests were independent and exact (1 − 0.95³ = 0.14)<br>Benjamini–Hochberg, the q of the report, keeps false calls to about 5&#160;% of the calls made</p>
+<p class="lab left small" style="left:0px; top:110px; width:120px; line-height:52px; color:#1B2A41; --i:2"><b>molecule</b><br><b>A</b><br><b>C</b><br><b>B</b></p>
+<p class="lab small" style="left:130px; top:110px; width:130px; line-height:52px; color:#1B2A41; white-space:nowrap; --i:2"><b>p (step 5)</b><br>0.00008<br>0.041<br>0.17</p>
+<p class="lab small" style="left:270px; top:110px; width:100px; line-height:52px; color:#1B2A41; white-space:nowrap; --i:2"><b>1. rank</b><br>1<br>2<br>3</p>
+<p class="lab small" style="left:380px; top:110px; width:270px; line-height:52px; color:#1B2A41; white-space:nowrap; --i:2"><b>2. limit 0.05 × rank ÷ 3</b><br>0.017<br>0.033<br>0.050</p>
+<p class="lab small" style="left:660px; top:110px; width:220px; line-height:52px; color:#1B2A41; white-space:nowrap; --i:2"><b>3. q = p × 3 ÷ rank</b><br>0.00024<br>0.061<br>0.17</p>
+<p class="lab small" style="left:890px; top:110px; width:140px; line-height:52px; color:#1B2A41; white-space:nowrap; --i:2"><b>q &lt; 0.05?</b><br><b>yes</b><br>no<br>no</p>
+<p class="lab small" style="left:1070px; top:404px; width:120px; text-align:right; --i:3">0.00001</p>
+<p class="lab small" style="left:1070px; top:288px; width:120px; text-align:right; --i:3">0.001</p>
+<p class="lab small" style="left:1070px; top:114px; width:120px; text-align:right; --i:3">p = 1</p>
+<p class="lab small" style="left:1205px; top:428px; width:140px; line-height:1.15; --i:3">rank 1<br>(A)</p>
+<p class="lab small" style="left:1355px; top:428px; width:140px; line-height:1.15; --i:3">rank 2<br>(C)</p>
+<p class="lab small" style="left:1505px; top:428px; width:140px; line-height:1.15; --i:3">rank 3<br>(B)</p>
+<p class="lab left small" style="left:1210px; top:124px; width:450px; line-height:1.15; --i:3"><b style="color:#A9501A">orange steps</b>: the limit, 0.05 × rank ÷ 3<br>A p below it is called</p>
+<p class="lab left small" style="left:0px; top:320px; width:1000px; line-height:1.22; color:#1B2A41; font-size:21px; --i:4"><b>How it is done</b><br>1. Sort the p-values, smallest first: that order is the rank<br>2. A molecule needs p below 0.05 × rank ÷ 3<br>&#160;&#160;&#160;&#160;The smallest p faces the strictest limit<br>3. Equivalently, q = p × 3 ÷ rank<br>&#160;&#160;&#160;&#160;Each q is then lowered to the smallest q at its rank or above (no change here)<br>4. Called when q &lt; 0.05<br><b>C</b>: p = 0.041 is below 0.05 but above its limit, 0.033, so q = 0.061: not called</p>
+<p class="lab left small" style="left:0px; top:590px; width:1664px; line-height:1.22; color:#4A5568; font-size:21px; --i:5">Assumes the molecules’ tests are independent or positively related<br>Sharing the same control wells keeps them positively related<br>The correction runs within each donor: over that donor’s molecules only</p>
+</div>
+<aside>With several molecules on a plate, each tested at p below 0.05, the chance of at least one false call grows with the number of molecules: about 14 % for three that do nothing. The Benjamini–Hochberg procedure corrects for this. Sort the p-values from smallest to largest, compare the one at rank k with 0.05 times k divided by the number of molecules, and call significant every molecule up to the largest rank that passes. Each molecule gets a corrected value, q, which is never smaller than its p, and the molecule is called significant when q is below 0.05. Here molecule A passes easily. Molecule C, whose four wells are all a little above the controls, has p = 0.041, which would count on its own, but it is compared with 0.033 at rank two and fails: its q is 0.061. Molecule B is not close. The procedure keeps the expected share of false calls among the molecules called significant at 5 %. Counts and p-values are illustrative.</aside>
+</section>

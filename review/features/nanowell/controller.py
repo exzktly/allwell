@@ -3001,6 +3001,13 @@ def set_rare_direction(ctx, direction: str) -> None:
         _set(ctx, "rare_direction", direction)
 
 
+def set_rare_donor(ctx, donor: str) -> None:
+    """The sample variable that names each group's donor for the Rare responders test (``NanowellState.rare_donor``:
+    a variable id, ``rare_donor_compute.AUTO`` or ``OFF``)."""
+    if isinstance(donor, str):
+        _set(ctx, "rare_donor", donor)
+
+
 def set_cohort(ctx, on: bool) -> None:
     _set(ctx, "cohort", bool(on))
 

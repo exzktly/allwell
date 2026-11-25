@@ -1,0 +1,35 @@
+{
+ "script": "sims/end_to_end_null.py",
+ "settings": {
+  "nanowells_per_well": 1000,
+  "log_fc_mean": -0.05,
+  "log_fc_sd": 0.36,
+  "well_shift_sd": 0.05,
+  "wells": "4 control + 4 molecule",
+  "cutoff": "99th percentile of the pooled control nanowells",
+  "seed": 20261126
+ },
+ "plates": 40000,
+ "rates": {
+  "0.05": {
+   "share": 0.080575,
+   "se": 0.0013609065854697743,
+   "ratio_to_nominal": 1.6114999999999997
+  },
+  "0.01": {
+   "share": 0.022,
+   "se": 0.0007334166619323561,
+   "ratio_to_nominal": 2.1999999999999997
+  },
+  "0.001": {
+   "share": 0.00325,
+   "se": 0.0002845802830485626,
+   "ratio_to_nominal": 3.25
+  }
+ },
+ "z_for_true_5pct": 1.9195951445925792,
+ "molecule_well_count_mean": 10.5164625,
+ "molecule_well_count_var": 33.06438563850399,
+ "control_count_total_always_40": true,
+ "seconds": 246.9
+}

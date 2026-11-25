@@ -7350,7 +7350,26 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   already shown hides it: when the control is hidden the figure says so and names the wells that bring it back, and
   when every group is hidden the page says that rather than "No nanowell wells selected". **All** under the plate shows
   every group again; *vs* keeps the control you chose meanwhile. Every other group drawn is tested against the
-  control. The value is the page's **Metric** at the **Timepoint** — a fold-change metric compares each nanowell
+  control.
+
+  **Several donors.** Cells from different donors differ in how often a nanowell grows and in whether a molecule
+  wakes any T cell at all, so each donor is its own experiment. Define a sample variable that says which donor each
+  well comes from (Home → Sample Map → Variables; name it *Donor* and it is used without being chosen) and the
+  **Donor** combo beside the Test reads it. Each treatment group is then tested against the control group **of its
+  own donor**, and q corrects each p across the groups tested **for the same donor**, never across donors. The
+  control you choose under *Control* is your donor's; each other donor's control is the group that matches it on
+  the variables that set it apart within its donor — choose *D1 DMSO* (Donor 1, Molecule DMSO) and donor 2's
+  control is the group with Donor 2 and Molecule DMSO. A variable every group of a donor shares, such as the donor's
+  age, plays no part. Every group must come from one donor, so define replicate sets per donor (*D1 Drug X*,
+  *D2 Drug X*) rather than grouping by a variable that pools donors. The figure names, at its top, every group it
+  did not test and why: wells from more than one donor, a well with no donor value, or a donor with no group (or
+  two groups) matching the control. Choose **— none** under Donor to test every group against the one control and
+  correct them together; the combo is hidden while the plate has no variable. **With no donor given** — no variable
+  named Donor and none chosen, or a Donor variable that no drawn well has a value for — every group is treated as
+  one donor, tested against the one control and corrected together, and a warning at the top of the figure says so
+  (*⚠ No donor given: …*). Choosing *— none* yourself draws no warning.
+
+  The value is the page's **Metric** at the **Timepoint** — a fold-change metric compares each nanowell
   with its own **Baseline** — with no grouping by starting cells, and **Responders higher / lower** (beside the Test)
   chooses the tail the tests look in. When the Timepoint names one the drawn wells were not imaged at (the page has
   one Timepoint for every view, and the Array view offers a single well's), the test reads the latest timepoint they
@@ -7365,7 +7384,9 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
 
   **Reading the figure.** The figure's first line says how its plots are grouped: how many groups were tested,
   each with its wells, and the comparisons that makes — each group against the control (for example *4 groups
-  tested: control DMSO (A01, A02, A03) · Drug X (B01, B02, B03) · … → 3 comparisons, each against DMSO*). Then each
+  tested: control DMSO (A01, A02, A03) · Drug X (B01, B02, B03) · … → 3 comparisons, each against DMSO*). Split by
+  donor, it lists each donor's control and groups in turn, and each comparison's name ends with its donor
+  (*Comparison 3 of 3: D2 Drug X vs D2 DMSO (Donor 2)*). Then each
   comparison's answer, under its name (*Comparison 1 of 3: Drug X vs DMSO*), in counts — and when it is *cannot be
   decided*, why, on the same line (for example *— the deciding test needs at least 3 control wells (this design has
   2)*): for example *drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its
@@ -11556,13 +11577,19 @@ treatment from that well's own luck, and the test refuses to pretend otherwise.
 p-values are corrected separately by **Benjamini–Hochberg** (the *q* in the report), which controls the expected
 share of false discoveries among the results called significant. "Significant" in the report means q < 0.05.
 
+**Several donors.** With a Donor variable on the plate, each donor is its own experiment: its groups are tested
+against its own control, and the correction runs over that donor's groups only, so *m* below is the number of
+treatments tested for that donor. A donor with many molecules then cannot dilute the evidence for a donor with few,
+and a donor that grows faster than another is never read as a response.
+
 **How many treatments a design can test.** Benjamini–Hochberg turns a raw p into
 
 ```
 q = p × m / rank
 ```
 
-where *m* is the number of treatments tested against the control and *rank* is the p-value's place when all *m*
+where *m* is the number of treatments tested against the control (for that donor, when the groups are split by
+donor) and *rank* is the p-value's place when all *m*
 are sorted from smallest. A result is significant when q < 0.05, which is the same as p < 0.05 × rank / m. So
 every treatment added makes a hit need a smaller raw p, and q is never smaller than p. With 20 treatments and one
 real hit, that hit needs p < 0.05 × 1/20 = 0.0025; with 10 real hits, the weakest of them (rank 10) needs
@@ -11757,6 +11784,7 @@ not run on the Statistics view; the view's report covers the analysis itself.
 | **Control** (*vs*) | Statistics view band | The control group every other group is tested against; captioned Control for this test |
 | **Metric** / **Timepoint** / **Baseline** | Page band | The value tested, where, and what a fold-change metric is relative to |
 | **Responders higher / lower** | Statistics band | The tail the tests look in |
+| **Donor** | Statistics band | The sample variable naming each well's donor: each donor's groups are tested against its own control and corrected among themselves; *— none* tests every group against one control |
 | **FC**, count fold change | Report, first panel | Nt / N0: count at the Timepoint over count at the Baseline (one Metric among the page's) |
 | **Control cutoff** (T, threshold) | Headline, first panel (dashed), report | The control's 99th percentile of the value (its top 1%), or its 1st (its bottom 1%) looking lower |
 | **Exceedance test**, k / n | Second panel's counts, report | Nanowells past the cutoff, out of those kept; the test that decides the verdict |
@@ -11768,7 +11796,7 @@ not run on the Statistics view; the view's report covers the analysis itself.
 | **Per-well empirical p** | Report | A treatment well's value placed among the control wells' values (≥ 0.25 with 3 control wells) |
 | **Permutation p**, **labelings** | Report, Tests B and C | Group p from shuffling whole wells between treatment and control |
 | **Lowest possible** p | Figure, report | The floor a design's permutations or control-well count allow |
-| **q** | Report | Benjamini–Hochberg corrected p across groups |
+| **q** | Report | Benjamini–Hochberg corrected p across groups — across one donor's groups when split by donor |
 | **anti-conservative** | Report, Fisher line | Ignores well-to-well variation; p too small; shown, never used |
 | **uncalibrated; i.i.d. assumption** | Report, Scholz–Stephens line | Textbook test over pooled nanowells; description only |
 | **rare responders detected / not detected** | Headline | The verdict, decided by the exceedance test alone |

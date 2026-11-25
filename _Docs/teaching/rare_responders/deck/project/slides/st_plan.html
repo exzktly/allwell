@@ -1,0 +1,20 @@
+<section id="st_plan" data-transition="fade">
+<div class="head">
+<p class="eyebrow">Backup · what can be concluded</p>
+<h2>A result counts only when three conditions hold</h2>
+</div>
+<div class="takeaways">
+<div class="tk"><h3>≥ 3 control + ≥ 2 treated wells</h3><p>Fewer, and r cannot be estimated: there is nothing to say how much wells differ.</p></div>
+<div class="tk"><h3>At least one exceedance</h3><p>With nothing past the cutoff, there is nothing to count.<br>With no <i>control</i> nanowell past it, r cannot be estimated and p overstates the evidence.</p></div>
+<div class="tk"><h3>q &lt; 0.05</h3><p>After the correction across every molecule tested on the donor.</p></div>
+</div>
+<table class="pct">
+<tr><th style="width:24%">Wells per donor</th><th style="width:76%">What the design allows</th></tr>
+<tr><td>3 control + 2 treated</td><td>A conclusion, from the exceedance test</td></tr>
+<tr><td>5 control + 2 treated</td><td>Also a false-positive check: test control wells against each other (3 vs 2)<br>Every call there is false</td></tr>
+<tr><td>6 control + 3 treated</td><td>Lowers the shuffling tests’ smallest possible p (4 + 4: 1/70 = 0.014, 6 + 3: 1/84 = 0.012)</td></tr>
+<tr><td><b>This plate: 4 + 4</b></td><td><b>A conclusion for each donor</b><br><b>One more control well per donor would add the false-positive check</b></td></tr>
+</table>
+<p class="tnote">Define the groups per donor: each donor’s molecule wells are compared with its own control wells<br>A donor’s wells are treated as one plate<br>With 4 control wells r is rough and usually too small, which makes p too small<br>More control wells fix that (backup, slide 28)<br>Past ~1,000 nanowells per well, more nanowells barely add evidence: add wells instead</p>
+<aside>Three conditions together justify calling a molecule a source of rare responders. There must be at least three control wells and two treated wells, because with fewer the model cannot estimate how much wells differ, and without that a high well cannot be told apart from chance. There must be at least one nanowell past the cutoff among the wells compared. And the molecule’s q value, after the Benjamini–Hochberg correction across every molecule tested, must be below 0.05. For planning, five control wells allow a useful self-check: split the control wells into a mock treated group of two and a mock control group of three, run the test, and repeat for every split; since nothing separates them, every call is a false positive, and the share of calls measures the false-positive rate on the experiment’s own wells. Six or more control wells with three treated also let the supporting tests, which get their p-values by shuffling well labels, can reach smaller p-values. The six-donor plate gives each donor four control and four treated wells per molecule: enough for a conclusion, one control well short of the self-check. Groups are defined per donor, so each donor’s molecule wells are compared with that donor’s own control wells, because T-cell responses differ between people, and the correction runs over that donor’s molecules only. The model has no term for the plate, so a donor’s wells are treated as one plate. If no control nanowell passes the cutoff, r cannot be estimated and the p-value overstates the evidence. With four control wells r is estimated only roughly and usually too small, which makes the p-value too small; more control wells give a better estimate.</aside>
+</section>

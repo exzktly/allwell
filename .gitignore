@@ -52,3 +52,6 @@ _Docs/visual_audit/screenshots/
 
 # Session status doc — kept out of the repo per CLAUDE.md §5
 PERF_STATUS.md
+
+# check.py in _Docs/teaching/rare_responders works in a temporary copy here while it runs
+_Docs/teaching/.check_*/

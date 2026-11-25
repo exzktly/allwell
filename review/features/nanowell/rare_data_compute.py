@@ -71,6 +71,10 @@ class RareParams:
     """Every choice the analysis makes, fixed before it runs and written into its output (:meth:`as_log`)."""
 
     control: str = "control"                       # the condition name of the control wells
+    #: Each donor its own experiment (``rare_donor_compute``): ``(label, control, treatments)`` per donor, each
+    #: treatment tested against its own donor's control and Benjamini–Hochberg run within each donor. Empty: every
+    #: condition other than *control* against *control*, one correction over all of them.
+    families: tuple = ()
     percentile: float = 99.0                       # Test A's threshold: this percentile of control FC, per stratum
     sensitivity: tuple = (95.0, 99.0, 99.9)        # Test A is re-run at each, and every result shown
     fixed_threshold: float | None = None           # a threshold chosen before running, used instead of the percentile

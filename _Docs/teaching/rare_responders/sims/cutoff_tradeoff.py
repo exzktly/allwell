@@ -37,7 +37,7 @@ def chunk(args):
 
 
 if __name__ == '__main__':
-    plates = int(sys.argv[1]) if len(sys.argv) > 1 else 2000
+    plates = int(sys.argv[1]) if len(sys.argv) > 1 else 4000
     procs = int(sys.argv[2]) if len(sys.argv) > 2 else 4
     t0 = time.time()
     jobs = [(si, ci, plates // procs) for si in range(len(SCENARIOS)) for ci in range(procs)]

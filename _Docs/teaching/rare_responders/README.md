@@ -55,10 +55,10 @@ cd _Docs/teaching/rare_responders/sims
 python example_plate.py            # seconds
 python null_gain.py                # about a minute
 python loo_variance.py             # seconds
-python cutoff_tradeoff.py 4000 4   # plates per row, processes; about 5 minutes
-python end_to_end_null.py 40000 4  # about 4 minutes
-python calibration.py 4000 4       # about 5 minutes
-python power.py 1000 4             # about 10 minutes
+python cutoff_tradeoff.py          # 4,000 plates per row on 4 processes by default; about 5 minutes
+python end_to_end_null.py          # 40,000 plates; about 4 minutes
+python calibration.py             # 4,000 plates per design; about 5 minutes
+python power.py                   # 1,000 plates per point; about 10 minutes
 cd ../deck && python build.py      # regenerate slides 10 to 40
 cd .. && python check.py           # about a minute; add --sims to rerun every simulation too
 ```
@@ -74,5 +74,8 @@ cd .. && python check.py           # about a minute; add --sims to rerun every s
   Add to it when the chapter quotes a new computed value.
 - **Simulated figures carry their uncertainty.** Each results file stores the number of plates and the standard
   error; quote a simulated rate with no more precision than that supports.
+- **Run the simulations with their defaults to reproduce the stored results.** The parallel scripts split the plates
+  into one random stream per process, so a different plate count or process count gives different (equally valid)
+  numbers.
 - A fresh seed should agree with the stored results within about three standard errors. Agreement at the same seed
   shows the code is unchanged; agreement at a new seed shows the result does not depend on the seed.

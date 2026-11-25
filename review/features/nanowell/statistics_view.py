@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QComboBox, QPushButton
 
 from review.features.nanowell import _rare_controller as rc
 from review.features.nanowell import controller as nwc
+from review.features.nanowell import rare_donor_compute as donors
 from review.features.nanowell import statistics_compute as sc
 
 _UNIT_TIP = ("What one value of a sample is.\n"
@@ -46,6 +47,15 @@ _DIRECTION_TIP = ("Which tail of the Metric a rare responder is in. Higher: a fe
                   "control wells reach (growth, a rise in signal). Lower: far below (death, a loss of signal).")
 
 
+_DONOR_TIP = ("The sample variable that says which donor each group's wells come from (Home → Sample Map →\n"
+              "Variables). Each donor is its own experiment: its groups are tested against its own control — the group\n"
+              "that matches the one chosen under Control, as Molecule = control, say — and q is corrected within each\n"
+              "donor. A group whose wells come from more than one donor, or have no donor value, is named and not\n"
+              "tested. None: every group against the one control, corrected together.")
+#: What the *Donor* combo calls "do not split by donor".
+DONOR_NONE = "— none"
+
+
 @dataclass
 class StatisticsControls:
     unit: object
@@ -53,10 +63,11 @@ class StatisticsControls:
     group: object
     flagged: object = None
     direction: object = None
+    donor: object = None
 
     @property
     def signalling(self) -> tuple:
-        return tuple(w for w in (self.unit, self.test, self.direction) if w is not None)
+        return tuple(w for w in (self.unit, self.test, self.direction, self.donor) if w is not None)
 
 
 def build_statistics_controls(ctx, band) -> StatisticsControls:
@@ -83,12 +94,31 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     direction.setToolTip(_DIRECTION_TIP)
     direction.currentIndexChanged.connect(lambda _i: nwc.set_rare_direction(ctx, direction.currentData() or "higher"))
     ctx.widgets.register("_nw_rare_direction_cb", direction)
-    group = band.add_scope("Compare", unit, test, direction, flagged)
-    return StatisticsControls(unit, test, group, flagged, direction)
+    from widgets.labeled_combo import LabeledComboBox
+
+    donor = LabeledComboBox("Donor")
+    donor.setToolTip(_DONOR_TIP)
+    donor.currentIndexChanged.connect(lambda _i: nwc.set_rare_donor(ctx, donor.currentData() or donors.OFF))
+    ctx.widgets.register("_nw_rare_donor_cb", donor)
+    group = band.add_scope("Compare", unit, test, direction, donor, flagged)
+    return StatisticsControls(unit, test, group, flagged, direction, donor)
 
 
-def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool) -> None:
-    """Shown on the Statistics view only, on the state's choices. The caller blocks the signals."""
+def fill_donor_combo(combo, st, variables) -> None:
+    """The *Donor* combo: none, then every sample variable of the plate, the one :func:`rare_donor_compute.resolve`
+    reads for the state's choice selected — the variable named Donor while nothing has been chosen. The caller
+    blocks the signals."""
+    combo.clear()
+    combo.addItem(DONOR_NONE, donors.OFF)
+    for variable in donors.donor_variables(variables):
+        combo.addItem(variable.name, variable.id)
+    index = combo.findData(donors.resolve(variables, st.rare_donor) or donors.OFF)
+    combo.setCurrentIndex(max(index, 0))
+
+
+def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool, variables=None) -> None:
+    """Shown on the Statistics view only, on the state's choices. The caller blocks the signals. *variables* is the
+    plate's ``VariableSet``: the *Donor* combo shows for the Rare responders test once the plate has a variable."""
     controls.group.setVisible(on_view)
     rare = sc.test_spec(st.stats_test)["kind"] == "rare"
     # Hidden, not greyed: the rare-responder tests always take wells as the units, so the choice never applies to
@@ -99,6 +129,10 @@ def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool)
         index = controls.direction.findData(st.rare_direction)
         if index >= 0:
             controls.direction.setCurrentIndex(index)
+    if controls.donor is not None:
+        fill_donor_combo(controls.donor, st, variables)
+        # Hidden while the plate has no variable: a combo whose only entry is "none" is not a choice.
+        controls.donor.setVisible(rare and bool(donors.donor_variables(variables)))
     if controls.flagged is not None:
         controls.flagged.setVisible(rare)
         ready = bool(st.rare_flagged)

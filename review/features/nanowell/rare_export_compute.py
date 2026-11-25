@@ -123,6 +123,18 @@ def _unit_lines(result, unit, r) -> list[str]:
     return lines
 
 
+def correction_line(result) -> str:
+    """What q is: each p corrected across the groups tested (Benjamini–Hochberg) — within each donor when the groups
+    are split by donor (``RareParams.families``), each donor's groups tested against that donor's own control."""
+    tail = f"separately for each test; only the {NAME_A.lower()} decides the verdict."
+    families = list(dict.fromkeys(u.family for u in result.units if u.family))
+    if not families:
+        return f"q is each p corrected across the {len(result.units)} group(s) tested (Benjamini–Hochberg), {tail}"
+    return (f"Each donor is its own experiment: its groups are tested against its own control, and q is each p "
+            f"corrected across the groups tested for the same donor (Benjamini–Hochberg, {len(families)} "
+            f"famil{'y' if len(families) == 1 else 'ies'}: {', '.join(families)}), {tail}")
+
+
 def report_lines(result) -> list[str]:
     """The full report, in plain words, as the page's Details shows it and ``rare_report.txt`` holds it: what each test
     asks, then per group its verdict, every test's statistic, p and q, the comparison tests, each well's count, and
@@ -130,8 +142,7 @@ def report_lines(result) -> list[str]:
     lines = [f"Rare-responder analysis of {result.prepared.value_label}: {result.log['nanowells_kept']} nanowells kept, "
              f"{result.log['nanowells_excluded']} left out.",
              *[f"{name} asks: {what}." for name, what in ASKS.items()],
-             f"q is each p corrected across the {len(result.units)} group(s) tested (Benjamini–Hochberg), separately "
-             f"for each test; only the {NAME_A.lower()} decides the verdict."]
+             correction_line(result)]
     for unit, (_i, r) in zip(result.units, result.table.iterrows()):
         lines += _unit_lines(result, unit, r)
     lines += [f"WARNING: {w}" for w in result.warnings]
@@ -283,7 +294,9 @@ def deciding_line(unit, n_units: int, params) -> str:
         return (f"Deciding: {NAME_A.lower()} has no group p — {needs(unit, params)} With fewer, it gives each well's "
                 "own p only (Details).")
     q = unit.q.get("exceedance", math.nan)
-    corrected = f" (q = {_num(q)} across the {n_units} groups tested)" if n_units > 1 else ""
+    n = unit.family_n or n_units                    # within its donor when the groups are split by donor
+    family = f" for {unit.family}" if unit.family else ""
+    corrected = f" (q = {_num(q)} across the {n} groups tested{family})" if n > 1 else ""
     return f"Deciding: {NAME_A.lower()} p = {_num(a.p)}{corrected}."
 
 
@@ -431,7 +444,7 @@ def _test_p(unit, key: str, params, n_units: int) -> str:
     if key == "exceedance":
         line = deciding_line(unit, n_units, params)
         line = line[len("Deciding: "):].removeprefix(f"{NAME_A.lower()} ").rstrip(".")
-        return re.sub(r" \(q = ([^ ]+) across the \d+ groups tested\)", r", q = \1", line)
+        return re.sub(r" \(q = ([^ ]+) across the \d+ groups tested[^)]*\)", r", q = \1", line)
     if key == "pooled":
         stat, p, note = unit.scholz
         if not math.isfinite(p):
@@ -489,18 +502,31 @@ def groups_line(result) -> str:
         names = [w.key if len(plates) > 1 else w.key.split(":", 1)[-1] for w in group]
         return ", ".join(dict.fromkeys(names))
 
-    control = result.prepared.params.control
-    treated = {}
-    for u in units:
-        treated.setdefault(u.treatment, []).extend(u.treated)
-    controls = [w for u in units for w in u.controls]
-    parts = [f"control {control} ({wells(controls)})", *[f"{name} ({wells(group)})" for name, group in treated.items()]]
     n = len(units)
-    return (f"{len(treated) + 1} groups tested: {' · '.join(parts)} → {n} comparison{'s' if n != 1 else ''}, "
-            f"each against {control}")
+    comparisons = f"{n} comparison{'s' if n != 1 else ''}"
+    families = list(dict.fromkeys(u.family for u in units))
+    blocks = []
+    for family in families:
+        mine = [u for u in units if u.family == family]
+        control = mine[0].control_name or result.prepared.params.control
+        treated = {}
+        for u in mine:
+            treated.setdefault(u.treatment, []).extend(u.treated)
+        controls = [w for u in mine for w in u.controls]
+        parts = [f"control {control} ({wells(controls)})", *[f"{name} ({wells(g)})" for name, g in treated.items()]]
+        blocks.append((family, control, treated, parts))
+    if families == [""]:
+        _family, control, treated, parts = blocks[0]
+        return f"{len(treated) + 1} groups tested: {' · '.join(parts)} → {comparisons}, each against {control}"
+    groups = sum(len(t) + 1 for _f, _c, t, _p in blocks)
+    return (f"{groups} groups tested from {len(families)} donors, each donor against its own control: "
+            + "; ".join(f"{family}: {' · '.join(parts)}" for family, _c, _t, parts in blocks)
+            + f" → {comparisons}, corrected within each donor")
 
 
 def comparison_title(result, i: int) -> str:
     """``Comparison i of n: <group> vs <control>`` — the label every plot of one comparison carries."""
     unit = result.units[i]
-    return f"Comparison {i + 1} of {len(result.units)}: {unit.label} vs {result.prepared.params.control}"
+    control = unit.control_name or result.prepared.params.control
+    family = f" ({unit.family})" if unit.family else ""
+    return f"Comparison {i + 1} of {len(result.units)}: {unit.label} vs {control}{family}"

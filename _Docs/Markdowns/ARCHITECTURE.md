@@ -1937,7 +1937,7 @@ review/
 │   │                 rare_exceedance_compute.py, rare_hc_compute.py,
 │   │                 rare_ad_compute.py, rare_report_compute.py,
 │   │                 rare_validate_compute.py, rare_export_compute.py,
-│   │                 rare_design_compute.py,
+│   │                 rare_design_compute.py, rare_donor_compute.py,
 │   │                 _rare_render.py, _rare_controller.py ← the
 │   │                 rare-responder analysis and the Statistics view's
 │   │                 Rare responders test that runs it
@@ -14377,7 +14377,10 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   `tail_start` is the control median the per-well sum starts at.
 * `rare_report_compute` — one unit per treatment (or per plate and treatment with `by_plate`), the guardrail that
   refuses group inference with fewer than two wells on either side, the sensitivity percentiles (95, 99, 99.9; all
-  shown), Benjamini–Hochberg across units for each test, `interpret` (the exceedance test alone decides the verdict;
+  shown), Benjamini–Hochberg for each test across the units of one family (`_bh_by_family`: one family of every
+  unit, or with `RareParams.families` one per donor — each `(label, control, treatments)`, every treatment tested
+  against its own family's control, the unit carrying `family`, `control_name` and `family_n`, and a family whose
+  control or treatments lost every nanowell said in the warnings while the others are still tested), `interpret` (the exceedance test alone decides the verdict;
   HC and AD are supporting evidence), the flagged nanowells — past the control cutoff only — with their crop paths,
   and the parameter log. A control with no kept nanowell refuses the analysis with the cause (`_units`): every
   nanowell excluded, or every one of the control's, each with `rare_data_compute.exclusion_counts` by reason; only
@@ -14387,6 +14390,13 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   Criticism and the shape test are computed independently (`_run_hc`, `_run_ad`, each with its own `_permute`), so
   an HC undefined for every labeling leaves the shape test's p standing, and `rare_export_compute.caveats` reads
   each test's own permutation floor rather than HC's for both.
+* `rare_donor_compute` — which donor each group belongs to and which control each donor's groups are tested
+  against (`plan`): the donor is a sample variable (`resolve`: the band's choice, else `default_donor`, the variable
+  named *Donor*), each group takes the one value its wells share (`sample_variables.roll_up`), the chosen control
+  serves its own donor, and every other donor's control is the group matching it on the variables that set it apart
+  within its own donor (`setting_apart` — so a donor-level variable such as an age never decides it). A group with
+  wells from two donors or an unassigned well, and a donor with no matching control or several, is a sentence in
+  `DonorPlan.refused` and is not tested; a control that cannot be placed is `DonorPlan.problem`, which stops the test.
 * `rare_validate_compute` — the self-check: control-versus-control splits for the false-positive share, and
   synthetic responders (2–4× the stratum's control 99th percentile, k = 1, 3, 5, 10, 20 per well) for power.
 * `rare_export_compute` — `report_lines` and `write`, which puts every table, the parameter log and the text report
@@ -14402,7 +14412,12 @@ nanowells treated as independent. The modules, in the order the analysis runs th
 refuses, since it compares no samples). `controller._compose_statistics` hands that kind to
 `_rare_controller.compose`, which takes each group the page draws as a condition and the *vs* control as the control
 (`statistics_view.control_choices` lists groups for this test on either unit, and the unit combo is hidden, since
-it never applies — a greyed control reads as one to unlock),
+it never applies — a greyed control reads as one to unlock), splits them by donor when the plate has a donor
+variable (`rare_donor_compute.plan` over `ctx.state.selection.variables` and the band's **Donor** combo,
+`NanowellState.rare_donor`, saved — a variable id, `AUTO` for the variable named Donor, or `OFF`; the combo is hidden
+while the plate has no variable): only the groups a family tests are read, `RareParams.families` carries the
+families into the key and the analysis, each refused group is drawn as a `⚠ Not tested:` line under the groups
+line and listed in Details, and `rc.plan_problem` draws instead of a result when no donor can be tested,
 resolves the timepoint through the call the view's sample tests resolve theirs with
 (`rc.drawn_timepoint` → `distribution_compute.drawn_timepoint`: the page's Timepoint when the drawn wells have it,
 else the latest they have — the page's one Timepoint is shared with the Array view, so it can name a timepoint only
@@ -14459,13 +14474,16 @@ gathered by `unit_text`; `report_lines`, the Details report, uses the same test 
 `_rare_render.render_rare_page` draws **one row per test**, so every plot on it belongs to exactly one test and
 says which. From the top: the groups tested, each with its wells, and the comparisons they make
 (`rare_export_compute.groups_line`, gid `nw-rare-groups`); each comparison's name
-(`comparison_title`, *Comparison i of n: group vs control*) over its headline (gid `nw-rare-unit`); then the four
+(`comparison_title`, *Comparison i of n: group vs control*, with *(Donor 2)* after it when split by donor; the
+groups line then lists each donor's control and groups, and `correction_line` says q is corrected within each donor)
+over its headline (gid `nw-rare-unit`); then the four
 rows of `rare_export_compute.TEST_ROWS` — the exceedance test (which decides), Higher Criticism and the shape test
 (supporting), and the pooled shape test (description only, its heading saying it treats nanowells as independent) —
 each headed by `test_heading` and the comparisons' p from `test_p` (gids `nw-rare-test:<key>`,
 `nw-rare-test-p:<key>`). In a row, a plot of one dot per well (each well's share past the cutoff labelled with its
 count, each well's peak HC score, each well's A²_R) holds **every comparison on one axes** (`draw_well_dots`, axes
-gid `nw-rare-shared:<key>`): the control wells once as the band chance gives, then each group's wells, a rule between
+gid `nw-rare-shared:<key>`) — of one donor, when split by donor, since `well_dot_chunks` never puts two families on
+one panel: the control wells once as the band chance gives, then each group's wells, a rule between
 groups and each group's name and short p over them, wrapped to its own width; a well with no value is written in
 ("no HC score"), never left out. A plot of curves (the cumulative shares with the cutoff, the HC curves, the gap
 between the pooled cumulative shares) is drawn **once per comparison** (axes gid `nw-rare-panel:<key>:<i>`),

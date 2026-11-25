@@ -29,6 +29,14 @@ def _rare_from(config: dict, fresh) -> str:
     return _one_of(config.get("rare_direction"), RARE_DIRECTIONS, fresh.rare_direction)
 
 
+def _donor_from(config: dict, fresh) -> str:
+    """The Rare responders test's saved Donor choice: any text (a variable id, ``AUTO`` or ``OFF``), since the plate's
+    variables are read after the page's settings; one this plate does not have reads as ``AUTO``
+    (``rare_donor_compute.resolve``)."""
+    value = config.get("rare_donor")
+    return value if isinstance(value, str) else fresh.rare_donor
+
+
 def _one_of(value, allowed, default):
     """*value* when it is one of *allowed*, else *default*: how a saved choice is read back."""
     return value if value in allowed else default
@@ -266,6 +274,10 @@ class NanowellState:
     #: The Rare responders test's direction: "higher" looks for responders in the top tail of the Metric, "lower"
     #: in the bottom tail (cell death, a loss of signal). Saved with the page.
     rare_direction: str = "higher"
+    #: The sample variable that says which donor a group's wells come from (``rare_donor_compute``): its id,
+    #: ``rare_donor_compute.AUTO`` (``""``, the variable named Donor when there is one) or ``OFF`` (``"none"``, one
+    #: control and one correction for every group). Saved with the page.
+    rare_donor: str = ""
     #: The value label of the Rare responders result drawn (the Metric it ran on), for the flagged-crops pop-out.
     rare_value_label: str = ""
     #: The QC view's *Wells* (:data:`QC_WELLS`).
@@ -461,6 +473,7 @@ class NanowellState:
                 "identity_mode": self.identity_mode, "identity_colour": self.identity_colour,
                 "excluded_wells": list(self.excluded_wells),
                 "stats_unit": self.stats_unit, "stats_test": self.stats_test, "rare_direction": self.rare_direction,
+                "rare_donor": self.rare_donor,
                 "qc_wells": self.qc_wells,
                 "selected_sites": [list(s) for s in self.selected_sites], "thresholds": dict(self.thresholds)}
 
@@ -492,6 +505,7 @@ class NanowellState:
         self.stats_unit = unit if unit in STATS_UNITS else fresh.stats_unit
         self.stats_test = test if test in STATS_TESTS else fresh.stats_test
         self.rare_direction = _rare_from(config, fresh)
+        self.rare_donor = _donor_from(config, fresh)
         self.qc_wells = config.get("qc_wells") if config.get("qc_wells") in QC_WELLS else fresh.qc_wells
         self.subset = _subset_from(config)
         self.saved_subsets = saved_from_config(config.get("saved_subsets"))

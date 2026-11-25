@@ -663,7 +663,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             _select(well_cb, nwc.page_well(ctx))
             stats_view = view == "statistics"
             fill_control_combo(ctx, st, control_cb, on_statistics=stats_view, tip=_CONTROL_TIP)
-            refresh_statistics_controls(st, statistics, stats_view)
+            refresh_statistics_controls(st, statistics, stats_view, getattr(ctx.state.selection, "variables", None))
             distribution = view == "distribution"
             wells_axis = distribution and (st.axis == "wells" or per_nanowell)
             at_one_timepoint = wells_axis or stats_view     # the views that draw wells at one timepoint

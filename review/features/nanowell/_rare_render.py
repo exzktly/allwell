@@ -480,7 +480,8 @@ def draw_well_dots(ax, result, value_of, ylabel: str, gid: str, *, label_of=None
     ax.scatter(xs, ctrl, color=muted, zorder=3, gid=f"{gid}-control")
     ticks = [w.key.split(":", 1)[-1] for _u, w in controls]
     labelled = [(x, v, label_of(u, w)) for x, v, (u, w) in zip(xs, ctrl, controls)] if label_of else []
-    control = result.prepared.params.control
+    # One donor's control per panel (:func:`well_dot_chunks`): the control the groups drawn here were tested against.
+    control = (units[0].control_name if units else "") or result.prepared.params.control
     groups = [(control if "control" in control.lower() else f"{control} (control)", 0, len(controls) - 1)]
     tops = list(finite)
     x = len(controls) + 1
@@ -557,7 +558,7 @@ def well_dot_chunks(units, axes_in: float) -> list:
     """*units* split into the runs that each fit one shared panel *axes_in* wide with every well's slot at least
     :data:`MIN_SLOT_PT`: each run's control wells, its groups' wells and a gap between groups, as
     :func:`draw_well_dots` lays them out. One run when they all fit; a run is never empty, so a comparison too
-    large for any panel still gets one of its own."""
+    large for any panel still gets one of its own. A run never holds two donors' comparisons (``Unit.family``)."""
     capacity = max(1.0, axes_in * 72 / MIN_SLOT_PT)
     chunks, current = [], []
 
@@ -565,7 +566,9 @@ def well_dot_chunks(units, axes_in: float) -> list:
         return len(_shared_controls(run)) + sum(len(u.treated) + 1 for u in run) + 0.4
 
     for unit in units:
-        if current and slots([*current, unit]) > capacity:
+        # A panel never spans two donors: each draws its own donor's control wells, the ones its groups were
+        # tested against (``rare_donor_compute``).
+        if current and (unit.family != current[-1].family or slots([*current, unit]) > capacity):
             chunks.append(current)
             current = []
         current.append(unit)

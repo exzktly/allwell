@@ -24,6 +24,11 @@ The control cutoff and the counts are then those of the averaged values, so a re
 are different tests. The Compare unit and the Fixed cohort do not apply to it, and Details says so when they are
 set.
 
+**Each donor its own experiment.** With a *Donor* variable chosen on the band (by default the one named Donor;
+``rare_donor_compute``), each treatment is tested against the control group of its own donor and q is corrected
+within each donor; a group whose wells span donors or carry no donor value, and a donor with no control to match the
+chosen one, are named at the top of the figure and not tested.
+
 **On a worker, once.** :func:`compose` builds the per-nanowell table on the GUI thread (vectorised, cheap) and keys
 the result on a hash of that table and the parameters — everything the result is computed from, so a key can never
 return a result computed for other numbers. A key not yet in ``NanowellState.rare_results`` is computed on a worker
@@ -46,6 +51,7 @@ import pandas as pd
 from review.features.nanowell import controller as _controller
 from review.features.nanowell import distribution_compute as dc
 from review.features.nanowell import moving_compute as mvc
+from review.features.nanowell import rare_donor_compute as donors
 from review.features.nanowell import window_compute as wc
 from review.features.nanowell._rare_render import needed_height, needs_relayout, render_rare_page
 from review.features.nanowell.rare_data_compute import RareParams, from_site_metrics
@@ -143,7 +149,8 @@ def windowed(metrics: pd.DataFrame, wells, column: str, *, moving: int, baseline
 def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: str = "", store: dict | None,
             request, moving: int = 0, baseline_moving: int = 0, moving_centred: bool = False, cohort: bool = False,
             unit_set: bool = False, hidden: dict | None = None, guessed: str = "", column: str = "",
-            value_label: str = "", direction: str = "higher", stamped: str = "") -> RareResult | None:
+            value_label: str = "", direction: str = "higher", stamped: str = "", variables=None,
+            donor: str = donors.AUTO) -> RareResult | None:
     """Draw the Rare responders test into *fig*: its result when *store* holds it, else a sentence while *request*
     (``request(key, job)``) has it computed, or one saying why it cannot run. Returns the result drawn, or ``None``.
 
@@ -151,12 +158,23 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     tests apply (:func:`windowed`); the caller passes 0 for a metric with one value per nanowell. The test keeps every
     nanowell the run flagged (count-disagreeing, partly visible, on a tile seam, identity contradicted), as every
     other view draws them: a Subset with those conditions leaves them out of every view at once, this test included,
-    so the views being compared show the same nanowells."""
+    so the views being compared show the same nanowells.
+
+    *variables* (the plate's ``VariableSet``) and *donor* (the band's choice, ``rare_donor_compute.resolve``) split the
+    groups by donor (:func:`donor_plan`): only the groups a donor family tests are read, and those that cannot be
+    placed are said above the result."""
     timepoint = drawn_timepoint(metrics, groups, timepoint)
     reason = why_not(groups, control, metrics, timepoint, hidden, column)
     if reason:
         render_message(fig, reason, gid="nw-rare-why")
         return None
+    plan = donors.plan(variables, groups, control, donors.resolve(variables, donor))
+    reason = plan_problem(plan)
+    if reason:
+        render_message(fig, reason, gid="nw-rare-why")
+        return None
+    if plan.split:
+        groups = {name: groups[name] for name in plan.tested()}
     averaging = bool(column) and mvc.is_on(moving) and column in metrics
     # One value per nanowell: read as the sample tests read it, with their reason where it is undefined.
     per_nanowell = column in dc.PER_NANOWELL and column in metrics
@@ -178,13 +196,14 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     except ValueError as exc:
         render_message(fig, str(exc), gid="nw-rare-why")
         return None
-    params = RareParams(control=control, direction=direction)
+    params = RareParams(control=control, direction=direction,
+                        families=tuple((f.label, f.control, f.treatments) for f in plan.families))
     key = (*result_key(table, params), value_label)      # the label is in the result's sentences
     held = (store or {}).get(key)
     if held is None:
         if request is not None:
             request(key, lambda: analyse(table, params, value_label=value_label))
-        render_message(fig, computing_text(groups, control), gid="nw-rare-computing")
+        render_message(fig, computing_text(groups, control, plan), gid="nw-rare-computing")
         return None
     if isinstance(held, str):
         render_message(fig, held, gid="nw-rare-why")
@@ -193,11 +212,25 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     notes = [VALUE_NOTE_PER_NANOWELL if per_nanowell else
              f"{values} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.",
              *([mvc.describe(moving, column, baseline_moving, moving_centred)] if averaging else []),
-             *([NOT_APPLIED] if cohort else []), *([UNIT_IGNORED] if unit_set else []), *([note] if note else [])]
+             *([NOT_APPLIED] if cohort else []), *([UNIT_IGNORED] if unit_set else []), *([note] if note else []),
+             *[f"Not tested: {line}" for line in plan.refused]]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
-    lead = [*([guessed_note(control)] if guessed and guessed == control else [])]
+    lead = [*([guessed_note(control)] if guessed and guessed == control else []),
+            *[f"⚠ Not tested: {line}" for line in plan.refused]]
     render_rare_page(fig, held, note=DETAILS_POINTER, stamped=stamped, lead=[line for line in lead if line])
     return held
+
+
+def plan_problem(plan: donors.DonorPlan) -> str:
+    """Why nothing can be tested once the groups are split by donor (:func:`donors.plan`), ``""`` when something
+    can: the control has no single donor, or no donor has both a control and a group to test against it."""
+    if plan.problem:
+        return plan.problem
+    if plan.split and not plan.families:
+        refused = " ".join(plan.refused)
+        return (f"No {plan.variable} has both a control and a group to test against it, so nothing is tested"
+                + (f". {refused}" if refused else f": each {plan.variable} needs its own control and treatment groups."))
+    return ""
 
 
 def timepoint_hours(metrics: pd.DataFrame, timepoint: str) -> float:
@@ -228,8 +261,11 @@ def guessed_note(control: str) -> str:
     return f"⚠ {control} was taken as the control because of its name: choose another under Control if it is not."
 
 
-def computing_text(groups: dict, control: str) -> str:
+def computing_text(groups: dict, control: str, plan: donors.DonorPlan | None = None) -> str:
     """What the figure says while the tests run: what is being tested against what, not where it runs."""
+    if plan is not None and plan.families:
+        return (f"{COMPUTING} each {plan.variable}'s groups against its own control for rare responders: "
+                + "; ".join(f"{f.label}: {', '.join(f.treatments)} against {f.control}" for f in plan.families) + "…")
     others = [name for name in groups if name != control]
     return f"{COMPUTING} {', '.join(others)} against {control} for rare responders…"
 
@@ -254,7 +290,8 @@ def hook(ctx, st) -> dict:
         _nwc()._fetch(ctx, "rare_results", key, job,
                       failed=lambda message: f"The rare-responder tests could not be run: {message}")
     return {"store": st.rare_results, "request": request, "guessed": st.control_guessed,
-            "direction": st.rare_direction}
+            "direction": st.rare_direction, "variables": getattr(ctx.state.selection, "variables", None),
+            "donor": st.rare_donor}
 
 
 def flagged_rows(result: RareResult) -> list[dict]:

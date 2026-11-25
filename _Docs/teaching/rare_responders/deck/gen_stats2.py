@@ -1109,7 +1109,7 @@ L.append(lab(GX0 + 10, GY0 - 6, 450, '<b style="color:#A9501A">orange steps</b>:
 L.append(lab(0, 320, 1000, '<b>How it is done</b><br>1. Sort the p-values, smallest first: that order is the rank<br>2. A molecule needs p below 0.05 × rank ÷ 3<br>&#160;&#160;&#160;&#160;The smallest p faces the strictest limit<br>'
           '3. Equivalently, q = p × 3 ÷ rank<br>&#160;&#160;&#160;&#160;Each q is then lowered to the smallest q at its rank or above (no change here)<br>4. Called when q &lt; 0.05<br>'
           '<b>C</b>: p = 0.041 is below 0.05 but above its limit, 0.033, so q = 0.061: not called', 'lab left small', 4, 'line-height:1.22; color:#1B2A41; font-size:21px; '))
-L.append(lab(0, 590, 1664, 'Assumes the molecules’ tests are independent or positively related<br>Sharing the same control wells keeps them positively related<br>The correction covers every molecule compared in one analysis: analyse one donor at a time', 'lab left small', 5, 'line-height:1.22; color:#4A5568; font-size:21px; '))
+L.append(lab(0, 590, 1664, 'Assumes the molecules’ tests are independent or positively related<br>Sharing the same control wells keeps them positively related<br>The correction runs within each donor: over that donor’s molecules only', 'lab left small', 5, 'line-height:1.22; color:#4A5568; font-size:21px; '))
 slide('st_bh', 'Backup · step 6 · Benjamini–Hochberg', 'Correcting for 3 molecules',
       svg('Left, a table for molecules A, C and B: p, rank, the limit 0.05 times rank over 3, corrected q and whether called. Right, the three p-values plotted '
           'against rank on a log scale with the limit drawn as orange steps: A falls far below its step and is called; C and B lie above theirs.', s, h=680), L,
@@ -1310,7 +1310,7 @@ html = ('<section id="st_plan" data-transition="fade">\n<div class="head">\n<p c
         '<tr><td>6 control + 3 treated</td><td>Lowers the shuffling tests’ smallest possible p (4 + 4: 1/70 = 0.014, 6 + 3: 1/84 = 0.012)</td></tr>\n'
         '<tr><td><b>This plate: 4 + 4</b></td><td><b>A conclusion for each donor</b><br><b>One more control well per donor would add the false-positive check</b></td></tr>\n'
         '</table>\n'
-        '<p class="tnote">Define the groups per donor: each donor’s molecule wells are compared with its own control wells<br>The model has no donor term and treats all wells as one plate, so analyse one donor at a time<br>'
+        '<p class="tnote">Define the groups per donor: each donor’s molecule wells are compared with its own control wells<br>A donor’s wells are treated as one plate<br>'
         'With 4 control wells r is rough and usually too small, which makes p too small<br>More control wells fix that (backup, slide 28)<br>Past ~1,000 nanowells per well, more nanowells barely add evidence: add wells instead</p>\n'
         '<aside>Three conditions together justify calling a molecule a source of rare responders. There must be at least three control '
         'wells and two treated wells, because with fewer the model cannot estimate how much wells differ, and without that a high well '
@@ -1321,7 +1321,7 @@ html = ('<section id="st_plan" data-transition="fade">\n<div class="head">\n<p c
         'measures the false-positive rate on the experiment’s own wells. Six or more control wells with three treated also let the '
         'supporting tests, which get their p-values by shuffling well labels, can reach smaller p-values. The six-donor plate gives each donor '
         'four control and four treated wells per molecule: enough for a conclusion, one control well short of the self-check. Groups are '
-        'defined per donor, so each donor’s molecule wells are compared with that donor’s own control wells, because T-cell responses differ between people; the model here has no term for the donor or for the plate. If no control nanowell passes the cutoff, r cannot be estimated and the p-value overstates the evidence. With four control wells r is estimated only roughly and usually too small, which makes the p-value too small; more control wells give a better estimate.</aside>\n</section>\n')
+        'defined per donor, so each donor’s molecule wells are compared with that donor’s own control wells, because T-cell responses differ between people, and the correction runs over that donor’s molecules only. The model has no term for the plate, so a donor’s wells are treated as one plate. If no control nanowell passes the cutoff, r cannot be estimated and the p-value overstates the evidence. With four control wells r is estimated only roughly and usually too small, which makes the p-value too small; more control wells give a better estimate.</aside>\n</section>\n')
 open('project/slides/st_plan.html', 'w').write(html); print('st_plan', len(html))
 
 # ================================================================ restructured steps 3-5 (new deck)
@@ -1672,26 +1672,46 @@ slide('n_r', 'The statistics · step 4 · the scatter', 'Why the one-group fit r
 s, L = [], []
 s.append('<rect x="0" y="0" width="690" height="300" rx="18" fill="#ECF1F8"/>')
 s.append('<rect x="726" y="0" width="938" height="300" rx="18" fill="#ECF1F8"/>')
-def ly_(v): return 88 + (-19.5 - v) / 9 * 190
-# the gain in log L that chance alone gives: a sideways histogram of the 1,500 no-effect plates' gains, drawn on the same
-# log L scale and rising from the one-group level, so each bar's height is a gain and its length is how many plates had it
+# Panel 1 is a plot with two drawn axes. Up: the gain in log L over the fit without a gap, from 0 (the one-group
+# level, which is the x axis) to A's 7.12 (the two-group level). Across: how many of 1,500 no-effect plates gained
+# that much, as a sideways histogram in bins of 0.5.
+GY0, GPX, AX0, AXW = 246, 20.5, 112, 280
+def gy_(g): return GY0 - g * GPX
 _gn = np.load(_RES / 'null_gain.npy') ** 2 / 2
 _g95 = float(np.percentile(_gn, 95)); _gA = int((_gn >= LL1 - LL0).sum())
 _bins = np.arange(0, 7.5, 0.5); _hc, _ = np.histogram(_gn, _bins); _hmax = max(_hc.max(), 1)
+def gx_(c): return AX0 + c / _hmax * AXW
 for _lo, _c in zip(_bins[:-1], _hc):
-    if _c / _hmax * 330 >= 3:
-        s.append(f'<rect x="40" y="{ly_(LL0 + _lo + 0.5):.1f}" width="{_c / _hmax * 330:.1f}" height="{ly_(LL0 + _lo) - ly_(LL0 + _lo + 0.5) - 1.5:.1f}" fill="#F3C9A5" stroke="{OR}" stroke-width="1"/>')
-s.append(f'<line x1="40" y1="{ly_(LL0 + _g95):.1f}" x2="400" y2="{ly_(LL0 + _g95):.1f}" stroke="{OR}" stroke-width="2.5" stroke-dasharray="6 4"/>')
-L.append(lab(250, int(ly_(LL0 + _g95)) - 24, 160, f'<span style="color:#A9501A">95&#160;% below {_g95:.1f}</span>', 'lab left small', 1, 'font-size:16px; white-space:nowrap; '))
-for v, col, dash in ((LL1, PUR, ''), (LL0, '#5A6679', ' stroke-dasharray="10 6"')):
-    s.append(f'<line x1="40" y1="{ly_(v):.1f}" x2="400" y2="{ly_(v):.1f}" stroke="{col}" stroke-width="5"{dash}/>')
-L.append(lab(40, int(ly_(LL1)) + 10, 372, f'<b style="color:#A9501A">Bars: gains in 1,500 no-effect plates</b><br>Longer bar: more plates gained that much<br>{"None" if _gA == 0 else _gA} reached A’s {LL1 - LL0:.2f}', 'lab left small', 1, 'font-size:18px; line-height:1.22; color:#1B2A41; '))
-s.append(f'<line x1="440" y1="{ly_(LL1) + 12:.1f}" x2="440" y2="{ly_(LL0) - 12:.1f}" stroke="#2F6BDB" stroke-width="4"/>'
-         f'<path d="M431 {ly_(LL1) + 14:.1f} l9 -15 l9 15 Z" fill="#2F6BDB"/><path d="M431 {ly_(LL0) - 14:.1f} l9 15 l9 -15 Z" fill="#2F6BDB"/>')
+    if gx_(_c) - AX0 >= 3:
+        s.append(f'<rect x="{AX0}" y="{gy_(_lo + 0.5) + 0.75:.1f}" width="{gx_(_c) - AX0:.1f}" height="{GPX * 0.5 - 1.5:.1f}" fill="#F3C9A5" stroke="{OR}" stroke-width="1"/>')
+# the axes, with ticks
+s.append(f'<line x1="{AX0}" y1="{GY0}" x2="{AX0}" y2="{gy_(LL1 - LL0) - 8:.1f}" stroke="{NAVY}" stroke-width="2.5"/>')
+# One label per axis for its tick numbers (a slide holds at most 24 labels): the y ticks are 2 apart, one line each;
+# the x ticks are equally spaced, one fixed-width cell each, centred on its tick.
+for g in (0, 2, 4, 6):
+    s.append(f'<line x1="{AX0 - 8}" y1="{gy_(g):.1f}" x2="{AX0}" y2="{gy_(g):.1f}" stroke="{NAVY}" stroke-width="2.5"/>')
+L.append(lab(AX0 - 46, int(gy_(6) - GPX), 34, '<br>'.join(str(g) for g in (6, 4, 2, 0)), 'lab small', 1,
+             f'text-align:right; font-size:17px; line-height:{2 * GPX:.1f}px; color:#4A5568; '))
+_cell = gx_(250) - gx_(0)
+for c in (0, 250, 500, 750):
+    s.append(f'<line x1="{gx_(c):.1f}" y1="{GY0}" x2="{gx_(c):.1f}" y2="{GY0 + 8}" stroke="{NAVY}" stroke-width="2.5"/>')
+L.append(lab(int(gx_(0) - _cell / 2), GY0 + 8, int(4 * _cell) + 2, ''.join(
+    f'<span style="display:inline-block; width:{_cell:.2f}px; text-align:center">{c}</span>' for c in (0, 250, 500, 750)),
+    'lab left small', 1, 'font-size:17px; color:#4A5568; white-space:nowrap; '))
+L.append(lab(AX0, GY0 + 30, 300, 'number of plates (of 1,500)', 'lab left small', 1, 'font-size:17px; color:#1B2A41; white-space:nowrap; '))
+L.append(lab(26, GY0, int(GY0 - gy_(LL1 - LL0)), 'gain in log L', 'lab small', 1, 'font-size:17px; color:#1B2A41; transform:rotate(-90deg); transform-origin:left top; '))
+# the 95 % point, and the two levels: the two-group fit at the top, the one-group fit along the x axis
+s.append(f'<line x1="{AX0}" y1="{gy_(_g95):.1f}" x2="{AX0 + AXW + 20}" y2="{gy_(_g95):.1f}" stroke="{OR}" stroke-width="2.5" stroke-dasharray="6 4"/>')
+L.append(lab(AX0 + 110, int(gy_(_g95)) + 2, 200, f'<span style="color:#A9501A">95&#160;% of plates below {_g95:.1f}</span>', 'lab left small', 1, 'font-size:16px; white-space:nowrap; '))
+s.append(f'<line x1="{AX0}" y1="{gy_(LL1 - LL0):.1f}" x2="{AX0 + AXW + 20}" y2="{gy_(LL1 - LL0):.1f}" stroke="{PUR}" stroke-width="5"/>')
+s.append(f'<line x1="{AX0}" y1="{GY0}" x2="{AX0 + AXW + 20}" y2="{GY0}" stroke="#5A6679" stroke-width="5" stroke-dasharray="10 6"/>')
+L.append(lab(AX0 + 24, int(gy_(LL1 - LL0)) + 8, 300, f'<b style="color:#A9501A">Orange bars: 1,500 plates</b><br><b style="color:#A9501A">where A does nothing</b><br>{"None" if _gA == 0 else _gA} reached A’s {LL1 - LL0:.2f}', 'lab left small', 1, 'font-size:17px; line-height:1.22; color:#1B2A41; '))
+s.append(f'<line x1="440" y1="{gy_(LL1 - LL0) + 12:.1f}" x2="440" y2="{GY0 - 12:.1f}" stroke="#2F6BDB" stroke-width="4"/>'
+         f'<path d="M431 {gy_(LL1 - LL0) + 14:.1f} l9 -15 l9 15 Z" fill="#2F6BDB"/><path d="M431 {GY0 - 14:.1f} l9 15 l9 -15 Z" fill="#2F6BDB"/>')
 L.append(lab(18, 8, 660, '<b>1. A gap always raises log L, but by how much?</b>', 'lab left', 1))
-L.append(lab(40, int(ly_(LL1)) - 38, 380, f'<b style="color:#6B3FB0">two groups: log L = {mn(LL1, 2)}</b>', 'lab left small', 1, 'font-size:21px; '))
-L.append(lab(40, int(ly_(LL0)) + 8, 380, f'<b style="color:#5A6679">one group: log L = {mn(LL0, 2)}</b>', 'lab left small', 1, 'font-size:21px; '))
-L.append(lab(462, int((ly_(LL1) + ly_(LL0)) / 2) - 52, 220, f'<b style="color:#2F6BDB">improvement</b><br><b style="color:#2F6BDB">{LL1 - LL0:.2f}</b><br><b>D = 2 × {LL1 - LL0:.2f}</b><br><b>= {LRA:.2f}</b>', 'lab left small', 1, 'line-height:1.2; font-size:21px; '))
+L.append(lab(AX0, int(gy_(LL1 - LL0)) - 34, 400, f'<b style="color:#6B3FB0">two groups: log L = {mn(LL1, 2)} (gain 7.12)</b>', 'lab left small', 1, 'font-size:19px; white-space:nowrap; '))
+L.append(lab(430, GY0 + 8, 250, f'<b style="color:#5A6679">one group: log L = {mn(LL0, 2)}</b><br><span style="color:#5A6679">(gain 0, along the x axis)</span>', 'lab left small', 1, 'font-size:17px; line-height:1.2; '))
+L.append(lab(462, int((gy_(LL1 - LL0) + GY0) / 2) - 52, 220, f'<b style="color:#2F6BDB">improvement</b><br><b style="color:#2F6BDB">{LL1 - LL0:.2f}</b><br><b>D = 2 × {LL1 - LL0:.2f}</b><br><b>= {LRA:.2f}</b>', 'lab left small', 1, 'line-height:1.2; font-size:21px; '))
 def zx_(z): return 790 + (z + 3.5) / 9 * 820
 ZB = 236
 zs_ = np.linspace(-3.5, 5.5, 110)
@@ -1740,7 +1760,7 @@ slide('n_test', 'The statistics · step 5 · the test', 'The test: is the gap mo
           'Below, three boxes: the likelihood ratio, why it is compared with z squared, and from D to p.', s, h=704), L,
       f'Now the test itself. The two fits gave log-likelihoods of {LL1:.2f} with a gap and {LL0:.2f} without, a difference of {LL1 - LL0:.2f}. The likelihood-ratio statistic, D, is twice that difference, {LRA:.2f}; '
       'it is called a ratio because a difference of logs is the log of a ratio of the two likelihoods. The larger it is, the more the gap helps to explain the counts. But how large is large? '
-      'A fit with a gap can never score lower than one without, because setting the gap to zero is one of its options; so a higher log-likelihood alone proves nothing. The orange bars in panel 1 are a sideways histogram, on the same log-likelihood scale, of how much the fit with a gap gains when the molecule does nothing: in 1,500 simulated no-effect plates the gain is usually a few tenths, 95 percent of them gain less than 2.6, and none gained as much as A’s 7.12, in either direction. The test asks whether A’s gain is more than that. ' 'Giving a model an extra free number always improves its fit a little, even when it is not needed. Statistical theory says how much: if the molecule truly did nothing, D would behave like the square of z, '
+      'A fit with a gap can never score lower than one without, because setting the gap to zero is one of its options; so a higher log-likelihood alone proves nothing. Panel 1 is a plot with two axes. Up the left is the gain in log-likelihood over the fit without a gap: 0 is the one-group level, which runs along the x axis, and 7.12 is A’s two-group level at the top. Across the bottom is the number of plates. Each orange bar is a sideways histogram bin: its height on the left axis is a gain, 0 to 0.5, 0.5 to 1 and so on, and its length is how many of 1,500 simulated plates in which the molecule does nothing gained that much: in 1,500 simulated no-effect plates the gain is usually a few tenths, 95 percent of them gain less than 2.6, and none gained as much as A’s 7.12, in either direction. The test asks whether A’s gain is more than that. ' 'Giving a model an extra free number always improves its fit a little, even when it is not needed. Statistical theory says how much: if the molecule truly did nothing, D would behave like the square of z, '
       'where z is a value drawn from the standard normal distribution, mean 0 and standard deviation 1; that is the chi-square distribution with one degree of freedom; the factor of two is what makes that hold. So under chance alone D is usually below about 4. '
       f'To use this, take the square root of D and give it the sign of δ: z = +{ZA:.2f}, positive because A sits above the control. The curve on the right is what z would look like if A did nothing; '
       f'{ZA:.2f} is far out in its tail. The test is one-sided, because only a rise counts as a response, so p is the area of the curve beyond z: 0.00008. The grey bars are a check on that theory: z values from 1,500 simulated plates of four and four wells in which the molecule does nothing, with the scatter of step 4. They follow the curve, but a little wider: across this and a second batch of simulations about 8 percent pass z = 1.64 where the curve says 5 percent, and the largest of these 1,500 was 3.3, the most extreme in either direction −3.7. So with four and four wells p is approximate and somewhat too small; A’s z of 3.77 is still beyond every simulated no-effect plate.', steps={5})
@@ -2248,7 +2268,7 @@ for di in range(3):
 boxp(0, 320, 812, 240, '#FFFFFF'); boxp(852, 320, 812, 240, '#FFFFFF')
 s.append('<rect x="0" y="320" width="812" height="240" rx="18" fill="none" stroke="#2F6BDB" stroke-width="2.5"/><rect x="852" y="320" width="812" height="240" rx="18" fill="none" stroke="#2F6BDB" stroke-width="2.5"/>')
 L.append(lab(18, 330, 780, '<b>Within a donor</b><br>Each molecule’s wells are compared with that donor’s own control wells<br>T-cell responses differ between people, so donors are not mixed<br>'
-          'The correction covers every molecule compared in one analysis (slide 24)<br>So analyse one donor at a time: one verdict per molecule, per donor', 'lab left small', 4, S20))
+          'The correction runs within each donor, over its molecules only (slide 24)<br>So each molecule gets one verdict per donor', 'lab left small', 4, S20))
 L.append(lab(870, 330, 780, '<b>Across plates and donors</b><br>A donor’s wells on several plates are treated as one set<br>No plate offset is fitted, so plate-wide differences add to the scatter r<br>'
           'Donors are not combined into one p-value<br>A molecule detected in several donors is stronger evidence than any one p', 'lab left small', 5, S20))
 L.append(lab(0, 574, 1664, 'Reading across donors: say in how many donors a molecule was detected, and give each donor’s odds ratio with its interval', 'lab left small', 6, 'color:#1B2A41; '))
@@ -2256,8 +2276,8 @@ slide('b_donors', 'Backup · donors and plates', 'Several donors, several plates
       svg('Three panels, one per donor. In each, four control wells are linked to three rows of four molecule wells, for molecules A, C and B: every molecule is compared with that donor’s own control wells. '
           'Below, two boxes: what happens within a donor, and what happens across plates and donors.', s, h=620), L,
       'The worked example used one donor. A real plate holds several. The comparison is always made within a donor: each molecule’s wells against that donor’s own control wells, because T-cell responses differ between people and mixing donors would add their differences to the scatter. '
-      'The correction for testing several molecules covers every molecule compared in one analysis, so analysing one donor at a time gives each molecule one verdict per donor. '
-      'When one donor’s wells are spread over several plates, they are treated as one set: no offset is fitted for the plate, so plate-wide differences such as the day of imaging add to the scatter between wells. There is no term for the donor either, which is why each donor is analysed alone. '
+      'The correction for testing several molecules runs within each donor, over that donor’s molecules only, so each molecule gets one verdict per donor, and a donor tested on many molecules does not dilute the evidence of a donor tested on few. '
+      'When one donor’s wells are spread over several plates, they are treated as one set: no offset is fitted for the plate, so plate-wide differences such as the day of imaging add to the scatter between wells. The donor needs no term, because each donor is tested against its own control wells and corrected on its own. '
       'Donors are not combined into a single p-value. To read across donors, report in how many donors a molecule was detected and give each donor’s odds ratio with its interval. '
       'A molecule detected independently in several donors is stronger evidence than any single p-value.')
 

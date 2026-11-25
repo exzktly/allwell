@@ -492,7 +492,8 @@ requirements-remote.txt the headless subset the remote worker is sent, by that
 _Docs/                  everything that is not source — Markdowns/ (the three live
                         docs: ARCHITECTURE.md, README_WellViewer.md,
                         GOD_OBJECT_REPOSITORY_ROADMAP.md), _Installation/ (spec +
-                        build scripts), design/, visual_audit/
+                        build scripts), design/, teaching/ (teaching material and the
+                        scripts that reproduce its numbers), visual_audit/
 ```
 
 Where new code goes: pipeline work → `process_microscopy.py` / `pipeline/`; a new

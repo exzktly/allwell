@@ -1,0 +1,90 @@
+{
+  "v": 5,
+  "createdOnFiles": {
+    "v": 1,
+    "at": "2026-11-21T00:00:00Z"
+  },
+  "lists": "css",
+  "format": {
+    "v": 1,
+    "shared": [
+      "project/deck.css"
+    ]
+  },
+  "title": "Nanowell DC–T cell assay (condensed, restructured)",
+  "order": [
+    "cover",
+    "dct",
+    "why",
+    "divide",
+    "platemap",
+    "cells",
+    "nanowell",
+    "fcdots",
+    "exceedance",
+    "st_vary",
+    "st_road",
+    "n_model",
+    "n_logodds",
+    "n_lik",
+    "n_mle",
+    "st_ll",
+    "n_r",
+    "n_test",
+    "n_ab",
+    "n_recap",
+    "backup",
+    "n_assume",
+    "st_plan",
+    "st_bh",
+    "st_supp",
+    "st_shift",
+    "cutoff",
+    "st_r",
+    "st_wells",
+    "b_naive",
+    "b_calib",
+    "b_jackpot",
+    "b_effect",
+    "b_bb",
+    "b_power",
+    "b_sepr",
+    "b_loo",
+    "b_ci",
+    "b_donors",
+    "b_gloss"
+  ],
+  "sections": {
+    "s1": {
+      "description": "Background, the problem, and the idea: divide a well into nanowells.",
+      "start": "cover"
+    },
+    "s2": {
+      "description": "Zooming in: the plate, a well, a nanowell.",
+      "start": "platemap"
+    },
+    "s3": {
+      "description": "Zooming out: from nanowell fold changes to one count per well.",
+      "start": "fcdots"
+    },
+    "s4": {
+      "description": "The statistics: why counts vary, the six steps, the model, log-odds, the likelihood, the search, the two fits, the test, and a recap.",
+      "start": "st_vary"
+    },
+    "s5": {
+      "description": "Backup: what can be concluded, caveats, choices.",
+      "start": "backup"
+    }
+  },
+  "faces": {
+    "fredoka": {
+      "family": "Fredoka",
+      "href": "https://fonts.googleapis.com/css2?family=Fredoka:wght@400..700&display=swap"
+    },
+    "nunito-sans": {
+      "family": "Nunito Sans",
+      "href": "https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;700&display=swap"
+    }
+  },
+  "designSystems": []
+}

@@ -1,0 +1,21 @@
+<section id="cutoff" data-transition="fade">
+<div class="head">
+<p class="eyebrow">Backup · choosing the cutoff</p>
+<h2>The top 1&#160;% is a trade-off between extremeness and numbers</h2>
+</div>
+<p class="lead2">Higher cutoff: only far-out nanowells count, but there are very few of them<br>Lower cutoff: many ordinary nanowells count too, which drowns a few responders</p>
+<table class="pct">
+<tr><th style="width:46%">Simulated plate</th><th style="width:18%; text-align:right">top 5&#160;% (95th)</th><th style="width:18%; text-align:right">top 1&#160;% (99th)</th><th style="width:18%; text-align:right">top 0.1&#160;% (99.9th)</th></tr>
+<tr><td>No effect: false positives (should be 5&#160;%)</td><td style="text-align:right">8.7&#160;%</td><td style="text-align:right">7.8&#160;%</td><td style="text-align:right">6.5&#160;%</td></tr>
+<tr><td>1&#160;% responders, far out (2–4× the 99th)</td><td style="text-align:right">27&#160;%</td><td style="text-align:right">92&#160;%</td><td style="text-align:right">100&#160;% best</td></tr>
+<tr><td>1&#160;% responders, just past (1–1.5× the 99th)</td><td style="text-align:right">28&#160;%</td><td style="text-align:right">87&#160;% best</td><td style="text-align:right">83&#160;%</td></tr>
+<tr><td>3&#160;% responders, modest (0.8–1.2× the 99th)</td><td style="text-align:right">88&#160;%</td><td style="text-align:right">96&#160;% best</td><td style="text-align:right">8.5&#160;%</td></tr>
+</table>
+<p class="tnote">Share of plates called significant by the exceedance test, one-sided p &lt; 0.05<br>4 control and 4 molecule wells, 1,000 nanowells each, 4,000 simulated plates per row<br>Each figure is uncertain by at most ±1.4 points (2 standard errors)</p>
+<div class="takeaways">
+<div class="tk"><h3>99th: no blind spot</h3><p>Finds every kind of responder<br>The 99.9th misses modest ones<br>The 95th misses rare ones</p></div>
+<div class="tk"><h3>Declared in advance</h3><p>Fix the cutoff before seeing the data<br>Report the 95th and 99.9th beside it<br>Never pick the one with the smallest p</p></div>
+<div class="tk"><h3>A test with no cutoff</h3><p>Higher Criticism, a second test, scans every cutoff<br>It finds the extreme nanowells without choosing one</p></div>
+</div>
+<aside>Why the top 1 %? The cutoff is a trade-off between how far out a nanowell must be to count and how many nanowells are left to count. To measure it, we simulated 4,000 plates for each row, each with four control wells and four molecule wells of 1,000 nanowells, with wells differing a little from one another, and ran the exceedance test with one cutoff for every well at the 95th, 99th or 99.9th percentile of the pooled control nanowells. With no effect, the three cutoffs call 8.7, 7.8 and 6.5 percent of plates significant. All three are above the 5 percent they promise, which is the few-wells excess of slide 31, and the excess is a little larger at the lower cutoffs. When 1 % of a molecule well’s nanowells are far-out responders, two to four times the control 99th percentile, the 99.9th finds them 100 percent of the time, the 99th 92 percent, and the 95th only 27 percent, because at 95 % the responders are swamped by fifty ordinary nanowells per well. When the responders are only just past the 99th percentile, the 99th is best, 87 percent against 83 for the 99.9th. And when the effect is a modest rise in 3 % of nanowells rather than a few big jumps, the 99.9th finds it only 8 percent of the time, about its false-positive rate, so it is effectively blind to it. The 99th percentile is the only one with no blind spot: it is never the worst, and it finds every kind of responder well, which is why it is the default. It is best not to rely on one choice: run the test at the 95th and 99.9th too and report all three, decided before the data are seen, because picking whichever percentile gives the smallest p would be a hidden search. Higher Criticism, a second test, scans the tail and needs no cutoff at all. These are simulations with made-up effect sizes, a guide to the trade-off rather than a property of any real plate.</aside>
+</section>

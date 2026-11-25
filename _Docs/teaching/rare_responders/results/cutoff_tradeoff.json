@@ -1,0 +1,105 @@
+{
+ "script": "sims/cutoff_tradeoff.py",
+ "settings": {
+  "nanowells_per_well": 1000,
+  "log_fc_mean": -0.05,
+  "log_fc_sd": 0.36,
+  "well_shift_sd": 0.05,
+  "wells": "4 control + 4 molecule",
+  "cutoff": "percentile of the pooled control nanowells",
+  "threshold": "one-sided p < 0.05",
+  "seed": 20261125
+ },
+ "rows": [
+  {
+   "scenario": "no effect",
+   "responder_share": 0.0,
+   "multiple_of_q99": null,
+   "plates": 4000,
+   "cells": {
+    "95": {
+     "share": 0.08675,
+     "se": 0.0044504055292748325
+    },
+    "99": {
+     "share": 0.07825,
+     "se": 0.004246378972136143
+    },
+    "99.9": {
+     "share": 0.06475,
+     "se": 0.003890932969738749
+    }
+   }
+  },
+  {
+   "scenario": "1 % responders, far out (2\u20134\u00d7 the 99th)",
+   "responder_share": 0.01,
+   "multiple_of_q99": [
+    2,
+    4
+   ],
+   "plates": 4000,
+   "cells": {
+    "95": {
+     "share": 0.269,
+     "se": 0.007011401429101032
+    },
+    "99": {
+     "share": 0.917,
+     "se": 0.004362080925429971
+    },
+    "99.9": {
+     "share": 1.0,
+     "se": 0.0
+    }
+   }
+  },
+  {
+   "scenario": "1 % responders, just past (1\u20131.5\u00d7 the 99th)",
+   "responder_share": 0.01,
+   "multiple_of_q99": [
+    1,
+    1.5
+   ],
+   "plates": 4000,
+   "cells": {
+    "95": {
+     "share": 0.27975,
+     "se": 0.007097357562853939
+    },
+    "99": {
+     "share": 0.8745,
+     "se": 0.005238075744011344
+    },
+    "99.9": {
+     "share": 0.83225,
+     "se": 0.005907832459963637
+    }
+   }
+  },
+  {
+   "scenario": "3 % responders, modest (0.8\u20131.2\u00d7 the 99th)",
+   "responder_share": 0.03,
+   "multiple_of_q99": [
+    0.8,
+    1.2
+   ],
+   "plates": 4000,
+   "cells": {
+    "95": {
+     "share": 0.876,
+     "se": 0.005211141909409108
+    },
+    "99": {
+     "share": 0.965,
+     "se": 0.0029058131392090594
+    },
+    "99.9": {
+     "share": 0.0845,
+     "se": 0.004397719579509362
+    }
+   }
+  }
+ ],
+ "seconds": 313.5
+}

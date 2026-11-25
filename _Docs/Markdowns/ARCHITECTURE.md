@@ -1666,6 +1666,7 @@ allwell/
 │   ├── Markdowns/              ← live docs (this file, README_WellViewer.md, the roadmap)
 │   ├── _Installation/          ← the PyInstaller spec, its hooks, the build scripts
 │   ├── design/                 ← HTML mockups — visual reference only
+│   ├── teaching/               ← teaching material with the code and simulations that reproduce its numbers
 │   └── visual_audit/           ← rendered screenshots
 └── tests/                       ← pytest suite (+ tests/visual/ render harness)
 ```
@@ -25169,6 +25170,14 @@ The on-disk shape of `pipeline_info.json::sample_definitions` (the saved
 selections schema) is described in the `domain/selections_format.py`
 module docstring; that module is the live source of truth for the
 contract.
+
+`_Docs/teaching/rare_responders/` holds the rare-responders teaching material, a slide deck and a chapter, with
+everything needed to reproduce its numbers: the simulations (`sims/`, each with a fixed seed), their outputs
+(`results/`), the deck generator (`deck/build.py`) and `check.py`, which reruns the example plate's fits and the deck
+build and confirms the chapter still quotes the current values. Its scripts import
+`review.features.nanowell.rare_exceedance_compute`, so a change to the exceedance fit can change the material; rerun
+`check.py` after one. The app never imports anything under `_Docs/`, and the AST guards do not scan it (it is not in
+`tests/_repo_scan.PACKAGE_ROOTS`).
 
 `_Docs/design/` holds the **non-Markdown** design artifacts — the
 HTML mockups (`grey_theme_mockup.html`, `image_table_builder_mockup.html`) — for

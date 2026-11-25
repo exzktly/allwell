@@ -136,7 +136,30 @@ def test_the_donor_variable_is_the_one_named_donor_unless_the_band_chose_another
     renamed = VariableSet((Variable("v_x", "Donor ID"), Variable("v_y", "Dose")), {})
     assert dn.default_donor(renamed) == "v_x"
     assert dn.default_donor(VariableSet((Variable("v_x", "Dose"),), {})) == ""
-    assert dn.plan(vset, _groups(), "D1 ctrl", "") == dn.DonorPlan()  # not split: every group against one control
+    # Not split: every group against one control — said, unless the band chose none.
+    assert dn.plan(vset, _groups(), "D1 ctrl", "") == dn.DonorPlan(unsplit_because=dn.NO_VARIABLE)
+    assert dn.plan(vset, _groups(), "D1 ctrl", "", chosen_none=True) == dn.DonorPlan()
+
+
+def test_with_no_donor_given_every_group_is_one_donor_and_the_figure_is_told_why():
+    plan = dn.plan(None, _groups(), "D1 ctrl", "")
+    assert not plan.split and plan.families == () and plan.refused == ()
+    assert dn.single_donor_note(plan, "D1 ctrl") == (
+        f"⚠ No donor given: no sample variable names a Donor ({dn.WHERE}), so every group is treated as one donor — "
+        f"each tested against D1 ctrl, with q corrected across all of them. If these wells come from more than one "
+        f"donor, give each well its donor in a variable named Donor ({dn.WHERE}).")
+    assert dn.single_donor_note(dn.plan(None, _groups(), "D1 ctrl", "", chosen_none=True), "D1 ctrl") == ""
+
+
+def test_a_donor_variable_no_drawn_well_holds_is_one_donor_too_not_every_group_refused():
+    vset = _variables()
+    vset.assignments["v_donor"].clear()
+    plan = dn.plan(vset, _groups(), "D1 ctrl", "v_donor")
+    assert plan.families == () and plan.refused == () and not plan.problem
+    assert plan.unsplit_because == f"no well drawn has a Donor value ({dn.WHERE})"
+    # One well with a value is a partly filled variable, not an absent one: the rest are refused by name.
+    vset.assignments["v_donor"]["A01"] = "d1"
+    assert dn.plan(vset, _groups(), "D1 ctrl", "v_donor").problem.startswith("The control D1 ctrl cannot be placed")
 
 
 # ── the analysis: units per donor, BH per donor ───────────────────────────────────────────────────────────────

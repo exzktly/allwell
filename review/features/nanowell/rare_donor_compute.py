@@ -23,6 +23,11 @@ donor shares (the donor's age, its plate) is not one, so a control is never soug
 * its donor has no group matching the control, or more than one;
 * no variable but the donor sets the chosen control apart, so no other donor's control can be told.
 
+**No donor given is one donor, said.** With no donor variable on the plate (and *none* not chosen on the band), or a
+donor variable no drawn well holds a value of, every group is treated as one donor — one control, one correction —
+and the figure says so at its top (:func:`single_donor_note`), so a plate of several donors analysed as one is never
+mistaken for a plate the user split.
+
 Qt-free and ctx-free: the caller hands over the variables and the groups.
 """
 
@@ -57,6 +62,9 @@ class DonorPlan:
     families: tuple = ()                 # Family, in the order of the donor variable's values
     refused: tuple = ()                  # one sentence per group (or donor) not tested, saying why
     problem: str = ""                    # why nothing can be tested at all (the control itself cannot be placed)
+    #: Why the groups were treated as one donor without the user choosing *none* (:func:`single_donor_note`): ""
+    #: when they were split, or when *none* was chosen.
+    unsplit_because: str = ""
 
     @property
     def split(self) -> bool:
@@ -82,6 +90,20 @@ def default_donor(vset: VariableSet | None) -> str:
         return exact.id
     hits = [v for v in vset.variables if "donor" in v.name.casefold()]
     return hits[0].id if len(hits) == 1 else ""
+
+
+#: :attr:`DonorPlan.unsplit_because` when no sample variable names a donor.
+NO_VARIABLE = f"no sample variable names a Donor ({WHERE})"
+
+
+def single_donor_note(plan: DonorPlan, control: str) -> str:
+    """The warning drawn at the top of the figure when the groups were treated as one donor because none was given
+    (:attr:`DonorPlan.unsplit_because`), ``""`` otherwise."""
+    if not plan.unsplit_because:
+        return ""
+    return (f"⚠ No donor given: {plan.unsplit_because}, so every group is treated as one donor — each tested against "
+            f"{control}, with q corrected across all of them. If these wells come from more than one donor, give "
+            f"each well its donor in a variable named Donor ({WHERE}).")
 
 
 def resolve(vset: VariableSet | None, choice: str) -> str:
@@ -127,14 +149,21 @@ def setting_apart(vset: VariableSet, donor_id: str, groups: dict, donor_of: dict
     return out
 
 
-def plan(vset: VariableSet | None, groups: dict, control: str, donor_id: str) -> DonorPlan:
+def plan(vset: VariableSet | None, groups: dict, control: str, donor_id: str, *, chosen_none: bool = False) -> DonorPlan:
     """The donor families for *groups* (``name -> wells``, in draw order) tested against *control*, the donor read
-    from the variable *donor_id* (:func:`resolve`); see the module docstring. ``DonorPlan()`` — not split — when
-    *donor_id* names no variable of *vset*."""
-    variable = vset.by_id(donor_id) if vset is not None and donor_id else None
-    if variable is None or control not in groups:
+    from the variable *donor_id* (:func:`resolve`); see the module docstring. Not split when *donor_id* names no
+    variable of *vset* — with :data:`NO_VARIABLE` as the reason unless *chosen_none* (the band's *none*) — or when no
+    well of *groups* holds a value of it."""
+    if chosen_none:
         return DonorPlan()
+    variable = vset.by_id(donor_id) if vset is not None and donor_id else None
+    if control not in groups:
+        return DonorPlan()
+    if variable is None:
+        return DonorPlan(unsplit_because=NO_VARIABLE)
     name = variable.name
+    if not vset.assigned_wells(donor_id) & {w for wells in groups.values() for w in wells}:
+        return DonorPlan(unsplit_because=f"no well drawn has a {name} value ({WHERE})")
     donor_of, refused = {}, []
     for group, wells in groups.items():
         value = roll_up(vset, donor_id, wells)

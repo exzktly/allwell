@@ -14397,6 +14397,10 @@ nanowells treated as independent. The modules, in the order the analysis runs th
   within its own donor (`setting_apart` — so a donor-level variable such as an age never decides it). A group with
   wells from two donors or an unassigned well, and a donor with no matching control or several, is a sentence in
   `DonorPlan.refused` and is not tested; a control that cannot be placed is `DonorPlan.problem`, which stops the test.
+  With no donor given — no variable resolves (`NO_VARIABLE`), or the donor variable holds no value on any drawn well
+  — the plan is unsplit with `DonorPlan.unsplit_because` set, and `single_donor_note` is the warning `compose` draws
+  first in the figure's lead and repeats in Details; the band's *none* (`plan(chosen_none=True)`) is unsplit with no
+  warning, since the user chose it.
 * `rare_validate_compute` — the self-check: control-versus-control splits for the false-positive share, and
   synthetic responders (2–4× the stratum's control 99th percentile, k = 1, 3, 5, 10, 20 per well) for power.
 * `rare_export_compute` — `report_lines` and `write`, which puts every table, the parameter log and the text report

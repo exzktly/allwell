@@ -168,7 +168,8 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
     if reason:
         render_message(fig, reason, gid="nw-rare-why")
         return None
-    plan = donors.plan(variables, groups, control, donors.resolve(variables, donor))
+    plan = donors.plan(variables, groups, control, donors.resolve(variables, donor), chosen_none=donor == donors.OFF)
+    unsplit = donors.single_donor_note(plan, control)
     reason = plan_problem(plan)
     if reason:
         render_message(fig, reason, gid="nw-rare-why")
@@ -213,9 +214,9 @@ def compose(fig, metrics, groups: dict, *, control: str, timepoint: str, note: s
              f"{values} Timepoint: {timepoint_phrase(timepoint, timepoint_hours(metrics, timepoint))}.",
              *([mvc.describe(moving, column, baseline_moving, moving_centred)] if averaging else []),
              *([NOT_APPLIED] if cohort else []), *([UNIT_IGNORED] if unit_set else []), *([note] if note else []),
-             *[f"Not tested: {line}" for line in plan.refused]]
+             *[f"Not tested: {line}" for line in plan.refused], *([unsplit.removeprefix("⚠ ")] if unsplit else [])]
     held.page_notes = notes                               # what Details lists under the report (:func:`footer_of`)
-    lead = [*([guessed_note(control)] if guessed and guessed == control else []),
+    lead = [*([unsplit] if unsplit else []), *([guessed_note(control)] if guessed and guessed == control else []),
             *[f"⚠ Not tested: {line}" for line in plan.refused]]
     render_rare_page(fig, held, note=DETAILS_POINTER, stamped=stamped, lead=[line for line in lead if line])
     return held

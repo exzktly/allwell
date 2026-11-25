@@ -7364,7 +7364,10 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   *D2 Drug X*) rather than grouping by a variable that pools donors. The figure names, at its top, every group it
   did not test and why: wells from more than one donor, a well with no donor value, or a donor with no group (or
   two groups) matching the control. Choose **— none** under Donor to test every group against the one control and
-  correct them together; the combo is hidden while the plate has no variable.
+  correct them together; the combo is hidden while the plate has no variable. **With no donor given** — no variable
+  named Donor and none chosen, or a Donor variable that no drawn well has a value for — every group is treated as
+  one donor, tested against the one control and corrected together, and a warning at the top of the figure says so
+  (*⚠ No donor given: …*). Choosing *— none* yourself draws no warning.
 
   The value is the page's **Metric** at the **Timepoint** — a fold-change metric compares each nanowell
   with its own **Baseline** — with no grouping by starting cells, and **Responders higher / lower** (beside the Test)

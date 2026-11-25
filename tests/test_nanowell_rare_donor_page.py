@@ -121,3 +121,17 @@ def test_the_donor_combo_is_hidden_while_the_plate_has_no_variable(page, qtbot):
     page.state.selection.variables = VariableSet()
     _open_rare(qtbot, page)
     assert not page.widgets.get("_nw_rare_donor_cb").isVisibleTo(page.window)
+    # With no donor given, every group is tested against the one control, and the figure says so at its top.
+    qtbot.waitUntil(lambda: len([t for i in range(4) for t in _texts(page, f"nw-rare-comparison-head:{i}")]) == 4,
+                    timeout=30000)
+    lines = _texts(page, "nw-rare-line")
+    assert _prose(lines[:3]).startswith("⚠ No donor given: no sample variable names a Donor")
+    assert "so every group is treated as one donor — each tested against D1 ctrl" in _prose(lines)
+
+
+def test_choosing_none_on_the_band_draws_no_missing_donor_warning(page, qtbot):
+    _open_rare(qtbot, page)
+    _choose(page, "_nw_rare_donor_cb", dn.OFF)
+    qtbot.waitUntil(lambda: len([t for i in range(4) for t in _texts(page, f"nw-rare-comparison-head:{i}")]) == 4,
+                    timeout=30000)
+    assert "No donor given" not in _prose(_texts(page, "nw-rare-line"))

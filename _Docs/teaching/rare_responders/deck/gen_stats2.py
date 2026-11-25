@@ -249,8 +249,11 @@ L.append(lab(0, 312, 400, '<b>2. Wells differ: beta-binomial</b>', 'lab left', 4
 L.append(lab(0, 352, 370, 'Each well has its own rate π<sub>w</sub><br>Set by T cells, DCs, plate spot<br>Counting noise then acts on top<br>A 64 is far beyond counting noise', 'lab left small', 4, 'line-height:1.2; '))
 L.append(lab(0, 500, 400, f'<b>π<sub>w</sub> ~ Beta(mean π, r)</b><br>Var(π<sub>w</sub>) = r·π(1−π)<br><b>K ~ Binomial(n, π<sub>w</sub>)</b>', 'lab left small', 4, EQ2))
 # right: the formula and how r shapes the curve
-L.append(lab(870, 0, 794, f'Var(K) = <span style="color:{NC}">n</span><span style="color:{PCc}">π</span>(1−<span style="color:{PCc}">π</span>) × [1 + (<span style="color:{NC}">n</span>−1) <span style="color:{RC}">r</span>]', 'lab left', 5, 'font-size:40px; font-weight:700; '))
-L.append(lab(870, 62, 794, f'<b style="color:{NC}">n</b> = 1,000 nanowells per well<br><b style="color:{PCc}">π</b> = 0.01<br><b style="color:{RC}">r</b>: how much wells differ<br>Counting noise × the bracket: ×1 at r = 0, ×3 at 0.002, ×11 at 0.01', 'lab left small', 5, 'line-height:1.2; font-size:21px; '))
+_nn, _pp, _rr = f'<span style="color:{NC}">n</span>', f'<span style="color:{PCc}">π</span>', f'<span style="color:{RC}">r</span>'
+L.append(lab(870, 0, 794, f'Var(K) = {_nn}{_pp}(1−{_pp}) + {_nn}({_nn}−1) {_rr} {_pp}(1−{_pp})', 'lab left', 5, 'font-size:36px; font-weight:700; '))
+_w2 = lambda rr: N * (N - 1) * rr * PI * (1 - PI)
+L.append(lab(870, 56, 794, f'<b>First term: counting noise</b>, {N * PI * (1 - PI):.1f}, the binomial’s variance<br><b>Second term: wells differ</b>, {_nn}({_nn}−1) × Var(πᵢ), since Var(πᵢ) = {_rr}{_pp}(1−{_pp})<br>'
+          f'Second term: 0 at r = 0, {_w2(0.002):.1f} at r = 0.002, {_w2(0.01):.1f} at r = 0.01<br>Total: {N * PI * (1 - PI):.1f}, {N * PI * (1 - PI) + _w2(0.002):.1f}, {N * PI * (1 - PI) + _w2(0.01):.1f} (n = 1,000, π = 0.01)', 'lab left small', 5, 'line-height:1.22; font-size:20px; '))
 CX0, CX1, CY0, CYB = 900, 1420, 250, 490
 def cxk(k): return CX0 + k / 40 * (CX1 - CX0)
 def cyp(p): return CYB - min(p, 0.13) / 0.13 * (CYB - CY0)
@@ -282,8 +285,8 @@ slide('st_vary', 'The statistics · why counts vary', 'Why wells’ counts K dif
       'And each well has its own position on the plate, with its own temperature, evaporation and gas exchange at the edges, and its own '
       'focus and timing in imaging. Everything in one well shares these, so they give each well its own true '
       'rate π<sub>w</sub>, scattered around π by an amount set by r; then counting noise acts on top. The letter p is kept for p-values. That two-step model is the beta-binomial. The bottom row uses slide 9’s molecule-B wells because they show it: three sit near 1 %, one near 6 %, a well-level difference that counting noise, SD 3, cannot produce. On the '
-      'right, the formula shows the two parts multiplied: counting noise, times the bracket 1 + (n − 1) r, which is 1 for identical wells, '
-      'about 3 at r = 0.002 and 11 at r = 0.01. The curves show what that does to one untreated well’s count, with the mean held at '
+      'right, the formula adds the two parts. The first term, n π (1 − π) = 9.9, is counting noise, the variance identical wells would have. The second, n (n − 1) r π (1 − π), is the extra variance from wells that differ: '
+      'it is 0 for identical wells, 19.8 at r = 0.002 and 98.9 at r = 0.01, so the total is 9.9, 29.7 or 108.8. The same formula is often written factored, as n π (1 − π) times 1 + (n − 1) r. The curves show what that does to one untreated well’s count, with the mean held at '
       '10: the peak drops and moves toward zero, and a long tail appears to the right, so a count of 20 or more goes from rare, 0.3 %, to '
       'ordinary, 15 %. r is never known in advance; it is fitted from replicate wells, as the following slides show.')
 

@@ -1673,15 +1673,19 @@ s, L = [], []
 s.append('<rect x="0" y="0" width="690" height="300" rx="18" fill="#ECF1F8"/>')
 s.append('<rect x="726" y="0" width="938" height="300" rx="18" fill="#ECF1F8"/>')
 def ly_(v): return 88 + (-19.5 - v) / 9 * 190
-# the gain in log L that chance alone gives: simulated no-effect plates, as an orange band and thin lines above the one-group level
+# the gain in log L that chance alone gives: a sideways histogram of the 1,500 no-effect plates' gains, drawn on the same
+# log L scale and rising from the one-group level, so each bar's height is a gain and its length is how many plates had it
 _gn = np.load(_RES / 'null_gain.npy') ** 2 / 2
 _g95 = float(np.percentile(_gn, 95)); _gA = int((_gn >= LL1 - LL0).sum())
-s.append(f'<rect x="40" y="{ly_(LL0 + _g95):.1f}" width="360" height="{ly_(LL0) - ly_(LL0 + _g95):.1f}" fill="#F3C9A5" fill-opacity="0.75"/>')
-for _g in [g_ for g_ in _gn[:60] if g_ <= _g95][:36]:
-    s.append(f'<line x1="40" y1="{ly_(LL0 + _g):.1f}" x2="400" y2="{ly_(LL0 + _g):.1f}" stroke="{OR}" stroke-width="1.2" stroke-opacity="0.7"/>')
+_bins = np.arange(0, 7.5, 0.5); _hc, _ = np.histogram(_gn, _bins); _hmax = max(_hc.max(), 1)
+for _lo, _c in zip(_bins[:-1], _hc):
+    if _c / _hmax * 330 >= 3:
+        s.append(f'<rect x="40" y="{ly_(LL0 + _lo + 0.5):.1f}" width="{_c / _hmax * 330:.1f}" height="{ly_(LL0 + _lo) - ly_(LL0 + _lo + 0.5) - 1.5:.1f}" fill="#F3C9A5" stroke="{OR}" stroke-width="1"/>')
+s.append(f'<line x1="40" y1="{ly_(LL0 + _g95):.1f}" x2="400" y2="{ly_(LL0 + _g95):.1f}" stroke="{OR}" stroke-width="2.5" stroke-dasharray="6 4"/>')
+L.append(lab(250, int(ly_(LL0 + _g95)) - 24, 160, f'<span style="color:#A9501A">95&#160;% below {_g95:.1f}</span>', 'lab left small', 1, 'font-size:16px; white-space:nowrap; '))
 for v, col, dash in ((LL1, PUR, ''), (LL0, '#5A6679', ' stroke-dasharray="10 6"')):
     s.append(f'<line x1="40" y1="{ly_(v):.1f}" x2="400" y2="{ly_(v):.1f}" stroke="{col}" stroke-width="5"{dash}/>')
-L.append(lab(40, int(ly_(LL1)) + 10, 372, f'<b style="color:#A9501A">Orange: the gain chance alone gives</b><br>95&#160;% of no-effect plates gain under {_g95:.1f}<br>{"None" if _gA == 0 else _gA} of {len(_gn):,} reached A’s {LL1 - LL0:.2f}, in either direction', 'lab left small', 1, 'font-size:18px; line-height:1.22; color:#1B2A41; '))
+L.append(lab(40, int(ly_(LL1)) + 10, 372, f'<b style="color:#A9501A">Bars: gains in 1,500 no-effect plates</b><br>Longer bar: more plates gained that much<br>{"None" if _gA == 0 else _gA} reached A’s {LL1 - LL0:.2f}', 'lab left small', 1, 'font-size:18px; line-height:1.22; color:#1B2A41; '))
 s.append(f'<line x1="440" y1="{ly_(LL1) + 12:.1f}" x2="440" y2="{ly_(LL0) - 12:.1f}" stroke="#2F6BDB" stroke-width="4"/>'
          f'<path d="M431 {ly_(LL1) + 14:.1f} l9 -15 l9 15 Z" fill="#2F6BDB"/><path d="M431 {ly_(LL0) - 14:.1f} l9 15 l9 -15 Z" fill="#2F6BDB"/>')
 L.append(lab(18, 8, 660, '<b>1. A gap always raises log L, but by how much?</b>', 'lab left', 1))
@@ -1736,7 +1740,7 @@ slide('n_test', 'The statistics · step 5 · the test', 'The test: is the gap mo
           'Below, three boxes: the likelihood ratio, why it is compared with z squared, and from D to p.', s, h=704), L,
       f'Now the test itself. The two fits gave log-likelihoods of {LL1:.2f} with a gap and {LL0:.2f} without, a difference of {LL1 - LL0:.2f}. The likelihood-ratio statistic, D, is twice that difference, {LRA:.2f}; '
       'it is called a ratio because a difference of logs is the log of a ratio of the two likelihoods. The larger it is, the more the gap helps to explain the counts. But how large is large? '
-      'A fit with a gap can never score lower than one without, because setting the gap to zero is one of its options; so a higher log-likelihood alone proves nothing. The orange band in panel 1 shows how much the fit with a gap gains when the molecule does nothing: in 1,500 simulated no-effect plates the gain is usually a few tenths, 95 percent of them gain less than 2.6, and none gained as much as A’s 7.12, in either direction. The test asks whether A’s gain is more than that. ' 'Giving a model an extra free number always improves its fit a little, even when it is not needed. Statistical theory says how much: if the molecule truly did nothing, D would behave like the square of z, '
+      'A fit with a gap can never score lower than one without, because setting the gap to zero is one of its options; so a higher log-likelihood alone proves nothing. The orange bars in panel 1 are a sideways histogram, on the same log-likelihood scale, of how much the fit with a gap gains when the molecule does nothing: in 1,500 simulated no-effect plates the gain is usually a few tenths, 95 percent of them gain less than 2.6, and none gained as much as A’s 7.12, in either direction. The test asks whether A’s gain is more than that. ' 'Giving a model an extra free number always improves its fit a little, even when it is not needed. Statistical theory says how much: if the molecule truly did nothing, D would behave like the square of z, '
       'where z is a value drawn from the standard normal distribution, mean 0 and standard deviation 1; that is the chi-square distribution with one degree of freedom; the factor of two is what makes that hold. So under chance alone D is usually below about 4. '
       f'To use this, take the square root of D and give it the sign of δ: z = +{ZA:.2f}, positive because A sits above the control. The curve on the right is what z would look like if A did nothing; '
       f'{ZA:.2f} is far out in its tail. The test is one-sided, because only a rise counts as a response, so p is the area of the curve beyond z: 0.00008. The grey bars are a check on that theory: z values from 1,500 simulated plates of four and four wells in which the molecule does nothing, with the scatter of step 4. They follow the curve, but a little wider: across this and a second batch of simulations about 8 percent pass z = 1.64 where the curve says 5 percent, and the largest of these 1,500 was 3.3, the most extreme in either direction −3.7. So with four and four wells p is approximate and somewhat too small; A’s z of 3.77 is still beyond every simulated no-effect plate.', steps={5})

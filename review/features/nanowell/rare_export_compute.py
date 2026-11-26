@@ -31,7 +31,9 @@ import numpy as np
 from review.features.nanowell import rare_hc_compute as hc
 from review.features.nanowell.rare_exceedance_compute import BB_LABEL, FISHER_LABEL, SMALL_SAMPLE_WELLS
 from review.features.nanowell.rare_null_compute import pool
-from review.features.nanowell.rare_report_compute import UNDECIDED, significant
+from review.features.nanowell.rare_report_compute import (
+    GATE_FLOOR, GATE_NO_RELABELING, GATE_NOT_CONFIRMED, UNDECIDED, significant,
+)
 from review.features.nanowell.rare_ad_compute import SCHOLZ_LABEL
 from util.json_write import write_json_atomic
 
@@ -243,9 +245,38 @@ def headline(unit, params, value_label: str = "") -> str:
             f"nanowells ({_pct(kt, nt)}) {past(params)} {cutoff_name(params)}{on}, {against} · {wells}.")
 
 
+def gate_reason(unit, params) -> str:
+    """Why a small design's significant regression is not "detected" (``rare_report_compute.small_design_gate``), in
+    the headline's words; ``""`` when the gate did not stop it."""
+    gate = getattr(unit, "gate", "")
+    if not gate:
+        return ""
+    wells = f"{len(unit.controls)} + {len(unit.treated)} wells"
+    family = f" for {unit.family}" if getattr(unit, "family", "") else ""
+    m = getattr(unit, "relabel_m", 0)
+    q_model = _num(unit.q.get("exceedance", math.nan))
+    if gate == GATE_FLOOR:
+        perm = unit.primary.perm
+        return (f"with {wells} the regression's q = {q_model} needs relabeling the wells to agree, and relabeling "
+                f"gives p = {_num(perm.p)}, the lowest {wells} allow (1 in {perm.n_labelings}), which corrected across "
+                f"the {m} group{'s' if m != 1 else ''} tested{family} is q = {_num(unit.q.get('relabel', math.nan))}. "
+                f"These wells cannot say more: add control wells, or test fewer groups{family}")
+    if gate == GATE_NOT_CONFIRMED:
+        return (f"with {wells} the regression's q = {q_model} needs relabeling the wells to agree, and it gives "
+                f"q = {_num(unit.q.get('relabel', math.nan))}")
+    if gate == GATE_NO_RELABELING:
+        return (f"with {wells} the regression's q = {q_model} needs relabeling the wells to agree, and the relabeling "
+                "could not be computed")
+    return ""
+
+
 def why_undecided(unit, params) -> str:
-    """Why *unit*'s verdict is "cannot be decided", for the headline itself — the verdict must not stand without its
-    reason, which used to be only in the line under the panels; ``""`` for any other verdict."""
+    """Why *unit*'s verdict is "cannot be decided" — or, in a small design, why a significant regression is not
+    "detected" (:func:`gate_reason`) — for the headline itself: the verdict must not stand without its reason, which
+    used to be only in the line under the panels; ``""`` for any other verdict."""
+    gated = gate_reason(unit, params)
+    if gated:
+        return gated
     if unit.interpretation != UNDECIDED:
         return ""
     # In the order ``rare_report_compute.interpret`` decides it. A cutoff on a tie is undecided only when no nanowell
@@ -353,10 +384,13 @@ def caveats(unit, params, value_label: str = "") -> list[str]:
     elif a.method == BB_LABEL and math.isfinite(a.p) and len(unit.controls) + len(unit.treated) <= SMALL_SAMPLE_WELLS:
         zero = ("the spread between wells was estimated at zero, so it treats nanowells as independent, and "
                 if a.rho_zero else "")
-        wells_p = (f" Relabeling whole wells gives p = {_num(a.perm.p)} (lowest possible {_num(a.perm.min_p)})."
+        relabel_q = unit.q.get("relabel", math.nan)
+        wells_p = (f" Relabeling whole wells gives p = {_num(a.perm.p)} (lowest possible {_num(a.perm.min_p)})"
+                   + (f", q = {_num(relabel_q)}" if math.isfinite(relabel_q) else "") + "."
                    if a.perm is not None and math.isfinite(a.perm.p) else "")
         out.append(f"{wells}, the {NAME_A.lower()}'s p is a large-sample approximation: {zero}it tends to come out "
-                   "too small, most of all when it is very small." + wells_p)
+                   "too small, most of all when it is very small." + wells_p + " With this few wells, detected "
+                   f"needs both q below {_num(params.fdr)}.")
     full = pool(unit.controls)
     unseen = 0
     for w in unit.treated:

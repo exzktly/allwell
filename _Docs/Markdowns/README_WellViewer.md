@@ -7389,8 +7389,11 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   (*Comparison 3 of 3: D2 Drug X vs D2 DMSO (Donor 2)*). Then each
   comparison's answer, under its name (*Comparison 1 of 3: Drug X vs DMSO*), in counts — and when it is *cannot be
   decided*, why, on the same line (for example *— the deciding test needs at least 3 control wells (this design has
-  2)*): for example *drug: rare responders detected. 8 of 120 drug nanowells (6.7%) grew past the control cutoff (its
-  top 1%), against 0 of 180 control nanowells (0.0%) · 2 drug vs 3 control wells.*
+  2)*): for example *drug: rare responders detected. 12 of 180 drug nanowells (6.7%) grew past the control cutoff (its
+  top 1%), against 0 of 240 control nanowells (0.0%) · 3 drug vs 4 control wells.* With 16 wells or fewer the verdict
+  also needs the relabeling of the wells to agree, and when it does not, the same line says why (for example
+  *cannot be decided with these wells — with 3 + 2 wells … relabeling gives p = 0.1, the lowest 3 + 2 wells allow
+  (1 in 10) … These wells cannot say more: add control wells, or test fewer groups*).
 
   Then **one block per test**, each framed and headed by the test's name, whether it decides the verdict, what it
   asks, and every comparison's p. The bar down a block's left edge gives its role: blue for the test that decides,
@@ -11404,9 +11407,11 @@ The report gives:
 **How far to trust the p with few wells.** The exceedance p is a large-sample approximation. On simulated plates
 where the treatment does nothing, with four to eight wells a group, 7 to 8 % of plates gave p below 0.05 where 5 %
 is promised, and the excess is larger further out: 1.5 to 4 times too many below 0.01 and 0.001. The reason is that
-ρ is estimated from a handful of wells and usually comes out too small. With 16 wells or fewer in a comparison the
-report says so beside the verdict and gives the relabeling p in the same sentence. A p far below 0.05 with a
-relabeling p at its floor is strong evidence; a p just below 0.05 is not.
+ρ is estimated from a handful of wells and usually comes out too small. So with **16 wells or fewer** in a
+comparison, *rare responders detected* needs both: the regression's q below 0.05 **and** the relabeling p, corrected
+by Benjamini–Hochberg the same way (within the donor), below 0.05. Relabeling is exact whatever the model gets
+wrong, so this holds false calls to 5 % exactly where the regression overstates. The report says so beside the
+verdict and gives both. With more than 16 wells the regression's p is close enough and decides alone.
 
 An interval whose end cannot be found, because the likelihood stays flat as the odds ratio grows (no control
 nanowell past the cutoff), is reported as unbounded (0 or ∞), never as a very large number.
@@ -11632,19 +11637,44 @@ which a treatment can be called *rare responders detected*:
    term in the regression, so the counts may be spread over plates.
 2. **At least one nanowell past the cutoff** in some well of the comparison. With none, the verdict is *not
    detected* — or *cannot be decided* when the cutoff sits on a tie the treatment piles onto.
-3. **q < 0.05 after Benjamini–Hochberg across the m treatments tested**, which is raw p < 0.05 × rank / m. The
-   regression's p has no floor, so any number of treatments can be tested; each one added raises the effect a hit
-   needs.
+3. **q < 0.05 after Benjamini–Hochberg across the m treatments tested** (for the same donor), which is raw
+   p < 0.05 × rank / m. The regression's p has no floor, so with more than 16 wells any number of treatments can be
+   tested; each one added raises the effect a hit needs.
+4. **With 16 wells or fewer, the relabeling q < 0.05 too.** The relabeling p cannot go below one over the number of
+   ways to relabel the wells, and q = p × m / rank, so the design caps how many treatments a lone hit can be tested
+   beside. Several hits at the floor share it — three of four at 1/70 have q = 0.019 and all pass — but a lone one
+   needs floor × m < 0.05:
 
-Three control and two treatment wells are enough for a verdict but not enough to check it: the between-well spread
-ρ comes from five wells, ρ cannot be estimated when no control nanowell is past the cutoff (the figure then warns
+   | Wells (control + treatment) | Relabelings | Floor | Treatments a lone hit can be tested beside (itself included) |
+   | --- | --- | --- | --- |
+   | 3 + 2 | 10 | 0.1 | none |
+   | 3 + 3 | 20 | 0.05 | none |
+   | 4 + 2 | 15 | 0.067 | none |
+   | 4 + 3 | 35 | 0.029 | 1 |
+   | 5 + 2 | 21 | 0.048 | 1 |
+   | 5 + 3 | 56 | 0.018 | 2 |
+   | 4 + 4 | 70 | 0.014 | 3 |
+   | 6 + 3 | 84 | 0.012 | 4 |
+   | 5 + 4 | 126 | 0.008 | 6 |
+   | 6 + 4 | 210 | 0.005 | 10 |
+   | 8 + 4 | 495 | 0.002 | 24 |
+
+   When the regression is significant and the relabeling p is already at its floor but corrects to 0.05 or above,
+   the wells cannot say more: the figure says *cannot be decided with these wells* and why (*add control wells, or
+   test fewer groups*). When the relabeling p is above its floor and not significant, the verdict is *not detected*,
+   with both q's beside it.
+
+Three control and two treatment wells give the regression a p but can never be called *detected*: ten relabelings
+put the relabeling floor at 0.1. Besides, the between-well spread ρ comes from five wells, ρ cannot be estimated when no control nanowell is past the cutoff (the figure then warns
 that its p overstates the evidence), the self-check cannot test the regression with fewer than five control wells,
 and each well's own p cannot go below 0.25.
 
 | Goal | Control wells | Treatment wells per treatment |
 | --- | --- | --- |
-| A verdict at all | 3 | 2 |
-| A verdict the self-check can test on the plate | 5 | 2 |
+| A group p from the regression | 3 | 2 |
+| *Detected* possible for one treatment | 4 (or 5) | 3 (or 2) |
+| *Detected* possible for a lone hit among three treatments | 4 | 4 |
+| A verdict the self-check can test on the plate, one treatment | 5 | 2 |
 | Higher Criticism and the shape test able to pass correction beside several treatments (floor 0.012 or less) | 6 or more | 3 |
 
 Control wells count most: every treatment is compared with the same ones, and they set every floor and the
@@ -11654,7 +11684,9 @@ estimate of ρ.
 
 | The exceedance test, after correction | The figure says |
 | --- | --- |
-| q < 0.05 | **rare responders detected** |
+| q < 0.05 — and, with 16 wells or fewer, the relabeling q < 0.05 too | **rare responders detected** |
+| q < 0.05, 16 wells or fewer, the relabeling p at its floor and its q ≥ 0.05 | **cannot be decided with these wells** — the wells cannot say more |
+| q < 0.05, 16 wells or fewer, the relabeling q ≥ 0.05 above its floor | **rare responders not detected** — the relabeling did not confirm it |
 | otherwise, or no nanowell in any well past the cutoff | **rare responders not detected** |
 | no group p (fewer than 3 control or 2 treatment wells for its regression) while nanowells are past the cutoff | **cannot be decided with these wells** — with the wells it needs |
 | no nanowell past a cutoff that sits on a tie the treatment piles onto (below) | **cannot be decided with these wells** — because the control cutoff sits on a tie |

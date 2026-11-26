@@ -475,6 +475,12 @@ class JobRow(QWidget):
         """
         if not linkable_targets(self._job.kind):
             return
+        if (not input_targets(self._job.kind) and not self._job.links()
+                and not self._predecessors and not self._below):
+            # A file-reading kind with no Watch folder job to offer: the menu
+            # would hold nothing but "Nothing", and offering it at all is what
+            # once let two conversions be linked.
+            return
         # Constructed with the parent menu rather than via addMenu(str): the
         # QMenu that call returns is not kept alive by its parent on the
         # Python side, so the submenu can be collected out from under the

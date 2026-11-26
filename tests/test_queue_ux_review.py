@@ -149,11 +149,26 @@ def test_m5_the_menus_say_input_from_and_new_job_using_this_output(qtbot):
 
 @pytest.mark.parametrize("kind", ["czi_import", "nd2_import", "ome_import", "import_loose"])
 def test_m6_no_input_menu_on_a_kind_that_reads_files(qtbot, kind):
-    job = JobSpec(id="c", kind=kind, label="Convert", spec={})
-    row = _row(job, predecessors=[("a", "Something")])
-    qtbot.addWidget(row)
-    labels = [a.text() for a in row.build_menu().actions() if a.text()]
+    """No job's output is a file to convert — except a watched folder's, so a
+    file-reading row offers "Input from" only when a Watch folder job is there
+    to choose, and then offers only that job. Driven through the page, which
+    is what narrows the list (``JobQueuePage._sources_for``)."""
+    from datasets.job_queue.view import JobQueuePage
+
+    page = JobQueuePage()
+    qtbot.addWidget(page)
+    convert = JobSpec(id="c", kind=kind, label="Convert", spec={})
+    page.set_jobs([_conv("a", "Something"), convert])
+    labels = [a.text() for a in page._rows["c"].build_menu().actions() if a.text()]
     assert "Input from" not in labels
+
+    watch = JobSpec(id="w", kind="watch_folder", label="Watch folder — run", spec={})
+    page.set_jobs([_conv("a", "Something"), watch, convert])
+    menu = page._rows["c"].build_menu()
+    sub = next(a.menu() for a in menu.actions() if a.text() == "Input from")
+    offered = [a.text() for a in sub.actions() if a.text()]
+    assert any("Watch folder — run" in t for t in offered)
+    assert not any("Something" in t for t in offered)
 
 
 def test_m6_the_dequeue_error_is_in_plain_words():

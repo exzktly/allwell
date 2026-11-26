@@ -17,7 +17,6 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -31,6 +30,7 @@ from ui import theme
 from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.watch_folder.watch_folder_compute import DEFAULT_QUIET_MINUTES, WatchStatus
 from widgets.path_field import PathField, folder_picker
+from widgets.spin_box import DoubleSpinBox
 
 #: Shown under the folder field when the folder is not there yet. Muted, not
 #: red: watching a folder the acquisition software will create is a normal
@@ -97,14 +97,13 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         ql = QHBoxLayout(quiet_row)
         ql.setContentsMargins(0, 0, 0, 0)
         ql.setSpacing(theme.Spacing.sm)
-        ql.addWidget(QLabel("Settled after no change for", quiet_row))
-        self._quiet_spin = QDoubleSpinBox(quiet_row)
+        ql.addWidget(QLabel("Settled after no change for (minutes)", quiet_row))
+        self._quiet_spin = DoubleSpinBox(quiet_row)
         self._quiet_spin.setObjectName("WatchQuietMinutes")
         self._quiet_spin.setDecimals(1)
         self._quiet_spin.setRange(0.1, 24 * 60.0)
         self._quiet_spin.setSingleStep(1.0)
         self._quiet_spin.setValue(DEFAULT_QUIET_MINUTES)
-        self._quiet_spin.setSuffix(" min")
         self._quiet_spin.setToolTip(
             "How long the folder must go with no file added, removed, growing "
             "or being modified before the watch counts it as finished. Make it "
@@ -128,17 +127,15 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         gl = QHBoxLayout(give_up_row)
         gl.setContentsMargins(0, 0, 0, 0)
         gl.setSpacing(theme.Spacing.sm)
-        gl.addWidget(QLabel("Give up after", give_up_row))
-        self._give_up_spin = QDoubleSpinBox(give_up_row)
+        gl.addWidget(QLabel("Give up after (hours, 0 = never)", give_up_row))
+        self._give_up_spin = DoubleSpinBox(give_up_row)
         self._give_up_spin.setObjectName("WatchGiveUpHours")
         self._give_up_spin.setDecimals(1)
         self._give_up_spin.setRange(0.0, 24 * 14.0)
         self._give_up_spin.setSingleStep(1.0)
-        self._give_up_spin.setSuffix(" h")
-        self._give_up_spin.setSpecialValueText("never")
         self._give_up_spin.setToolTip(
             "Fail the watch, and block the jobs after it, if the folder has not "
-            "settled in this long. \"never\" waits indefinitely.")
+            "settled in this many hours. 0 waits indefinitely.")
         gl.addWidget(self._give_up_spin)
         gl.addStretch(1)
         outer.addWidget(give_up_row)

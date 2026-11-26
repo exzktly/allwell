@@ -118,8 +118,8 @@ class JobQueuePage(QWidget):
         blurb = QLabel(
             "Line up Analyze runs and Datasets tools to work through "
             "unattended, in order. One job runs at a time — except that an "
-            "Analyze run on a remote host can run beside one job on this "
-            "computer, when the two share no folder. "
+            "Analyze run on a remote host, and a Watch Folder job, can each "
+            "run beside one job on this computer, when they share no folder. "
             "A queued run proceeds without the interactive confirmations its "
             "own page would show, since there's no one there to ask. "
             "Pause winds the running job down and keeps what it has finished, "

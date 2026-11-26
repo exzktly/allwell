@@ -194,6 +194,11 @@ class PackedConverterWorker(QThread):
 
 
 class PackedConverterController(DatasetToolController):
+    #: A line for the job's queue row and its recipe journal — here, which
+    #: file a conversion handed a watched folder chose
+    #: (``QueueBridge._on_status_text``).
+    statusText = Signal(str)
+
     """Wires a converter page to its background worker.
 
     A subclass supplies a :class:`ConverterSpec` and builds its page; every
@@ -402,8 +407,10 @@ class PackedConverterController(DatasetToolController):
         self.show_job(spec)
         self._launch()
         if chosen != source:
-            self.page.append_log(f"Converting {chosen} — the one {self.spec.noun} "
-                                 f"file in the watched folder {source}.")
+            line = (f"Converting {chosen} — the one {self.spec.noun} "
+                    f"file in the watched folder {source}.")
+            self.page.append_log(line)
+            self.statusText.emit(line)
 
     # ── worker results ───────────────────────────────────────────────────────
     def _on_succeeded(self, dest_root: str, summary: str) -> None:

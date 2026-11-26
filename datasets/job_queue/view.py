@@ -80,6 +80,7 @@ class JobQueuePage(QWidget):
     nextStepRequested = Signal(str, str, str)
     showRequested = Signal(str)
     saveRecipeRequested = Signal(str)
+    recipeLogRequested = Signal(str)
     applyRecipeRequested = Signal(str)
     deleteRecipeRequested = Signal(str)
 
@@ -413,6 +414,7 @@ class JobQueuePage(QWidget):
             row.editClicked.connect(self.editRequested)
             row.duplicateClicked.connect(self.duplicateRequested)
             row.saveRecipeClicked.connect(self.saveRecipeRequested)
+            row.recipeLogClicked.connect(self.recipeLogRequested)
             row.stopClicked.connect(self.stopJobRequested)
             row.retryClicked.connect(self.retryRequested)
             row.chainRequested.connect(self.chainRequested)

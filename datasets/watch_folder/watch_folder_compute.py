@@ -130,14 +130,29 @@ class SettleTracker:
     keeps reporting it, since the watch is over.
     """
 
-    def __init__(self, quiet_seconds: float, *, require_change: bool = True) -> None:
+    def __init__(self, quiet_seconds: float, *, require_change: bool = True,
+                 armed_at: float | None = None) -> None:
         self.quiet_seconds = max(0.0, float(quiet_seconds))
         self.require_change = bool(require_change)
+        #: When the watch first started (epoch seconds), for a watch resumed
+        #: after a Pause or an app restart. A file modified at or after it is
+        #: a change this watch has already seen happen, so it does not wait
+        #: for another. ``None`` for a watch starting for the first time.
+        self.armed_at = armed_at
         self._previous: Snapshot | None = None
         self._started = False
         self._last_change = 0.0
         self._changes = 0
         self._settled: WatchStatus | None = None
+
+    def _written_since_armed(self, snap: Snapshot | None) -> bool:
+        """Whether a file was written after this watch first started — the
+        change a watch resumed after a restart or a Pause would otherwise
+        have missed. Compared with the share's own modification times, so a
+        file server whose clock runs behind this computer's can hide it; the
+        row then keeps saying it is waiting, as before."""
+        newest = _newest_mtime(snap or {})
+        return self.armed_at is not None and newest is not None and newest >= self.armed_at
 
     def observe(self, snap: Snapshot | None, now: float) -> WatchStatus:
         if self._settled is not None:
@@ -155,7 +170,7 @@ class SettleTracker:
         quiet_for = now - self._last_change
         if snap is None:
             phase = MISSING
-        elif self.require_change and self._changes == 0:
+        elif self.require_change and self._changes == 0 and not self._written_since_armed(snap):
             phase = WAITING
         elif files and quiet_for >= self.quiet_seconds:
             phase = SETTLED
@@ -167,6 +182,13 @@ class SettleTracker:
         if phase == SETTLED:
             self._settled = status
         return status
+
+
+def _newest_mtime(snap: Snapshot) -> float | None:
+    """The newest modification time in *snap*, as epoch seconds."""
+    if not snap:
+        return None
+    return max(mtime for _size, mtime in snap.values()) / 1e9
 
 
 def poll_interval(base_seconds: float, last_scan_seconds: float) -> float:

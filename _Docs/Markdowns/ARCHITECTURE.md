@@ -20573,20 +20573,23 @@ precedent, not reinvented.
 changes no data: a queueable job that succeeds once a folder has stopped
 receiving files, so the jobs chained after it run when an acquisition is
 complete. It fires once; queueing it again for the next acquisition is what a
-recipe (`services/job_recipes.py`, under the Job Queue below) is for. A watch keeps
-no state between runs: one interrupted by the app closing starts again from
-scratch when the queue resumes it, so with `require_change` it waits for a
-change it may already have missed. The row then keeps saying it is waiting,
-which is visible rather than wrong, and unticking the option fixes it; carrying
-the first start time on the job would be the way to close it. A watch paused
-and started again behaves the same way.
+recipe (`services/job_recipes.py`, under the Job Queue below) is for. A queued
+watch resumed after a Pause or an app restart is handed its job's
+`first_started_at` as `armed_at` (`QueueBridge._dispatch`, for a runner with
+`resumes_from_first_start`), and `SettleTracker` counts a file modified at or
+after it as the change `require_change` waits for — so an acquisition that
+finished while the app was down settles after one quiet period. It compares
+the share's modification times with this computer's clock; a server clock far
+behind still hides the change, and the row then keeps saying it is waiting.
+Retry clears `first_started_at` (`JobQueue._reset`), so a retried watch waits
+for new files.
 
 | Module | Role |
 |--------|------|
 | `watch_folder_compute.py` | Qt-free. `snapshot(folder)` — every data file below the folder as relative path → `(size, mtime_ns)`, or `None` for a folder that does not exist (a watch can be set up before the acquisition software creates it); housekeeping files and hidden folders are left out through `datasets.core.watched_source.is_ignored`, so Finder's `.DS_Store` does not restart the countdown each time someone looks. `SettleTracker(quiet_seconds, require_change=)` is fed one snapshot per poll with a monotonic time and answers a `WatchStatus` whose phase is `missing`, `waiting` (no change yet, with `require_change`), `settling` or `settled`: settled once the folder holds at least one file and nothing has changed for the quiet period, and with `require_change` only after at least one change since the watch began, so a watch armed before an acquisition never fires on the previous one's files. Settled is final. Polling rather than OS change notifications is deliberate: the folders are usually network shares or USB drives, where notifications are unreliable, and a watch that silently never fires is the worse failure. `poll_interval` stretches the interval to twice a slow scan. |
 | `worker.py` | `WatchFolderWorker(QThread)`: snapshot, observe, emit `status` and a log line per phase change, sleep in 100 ms slices so a Stop is answered at once. Ends with `succeeded(folder, summary)`, or `failed` — "Cancelled — …" for a Stop, which the bridge reads as a cancellation, and "Gave up after …" when the give-up time passes. |
 | `view.py` | `WatchFolderPage`: folder (a path that does not exist yet is valid and says so in a muted note), quiet minutes, **Wait for new files before counting**, **Give up after (hours, 0 = never)**, **▶ Start watching** / **+ Queue**, a live status line, and the shared raw log. |
-| `controller.py` | `WatchFolderController(DatasetToolController)`. `start_from_queue` passes the queued spec straight to the worker rather than reading it back off the page, whose spin boxes round to one decimal; a spec may carry `poll_seconds`, which only tests set. Reports the watched folder as the job's output, and each status sentence through `statusText` for its queue row. `suspend` / `was_suspended` make the queue's Pause a pause for a watch: without them Pause fell back to Stop, which cancelled the watch and blocked every job chained after it. A watch keeps no progress, so a resumed watch starts looking afresh. |
+| `controller.py` | `WatchFolderController(DatasetToolController)`. Declares `resumes_from_first_start`. `start_from_queue` passes the queued spec straight to the worker rather than reading it back off the page, whose spin boxes round to one decimal; a spec may carry `poll_seconds`, which only tests set. Reports the watched folder as the job's output, and each status sentence through `statusText` for its queue row. `suspend` / `was_suspended` make the queue's Pause a pause for a watch: without them Pause fell back to Stop, which cancelled the watch and blocked every job chained after it. A resumed watch counts files written since its first start (above). |
 
 A converter linked to a watch is handed the watched folder as its `source`.
 `datasets/core/watched_source.py` decides what that means when the conversion
@@ -21291,6 +21294,32 @@ Qt event loop. Four layers:
   `default_state_dir()`); `load_recipes` treats an unreadable file as no
   recipes and skips a malformed entry on its own, logging both, since the
   Job Queue page builds at app start.
+
+- **`services/recipe_journal.py`** — the log of one recipe application, Qt-free.
+  The queue already survives a crash (`job_queue.json` rewritten on every
+  change, a running job reloaded `interrupted`); what it does not keep is the
+  run's story, or that its jobs belong together once some are cleared. Each
+  application gets `recipe_runs/<run>.jsonl` beside the queue: one JSON object
+  per line, appended and `fsync`-ed, never rewritten. `read_events` skips a
+  line cut off by a crash, and `append` starts a fresh line after one, so the
+  next event is not lost with it; `append` never raises (a journal that cannot
+  be written must not stop the job it describes) and logs instead. Run ids are
+  checked to be plain names before becoming file names. `EVENTS` lists the
+  kinds: `applied` (by `RecipeActions.apply`, before the jobs are added, so a
+  running queue's first `started` comes after it), `started` (with the folder
+  each link actually filled), `status`, `finished` (ok, cancelled, message,
+  what it wrote), `suspended`, `interrupted`, `retried`, `removed` — written by
+  `QueueBridge._journal`, which does nothing for a job not queued from a
+  recipe. A job's membership is `JobSpec.recipe` (`run`, `name`, `input`,
+  `step`, `steps`), persisted with the job; `JobQueue.duplicate` builds the
+  copy without it. A runner's `statusText` is journalled once per phase (its
+  leading phrase), not per tick; the converters use it to say which file they
+  chose from a watched folder. `QueueBridge._journal_restart` records
+  `interrupted` for each recipe job `from_json` repaired and saves the queue at
+  once, so the next launch does not record the same restart again.
+  `describe_event` / `render` turn the journal into the lines the row's
+  **Recipe log…** window shows (`RecipeActions.show_log`, a non-modal window
+  that re-reads the journal on every queue change).
 
 - **`datasets/job_queue/recipe_actions.py`** — `RecipeActions`, the page's
   half: `save_from(job_id)` (refuses an unsavable chain before asking for a

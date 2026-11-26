@@ -16,6 +16,7 @@ shape.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from collections.abc import Callable
 from typing import Protocol
@@ -33,6 +34,7 @@ from services.job_kinds import (
     produced_for,
     produced_layout,
 )
+from services import recipe_journal
 from services.job_lanes import LANES, run_lane
 from services.job_queue import (
     ChainLink,
@@ -70,6 +72,16 @@ class QueueableController(Protocol):
     # def was_suspended(self) -> bool: ...
 
 
+def _dotted_get(spec: dict, dotted: str) -> object | None:
+    """The value at *dotted* in *spec*, or ``None``."""
+    cur: object = spec
+    for part in dotted.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
 class QueueBridge(QObject):
     """Owns the persisted queue and drives it against the controller
     registry. At most one job in flight per lane (``services.job_lanes``):
@@ -89,6 +101,37 @@ class QueueBridge(QObject):
         self._queue: JobQueue = load_queue(state_dir)
         # kind -> (job_id, lane) for every queue job in flight.
         self._running: dict[str, tuple[str, str]] = {}
+        # job_id -> the leading phrase of the last status journalled for it,
+        # so a countdown ticking every few seconds is journalled once a phase.
+        self._journalled_phase: dict[str, str] = {}
+        self._journal_restart()
+
+    # ── recipe journals ──────────────────────────────────────────────────
+    def _journal(self, job: JobSpec | None, event: str, **fields) -> None:
+        """Append *event* to the journal of the recipe run *job* belongs to.
+        A job not queued from a recipe has no journal; nothing is written."""
+        run = (job.recipe or {}).get("run") if job is not None else None
+        if not run:
+            return
+        recipe_journal.append(str(run), event, state_dir=self._state_dir,
+                              job=job.id, step=(job.recipe or {}).get("step"), **fields)
+
+    def _journal_restart(self) -> None:
+        """Record, once, that the app stopped while recipe jobs were running.
+
+        ``JobQueue.from_json`` has just turned each such job *interrupted* (or
+        *cancelled*, for one started on its own page). The file still says
+        *running* until it is saved, so it is saved here: otherwise every
+        launch until the queue next changed would journal the same restart.
+        """
+        restarted = [j for j in self._queue.jobs
+                     if j.state in (JobState.INTERRUPTED, JobState.CANCELLED)
+                     and j.message.startswith("interrupted by an app restart")]
+        if not self._queue.repair_notes or not restarted:
+            return
+        for job in restarted:
+            self._journal(job, "interrupted", message=job.message)
+        self._save()
 
     @property
     def queue(self) -> JobQueue:
@@ -129,6 +172,13 @@ class QueueBridge(QObject):
         if job is None or job.state != JobState.RUNNING or job.message == text:
             return
         job.message = text
+        # Journalled when the phase changes, not on every tick: the leading
+        # phrase ("Receiving files", "Settled") names the phase, the rest is
+        # the count that moves.
+        phase = text.split(" — ")[0].split(" (")[0]
+        if self._journalled_phase.get(job.id) != phase:
+            self._journalled_phase[job.id] = phase
+            self._journal(job, "status", message=text)
         self.queueChanged.emit()
 
     def _on_run_started(self, kind: str, spec: dict) -> None:
@@ -182,6 +232,7 @@ class QueueBridge(QObject):
         job = self._queue.get(job_id)
         if job is not None and job.state == JobState.RUNNING:
             return  # can't remove the job currently in flight
+        self._journal(job, "removed")
         self._queue.remove(job_id)
         self._save()
         self.queueChanged.emit()
@@ -226,8 +277,13 @@ class QueueBridge(QObject):
         return True
 
     def retry_job(self, job_id: str, with_downstream: bool = False) -> bool:
+        before = {j.id: j.state for j in self._queue.jobs}
         if not self._queue.retry(job_id, with_downstream=with_downstream):
             return False
+        for job in self._queue.jobs:
+            if job.state == JobState.PENDING and before.get(job.id) in JobState.TERMINAL:
+                self._journal(job, "retried")
+                self._journalled_phase.pop(job.id, None)
         self._save()
         self.queueChanged.emit()
         self._advance()
@@ -539,7 +595,15 @@ class QueueBridge(QObject):
             QTimer.singleShot(0, self._advance)
             return False
         self._running[job.kind] = (job.id, lane)
-        self._queue.mark_running(job.id)
+        self._queue.mark_running(job.id, now=time.time())
+        if getattr(runner, "resumes_from_first_start", False):
+            # A watch resumed after a Pause or a restart counts what arrived
+            # since it first started (``JobSpec.first_started_at``).
+            spec["armed_at"] = job.first_started_at
+        self._journal(job, "started", inputs={
+            link.target: _dotted_get(spec, link.target)
+            for link in job.links() if link.target})
+        self._journalled_phase.pop(job.id, None)
         self._save()
         self.queueChanged.emit()
         runner.start_from_queue(spec)
@@ -568,6 +632,7 @@ class QueueBridge(QObject):
             # the queue stays paused until the user starts it again.
             self._queue.mark_suspended(
                 job_id, getattr(self._runners.get(kind), "suspended_message", ""))
+            self._journal(finished, "suspended", message=finished.message if finished else "")
             self._save()
             self.queueChanged.emit()
             self.pause()
@@ -576,6 +641,8 @@ class QueueBridge(QObject):
         self._queue.mark_finished(
             job_id, ok=ok, message=message, cancelled=cancelled, produced=produced,
         )
+        self._journal(finished, "finished", ok=ok, cancelled=cancelled, message=message,
+                      wrote=produced.get("dataset_root") or produced.get("out_dir"))
         self._save()
         self.queueChanged.emit()
         if cancelled:
@@ -681,6 +748,7 @@ class JobQueueController(QObject):
         self.page.saveRecipeRequested.connect(self._on_save_recipe)
         self.page.applyRecipeRequested.connect(self._on_apply_recipe)
         self.page.deleteRecipeRequested.connect(self._on_delete_recipe)
+        self.page.recipeLogRequested.connect(self.recipes.show_log)
         self._show_recipes()
         self.bridge.queueChanged.connect(self._refresh_page)
         self._refresh_page()

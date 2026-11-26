@@ -29,6 +29,11 @@ from datasets.watch_folder.worker import WatchFolderWorker
 KIND = "watch_folder"
 
 
+def _epoch(value: object) -> float | None:
+    """*value* as epoch seconds, or ``None`` when it is not a number."""
+    return float(value) if isinstance(value, (int, float)) else None
+
+
 class WatchFolderController(DatasetToolController):
     """Behaviour for the Watch folder feature."""
 
@@ -41,10 +46,14 @@ class WatchFolderController(DatasetToolController):
     #: What a paused watch's row says (``QueueBridge.suspend_current``). A
     #: watch has nothing to finish: it stops looking, and starting the queue
     #: again watches afresh.
+    #: The queue hands a resumed watch its first start time as ``armed_at``
+    #: (``QueueBridge._dispatch``), so files written while it was paused or the
+    #: app was closed count as the change it waits for.
+    resumes_from_first_start = True
+
     suspending_message = "pausing — stopping the watch"
     suspended_message = ("paused — watches the folder again when the queue "
-                         "starts; with “Wait for new files” on it waits for a "
-                         "new change")
+                         "starts, counting files written in the meantime")
 
     def __init__(
         self,
@@ -99,6 +108,7 @@ class WatchFolderController(DatasetToolController):
             require_change=bool(spec.get("require_change", True)),
             give_up_seconds=float(spec.get("give_up_hours") or 0.0) * 3600.0,
             poll_seconds=self._poll_seconds,
+            armed_at=_epoch(spec.get("armed_at")),
         )
         worker.logLine.connect(self.page.append_log)
         worker.status.connect(self.page.show_status)

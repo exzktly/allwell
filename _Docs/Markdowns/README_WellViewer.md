@@ -10804,16 +10804,20 @@ A watch fires once. To process the next acquisition, queue the chain again —
 a [recipe](#job-queue) does that in two clicks. A running watch does not hold
 up other work: it runs beside the queue's jobs on this computer, and its row
 in the queue shows the same countdown as its page. **⏸ Pause queue** pauses a
-watch rather than cancelling it — the jobs after it keep waiting — and
-starting the queue again watches the folder afresh. Only one watch
+watch rather than cancelling it — the jobs after it keep waiting. Only one watch
 runs at a time, though: a second Watch Folder job waits in the queue until the
 first has settled, so two acquisitions running at once are watched one after
-the other. A watch that was running when the app closed starts again when the
-queue is started, and starts from scratch: with **Wait for new files before
-counting** on, it waits for a change it may already have missed. If the
-acquisition finished while the app was closed, its row keeps saying "Waiting
-for new files"; choose **Edit…**, untick the box, and save. The same holds for
-a watch you paused and started again.
+the other.
+
+A queued watch remembers when it first started. If you pause it, or the app
+closes or crashes while it is watching, starting the queue again resumes it
+and counts every file written since it first started — so an acquisition that
+finished while the app was down settles after one quiet period instead of
+waiting for a change that already happened. (This compares the files'
+modification times with this computer's clock; on a file server whose clock is
+far behind, a resumed watch can still wait for a new change — then choose
+**Edit…**, untick **Wait for new files before counting**, and save.)
+**Retry** starts a watch over, waiting for new files again.
 
 **Converting what lands in the watched folder.** Queue the conversion as usual
 — set its page up on an earlier acquisition from the same protocol, so the
@@ -10972,7 +10976,15 @@ grid, the channel roles and every other setting are kept. Applying a recipe
 says what it left out. A chain — every job linked to the one you save from,
 in either direction — can be saved as a recipe only if it starts from one job
 (two watches feeding a Concatenate have two inputs, whichever of the three you
-save from) and that job has its input set. **Recipes ▸** *the recipe* **▸ Delete…** removes one; jobs already
+save from) and that job has its input set. Every job queued from a recipe says so on its row ("recipe “Nightly” · step
+2/3"), and **Recipe log…** in its **⋯** menu shows that run's log: when it was
+applied and to what, when each step started and on which folder, when the
+watch began receiving files and settled, which file the conversion chose, how
+each step ended and what it wrote, any pause, retry or removal, and any app
+restart that interrupted it. The log is kept in `recipe_runs/` beside the queue,
+one file per application, written line by line as things happen, so it
+survives a crash — at most the line being written at that moment is lost — and
+stays after the jobs are cleared from the queue. **Recipes ▸** *the recipe* **▸ Delete…** removes one; jobs already
 queued from it are not affected. Recipes are saved beside the queue and
 survive restarts.
 

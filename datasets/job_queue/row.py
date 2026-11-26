@@ -132,6 +132,7 @@ class JobRow(QWidget):
     editClicked = Signal(str)
     duplicateClicked = Signal(str)
     saveRecipeClicked = Signal(str)
+    recipeLogClicked = Signal(str)
     stopClicked = Signal(str)
     # (job_id, with the jobs that used its output too)
     retryClicked = Signal(str, bool)
@@ -342,6 +343,12 @@ class JobRow(QWidget):
             # job otherwise reads exactly like a ready one until it fails.
             parts.append("no input folder — choose one with Input from ▸ or "
                          "edit the job")
+        recipe = job.recipe or {}
+        if recipe.get("run"):
+            step, steps = recipe.get("step"), recipe.get("steps")
+            where = (f" · step {step + 1}/{steps}"
+                     if isinstance(step, int) and isinstance(steps, int) else "")
+            parts.append(f"recipe “{recipe.get('name', '')}”{where}")
         detail = describe_detail(job.kind, job.spec)
         if detail:
             parts.append(detail)
@@ -394,6 +401,9 @@ class JobRow(QWidget):
         # the jobs that read from it (services.job_recipes).
         owned_action(menu, "Save chain as recipe…").triggered.connect(
             lambda: self.saveRecipeClicked.emit(self.job_id))
+        if (job.recipe or {}).get("run"):
+            owned_action(menu, "Recipe log…").triggered.connect(
+                lambda: self.recipeLogClicked.emit(self.job_id))
 
         # Only a job that ran can be retried: a pending one is already
         # waiting, a running one is already going, and a blocked one never ran

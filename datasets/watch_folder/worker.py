@@ -41,10 +41,12 @@ class WatchFolderWorker(QThread):
 
     def __init__(self, folder: str, *, quiet_seconds: float, require_change: bool,
                  give_up_seconds: float = 0.0,
-                 poll_seconds: float = DEFAULT_POLL_SECONDS, parent=None) -> None:
+                 poll_seconds: float = DEFAULT_POLL_SECONDS,
+                 armed_at: float | None = None, parent=None) -> None:
         super().__init__(parent)
         self._folder = folder
-        self._tracker = SettleTracker(quiet_seconds, require_change=require_change)
+        self._tracker = SettleTracker(quiet_seconds, require_change=require_change,
+                                      armed_at=armed_at)
         self._give_up = max(0.0, float(give_up_seconds))
         self._poll = max(0.01, float(poll_seconds))
 

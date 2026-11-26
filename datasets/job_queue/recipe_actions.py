@@ -28,6 +28,7 @@ from services.job_recipes import (
     save_recipes,
     with_recipe,
 )
+from services import recipe_journal
 from services.job_kinds import KIND_LABEL, short_label
 
 
@@ -42,6 +43,8 @@ class RecipeActions:
         self._notify = notify
         self._parent = parent_widget
         self._recipes: list[Recipe] = load_recipes(state_dir)
+        self._log_window = None
+        self._log_job = ""
 
     @property
     def recipes(self) -> list[Recipe]:
@@ -90,6 +93,16 @@ class RecipeActions:
         except RecipeError as exc:
             self._notify(str(exc), "warn")
             return []
+        run_id = uuid.uuid4().hex[:12]
+        for step, (job, _links) in enumerate(planned):
+            job.recipe = {"run": run_id, "name": recipe.name, "input": source,
+                          "step": step, "steps": len(planned)}
+        # Journalled before the jobs are added: a running queue starts the
+        # first of them inside add_job, and its "started" must come after this.
+        recipe_journal.append(run_id, "applied", state_dir=self._state_dir,
+                              name=recipe.name, input=source,
+                              jobs=[job.id for job, _links in planned],
+                              notes=list(recipe.notes))
         added: list[str] = []
         refused: list[str] = []
         for job, links in planned:
@@ -104,6 +117,54 @@ class RecipeActions:
             message += " " + " ".join(recipe.notes)
         self._notify(message, "warn" if refused else "success")
         return added
+
+    # ── the run's log ────────────────────────────────────────────────────────
+    def log_text(self, job_id: str) -> str:
+        """The journal of the recipe run *job_id* belongs to, as text."""
+        job = self._bridge.queue.get(job_id)
+        run = (job.recipe or {}).get("run") if job is not None else None
+        if not run:
+            return "This job was not queued from a recipe."
+        labels = {j.id: j.label for j in self._bridge.queue.jobs}
+        recipe = job.recipe or {}
+        head = (f"Recipe “{recipe.get('name', '')}” applied to "
+                f"{recipe.get('input', '')} — run {run}\n"
+                f"Journal: {recipe_journal.journal_path(str(run), self._state_dir)}\n\n")
+        return head + recipe_journal.render(str(run), self._state_dir, labels)
+
+    def show_log(self, job_id: str) -> object:
+        """Open (or bring forward and refresh) a window showing the run's log.
+
+        Not modal: it is a record to read beside the queue, and it re-reads the
+        journal whenever the queue changes, so it follows a running chain.
+        """
+        from PySide6.QtWidgets import QPlainTextEdit
+
+        window = self._log_window
+        if window is None:
+            window = QPlainTextEdit()
+            window.setReadOnly(True)
+            window.setObjectName("RecipeLog")
+            window.resize(760, 420)
+            self._log_window = window
+            self._bridge.queueChanged.connect(self._refresh_log)
+        self._log_job = job_id
+        window.setWindowTitle("Recipe log")
+        window.setPlainText(self.log_text(job_id))
+        window.show()
+        window.raise_()
+        return window
+
+    def _refresh_log(self) -> None:
+        window = self._log_window
+        if window is None or not self._log_job:
+            return
+        try:
+            if window.isVisible():
+                window.setPlainText(self.log_text(self._log_job))
+        except RuntimeError:
+            # The window was deleted (app teardown, a test's reaper).
+            self._log_window = None
 
     # ── delete ───────────────────────────────────────────────────────────────
     def delete(self, name: str) -> bool:

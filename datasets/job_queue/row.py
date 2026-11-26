@@ -46,6 +46,7 @@ from services.job_kinds import (
     describe_detail,
     input_label,
     input_targets,
+    linkable_targets,
 )
 from services.job_queue import JobSpec, JobState
 from widgets.owned_action import owned_action
@@ -69,6 +70,7 @@ KIND_ICON = {
     "subset": "boxes",
     "import_loose": "download",
     "merge_plates": "layout-grid",
+    "watch_folder": "eye",
 }
 
 #: The tools a dataset can be handed to next, derived from what each kind
@@ -460,11 +462,12 @@ class JobRow(QWidget):
 
         Offers the jobs *above* this one, since a link that ran backwards
         would be refused by the queue's own order check anyway; showing the
-        rest would be offering choices that cannot be made. Absent on a kind
-        that reads files rather than a dataset (the converters, Zip loose):
-        no earlier job's output can be its input.
+        rest would be offering choices that cannot be made. A kind that reads
+        files rather than a dataset (the converters, Zip loose) is offered only
+        the Watch folder jobs, whose folder is where its files will be; the
+        page filters the lists to those (``JobQueuePage._sources_for``).
         """
-        if not input_targets(self._job.kind):
+        if not linkable_targets(self._job.kind):
             return
         # Constructed with the parent menu rather than via addMenu(str): the
         # QMenu that call returns is not kept alive by its parent on the

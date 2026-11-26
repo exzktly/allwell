@@ -44,11 +44,18 @@ _NO_DATASET_INPUT = (
     "earlier job's output can be its input; offering \"Input from\" on it "
     "let two conversions be linked, and the second then failed at dequeue.")
 
+_NO_INPUT_AT_ALL = (
+    "Watches a folder on disk that an acquisition writes into. No queued job "
+    "produces that folder, so nothing can be its input; it is the first step "
+    "of a chain, never a later one.")
+
 _EXEMPT = {
-    "CHAIN_TARGET": {kind: _NO_DATASET_INPUT for kind in
-                     ("ome_import", "czi_import", "nd2_import", "import_loose")},
-    "INPUT_TARGETS": {kind: _NO_DATASET_INPUT for kind in
-                      ("ome_import", "czi_import", "nd2_import", "import_loose")},
+    "CHAIN_TARGET": {**{kind: _NO_DATASET_INPUT for kind in
+                        ("ome_import", "czi_import", "nd2_import", "import_loose")},
+                     "watch_folder": _NO_INPUT_AT_ALL},
+    "INPUT_TARGETS": {**{kind: _NO_DATASET_INPUT for kind in
+                         ("ome_import", "czi_import", "nd2_import", "import_loose")},
+                      "watch_folder": _NO_INPUT_AT_ALL},
     "_DESCRIBE_KEYS": {
         "analyze": (
             "Analyze does not describe itself from spec keys. Its spec holds "

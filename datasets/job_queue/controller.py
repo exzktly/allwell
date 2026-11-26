@@ -25,9 +25,11 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from services.job_kinds import (
     CHAIN_KIND,
-    CHAIN_TARGET,
+    accepts_link,
+    chain_target,
     describe,
     input_targets,
+    linkable_targets,
     produced_for,
     produced_layout,
 )
@@ -244,7 +246,7 @@ class QueueBridge(QObject):
             self.queueChanged.emit()
             return True
         pred = self._queue.get(chain_from)
-        target = CHAIN_TARGET.get(job.kind)
+        target = chain_target(job.kind, pred.kind) if pred is not None else None
         if pred is None or target is None:
             return False
         try:
@@ -267,9 +269,18 @@ class QueueBridge(QObject):
         make a cycle — the caller says so.
         """
         job = self._queue.get(job_id)
-        if job is None or target not in input_targets(job.kind):
+        if job is None:
             return False
-        if source and self._queue.get(source) is None:
+        source_job = self._queue.get(source) if source else None
+        if source and source_job is None:
+            return False
+        # Unlinking is always allowed for an input that can be linked at all;
+        # linking also asks whether *this* source may fill it — a watched
+        # folder can be a converter's source, no other job's output can.
+        if source_job is not None:
+            if not accepts_link(job.kind, target, source_job.kind):
+                return False
+        elif target not in linkable_targets(job.kind):
             return False
         try:
             self._queue.set_link(job_id, target, source or None, kind=CHAIN_KIND)

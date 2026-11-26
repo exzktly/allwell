@@ -42,12 +42,14 @@ from datasets.nd2_import.controller import Nd2ImportController
 from datasets.ome_import.controller import OmeImportController
 from datasets.subset.controller import SubsetController
 from datasets.validate.controller import ValidateController
+from datasets.watch_folder.controller import WatchFolderController
 
 # Kinds a Datasets controller can queue itself under — registered against the
 # Job Queue page once every controller (including Analyze, injected from
 # outside) has been built.
 _QUEUEABLE_KINDS = ("concatenate", "ome_import", "czi_import", "nd2_import",
-                    "validate", "subset", "import_loose", "merge_plates")
+                    "validate", "subset", "import_loose", "merge_plates",
+                    "watch_folder")
 
 
 @dataclass(frozen=True)
@@ -120,6 +122,12 @@ def _build_merge_plates(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None]
     controller = MergePlatesController(
         on_open_in_review=tab._open_in_review, on_add_to_queue=tab._add_to_queue)
     tab._controllers["merge_plates"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_watch_folder(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = WatchFolderController(on_add_to_queue=tab._add_to_queue)
+    tab._controllers["watch_folder"] = controller
     return controller.page, controller.shutdown
 
 
@@ -209,6 +217,8 @@ _FEATURES: tuple[_Feature, ...] = (
              kind="import_loose"),
     _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates,
              kind="merge_plates"),
+    _Feature(name="Watch Folder", icon="eye", build=_build_watch_folder,
+             kind="watch_folder"),
     _Feature(name="Job Queue", icon="waypoints", build=_build_job_queue),
 )
 

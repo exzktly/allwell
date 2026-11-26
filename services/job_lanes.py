@@ -1,13 +1,17 @@
 """Which queued jobs may run at the same time.
 
-The Job Queue runs at most one job per **lane**. There are two lanes:
+The Job Queue runs at most one job per **lane**. There are three lanes:
 
 * ``"remote"`` — an Analyze job with a remote host set. Its pipeline runs on
   the remote machine; this computer stages, uploads and fetches, which costs
   disk and network but little CPU.
-* ``"local"`` — every other job: a local Analyze, and every Datasets tool.
+* ``"local"`` — a local Analyze, and every Datasets tool but Watch folder.
   Each of those works this computer's CPU and disk hard, and two at once
   would each run slower than the two in turn.
+* ``"watch"`` — a Watch folder job. It lists a folder every few seconds and
+  otherwise sleeps, for as long as an acquisition takes — hours. Holding the
+  local lane for that would keep every conversion queued behind it waiting for
+  the whole acquisition, so it has a lane of its own.
 
 So a remote Analyze can run alongside one local job — converting the next
 plate while the previous one is analysed on the cluster — and never two local
@@ -33,9 +37,10 @@ from services.job_kinds import planned_output
 
 LOCAL = "local"
 REMOTE = "remote"
+WATCH = "watch"
 #: Every lane. ``QueueBridge._advance`` asks each free one for its next job
 #: and starts the earliest of those in the queue first.
-LANES = (LOCAL, REMOTE)
+LANES = (LOCAL, REMOTE, WATCH)
 
 #: The spec keys each kind reads its input from. Analyze reads ``opts.raw``.
 _READ_KEYS = {
@@ -47,11 +52,18 @@ _READ_KEYS = {
     "czi_import": ("source",),
     "nd2_import": ("source",),
     "import_loose": ("source",),
+    "watch_folder": ("folder",),
 }
+
+#: Kinds that read and never write. A watch only lists its folder; counting
+#: the folder as written would hold every job that merely reads it back.
+_READ_ONLY_KINDS = frozenset({"watch_folder"})
 
 
 def run_lane(kind: str, spec: dict | None) -> str:
     """The lane a job of *kind* with *spec* runs in."""
+    if kind == "watch_folder":
+        return WATCH
     if kind == "analyze" and str((spec or {}).get("remote_name") or "").strip():
         return REMOTE
     return LOCAL
@@ -84,6 +96,8 @@ def folders(kind: str, spec: dict | None) -> tuple[set[str], set[str]]:
         root = os.path.dirname(raw) if os.path.basename(raw) == "in" else raw
         return {raw}, {root}
     reads = {_norm(spec.get(key)) for key in _READ_KEYS.get(kind, ())} - {""}
+    if kind in _READ_ONLY_KINDS:
+        return reads, set()
     written = planned_output(kind, spec)
     writes = {_norm(written)} - {""} if written else set()
     return reads, writes

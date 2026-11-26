@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from widgets.flow_layout import FlowLayout
 from datasets.core.log_panel import hrule as _hrule
-from services.job_kinds import KIND_LABEL
+from services.job_kinds import FOLDER_SOURCE_KINDS, KIND_LABEL, input_targets
 from services.job_queue import JobSpec, JobState, downstream_ids, lineage
 from datasets.job_queue.row import JobRow
 from widgets import menu_exec
@@ -43,7 +43,7 @@ from widgets.owned_action import owned_action
 # the Datasets tools in the order their own rail lists them.
 ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import",
              "nd2_import", "validate",
-             "subset", "import_loose", "merge_plates")
+             "subset", "import_loose", "merge_plates", "watch_folder")
 
 _STATE_WORD = {
     JobState.PENDING: "pending",
@@ -290,8 +290,10 @@ class JobQueuePage(QWidget):
             if row is not None:
                 downstream = downstream_ids(jobs, job.id)
                 row.update_from(job, ordinal=positions[job.id],
-                                predecessors=self._predecessors_for(job.id, jobs),
-                                below=self._below_for(job.id, jobs),
+                                predecessors=self._sources_for(
+                                    job, self._predecessors_for(job.id, jobs), jobs),
+                                below=self._sources_for(
+                                    job, self._below_for(job.id, jobs), jobs),
                                 others=self._others_for(job.id, jobs),
                                 positions=positions,
                                 finished_downstream=sum(
@@ -312,6 +314,22 @@ class JobQueuePage(QWidget):
                 break
             out.append((job.id, job.label or job.kind))
         return out
+
+    @staticmethod
+    def _sources_for(job: JobSpec, offered: list[tuple[str, str]],
+                     jobs: list[JobSpec]) -> list[tuple[str, str]]:
+        """*offered*, narrowed to the jobs that can be *job*'s input.
+
+        A kind that reads a dataset can take any job's output. A kind that
+        reads files — a converter, Zip loose — can take only a Watch folder
+        job's, since a watched folder is the one output that is files rather
+        than a dataset (``services.job_kinds.FOLDER_INPUT_TARGETS``).
+        """
+        if input_targets(job.kind):
+            return offered
+        kinds = {j.id: j.kind for j in jobs}
+        return [(jid, label) for jid, label in offered
+                if kinds.get(jid) in FOLDER_SOURCE_KINDS]
 
     @staticmethod
     def _below_for(job_id: str, jobs: list[JobSpec]) -> list[tuple[str, str]]:

@@ -43,6 +43,7 @@ from services.job_queue import (
     load_queue,
     save_queue,
 )
+from datasets.job_queue.recipe_actions import RecipeActions
 from datasets.job_queue.session import QueueSession
 from datasets.job_queue.view import JobQueuePage
 
@@ -652,6 +653,14 @@ class JobQueueController(QObject):
         self.page.moveDownRequested.connect(lambda job_id: self._on_move(job_id, 1))
         self.page.moveByRequested.connect(self._on_drag_move)
         self.page.showRequested.connect(self._on_show_requested)
+        self.recipes = RecipeActions(
+            self.bridge, state_dir=state_dir,
+            notify=lambda text, kind="warn": self._notify(text, kind),
+            parent_widget=lambda: self.page.window())
+        self.page.saveRecipeRequested.connect(self._on_save_recipe)
+        self.page.applyRecipeRequested.connect(self._on_apply_recipe)
+        self.page.deleteRecipeRequested.connect(self._on_delete_recipe)
+        self._show_recipes()
         self.bridge.queueChanged.connect(self._refresh_page)
         self._refresh_page()
 
@@ -1025,6 +1034,21 @@ class JobQueueController(QObject):
         self._refresh_page()
 
     # ── plumbing ─────────────────────────────────────────────────────────
+    # ── recipes ──────────────────────────────────────────────────────────
+    def _show_recipes(self) -> None:
+        self.page.set_recipes([(r.name, r.summary()) for r in self.recipes.recipes])
+
+    def _on_save_recipe(self, job_id: str) -> None:
+        if self.recipes.save_from(job_id) is not None:
+            self._show_recipes()
+
+    def _on_apply_recipe(self, name: str) -> None:
+        self.recipes.apply(name)
+
+    def _on_delete_recipe(self, name: str) -> None:
+        if self.recipes.delete(name):
+            self._show_recipes()
+
     def _notify(self, text: str, kind: str = "warn") -> None:
         """One seam for every "that did nothing, and here is why".
 

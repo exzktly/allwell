@@ -79,11 +79,16 @@ class JobQueuePage(QWidget):
     linkRequested = Signal(str, str, str)
     nextStepRequested = Signal(str, str, str)
     showRequested = Signal(str)
+    saveRecipeRequested = Signal(str)
+    applyRecipeRequested = Signal(str)
+    deleteRecipeRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._rows: dict[str, JobRow] = {}
         self._order: list[str] = []
+        #: (name, one-line chain) per saved recipe, for the Recipes menu.
+        self._recipes: list[tuple[str, str]] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -193,6 +198,17 @@ class JobQueuePage(QWidget):
         self._add_btn.clicked.connect(self._open_add_menu)
         hl.addWidget(self._add_btn)
 
+        # A plain button that opens a transient menu, as "+ Add job" does: it
+        # has no QMenu attached, so Qt draws no indicator and the label needs
+        # no caret (CLAUDE.md §7.12).
+        self._recipes_btn = QPushButton("Recipes", self)
+        self._recipes_btn.setProperty("variant", "secondary")
+        self._recipes_btn.setToolTip(
+            "Queue a saved chain of jobs on a new folder or file. Save a chain "
+            "from any of its jobs' ⋯ menu: “Save chain as recipe…”.")
+        self._recipes_btn.clicked.connect(self._open_recipes_menu)
+        hl.addWidget(self._recipes_btn)
+
         self._clear_btn = QPushButton("Clear completed", self)
         self._clear_btn.setToolTip(
             "Remove every finished job — succeeded, failed, cancelled or "
@@ -248,6 +264,39 @@ class JobQueuePage(QWidget):
             act.triggered.connect(lambda _checked=False, k=kind:
                                   self.addKindRequested.emit(k))
         return menu
+
+    def _open_recipes_menu(self) -> None:
+        menu = self.build_recipes_menu()
+        menu_exec.exec_transient_menu(
+            menu, self._recipes_btn.mapToGlobal(self._recipes_btn.rect().bottomLeft()))
+
+    def build_recipes_menu(self) -> QMenu:
+        """The Recipes menu, returned rather than opened (see
+        :meth:`build_add_menu`): one submenu per recipe, to apply or delete it."""
+        menu = QMenu(self)
+        menu.setObjectName("RecipesMenu")
+        if not self._recipes:
+            note = owned_action(menu, "No recipes yet — open a queued job's ⋯ menu "
+                                      "and choose “Save chain as recipe…”")
+            note.setEnabled(False)
+            return menu
+        for name, summary in self._recipes:
+            sub = QMenu(name, menu)
+            sub.setObjectName("RecipeMenu")
+            sub.setToolTip(summary)
+            menu.addMenu(sub)
+            info = owned_action(sub, summary)
+            info.setEnabled(False)
+            sub.addSeparator()
+            owned_action(sub, "Apply to…").triggered.connect(
+                lambda _checked=False, n=name: self.applyRecipeRequested.emit(n))
+            owned_action(sub, "Delete…").triggered.connect(
+                lambda _checked=False, n=name: self.deleteRecipeRequested.emit(n))
+        return menu
+
+    def set_recipes(self, recipes: list[tuple[str, str]]) -> None:
+        """The saved recipes the Recipes menu offers, as (name, chain)."""
+        self._recipes = list(recipes)
 
     # ── public API used by the controller ───────────────────────────────
     def _show_empty_hint(self) -> None:
@@ -363,6 +412,7 @@ class JobQueuePage(QWidget):
             row.moveDownClicked.connect(self.moveDownRequested)
             row.editClicked.connect(self.editRequested)
             row.duplicateClicked.connect(self.duplicateRequested)
+            row.saveRecipeClicked.connect(self.saveRecipeRequested)
             row.stopClicked.connect(self.stopJobRequested)
             row.retryClicked.connect(self.retryRequested)
             row.chainRequested.connect(self.chainRequested)

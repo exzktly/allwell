@@ -171,7 +171,7 @@ class Recipe:
 
 # ── templating ───────────────────────────────────────────────────────────────
 
-def _get_dotted(spec: dict, dotted: str):
+def _get_dotted(spec: dict, dotted: str) -> object | None:
     cur = spec
     for part in dotted.split("."):
         if not isinstance(cur, dict):

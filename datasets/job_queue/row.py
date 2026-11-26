@@ -131,6 +131,7 @@ class JobRow(QWidget):
     moveDownClicked = Signal(str)
     editClicked = Signal(str)
     duplicateClicked = Signal(str)
+    saveRecipeClicked = Signal(str)
     stopClicked = Signal(str)
     # (job_id, with the jobs that used its output too)
     retryClicked = Signal(str, bool)
@@ -388,6 +389,11 @@ class JobRow(QWidget):
 
         owned_action(menu, "Duplicate").triggered.connect(
             lambda: self.duplicateClicked.emit(self.job_id))
+
+        # Any job of a chain saves the whole chain: the jobs it reads from and
+        # the jobs that read from it (services.job_recipes).
+        owned_action(menu, "Save chain as recipe…").triggered.connect(
+            lambda: self.saveRecipeClicked.emit(self.job_id))
 
         # Only a job that ran can be retried: a pending one is already
         # waiting, a running one is already going, and a blocked one never ran

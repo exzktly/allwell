@@ -50,11 +50,15 @@ class WatchFolderController(DatasetToolController):
         self._poll_seconds = DEFAULT_POLL_SECONDS
 
         self.page = WatchFolderPage()
-        self.page.runRequested.connect(self._launch)
+        self.page.runRequested.connect(lambda: self._launch())
         self.page.queueRequested.connect(self._on_queue_requested)
 
     # ── run ──────────────────────────────────────────────────────────────────
-    def _launch(self) -> None:
+    def _launch(self, spec: dict | None = None) -> None:
+        """Start watching. *spec* is a queued job's own settings; without one
+        (Start watching on the page) the page's are used. A queued job's are
+        used as stored rather than read back off the page, whose spin boxes
+        round to what they display."""
         if self._worker is not None and self._worker.isRunning():
             return
         folder = self.page.folder_path()
@@ -72,7 +76,7 @@ class WatchFolderController(DatasetToolController):
             return
         self.page.clear_log()
         self.page.set_running(True)
-        spec = self.collect_spec()
+        spec = {**self.collect_spec(), **(spec or {}), "folder": folder}
         worker = WatchFolderWorker(
             folder,
             quiet_seconds=spec_quiet_seconds(spec),
@@ -111,7 +115,7 @@ class WatchFolderController(DatasetToolController):
         self.show_job(spec)
         poll = spec.get("poll_seconds")
         self._poll_seconds = float(poll) if poll else DEFAULT_POLL_SECONDS
-        self._launch()
+        self._launch(spec)
 
     # ── worker results ───────────────────────────────────────────────────────
     def _on_succeeded(self, folder: str, summary: str) -> None:

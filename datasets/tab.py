@@ -36,6 +36,7 @@ from widgets.page_stack import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
 from datasets.import_loose.controller import ImportLooseController
 from datasets.job_queue.controller import JobQueueController
+from datasets.job_queue.automation_view import QUEUE, RECIPES, AutomationPage
 from datasets.job_queue.recipes_controller import RecipesController
 from datasets.merge_plates.controller import MergePlatesController
 from datasets.czi_import.controller import CziImportController
@@ -140,6 +141,37 @@ def _build_open_in_review(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], Non
     return controller.page, controller.shutdown
 
 
+def _build_automation(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    """Automation: the Job Queue, Recipes and Runs as tabs of one page.
+
+    Built last, like the Job Queue it holds — every other feature's controller
+    already exists in ``tab._controllers`` when the queue registers them.
+    """
+    queue_page, queue_teardown = _build_job_queue(tab)
+    queue = tab._controllers["job_queue"]
+    holder: dict = {}
+
+    def show_tab(name: str) -> None:
+        tab._show_page("Automation")
+        holder["page"].show_tab(name)
+
+    recipes = RecipesController(queue.recipes, queue.bridge,
+                                state_dir=tab._queue_state_dir, show_tab=show_tab)
+    page = AutomationPage(queue_page, recipes.page, recipes.runs_page)
+    holder["page"] = page
+
+    def show_run(run_id: str) -> bool:
+        if run_id and recipes.select_run(run_id):
+            return True
+        show_tab(RECIPES)
+        return True
+
+    queue.set_recipes_page_hook(show_run)
+    tab._controllers["recipes"] = recipes
+    tab._automation = page
+    return page, queue_teardown
+
+
 def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
     """Built last — every other feature's controller already exists in
     ``tab._controllers`` by the time this registers them against the bridge."""
@@ -160,24 +192,6 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
     controller.set_reveal_hook(tab._reveal_page)
     _offer_queued_outputs(tab, controller)
     tab._controllers["job_queue"] = controller
-    return controller.page, controller.shutdown
-
-
-def _build_recipes(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
-    """After the Job Queue, whose recipe store and bridge it shares."""
-    queue = tab._controllers["job_queue"]
-    controller = RecipesController(
-        queue.recipes, queue.bridge, state_dir=tab._queue_state_dir,
-        show_queue=lambda: tab._show_page("Job Queue"))
-
-    def show(run_id: str) -> bool:
-        tab._show_page("Recipes")
-        if run_id and not controller.select_run(run_id):
-            controller.refresh()
-        return True
-
-    queue.set_recipes_page_hook(show)
-    tab._controllers["recipes"] = controller
     return controller.page, controller.shutdown
 
 
@@ -248,8 +262,7 @@ _FEATURES: tuple[_Feature, ...] = (
              kind="watch_folder"),
     _Feature(name="Open in Review", icon="bar-chart-3", build=_build_open_in_review,
              kind="open_in_review"),
-    _Feature(name="Job Queue", icon="waypoints", build=_build_job_queue),
-    _Feature(name="Recipes", icon="save", build=_build_recipes),
+    _Feature(name="Automation", icon="waypoints", build=_build_automation),
 )
 
 
@@ -399,6 +412,9 @@ class DatasetsTab(QWidget):
         queue_page = self._page_name_for(None)
         if queue_page is not None:
             self._show_page(queue_page)
+            automation = getattr(self, "_automation", None)
+            if automation is not None:
+                automation.show_tab(QUEUE)
 
     def _return_from_analyze(self, kind: str | None) -> None:
         """After the banner's Save or Cancel ended an Analyze session, go back

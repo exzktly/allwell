@@ -125,6 +125,5 @@ DATASETS_PAGE_HELP: dict[str, str] = {
     "Merge Plates": "Merge Plates",
     "Watch Folder": "Watch Folder",
     "Open in Review": "Open in Review",
-    "Job Queue": "Job Queue",
-    "Recipes": "Recipes",
+    "Automation": "Automation",
 }

@@ -60,7 +60,7 @@ to add features, how to debug, and build / environment troubleshooting), see
      [Merge Plates](#merge-plates) ·
      [Watch Folder](#watch-folder) ·
      [Open in Review](#open-in-review) ·
-     [Job Queue](#job-queue) · [Recipes](#recipes)
+     [Automation](#automation): [Job Queue](#job-queue) · [Recipes](#recipes)
 7. [Using All-Well from a phone](#using-all-well-from-a-phone)
 7. [Statistics primer: Rare responders](#statistics-primer-rare-responders) — the reasoning behind the
    Nanowells Statistics view's Rare responders test
@@ -10859,6 +10859,23 @@ The folder must hold an analysed dataset (`out/pipeline_info.json`, which
 Analyze writes last). Pointed at a conversion's output, the step fails and
 says there is nothing to show yet, rather than opening an empty plate.
 
+### Automation
+
+Everything about running work unattended is on one page, **Automation**, in
+three tabs:
+
+- **Queue** — the jobs: what is running now and what runs next (the
+  [Job Queue](#job-queue), below).
+- **Recipes** — the plans: chains of jobs saved to apply to each new
+  acquisition ([Recipes](#recipes)).
+- **Runs** — the record: every time a recipe was applied, how far it got and
+  its log, kept after the jobs are cleared from the queue.
+
+Each leads to the next: applying a recipe adds its jobs to Queue and takes you
+there; a job queued from a recipe opens its run in Runs (**Recipe log…** in its
+**⋯** menu); a recipe shows how often it was applied, and **Show runs** opens
+Runs filtered to it.
+
 ### Job Queue
 
 Lines up Analyze runs and Datasets-tool runs to work through unattended,
@@ -10980,7 +10997,7 @@ and choose **Apply “*name*”…**, then choose the folder (or, for a chain th
 starts with Convert ND2 or Convert OME-TIFF, the file) to run it on. The whole
 chain is queued, linked as before. Everything else about recipes — their
 steps, renaming, copying, sharing, deleting, and every run's log — is on the
-[Recipes](#recipes) page (**Recipes ▸ Manage recipes…**).
+[Recipes](#recipes) tab (**Recipes ▸ Manage recipes…**).
 
 Paths in the recipe follow the input you apply it to. The original input, a
 path inside it, and a path beside it **named after it** are rewritten for the
@@ -11004,29 +11021,33 @@ says what it left out. A chain — every job linked to the one you save from,
 in either direction — can be saved as a recipe only if it starts from one job
 (two watches feeding a Concatenate have two inputs, whichever of the three you
 save from) and that job has its input set. Every job queued from a recipe says so on its row ("recipe “Nightly” · step
-2/3"), and **Recipe log…** in its **⋯** menu opens that run on the Recipes page.
+2/3"), and **Recipe log…** in its **⋯** menu opens that run in the Runs tab.
 
 ### Recipes
 
-A recipe is a plan; the Job Queue holds the jobs a plan becomes. Apply a
-recipe and its jobs join the queue; the Recipes page is where the plans
-themselves are kept, and where you read afterwards what each use of one did.
+The **Recipes** tab of Automation keeps the plans themselves; the Queue tab
+holds the jobs a plan becomes, and the Runs tab what each use of one did.
 
 - **The list** — every saved recipe. Choose one to see its **steps** in order,
   each with its settings and where its input comes from ("source from step
   1"). Paths that follow the input are written as ‹input›, ‹input's folder› and
   ‹input name›; a fixed path is shown as it is.
 - **▶ Apply to…** queues the recipe on a folder or file you choose, as the
-  queue's own Recipes menu does.
+  queue's own Recipes menu does, and takes you to the Queue tab.
 - **Rename…**, **Duplicate** (a copy to change), **Export…** (a file to send
   to a colleague or another computer), **Delete…** (jobs already queued from it
   are not affected). **Import…** adds an exported recipe; one with the same
   name as yours is imported as "*name* (2)" rather than replacing it, and a
   file from a newer version of All-Well, or one that is damaged, is refused
   with the reason.
-- **Runs** — every time the recipe was applied, newest first: when, to what,
-  how many steps are done, and how it stands (waiting, running, paused,
-  interrupted, failed, cancelled, done). Choose one to read its **log**: when
+- Under the steps, how often the recipe was applied and how its last run
+  stands; **Show runs** opens the Runs tab filtered to it.
+
+**The Runs tab** lists every time a recipe was applied — all recipes, or one
+chosen in **Recipe** — newest first: when, to what, how many steps are done,
+and how it stands (waiting, running, paused, interrupted, failed, cancelled,
+done). A recipe since renamed or deleted keeps its runs, under the name it was
+applied with. Choose a run to read its **log**: when
   it was applied and to what, when each step started and on which folder,
   when the watch began receiving files and settled, which file the conversion
   chose, how each step ended and what it wrote, any pause, retry or removal,

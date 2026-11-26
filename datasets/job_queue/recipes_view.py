@@ -2,8 +2,8 @@
 
 Recipes are plans; the Job Queue holds the jobs a plan becomes. This page is
 where the plans live — the saved recipes, each one's steps and what they do,
-renaming, copying, sharing and deleting them — and where a plan's runs are
-read afterwards: every application of the recipe, how far it got, and its log.
+renaming, copying, sharing and deleting them — and where you go from a plan to
+its runs, which the Runs tab beside it lists.
 
 Pure view: it owns widgets and emits intent; ``recipes_controller`` wires it
 to :class:`~datasets.job_queue.recipe_actions.RecipeActions` and the queue.
@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -28,10 +27,9 @@ from ui import theme
 from datasets.core.log_panel import hrule as _hrule
 from widgets.flow_layout import FlowLayout
 
-#: The recipe and run lists' ceilings: enough for a handful of rows before
-#: they scroll, so the steps and the log below stay on screen.
+#: The recipe list's ceiling: enough for a handful of rows before it scrolls,
+#: so the selected recipe's steps below stay on screen.
 _RECIPE_LIST_MAX_H = 160
-_RUN_LIST_MAX_H = 128
 
 #: How a templated path reads on this page: what it stands for, not the token.
 _PLACEHOLDER_WORDS = (("{source_parent}", "‹input's folder›"),
@@ -50,14 +48,13 @@ class RecipesPage(QWidget):
     """The Recipes feature body."""
 
     recipeSelected = Signal(str)
-    runSelected = Signal(str)
+    showRunsRequested = Signal(str)
     applyRequested = Signal(str)
     renameRequested = Signal(str)
     duplicateRequested = Signal(str)
     exportRequested = Signal(str)
     deleteRequested = Signal(str)
     importRequested = Signal()
-    showQueueRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -79,7 +76,7 @@ class RecipesPage(QWidget):
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
 
-        heading = QLabel("Recipes", self)
+        heading = QLabel("Recipes", self)  # the Recipes tab of Automation
         heading.setObjectName("Heading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
@@ -100,11 +97,6 @@ class RecipesPage(QWidget):
         self._import_btn.setToolTip("Add a recipe exported from All-Well, here or elsewhere.")
         self._import_btn.clicked.connect(self.importRequested)
         tl.addWidget(self._import_btn)
-        self._queue_btn = QPushButton("Job Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
-        self._queue_btn.setToolTip("Go to the Job Queue, where applied recipes run.")
-        self._queue_btn.clicked.connect(self.showQueueRequested)
-        tl.addWidget(self._queue_btn)
         outer.addWidget(top)
 
         self._empty = QLabel(
@@ -164,22 +156,15 @@ class RecipesPage(QWidget):
         dl.addWidget(self._notes)
 
         dl.addWidget(_hrule(self._detail))
-        runs_title = QLabel("Runs", self._detail)
-        runs_title.setObjectName("SectionTitle")
-        dl.addWidget(runs_title)
-        self._no_runs = QLabel("Not applied yet.", self._detail)
-        self._no_runs.setObjectName("Muted")
-        dl.addWidget(self._no_runs)
-        self._runs = QListWidget(self._detail)
-        self._runs.setObjectName("RecipeRuns")
-        self._runs.setMaximumHeight(_RUN_LIST_MAX_H)
-        self._runs.currentItemChanged.connect(self._on_run_changed)
-        dl.addWidget(self._runs)
-        self._log = QPlainTextEdit(self._detail)
-        self._log.setObjectName("RecipeRunLog")
-        self._log.setReadOnly(True)
-        self._log.setVisible(False)
-        dl.addWidget(self._log, 1)
+        self._runs_line = QLabel("", self._detail)
+        self._runs_line.setObjectName("Muted")
+        self._runs_line.setWordWrap(True)
+        dl.addWidget(self._runs_line)
+        self._runs_btn = QPushButton("Show runs", self._detail)
+        self._runs_btn.setProperty("variant", "secondary")
+        self._runs_btn.setToolTip("Every time this recipe was applied, with each run's log.")
+        self._runs_btn.clicked.connect(lambda: self.showRunsRequested.emit(self._current))
+        dl.addWidget(self._runs_btn, 0, Qt.AlignLeft)
         outer.addWidget(self._detail)
         outer.addStretch(1)
 
@@ -217,38 +202,13 @@ class RecipesPage(QWidget):
         self._notes.setText(" ".join(notes))
         self._notes.setVisible(bool(notes))
 
-    def set_runs(self, runs: list[tuple[str, str]], select: str = "") -> None:
-        """Show (run id, one line) per run, newest first."""
-        keep = select or self.current_run()
-        self._runs.blockSignals(True)
-        self._runs.clear()
-        for run_id, line in runs:
-            item = QListWidgetItem(line)
-            item.setData(Qt.UserRole, run_id)
-            self._runs.addItem(item)
-        self._runs.blockSignals(False)
-        ids = [run_id for run_id, _line in runs]
-        self._no_runs.setVisible(not ids)
-        self._runs.setVisible(bool(ids))
-        if keep in ids:
-            self._runs.setCurrentRow(ids.index(keep))
-        else:
-            self._log.setVisible(False)
+    def set_runs_line(self, text: str, has_runs: bool) -> None:
+        """One line about the selected recipe's runs, and whether to offer them."""
+        self._runs_line.setText(text)
+        self._runs_btn.setVisible(has_runs)
 
-    def current_run(self) -> str:
-        item = self._runs.currentItem()
-        return str(item.data(Qt.UserRole)) if item is not None else ""
-
-    def show_log(self, text: str) -> None:
-        bar = self._log.verticalScrollBar()
-        at_end = bar.value() >= bar.maximum() - 2
-        self._log.setPlainText(text)
-        self._log.setVisible(bool(text))
-        if at_end:
-            bar.setValue(bar.maximum())
-
-    def log_text(self) -> str:
-        return self._log.toPlainText()
+    def runs_line(self) -> str:
+        return self._runs_line.text()
 
     def steps_text(self) -> str:
         return self._steps.text()
@@ -262,6 +222,3 @@ class RecipesPage(QWidget):
         if self._current:
             self.recipeSelected.emit(self._current)
 
-    def _on_run_changed(self, current, _previous) -> None:
-        if current is not None:
-            self.runSelected.emit(str(current.data(Qt.UserRole)))

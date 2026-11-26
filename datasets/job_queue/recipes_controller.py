@@ -1,4 +1,4 @@
-"""Wires the Recipes page to the recipe store, the queue and the run journals.
+"""Wires the Recipes and Runs tabs to the recipe store, the queue and the journals.
 
 The page shares the Job Queue's :class:`RecipeActions` rather than holding a
 second copy: a recipe saved from a queue row appears here at once, and one
@@ -18,7 +18,9 @@ from PySide6.QtCore import QObject
 from services import recipe_journal
 from services.job_kinds import KIND_LABEL, describe_detail, input_label
 from datasets.job_queue.recipe_actions import RecipeActions
+from datasets.job_queue.automation_view import QUEUE, RUNS
 from datasets.job_queue.recipes_view import RecipesPage, readable
+from datasets.job_queue.runs_view import ALL_RECIPES, RunsPage
 
 
 def _when(ts: float | None) -> str:
@@ -37,37 +39,51 @@ def run_line(summary: recipe_journal.RunSummary) -> str:
 
 
 class RecipesController(QObject):
-    """Behaviour for the Recipes page."""
+    """Behaviour for the Recipes and Runs tabs of Automation."""
 
     def __init__(self, actions: RecipeActions, bridge, *, state_dir=None,
-                 show_queue: Callable[[], None] | None = None,
+                 show_tab: Callable[[str], None] | None = None,
                  parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._actions = actions
         self._bridge = bridge
         self._state_dir = state_dir
-        self._show_queue = show_queue or (lambda: None)
+        self._show_tab = show_tab or (lambda _name: None)
 
         self.page = RecipesPage()
         self.page.recipeSelected.connect(self._show_recipe)
-        self.page.runSelected.connect(self._show_run)
         self.page.applyRequested.connect(self._on_apply)
         self.page.renameRequested.connect(self._on_rename)
         self.page.duplicateRequested.connect(self._on_duplicate)
         self.page.exportRequested.connect(self._on_export)
         self.page.deleteRequested.connect(self._actions.delete)
         self.page.importRequested.connect(self._on_import)
-        self.page.showQueueRequested.connect(self._show_queue)
+        self.page.showRunsRequested.connect(self.show_runs_of)
+
+        self.runs_page = RunsPage()
+        self.runs_page.filterChanged.connect(lambda _name: self._refresh_runs())
+        self.runs_page.runSelected.connect(self._show_run)
+
         actions.subscribe(self.refresh)
-        bridge.queueChanged.connect(self._refresh_runs)
+        bridge.queueChanged.connect(self._on_queue_changed)
         self.refresh()
 
-    # ── showing ──────────────────────────────────────────────────────────────
+    # ── recipes ──────────────────────────────────────────────────────────────
     def refresh(self, select: str = "") -> None:
+        names = [r.name for r in self._actions.recipes]
         self.page.set_recipes([(r.name, r.summary()) for r in self._actions.recipes],
                               select=select)
-        if not self._actions.recipes:
-            self.page.set_runs([])
+        self.runs_page.set_filters(self._run_names(names))
+        self._refresh_runs()
+
+    def _run_names(self, names: list[str]) -> list[str]:
+        """The filter's recipes: the saved ones, then any a run was applied
+        under that is no longer saved (renamed or deleted since)."""
+        seen = list(names)
+        for run in recipe_journal.list_runs(self._state_dir):
+            if run.name and run.name not in seen:
+                seen.append(run.name)
+        return seen
 
     def _show_recipe(self, name: str) -> None:
         recipe = self._actions.get(name)
@@ -84,36 +100,64 @@ class RecipesController(QObject):
         origin = (f"{recipe.summary()} · saved from {recipe.saved_from}"
                   if recipe.saved_from else recipe.summary())
         self.page.show_recipe(recipe.name, origin, lines, recipe.notes)
+        self._show_runs_line(name)
+
+    def _show_runs_line(self, name: str) -> None:
+        runs = recipe_journal.list_runs(self._state_dir, name=name)
+        if not runs:
+            self.page.set_runs_line("Not applied yet.", False)
+            return
+        last = runs[0]
+        times = "once" if len(runs) == 1 else f"{len(runs)} times"
+        self.page.set_runs_line(
+            f"Applied {times}; last on {_when(last.applied_at)} to "
+            f"{last.input} — {last.done}/{len(last.steps)} steps, {last.status}.", True)
+
+    # ── runs ─────────────────────────────────────────────────────────────────
+    def _on_queue_changed(self) -> None:
         self._refresh_runs()
+        current = self.page.current_recipe()
+        if current:
+            self._show_runs_line(current)
 
     def _refresh_runs(self, select: str = "") -> None:
-        name = self.page.current_recipe()
-        if not name:
-            return
-        runs = recipe_journal.list_runs(self._state_dir, name=name)
-        self.page.set_runs([(r.run, run_line(r)) for r in runs], select=select)
-        current = select or self.page.current_run()
+        name = self.runs_page.current_filter()
+        everything = name == ALL_RECIPES
+        runs = recipe_journal.list_runs(self._state_dir, name=None if everything else name)
+        self.runs_page.set_runs(
+            [(r.run, (f"{r.name} · " if everything else "") + run_line(r)) for r in runs],
+            select=select)
+        current = select or self.runs_page.current_run()
         if current:
             self._show_run(current)
 
     def _show_run(self, run_id: str) -> None:
-        self.page.show_log(self._actions.run_log_text(run_id))
+        self.runs_page.show_log(self._actions.run_log_text(run_id))
+
+    def show_runs_of(self, name: str) -> None:
+        """The Runs tab, filtered to *name*'s runs."""
+        self.runs_page.set_filter(name)
+        self._refresh_runs()
+        self._show_tab(RUNS)
 
     def select_run(self, run_id: str) -> bool:
-        """Show *run_id*: its recipe selected, the run selected, its log open.
-        Returns whether the run was found (a run of a recipe since deleted or
-        renamed still has a journal, under the name it was applied with)."""
+        """Show *run_id* in the Runs tab, its log open. Returns whether it was
+        found. The filter moves to the run's recipe, or to every recipe when
+        the run's name is not in it."""
         summary = recipe_journal.summarise(run_id, self._state_dir)
-        if summary is None or self._actions.get(summary.name) is None:
+        if summary is None:
             return False
-        self.refresh(select=summary.name)
+        self.runs_page.set_filters(self._run_names([r.name for r in self._actions.recipes]),
+                                   select=summary.name)
         self._refresh_runs(select=run_id)
+        self._show_tab(RUNS)
         return True
 
     # ── actions ──────────────────────────────────────────────────────────────
     def _on_apply(self, name: str) -> None:
         if self._actions.apply(name):
-            self._refresh_runs()
+            # The jobs it added are what to look at next.
+            self._show_tab(QUEUE)
 
     def _on_rename(self, name: str) -> None:
         new = self._ask_rename(name)
@@ -157,6 +201,3 @@ class RecipesController(QObject):
         path, _filter = QFileDialog.getOpenFileName(
             self.page.window(), "Import recipe", "", "All-Well recipe (*.json)")
         return path
-
-    def shutdown(self) -> None:
-        """Nothing runs here; present for the page roster's teardown."""

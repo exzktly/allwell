@@ -512,7 +512,7 @@ def test_current_help_page_names_the_selected_tool(qapp, tmp_path):
         # the assertion read back what the test itself wrote; the rail's own
         # currentChanged is what moves the stack in the app, so letting it do
         # that is the thing worth checking.
-        for name in ("Merge Plates", "Job Queue", "Validate & Repair"):
+        for name in ("Merge Plates", "Automation", "Validate & Repair"):
             tab._nav.setCurrentKey(name)
             assert tab.current_help_page() == name
             assert tab._pages.currentName() == name, "the rail did not move the page"

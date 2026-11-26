@@ -155,11 +155,19 @@ def test_applying_from_the_page_lists_the_run_and_its_log(tab, tmp_path, monkeyp
     recipes.page.button("apply").click()
     jobs = queue.bridge.queue.jobs
     assert [j.kind for j in jobs] == ["watch_folder", "nd2_import", "open_in_review"]
+    # The jobs it added are what to look at next.
+    assert tab._automation.current_tab() == "Queue"
     run = jobs[0].recipe["run"]
+    assert recipes.page.runs_line().startswith("Applied once; last on ")
+    assert recipes.page.runs_line().endswith("— 0/3 steps, waiting.")
+    recipes.page.showRunsRequested.emit("Nightly")
+    assert tab._automation.current_tab() == "Runs"
+    assert recipes.runs_page.current_filter() == "Nightly"
+    assert len(recipes.runs_page.run_lines()) == 1
     recipes._refresh_runs(select=run)
-    assert recipes.page.current_run() == run
-    assert "applied “Nightly”" in recipes.page.log_text()
-    assert "0/3 steps done, waiting" in recipes.page.log_text()
+    assert recipes.runs_page.current_run() == run
+    assert "applied “Nightly”" in recipes.runs_page.log_text()
+    assert "0/3 steps done, waiting" in recipes.runs_page.log_text()
 
 
 def test_a_row_s_recipe_log_opens_its_run_on_the_page(tab, tmp_path, monkeypatch):
@@ -171,9 +179,10 @@ def test_a_row_s_recipe_log_opens_its_run_on_the_page(tab, tmp_path, monkeypatch
     job = queue.bridge.queue.jobs[1]
     menu = queue.page._rows[job.id].build_menu()
     next(a for a in menu.actions() if a.text() == "Recipe log…").trigger()
-    assert tab._pages.currentWidget() is recipes.page
-    assert recipes.page.current_run() == job.recipe["run"]
-    assert "applied “Nightly”" in recipes.page.log_text()
+    assert tab._pages.currentWidget() is tab._automation
+    assert tab._automation.current_tab() == "Runs"
+    assert recipes.runs_page.current_run() == job.recipe["run"]
+    assert "applied “Nightly”" in recipes.runs_page.log_text()
 
 
 def test_rename_duplicate_export_import_from_the_page(tab, tmp_path, monkeypatch):
@@ -326,3 +335,26 @@ def test_a_retried_step_no_longer_offers_what_it_wrote_before(tmp_path):
             ("retried", {"step": 0}))
     s = recipe_journal.summarise("r2", tmp_path)
     assert (s.steps, s.results()) == (["waiting"], [])
+
+
+def test_runs_of_a_deleted_recipe_stay_listed_under_their_name(tab, tmp_path, monkeypatch):
+    _quiet(tab, monkeypatch)
+    recipes = _with_recipe(tab, tmp_path)
+    queue = tab._controllers["job_queue"]
+    monkeypatch.setattr(queue.recipes, "_ask_input", lambda recipe: str(tmp_path / "run8"))
+    queue.recipes.apply("Nightly")
+    monkeypatch.setattr(queue.recipes, "_confirm_delete", lambda name: True)
+    queue.recipes.delete("Nightly")
+    assert recipes.runs_page.current_filter() == "All recipes"
+    lines = recipes.runs_page.run_lines()
+    assert len(lines) == 1 and lines[0].startswith("Nightly · ")
+
+
+def test_the_page_is_one_sidebar_entry_with_three_tabs(tab):
+    from datasets.tab import _FEATURES
+
+    names = [f.name for f in _FEATURES]
+    assert "Automation" in names and "Job Queue" not in names and "Recipes" not in names
+    page = tab._automation
+    assert [page.tabs.tabText(i) for i in range(page.tabs.count())] == ["Queue", "Recipes", "Runs"]
+    assert page.tabs.widget(0) is tab._controllers["job_queue"].page

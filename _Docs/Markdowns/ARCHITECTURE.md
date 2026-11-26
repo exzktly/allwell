@@ -1368,8 +1368,10 @@ allwell/
 │   ├── job_queue/              ← the queue the ten tools (and Analyze) submit runs to;
 │   │                              projection.py: what a queued job will write, for
 │   │                              the next step set up before it runs; recipe_actions.py:
-│   │                              the recipe store's actions; recipes_view.py +
-│   │                              recipes_controller.py: the Recipes page
+│   │                              the recipe store's actions; automation_view.py: the
+│   │                              Automation page (Queue · Recipes · Runs tabs);
+│   │                              recipes_view.py + runs_view.py + recipes_controller.py:
+│   │                              the Recipes and Runs tabs
 │   ├── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
 │   ├── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
 │   │                              per-scene ones → dataset folder; wells read from the
@@ -21365,7 +21367,7 @@ Qt event loop. Four layers:
   asking for a name, then replaces a recipe of the same name),
   `apply(name, source=None)`, `rename`, `duplicate`, `export_to`,
   `import_from` and `delete`, each saving through `_changed`, which also calls
-  every `subscribe`d listener — the queue's Apply menu and the Recipes page
+  every `subscribe`d listener — the queue's Apply menu and the Recipes tab
   both listen, so a change on either shows on the other. `run_of(job_id)` and
   `run_log_text(run_id)` serve the run logs. The three questions are one method each — `_ask_name`
   (`QInputDialog`), `_ask_input` (a file or folder dialog per `wants_file`) and
@@ -21378,27 +21380,41 @@ Qt event loop. Four layers:
   indicator) whose menu, `JobQueuePage.build_recipes_menu`, lists **Apply
   “name”…** per recipe and **Manage recipes…**, and each row's ⋯ menu has
   **Save chain as recipe…** and, for a job queued from a recipe, **Recipe
-  log…**. Both of the last two open the Recipes page through the hook
-  `DatasetsTab` installs (`JobQueueController.set_recipes_page_hook`), with the
-  run selected. Deleting a recipe and reading a run's log are deliberately not
-  offered in the queue as well: a plan and its history belong on the plan's
-  page, and the same action in two places is two things to keep in step.
+  log…**. **Manage recipes…** opens the Recipes tab and **Recipe log…** the
+  Runs tab with that run selected, through the hook `DatasetsTab` installs
+  (`JobQueueController.set_recipes_page_hook`). Deleting a recipe and reading a
+  run's log are deliberately not offered in the queue as well: a plan and its
+  history have their own tabs, and the same action in two places is two things
+  to keep in step.
 
-- **`datasets/job_queue/recipes_view.py` + `recipes_controller.py`** — the
-  Recipes page: recipes are plans, the queue holds the jobs a plan becomes,
-  and this page holds the plans and their runs. The view lists the recipes,
-  shows the selected one's steps (each `describe_detail` with its placeholders
-  written as ‹input›, ‹input's folder›, ‹input name› by `readable`, and
-  "*input* from step *n*" per link), its notes, and its runs
-  (`recipe_journal.list_runs(name=…)`, newest first, each "when · input · done/
-  steps · status"), with the selected run's log (`RecipeActions.run_log_text`).
-  Apply, Rename, Duplicate, Export, Import and Delete go to the shared store;
-  rename, export and import paths are asked through one seam each
-  (`_ask_rename`, `_ask_export_path`, `_ask_import_path`). Runs re-read on
-  every `queueChanged`, so a run in progress updates in place. The page is a
-  `_Feature` with no `kind`, built after the Job Queue, whose store and bridge
-  it is handed (`datasets.tab._build_recipes`); `select_run(run_id)` is what the
-  queue's hook calls.
+- **`datasets/job_queue/automation_view.py`** — `AutomationPage`, the
+  **Automation** sidebar entry: a `QTabWidget` (tab bar `AutomationSubTabs`,
+  styled with the other sub-tab bars in `ui/theme.py`) holding three different
+  kinds of thing about unattended work — **Queue** (the jobs: `JobQueuePage`),
+  **Recipes** (the plans) and **Runs** (the record of each plan's uses) —
+  together because each leads to the next. `show_tab(name)` is the one way to
+  move between them. `datasets.tab._build_automation` builds it as the last
+  `_Feature` (no `kind`): it builds the Job Queue (`_build_job_queue`, which
+  must still come after every tool), then the `RecipesController` on the
+  queue's store and bridge, and installs the queue's hook. `_end_session`
+  returns to the Queue tab, since `_page_name_for(None)` is now Automation.
+
+- **`datasets/job_queue/recipes_view.py` + `runs_view.py` +
+  `recipes_controller.py`** — the Recipes and Runs tabs, one controller for
+  both. Recipes lists the recipes and shows the selected one's steps (each
+  `describe_detail` with its placeholders written as ‹input›, ‹input's folder›,
+  ‹input name› by `readable`, and "*input* from step *n*" per link), its notes,
+  and a line on its runs (how often applied, how the last run stands) with
+  **Show runs**, which opens Runs filtered to it (`show_runs_of`). Apply (which
+  then shows the Queue tab), Rename, Duplicate, Export, Import and Delete go to
+  the shared store; rename, export and import paths are asked through one seam
+  each (`_ask_rename`, `_ask_export_path`, `_ask_import_path`). Runs lists
+  `recipe_journal.list_runs`, newest first, all recipes or one (the filter also
+  offers names no saved recipe has any more, so a renamed or deleted recipe's
+  runs stay reachable), each "when · input · done/steps · status", and the
+  selected run's log (`RecipeActions.run_log_text`). Runs re-read on every
+  `queueChanged`, so a run in progress updates in place. `select_run(run_id)`
+  is what the queue's hook calls.
 
 - **`datasets/job_queue/projection.py`** — what a queued job is expected to
   write, before it has run, for the pages that build their controls from the
@@ -21529,8 +21545,8 @@ would leave it believing one was live and willing to save it later.
 
 `datasets/tab.py` wires all of this: each of the seven Datasets controllers is
 constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
-`tab._controllers[kind]`; the `"Job Queue"` `_Feature` entry is built **last**
-so `_build_job_queue` can register every already-built controller (plus the
+`tab._controllers[kind]`; the `"Automation"` `_Feature` entry, which holds the
+Job Queue, is built **last** so `_build_job_queue` can register every already-built controller (plus the
 injected `AnalyzeTab`, under kind `"analyze"`) against a single
 `JobQueueController`. `allwell.py` injects the already-built `AnalyzeTab` as
 `DatasetsTab(analyze_controller=...)` the same way it injects

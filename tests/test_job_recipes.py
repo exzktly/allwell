@@ -247,12 +247,13 @@ def test_the_recipes_menu_explains_itself_when_empty(tab):
     assert actions[1].text() == "Manage recipes…"
 
 
-def test_manage_recipes_opens_the_recipes_page(tab):
+def test_manage_recipes_opens_the_recipes_tab(tab):
     controller = tab._controllers["job_queue"]
     manage = next(a for a in controller.page.build_recipes_menu().actions()
                   if a.text() == "Manage recipes…")
     manage.trigger()
-    assert tab._pages.currentWidget() is tab._controllers["recipes"].page
+    assert tab._pages.currentWidget() is tab._automation
+    assert tab._automation.current_tab() == "Recipes"
 
 
 def test_deleting_a_recipe_asks_first(tab, tmp_path, monkeypatch):

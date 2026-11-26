@@ -1457,14 +1457,16 @@ QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
    generic QTabBar::tab rule and were indistinguishable from the top level. */
 QTabBar#HomeSubTabs::tab,
 QTabBar#ImageBrowserSubTabs::tab,
-QTabBar#PlottingSubTabs::tab {{
+QTabBar#PlottingSubTabs::tab,
+QTabBar#AutomationSubTabs::tab {{
     padding: {s.xs}px {s.md}px;
     min-width: 72px;
     color: {c.text_secondary};
 }}
 QTabBar#HomeSubTabs::tab:selected,
 QTabBar#ImageBrowserSubTabs::tab:selected,
-QTabBar#PlottingSubTabs::tab:selected {{
+QTabBar#PlottingSubTabs::tab:selected,
+QTabBar#AutomationSubTabs::tab:selected {{
     color: {c.text_primary};
     border-bottom: 2px solid {c.accent};
 }}

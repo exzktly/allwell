@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 
 from util.aw_safe import swallowed
 from datasets.core.tool_controller import DatasetToolController
@@ -34,6 +34,18 @@ class WatchFolderController(DatasetToolController):
 
     _shutdown_label = "watch folder"
 
+    #: The countdown, for the watch's row in the queue
+    #: (``QueueBridge._on_status_text``).
+    statusText = Signal(str)
+
+    #: What a paused watch's row says (``QueueBridge.suspend_current``). A
+    #: watch has nothing to finish: it stops looking, and starting the queue
+    #: again watches afresh.
+    suspending_message = "pausing — stopping the watch"
+    suspended_message = ("paused — watches the folder again when the queue "
+                         "starts; with “Wait for new files” on it waits for a "
+                         "new change")
+
     def __init__(
         self,
         *,
@@ -48,6 +60,9 @@ class WatchFolderController(DatasetToolController):
         #: reason to change it — but a spec may carry ``poll_seconds``, which
         #: is how a test watches a folder without waiting five seconds a look.
         self._poll_seconds = DEFAULT_POLL_SECONDS
+        #: Set by :meth:`suspend` for the run it stopped, so the queue can tell
+        #: a Pause from a Stop (``QueueBridge._was_suspended``).
+        self._suspended = False
 
         self.page = WatchFolderPage()
         self.page.runRequested.connect(lambda: self._launch())
@@ -74,6 +89,7 @@ class WatchFolderController(DatasetToolController):
             except Exception:
                 swallowed()
             return
+        self._suspended = False
         self.page.clear_log()
         self.page.set_running(True)
         spec = {**self.collect_spec(), **(spec or {}), "folder": folder}
@@ -86,6 +102,7 @@ class WatchFolderController(DatasetToolController):
         )
         worker.logLine.connect(self.page.append_log)
         worker.status.connect(self.page.show_status)
+        worker.status.connect(lambda status: self.statusText.emit(status.sentence()))
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)
@@ -116,6 +133,22 @@ class WatchFolderController(DatasetToolController):
         poll = spec.get("poll_seconds")
         self._poll_seconds = float(poll) if poll else DEFAULT_POLL_SECONDS
         self._launch(spec)
+
+    def suspend(self) -> None:
+        """Pause, as the queue's Pause asks of every runner that can.
+
+        Without this the queue fell back to a plain Stop, which marks a watch
+        cancelled and blocks every job chained after it — so pausing the queue
+        to hold back local work threw away a watch that may have been running
+        for hours, and the whole chain had to be retried. A watch keeps no
+        progress, so suspending is stopping and being picked up again.
+        """
+        if self.is_busy():
+            self._suspended = True
+            self.stop()
+
+    def was_suspended(self) -> bool:
+        return self._suspended
 
     # ── worker results ───────────────────────────────────────────────────────
     def _on_succeeded(self, folder: str, summary: str) -> None:

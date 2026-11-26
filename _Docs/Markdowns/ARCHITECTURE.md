@@ -20578,14 +20578,15 @@ no state between runs: one interrupted by the app closing starts again from
 scratch when the queue resumes it, so with `require_change` it waits for a
 change it may already have missed. The row then keeps saying it is waiting,
 which is visible rather than wrong, and unticking the option fixes it; carrying
-the first start time on the job would be the way to close it.
+the first start time on the job would be the way to close it. A watch paused
+and started again behaves the same way.
 
 | Module | Role |
 |--------|------|
 | `watch_folder_compute.py` | Qt-free. `snapshot(folder)` — every data file below the folder as relative path → `(size, mtime_ns)`, or `None` for a folder that does not exist (a watch can be set up before the acquisition software creates it); housekeeping files and hidden folders are left out through `datasets.core.watched_source.is_ignored`, so Finder's `.DS_Store` does not restart the countdown each time someone looks. `SettleTracker(quiet_seconds, require_change=)` is fed one snapshot per poll with a monotonic time and answers a `WatchStatus` whose phase is `missing`, `waiting` (no change yet, with `require_change`), `settling` or `settled`: settled once the folder holds at least one file and nothing has changed for the quiet period, and with `require_change` only after at least one change since the watch began, so a watch armed before an acquisition never fires on the previous one's files. Settled is final. Polling rather than OS change notifications is deliberate: the folders are usually network shares or USB drives, where notifications are unreliable, and a watch that silently never fires is the worse failure. `poll_interval` stretches the interval to twice a slow scan. |
 | `worker.py` | `WatchFolderWorker(QThread)`: snapshot, observe, emit `status` and a log line per phase change, sleep in 100 ms slices so a Stop is answered at once. Ends with `succeeded(folder, summary)`, or `failed` — "Cancelled — …" for a Stop, which the bridge reads as a cancellation, and "Gave up after …" when the give-up time passes. |
 | `view.py` | `WatchFolderPage`: folder (a path that does not exist yet is valid and says so in a muted note), quiet minutes, **Wait for new files before counting**, **Give up after (hours, 0 = never)**, **▶ Start watching** / **+ Queue**, a live status line, and the shared raw log. |
-| `controller.py` | `WatchFolderController(DatasetToolController)`. `start_from_queue` passes the queued spec straight to the worker rather than reading it back off the page, whose spin boxes round to one decimal; a spec may carry `poll_seconds`, which only tests set. Reports the watched folder as the job's output. |
+| `controller.py` | `WatchFolderController(DatasetToolController)`. `start_from_queue` passes the queued spec straight to the worker rather than reading it back off the page, whose spin boxes round to one decimal; a spec may carry `poll_seconds`, which only tests set. Reports the watched folder as the job's output, and each status sentence through `statusText` for its queue row. `suspend` / `was_suspended` make the queue's Pause a pause for a watch: without them Pause fell back to Stop, which cancelled the watch and blocked every job chained after it. A watch keeps no progress, so a resumed watch starts looking afresh. |
 
 A converter linked to a watch is handed the watched folder as its `source`.
 `datasets/core/watched_source.py` decides what that means when the conversion
@@ -20869,6 +20870,14 @@ Qt event loop. Four layers:
   directly (a `_launch()` split out of `_on_run()` so `start_from_queue` can
   skip the interactive restart/in-place confirmation a queued, unattended run
   has no one to answer); so does `AnalyzeTab`.
+
+  A runner may also declare a `statusText(str)` signal; `register` connects it
+  to `_on_status_text`, which puts the text on the running job's row as its
+  message without saving on each tick. The watch uses it for its countdown,
+  which can run for hours. `suspend_current` and the suspended branch of
+  `_on_job_finished` take a runner's own `suspending_message` /
+  `suspended_message` when it has them, since "finishing the current field" is
+  Analyze's wording.
 
   `QueueBridge` owns the persisted `JobQueue` and a `kind -> QueueableController`
   registry, and is the only thing that actually starts a job. It runs at
@@ -21235,19 +21244,31 @@ Qt event loop. Four layers:
 
 - **`services/job_recipes.py`** — recipes: a chain in the queue saved as a
   template and queued again on a new input, Qt-free. `recipe_from_chain(name,
-  jobs, job_id)` takes the job's `lineage` in queue order, refuses a chain that
-  starts from more than one job (a recipe has one parameter, its input) or
-  whose first job has no input set (`ROOT_INPUT` says where each kind holds
-  it), and records each step's `kind`, a templated copy of its `spec`, and
-  its links as `RecipeLink(target, step)` — by position in the chain, never by
-  job id. A link to a job outside the chain is not kept and is noted. Every
-  string in every spec is templated on the input: the input itself becomes
-  `{source}`, a path inside it `{source}/…`, and a path beside it
-  `{source_parent}/…` with whole-token occurrences of the input's name
-  (`source_name`, which takes a known file extension off and leaves a folder's
-  dots alone) replaced by `{source_name}` — so `/scope/run7_dataset` saved from
-  `/scope/run7` comes back as `/scope/run8_dataset`. A path unrelated to the
-  input is kept verbatim.
+  jobs, job_id)` takes the job's whole connected group (`connected`: every job
+  reachable through links in either direction, in queue order) — not its
+  `lineage`, which from one of two watches feeding a Concatenate left the other
+  watch out, so whether a chain could be saved depended on which job it was
+  saved from. It refuses a chain that starts from more than one job (a recipe
+  has one parameter, its input) or whose first job has no input set
+  (`ROOT_INPUT` says where each kind holds it), and records each step's `kind`,
+  a templated copy of its `spec`, and its links as `RecipeLink(target, step)` —
+  by position in the chain, never by job id. Every string in every spec is
+  templated on the input: the input itself becomes `{source}`, a path inside it
+  `{source}/…`, and a path beside it `{source_parent}/…` **only when it carries
+  the input's name** as a whole token (`source_name`, which takes a known file
+  extension off and leaves a folder's dots alone; `_replace_name`) — so
+  `/scope/run7_dataset` saved from `/scope/run7` comes back as
+  `/scope/run8_dataset`, while `/scope/reference_plate` is the protocol's and is
+  kept verbatim. `_relative_inside` handles a parent at a filesystem or drive
+  root, and `_fill_value` joins a placeholder back with `os.path.join`;
+  templating every path under the parent once rewrote every absolute path in a
+  chain whose input sat at `/` or `E:\`. `_check_outputs_follow` refuses a step
+  whose own new folder (`planned_output` equal to its `destination`) carries no
+  placeholder: a conversion set up on an earlier acquisition proposes that
+  acquisition's `<name>_dataset`, every use of the recipe would write there, and
+  the converter refuses a destination holding another plate's wells
+  (`convert_marker.destination_problem`), so it would fail from the second use
+  on.
 
   `_drop_run_specific` removes what belongs to one acquisition, each with the
   reason `DROPPED` states and a note on the recipe: a converter's

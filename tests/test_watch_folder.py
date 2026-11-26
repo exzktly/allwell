@@ -319,3 +319,42 @@ def test_only_a_watch_can_feed_a_converter(queue):
     assert bridge.set_chain("c", "w") is True
     assert [(link.source, link.target) for link in bridge.queue.get("c").links()] == [
         ("w", "source")]
+
+
+# ── review findings ───────────────────────────────────────────────────────────
+
+def test_pausing_the_queue_keeps_a_watch_and_its_chain(queue, qtbot, tmp_path):
+    """Pause fell back to Stop for a watch, cancelling it and blocking every
+    job chained after it."""
+    bridge, watch, nd2, _czi = queue
+    scope = tmp_path / "run7"
+    scope.mkdir()
+    bridge.add_job(JobSpec(id="w", kind="watch_folder", label="w",
+                           spec=_fast({"folder": str(scope), "quiet_minutes": 10.0})))
+    bridge.add_job(JobSpec(id="c", kind="nd2_import", label="c",
+                           spec={"source": "/old/a.nd2", "destination": str(tmp_path / "o")}),
+                   [ChainLink("w", "source", CHAIN_KIND)])
+    bridge.start()
+    qtbot.waitUntil(watch.is_busy, timeout=2000)
+    assert bridge.suspend_current() is True
+    qtbot.waitUntil(lambda: not watch.is_busy(), timeout=3000)
+    qtbot.wait(100)
+    assert bridge.queue.get("w").state == JobState.SUSPENDED
+    assert "watches the folder again" in bridge.queue.get("w").message
+    assert bridge.queue.get("c").state == JobState.PENDING
+    assert nd2.started == []
+    bridge.start()
+    qtbot.waitUntil(lambda: bridge.queue.get("w").state == JobState.RUNNING, timeout=2000)
+
+
+def test_a_running_watch_shows_its_countdown_on_its_row(queue, qtbot, tmp_path):
+    bridge, watch, _nd2, _czi = queue
+    scope = tmp_path / "run7"
+    scope.mkdir()
+    (scope / "old.nd2").write_bytes(b"x")
+    bridge.add_job(JobSpec(id="w", kind="watch_folder", label="w",
+                           spec=_fast({"folder": str(scope), "quiet_minutes": 10.0})))
+    bridge.start()
+    qtbot.waitUntil(lambda: bridge.queue.get("w").message.startswith("Waiting for new files"),
+                    timeout=3000)
+    assert bridge.queue.get("w").message == "Waiting for new files (1 file there now)…"

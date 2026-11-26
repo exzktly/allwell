@@ -112,6 +112,24 @@ class QueueBridge(QObject):
         started = getattr(runner, "runStarted", None)
         if started is not None:
             started.connect(lambda spec, k=kind: self._on_run_started(k, spec))
+        status = getattr(runner, "statusText", None)
+        if status is not None:
+            status.connect(lambda text, k=kind: self._on_status_text(k, text))
+
+    def _on_status_text(self, kind: str, text: str) -> None:
+        """Show a running job's own status line on its row.
+
+        Optional: a runner that has a one-line status worth reading from the
+        queue — a watch's countdown, which can run for hours — declares a
+        ``statusText(str)`` signal. Not saved on each tick; the next save
+        writes it, and finishing the job replaces it.
+        """
+        entry = self._running.get(kind)
+        job = self._queue.get(entry[0]) if entry else None
+        if job is None or job.state != JobState.RUNNING or job.message == text:
+            return
+        job.message = text
+        self.queueChanged.emit()
 
     def _on_run_started(self, kind: str, spec: dict) -> None:
         """Take in a run started on its tool's own page.
@@ -459,8 +477,10 @@ class QueueBridge(QObject):
             # Marked here rather than waiting for jobFinished: the run may take
             # a while to wind down, and the row should say what is happening
             # now. _on_job_finished sees the state is already SUSPENDED and
-            # leaves it.
-            self._queue.mark_suspended(job_id, "suspending — finishing the current field")
+            # leaves it. A runner may say in its own words what winding down
+            # means for it (a watch has no field to finish).
+            self._queue.mark_suspended(job_id, getattr(
+                runner, "suspending_message", "suspending — finishing the current field"))
         if not suspended:
             return False
         self._save()
@@ -546,7 +566,8 @@ class QueueBridge(QObject):
             # Suspended, not cancelled: the job keeps its place and its
             # progress, its successors keep waiting rather than blocking, and
             # the queue stays paused until the user starts it again.
-            self._queue.mark_suspended(job_id)
+            self._queue.mark_suspended(
+                job_id, getattr(self._runners.get(kind), "suspended_message", ""))
             self._save()
             self.queueChanged.emit()
             self.pause()

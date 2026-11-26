@@ -168,7 +168,7 @@ def test_a_damaged_recipe_is_refused_rather_than_half_queued():
 def test_which_input_a_recipe_asks_for():
     assert recipe_from_chain("r", _chain(), "w").wants_file() is False
     jobs = [JobSpec(id="c", kind="nd2_import", label="c",
-                    spec={"source": "/s/a.nd2", "destination": "/d/a"})]
+                    spec={"source": "/s/a.nd2", "destination": "/s/a_dataset"})]
     assert recipe_from_chain("r", jobs, "c").wants_file() is True
 
 
@@ -306,3 +306,64 @@ def test_a_saved_recipe_survives_a_new_session(tab, tmp_path):
     actions = RecipeActions(tab._controllers["job_queue"].bridge, state_dir=tmp_path / "state",
                             notify=lambda *a: None, parent_widget=lambda: None)
     assert [r.name for r in actions.recipes] == ["Kept"]
+
+
+# ── review findings ───────────────────────────────────────────────────────────
+
+def test_an_input_at_a_filesystem_root_templates_only_what_follows_it():
+    """With the input's parent at ``/`` every absolute path used to look like
+    it sat beside the input, losing its separator on the way back out."""
+    jobs = _chain(root="/run7")
+    jobs[1].spec["destination"] = "/run7_dataset"
+    jobs[2].spec["opts"]["raw"] = "/run7_dataset"
+    recipe = recipe_from_chain("r", jobs, "w")
+    assert recipe.steps[1].spec["destination"] == "{source_parent}/{source_name}_dataset"
+    assert recipe.steps[2].spec["opts"]["reference"] == "/refs/flat.tif"
+    planned = instantiate(recipe, "/scope/run8", iter("WCA").__next__)
+    convert, analyze = planned[1][0], planned[2][0]
+    assert convert.spec["destination"] == "/scope/run8_dataset"
+    assert analyze.spec["opts"]["reference"] == "/refs/flat.tif"
+
+
+def test_a_shared_reference_beside_the_input_is_kept():
+    q = JobQueue()
+    q.add(JobSpec(id="w", kind="watch_folder", label="w", spec={"folder": "/scope/run7"}))
+    q.add(JobSpec(id="c", kind="concatenate", label="c", spec={
+        "dataset1": "/scope/run7", "dataset2": "/scope/reference_plate",
+        "destination": "/scope/run7_with_reference"}))
+    q.set_link("c", "dataset1", "w", kind=CHAIN_KIND)
+    recipe = recipe_from_chain("r", q.jobs, "w")
+    job = instantiate(recipe, "/other/run8", iter("WC").__next__)[1][0]
+    assert job.spec["dataset2"] == "/scope/reference_plate"
+    assert job.spec["destination"] == "/other/run8_with_reference"
+
+
+def _two_watches_into_one_concatenate() -> list[JobSpec]:
+    q = JobQueue()
+    q.add(JobSpec(id="w1", kind="watch_folder", label="w1", spec={"folder": "/scope/plateA"}))
+    q.add(JobSpec(id="w2", kind="watch_folder", label="w2", spec={"folder": "/scope/plateB"}))
+    q.add(JobSpec(id="c", kind="concatenate", label="c", spec={
+        "dataset1": "/scope/plateA", "dataset2": "/scope/plateB",
+        "destination": "/scope/plateA_joined"}))
+    q.set_link("c", "dataset1", "w1", kind=CHAIN_KIND)
+    q.set_link("c", "dataset2", "w2", kind=CHAIN_KIND)
+    return q.jobs
+
+
+@pytest.mark.parametrize("saved_from", ["w1", "w2", "c"])
+def test_a_branching_chain_is_the_same_chain_from_any_of_its_jobs(saved_from):
+    with pytest.raises(RecipeError, match="starts from 2 jobs"):
+        recipe_from_chain("r", _two_watches_into_one_concatenate(), saved_from)
+
+
+def test_a_destination_named_after_an_earlier_acquisition_is_refused():
+    """Set up on run6's file, the conversion proposes run6_dataset; kept in a
+    recipe, every application would convert into that one folder, and the
+    converter refuses a folder holding another plate's wells."""
+    jobs = _chain(root="/scope/run7")
+    jobs[1].spec["destination"] = "/scope/run6_dataset"
+    with pytest.raises(RecipeError) as info:
+        recipe_from_chain("r", jobs, "w")
+    message = str(info.value)
+    assert "writes to /scope/run6_dataset" in message
+    assert "/scope/run7_dataset" in message

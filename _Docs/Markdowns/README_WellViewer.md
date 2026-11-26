@@ -10802,19 +10802,26 @@ restart the countdown.
 
 A watch fires once. To process the next acquisition, queue the chain again —
 a [recipe](#job-queue) does that in two clicks. A running watch does not hold
-up other work: it runs beside the queue's jobs on this computer. Only one watch
+up other work: it runs beside the queue's jobs on this computer, and its row
+in the queue shows the same countdown as its page. **⏸ Pause queue** pauses a
+watch rather than cancelling it — the jobs after it keep waiting — and
+starting the queue again watches the folder afresh. Only one watch
 runs at a time, though: a second Watch Folder job waits in the queue until the
 first has settled, so two acquisitions running at once are watched one after
 the other. A watch that was running when the app closed starts again when the
 queue is started, and starts from scratch: with **Wait for new files before
 counting** on, it waits for a change it may already have missed. If the
 acquisition finished while the app was closed, its row keeps saying "Waiting
-for new files"; choose **Edit…**, untick the box, and save.
+for new files"; choose **Edit…**, untick the box, and save. The same holds for
+a watch you paused and started again.
 
 **Converting what lands in the watched folder.** Queue the conversion as usual
 — set its page up on an earlier acquisition from the same protocol, so the
-plate layout and channel roles are right — then on its row choose **Input
-from ▸** the Watch Folder job. When the conversion starts it is handed the
+plate layout and channel roles are right, and set its **destination** to a
+folder named after the watched one (watching `run7`, convert into
+`run7_dataset`; the page suggests a name taken from the earlier file, which
+would already hold that plate) — then on its row choose **Input from ▸** the
+Watch Folder job. When the conversion starts it is handed the
 watched folder and chooses the file itself: Convert ND2 and Convert OME-TIFF
 use the one `.nd2` / `.ome.tif` file in the folder (in any subfolder), and the
 job fails naming what it found if there is none or more than one, rather than
@@ -10944,12 +10951,15 @@ pick the recipe and choose **Apply to…**, then choose the folder (or, for a
 chain that starts with Convert ND2 or Convert OME-TIFF, the file) to run it
 on. The whole chain is queued, linked as before.
 
-Paths in the recipe follow the input you apply it to. A path that was the
-original input, inside it, or beside it is rewritten for the new one: a
-destination `/scope/run7_dataset` saved from `/scope/run7` becomes
-`/scope/run8_dataset` when the recipe is applied to `/scope/run8`. A path that
-has nothing to do with the input, such as a shared reference file, is kept as
-it was.
+Paths in the recipe follow the input you apply it to. The original input, a
+path inside it, and a path beside it **named after it** are rewritten for the
+new one: a destination `/scope/run7_dataset` saved from `/scope/run7` becomes
+`/scope/run8_dataset` when the recipe is applied to `/scope/run8`. Any other
+path, such as a shared reference plate in the same folder
+(`/scope/reference_plate`) or a calibration file elsewhere, is kept as it was.
+A step that writes a new folder must name it after the input; a recipe whose
+conversion writes to, say, `run6_dataset` while watching `run7` is refused when
+you save it, because every use of it would write into that one folder.
 
 What belongs to one acquisition rather than to the protocol is worked out when
 each job runs instead of being saved: a conversion's experiment name is taken
@@ -10959,9 +10969,10 @@ Analyze job reads its filename schema and channels from its input when it
 starts, as **Detect schema & channels at run time** does. Analyze's list of
 wells to redo and its Force re-run are left out. The well selection, the plate
 grid, the channel roles and every other setting are kept. Applying a recipe
-says what it left out. A chain can be saved as a recipe only if it starts from
-one job — two conversions feeding a Concatenate have two inputs — and that job
-has its input set. **Recipes ▸** *the recipe* **▸ Delete…** removes one; jobs already
+says what it left out. A chain — every job linked to the one you save from,
+in either direction — can be saved as a recipe only if it starts from one job
+(two watches feeding a Concatenate have two inputs, whichever of the three you
+save from) and that job has its input set. **Recipes ▸** *the recipe* **▸ Delete…** removes one; jobs already
 queued from it are not affected. Recipes are saved beside the queue and
 survive restarts.
 

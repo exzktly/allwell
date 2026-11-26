@@ -10,11 +10,12 @@ What is taken out, and why, decides whether a recipe is safe to reuse:
 * **Paths are templated on the chain's input.** The input of the chain's first
   job (the watched folder, the converted file, the analysed folder) is the
   recipe's one parameter. Every path in every step that is that input, lies
-  inside it, or sits beside it is rewritten in terms of it — ``{source}``,
-  ``{source_parent}`` and ``{source_name}`` — so a destination
-  ``/scope/run7_dataset`` saved from ``/scope/run7`` comes back as
-  ``/scope/run8_dataset`` for ``/scope/run8``. A path unrelated to the input
-  (a shared reference dataset, say) is kept as it is.
+  inside it, or sits beside it *and is named after it* is rewritten in terms
+  of it — ``{source}``, ``{source_parent}`` and ``{source_name}`` — so a
+  destination ``/scope/run7_dataset`` saved from ``/scope/run7`` comes back as
+  ``/scope/run8_dataset`` for ``/scope/run8``. Any other path — a shared
+  reference plate beside the input, say — is kept as it is, and a step whose
+  new folder would not follow the input is refused when the recipe is saved.
 * **Links are kept by position.** Each step's inputs that came from an earlier
   step in the chain are recorded as "step N's output" and become real links
   when the recipe is applied, so they are resolved when each job runs, from
@@ -48,7 +49,7 @@ from services.job_kinds import (
     linkable_targets,
     planned_output,
 )
-from services.job_queue import ChainLink, JobSpec, lineage, set_dotted
+from services.job_queue import ChainLink, JobSpec, set_dotted
 from services.remote_config import default_state_dir
 from util.json_write import write_json_atomic
 
@@ -204,22 +205,49 @@ def _replace_name(text: str, name: str) -> str:
     return re.sub(pattern, lambda _m: SOURCE_NAME, text)
 
 
+def _relative_inside(path: str, folder: str) -> str | None:
+    """*path* relative to *folder* when it lies strictly inside it, else ``None``.
+
+    Written against a filesystem or drive root too: a folder of ``/`` or
+    ``E:\\`` already ends in a separator, and adding another made every
+    absolute path look like it was outside — or, stripped first, inside.
+    """
+    if not folder:
+        return None
+    prefix = folder if folder.endswith(("/", "\\")) else folder + os.sep
+    if path.startswith(prefix) and len(path) > len(prefix):
+        return path[len(prefix):]
+    return None
+
+
 def _template_value(value: str, source: str, parent: str, name: str) -> str:
-    """*value* with the input, its folder and its name replaced by
-    placeholders, or *value* itself when it does not refer to the input."""
-    sep = os.sep
-    norm = os.path.normpath(value) if value else value
+    """*value* with the input, a path inside it, or a path beside it that is
+    named after it replaced by placeholders; *value* itself otherwise.
+
+    A path beside the input is templated **only when it carries the input's
+    name** (``run7_dataset`` beside ``run7``). One that does not — a shared
+    reference plate, a calibration file — is about the protocol, not this
+    acquisition, and is kept verbatim. Rewriting everything under the input's
+    folder sent a recipe saved from ``/scope/run7`` and applied to
+    ``/other/run8`` looking for ``/other/reference_plate``, and with an input
+    at a drive root it rewrote every absolute path in the chain.
+
+    The placeholders are written with ``/`` and joined back with the platform's
+    own rules in :func:`_fill_value`.
+    """
     if not value:
         return value
+    norm = os.path.normpath(value)
     if norm == source:
         return SOURCE
-    if norm.startswith(source.rstrip(sep) + sep):
-        return SOURCE + norm[len(source):]
-    if parent and norm.startswith(parent.rstrip(sep) + sep):
-        rest = norm[len(parent):]
-        if name:
-            rest = _replace_name(rest, name)
-        return SOURCE_PARENT + rest
+    inside = _relative_inside(norm, source)
+    if inside is not None:
+        return f"{SOURCE}/{inside.replace(os.sep, '/')}"
+    beside = _relative_inside(norm, parent)
+    if beside is not None and name:
+        renamed = _replace_name(beside, name)
+        if renamed != beside:
+            return f"{SOURCE_PARENT}/{renamed.replace(os.sep, '/')}"
     return value
 
 
@@ -259,12 +287,60 @@ def _drop_run_specific(kind: str, spec: dict) -> list[str]:
     return dropped
 
 
+def connected(jobs: list[JobSpec], job_id: str) -> set[str]:
+    """Every job reachable from *job_id* through links, either way, itself included."""
+    neighbours: dict[str, set[str]] = {j.id: set() for j in jobs}
+    for j in jobs:
+        for source in j.sources():
+            if source in neighbours:
+                neighbours[j.id].add(source)
+                neighbours[source].add(j.id)
+    found = {job_id}
+    stack = [job_id]
+    while stack:
+        for other in neighbours.get(stack.pop(), ()):
+            if other not in found:
+                found.add(other)
+                stack.append(other)
+    return found
+
+
+def _check_outputs_follow(steps: list[RecipeStep], source: str) -> None:
+    """Refuse a step whose new folder would be the same for every input.
+
+    A conversion set up on an earlier acquisition proposes a destination named
+    after *that* file (``run6_dataset``). Kept verbatim in a recipe, every
+    application would convert into it — and a converter refuses a destination
+    already holding another plate's wells, so every use after the first would
+    fail. Said when saving, with the fix, rather than on the second night.
+    """
+    for step in steps:
+        out = planned_output(step.kind, step.spec)
+        if not out or out != step.spec.get("destination"):
+            continue        # writes in place, or into a folder a link fills
+        if SOURCE in out or SOURCE_PARENT in out:
+            continue
+        label = KIND_LABEL.get(step.kind, step.kind)
+        raise RecipeError(
+            f"{label} writes to {out}, which isn't named after the chain's input "
+            f"({source_name(source)}), so every use of the recipe would write "
+            f"there. Set its destination to a folder named after "
+            f"{source_name(source)} — for example "
+            f"{os.path.join(os.path.dirname(source), source_name(source) + '_dataset')} "
+            "— and save the recipe again.")
+
+
 def recipe_from_chain(name: str, jobs: list[JobSpec], job_id: str) -> Recipe:
     """The chain *job_id* belongs to, saved as a recipe called *name*.
 
-    The chain is every job *job_id* reads from and every job that reads from
-    it, in queue order. It must start from one job — a recipe has one input —
-    and that job's input must be filled in.
+    The chain is every job linked to *job_id* through any number of links in
+    either direction — its connected group in the queue — in queue order, so
+    saving from any job of a chain saves the same recipe. (Its lineage alone
+    was not enough: saved from one of two watches feeding a Concatenate, the
+    other watch was left out and dataset 2 kept a fixed path.) The chain must
+    start from one job — a recipe has one input — and that job's input must be
+    filled in. Every step that writes a new folder must name it after the
+    input (:func:`_check_outputs_follow`).
     """
     name = name.strip()
     if not name:
@@ -272,7 +348,7 @@ def recipe_from_chain(name: str, jobs: list[JobSpec], job_id: str) -> Recipe:
     by_id = {j.id: j for j in jobs}
     if job_id not in by_id:
         raise RecipeError("That job is no longer in the queue.")
-    ids = lineage(jobs, job_id) | {job_id}
+    ids = connected(jobs, job_id)
     chain = [j for j in jobs if j.id in ids]
     index = {j.id: i for i, j in enumerate(chain)}
     roots = [j for j in chain if not any(link.source in index for link in j.links())]
@@ -300,26 +376,31 @@ def recipe_from_chain(name: str, jobs: list[JobSpec], job_id: str) -> Recipe:
         spec = _walk_strings(spec, lambda v: _template_value(v, source, parent, stem))
         links: list[RecipeLink] = []
         for link in job.links():
-            if link.source in index and link.target:
+            # The chain is a connected group, so every source is in it.
+            if link.target:
                 links.append(RecipeLink(target=link.target, step=index[link.source]))
-            elif link.target:
-                notes.append(
-                    f"{KIND_LABEL.get(job.kind, job.kind)}'s input came from a job "
-                    "outside this chain; the recipe uses the folder that job was "
-                    "set up to write.")
         label = KIND_LABEL.get(job.kind, job.kind)
         notes.extend(f"{label}: left out {why}." for why in dropped)
         steps.append(RecipeStep(kind=job.kind, spec=spec, links=links))
+    _check_outputs_follow(steps, source)
     if any(step.kind == "analyze" for step in steps):
         notes.append("Analyze reads its filename schema and channels from its "
                      "input when it runs.")
     return Recipe(name=name, steps=steps, notes=notes, saved_from=source)
 
 
-def _fill(value: str, source: str, parent: str, name: str) -> str:
-    return (value.replace(SOURCE_PARENT, parent)
-                 .replace(SOURCE_NAME, name)
-                 .replace(SOURCE, source))
+def _fill_value(value: str, source: str, parent: str, name: str) -> str:
+    """A templated *value* for the input *source*: the placeholder that starts
+    a path is joined with :func:`os.path.join`, so a parent at a drive root
+    does not lose or double its separator; ``{source_name}`` is replaced
+    wherever it appears."""
+    for head, base in ((SOURCE_PARENT + "/", parent), (SOURCE + "/", source)):
+        if value.startswith(head):
+            rest = value[len(head):].replace(SOURCE_NAME, name)
+            return os.path.normpath(os.path.join(base, *rest.split("/")))
+    if value == SOURCE:
+        return source
+    return value.replace(SOURCE_NAME, name)
 
 
 def instantiate(recipe: Recipe, source: str,
@@ -342,7 +423,7 @@ def instantiate(recipe: Recipe, source: str,
     ids: list[str] = []
     for position, step in enumerate(recipe.steps):
         spec = _walk_strings(json.loads(json.dumps(step.spec)),
-                             lambda v: _fill(v, source, parent, name))
+                             lambda v: _fill_value(v, source, parent, name))
         links: list[ChainLink] = []
         for link in step.links:
             if not 0 <= link.step < position:

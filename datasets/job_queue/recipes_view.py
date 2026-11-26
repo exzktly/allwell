@@ -28,6 +28,11 @@ from ui import theme
 from datasets.core.log_panel import hrule as _hrule
 from widgets.flow_layout import FlowLayout
 
+#: The recipe and run lists' ceilings: enough for a handful of rows before
+#: they scroll, so the steps and the log below stay on screen.
+_RECIPE_LIST_MAX_H = 160
+_RUN_LIST_MAX_H = 128
+
 #: How a templated path reads on this page: what it stands for, not the token.
 _PLACEHOLDER_WORDS = (("{source_parent}", "‹input's folder›"),
                       ("{source_name}", "‹input name›"),
@@ -111,7 +116,7 @@ class RecipesPage(QWidget):
 
         self._list = QListWidget(self)
         self._list.setObjectName("RecipeList")
-        self._list.setMaximumHeight(theme.Spacing.lg * 10)
+        self._list.setMaximumHeight(_RECIPE_LIST_MAX_H)
         self._list.currentItemChanged.connect(self._on_current_changed)
         outer.addWidget(self._list)
 
@@ -167,7 +172,7 @@ class RecipesPage(QWidget):
         dl.addWidget(self._no_runs)
         self._runs = QListWidget(self._detail)
         self._runs.setObjectName("RecipeRuns")
-        self._runs.setMaximumHeight(theme.Spacing.lg * 8)
+        self._runs.setMaximumHeight(_RUN_LIST_MAX_H)
         self._runs.currentItemChanged.connect(self._on_run_changed)
         dl.addWidget(self._runs)
         self._log = QPlainTextEdit(self._detail)

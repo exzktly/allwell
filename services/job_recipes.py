@@ -74,6 +74,7 @@ ROOT_INPUT = {
     "subset": "source",
     "concatenate": "dataset1",
     "merge_plates": "dataset1",
+    "open_in_review": "dataset",
 }
 
 #: The kinds whose input is one file rather than a folder, so applying a
@@ -487,3 +488,51 @@ def with_recipe(recipes: list[Recipe], recipe: Recipe) -> list[Recipe]:
     """*recipes* with *recipe* added, replacing one of the same name."""
     kept = [r for r in recipes if r.name != recipe.name]
     return [*kept, recipe]
+
+
+# ── sharing ──────────────────────────────────────────────────────────────────
+
+#: The marker an exported recipe file carries, and its format version.
+EXPORT_KEY = "allwell_recipe"
+EXPORT_VERSION = 1
+
+
+def export_json(recipe: Recipe) -> dict:
+    """*recipe* as a file another installation can import."""
+    return {EXPORT_KEY: EXPORT_VERSION, "recipe": recipe.to_json()}
+
+
+def import_json(data: object) -> Recipe:
+    """The recipe in an exported file. Raises :class:`RecipeError` naming
+    what is wrong, rather than importing something half-formed."""
+    if not isinstance(data, dict) or EXPORT_KEY not in data:
+        raise RecipeError("This isn't an All-Well recipe file.")
+    if data.get(EXPORT_KEY) != EXPORT_VERSION:
+        raise RecipeError(
+            f"This recipe file is format {data.get(EXPORT_KEY)!r}; this version "
+            f"of All-Well reads format {EXPORT_VERSION}.")
+    try:
+        recipe = Recipe.from_json(data["recipe"])
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise RecipeError(f"This recipe file is damaged ({exc}).") from exc
+    if not recipe.name.strip() or not recipe.steps:
+        raise RecipeError("This recipe file has no name or no steps.")
+    for position, step in enumerate(recipe.steps):
+        if step.kind not in KIND_LABEL:
+            raise RecipeError(f"Step {position + 1} is a kind of job this version of "
+                              f"All-Well doesn't have ({step.kind}).")
+        for link in step.links:
+            if not 0 <= link.step < position or link.target not in linkable_targets(step.kind):
+                raise RecipeError(f"Step {position + 1}'s link is damaged.")
+    return recipe
+
+
+def unused_name(recipes: list[Recipe], wanted: str) -> str:
+    """*wanted*, or *wanted* (2), (3)… — whichever no recipe has yet."""
+    names = {r.name for r in recipes}
+    if wanted not in names:
+        return wanted
+    n = 2
+    while f"{wanted} ({n})" in names:
+        n += 1
+    return f"{wanted} ({n})"

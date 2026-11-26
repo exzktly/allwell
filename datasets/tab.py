@@ -36,6 +36,7 @@ from widgets.page_stack import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
 from datasets.import_loose.controller import ImportLooseController
 from datasets.job_queue.controller import JobQueueController
+from datasets.job_queue.recipes_controller import RecipesController
 from datasets.merge_plates.controller import MergePlatesController
 from datasets.czi_import.controller import CziImportController
 from datasets.nd2_import.controller import Nd2ImportController
@@ -43,13 +44,14 @@ from datasets.ome_import.controller import OmeImportController
 from datasets.subset.controller import SubsetController
 from datasets.validate.controller import ValidateController
 from datasets.watch_folder.controller import WatchFolderController
+from datasets.open_in_review.controller import OpenInReviewController
 
 # Kinds a Datasets controller can queue itself under — registered against the
 # Job Queue page once every controller (including Analyze, injected from
 # outside) has been built.
 _QUEUEABLE_KINDS = ("concatenate", "ome_import", "czi_import", "nd2_import",
                     "validate", "subset", "import_loose", "merge_plates",
-                    "watch_folder")
+                    "watch_folder", "open_in_review")
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,13 @@ def _build_watch_folder(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None]
     return controller.page, controller.shutdown
 
 
+def _build_open_in_review(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = OpenInReviewController(
+        show_in_review=tab._on_show_in_review, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["open_in_review"] = controller
+    return controller.page, controller.shutdown
+
+
 def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
     """Built last — every other feature's controller already exists in
     ``tab._controllers`` by the time this registers them against the bridge."""
@@ -151,6 +160,24 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
     controller.set_reveal_hook(tab._reveal_page)
     _offer_queued_outputs(tab, controller)
     tab._controllers["job_queue"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_recipes(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    """After the Job Queue, whose recipe store and bridge it shares."""
+    queue = tab._controllers["job_queue"]
+    controller = RecipesController(
+        queue.recipes, queue.bridge, state_dir=tab._queue_state_dir,
+        show_queue=lambda: tab._show_page("Job Queue"))
+
+    def show(run_id: str) -> bool:
+        tab._show_page("Recipes")
+        if run_id and not controller.select_run(run_id):
+            controller.refresh()
+        return True
+
+    queue.set_recipes_page_hook(show)
+    tab._controllers["recipes"] = controller
     return controller.page, controller.shutdown
 
 
@@ -219,7 +246,10 @@ _FEATURES: tuple[_Feature, ...] = (
              kind="merge_plates"),
     _Feature(name="Watch Folder", icon="eye", build=_build_watch_folder,
              kind="watch_folder"),
+    _Feature(name="Open in Review", icon="bar-chart-3", build=_build_open_in_review,
+             kind="open_in_review"),
     _Feature(name="Job Queue", icon="waypoints", build=_build_job_queue),
+    _Feature(name="Recipes", icon="save", build=_build_recipes),
 )
 
 
@@ -231,6 +261,7 @@ class DatasetsTab(QWidget):
         parent: QWidget | None = None,
         *,
         on_open_in_review: Callable[[Path], None] | None = None,
+        on_show_in_review: Callable[..., str] | None = None,
         on_open_in_analyze: Callable[..., None] | None = None,
         on_reveal_analyze: Callable[[], bool] | None = None,
         on_reveal_datasets: Callable[[], bool] | None = None,
@@ -240,6 +271,10 @@ class DatasetsTab(QWidget):
         super().__init__(parent)
         self._on_open_in_review = on_open_in_review
         self._on_open_in_analyze = on_open_in_analyze
+        # "Load this finished result in Review, moving the window only if
+        # nobody is using the app" — the queued Open in Review step's hand-off
+        # (AllWellApp._show_result_in_review). None without a shell.
+        self._on_show_in_review = on_show_in_review
         # "Switch to the Analyze pane, change nothing on it." Analyze is the one
         # queueable kind with no rail entry here, so revealing its page means
         # leaving this pane entirely, which only the shell can do. None when a

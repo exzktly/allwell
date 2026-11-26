@@ -43,7 +43,7 @@ from widgets.owned_action import owned_action
 # the Datasets tools in the order their own rail lists them.
 ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import",
              "nd2_import", "validate",
-             "subset", "import_loose", "merge_plates", "watch_folder")
+             "subset", "import_loose", "merge_plates", "watch_folder", "open_in_review")
 
 _STATE_WORD = {
     JobState.PENDING: "pending",
@@ -82,7 +82,7 @@ class JobQueuePage(QWidget):
     saveRecipeRequested = Signal(str)
     recipeLogRequested = Signal(str)
     applyRecipeRequested = Signal(str)
-    deleteRecipeRequested = Signal(str)
+    manageRecipesRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -273,26 +273,25 @@ class JobQueuePage(QWidget):
 
     def build_recipes_menu(self) -> QMenu:
         """The Recipes menu, returned rather than opened (see
-        :meth:`build_add_menu`): one submenu per recipe, to apply or delete it."""
+        :meth:`build_add_menu`).
+
+        The queue's half of recipes only: apply one (which adds jobs here), or
+        go to the Recipes page, which owns everything else about them —
+        renaming, copying, sharing, deleting, and every run's log. Offering
+        Delete here as well put the same action in two places."""
         menu = QMenu(self)
         menu.setObjectName("RecipesMenu")
         if not self._recipes:
             note = owned_action(menu, "No recipes yet — open a queued job's ⋯ menu "
                                       "and choose “Save chain as recipe…”")
             note.setEnabled(False)
-            return menu
         for name, summary in self._recipes:
-            sub = QMenu(name, menu)
-            sub.setObjectName("RecipeMenu")
-            sub.setToolTip(summary)
-            menu.addMenu(sub)
-            info = owned_action(sub, summary)
-            info.setEnabled(False)
-            sub.addSeparator()
-            owned_action(sub, "Apply to…").triggered.connect(
+            act = owned_action(menu, f"Apply “{name}”…")
+            act.setToolTip(summary)
+            act.triggered.connect(
                 lambda _checked=False, n=name: self.applyRecipeRequested.emit(n))
-            owned_action(sub, "Delete…").triggered.connect(
-                lambda _checked=False, n=name: self.deleteRecipeRequested.emit(n))
+        menu.addSeparator()
+        owned_action(menu, "Manage recipes…").triggered.connect(self.manageRecipesRequested)
         return menu
 
     def set_recipes(self, recipes: list[tuple[str, str]]) -> None:

@@ -51,6 +51,7 @@ from ui import theme as theme_v2
 from core.log_view import append_entry, entries_text, log_formatter
 from core.panes import pane_index, pane_mode
 from core import gui_busy as _gui_busy
+from core import user_activity as _user_activity
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
@@ -617,6 +618,7 @@ class AllWellApp(QMainWindow):
         self._datasets = DatasetsTab(
             parent=None,
             on_open_in_review=self._open_dataset_in_review,
+            on_show_in_review=self._show_result_in_review,
             on_open_in_analyze=self._open_dataset_in_analyze,
             on_reveal_analyze=self._reveal_analyze_pane,
             on_reveal_datasets=self._reveal_datasets_pane,
@@ -624,6 +626,9 @@ class AllWellApp(QMainWindow):
         )
         self._review.mountDatasetsPane(self._datasets)
         self._install_mode_bar_sync()
+        # Noted from launch, so a queued Open in Review step can tell whether
+        # someone is using the app before it moves the window.
+        _user_activity.install()
 
         # Status bar v2: status / kbd hints / Log tray IconButton.
         from widgets.kbd_hint import KbdHint as _KbdHint
@@ -2052,6 +2057,30 @@ class AllWellApp(QMainWindow):
         # (an Image Table Generate drawing its progress bar), and a load there
         # would reset the dataset under the work: it waits for the work to end.
         QTimer.singleShot(delay_ms, lambda: _gui_busy.after_busy("review_dataset_load", _load))
+
+    def _show_result_in_review(self, dataset_path: Path, *, when_idle: bool) -> str:
+        """Load a finished result into Review for an **Open in Review** step.
+
+        *when_idle* is the queued step's manners: the window moves to Review
+        only if nobody is using the app (``core.user_activity``). Someone
+        working in Analyze or Datasets keeps their pane and the result loads
+        behind them; someone looking at another dataset in Review is left
+        alone entirely, since loading would replace what they are reading.
+        Returns ``"switched"``, ``"loaded"``, ``"held"`` or ``"unavailable"``.
+        """
+        if self._review is None:
+            return "unavailable"
+        _user_activity.install()
+        outcome = _user_activity.review_hand_off(
+            when_idle=when_idle, idle=when_idle and _user_activity.is_idle(),
+            on_review=self._nb.currentIndex() == 0)
+        if outcome == "held":
+            return outcome
+        self._load_in_review_later(dataset_path)
+        self._update_dataset_chip(dataset_path)
+        if outcome == "switched":
+            self._nb.setCurrentIndex(0)
+        return outcome
 
     def _open_dataset_in_review(self, dataset_path: Path) -> None:
         """Load a dataset root into Review and switch to it (from Datasets)."""

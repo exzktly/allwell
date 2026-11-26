@@ -175,7 +175,7 @@ def test_a_recipe_run_journals_its_whole_story(setup, qtbot, tmp_path):
     # The countdown ticks many times; it is journalled once per phase.
     statuses = [e["message"].split(" — ")[0] for e in events if e["event"] == "status"]
     assert len(statuses) == len(set(statuses))
-    log = actions.log_text(ids[1])
+    log = actions.run_log_text(run)
     assert "applied “Nightly”" in log and "step 2" in log
 
 

@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from services.remote_config import default_state_dir
@@ -181,3 +182,94 @@ def render(run_id: str, state_dir: Path | None = None,
     if not events:
         return "No events recorded for this recipe run."
     return "\n".join(describe_event(e, labels) for e in events)
+
+
+# ── what a run's journal adds up to ──────────────────────────────────────────
+
+#: What each event leaves a step's state as. A status line leaves it as it was.
+_STEP_STATE = {"started": "running", "suspended": "paused", "interrupted": "interrupted",
+               "retried": "waiting", "removed": "removed"}
+
+
+@dataclass
+class RunSummary:
+    """One recipe application, as its journal tells it."""
+
+    run: str
+    name: str = ""
+    input: str = ""
+    applied_at: float | None = None
+    last_at: float | None = None
+    #: One state per step: waiting, running, paused, interrupted, succeeded,
+    #: failed, cancelled or removed.
+    steps: list[str] = field(default_factory=list)
+    #: The folder each step reported when it succeeded, by step.
+    wrote: dict[int, str] = field(default_factory=dict)
+
+    @property
+    def done(self) -> int:
+        return sum(1 for s in self.steps if s == "succeeded")
+
+    @property
+    def status(self) -> str:
+        """The run in one word, worst first: a failure is what needs reading."""
+        for state in ("failed", "cancelled", "interrupted", "running", "paused"):
+            if state in self.steps:
+                return state
+        live = [s for s in self.steps if s != "removed"]
+        if live and all(s == "succeeded" for s in live):
+            return "done"
+        return "waiting"
+
+    def results(self) -> list[str]:
+        """The folders the run's steps wrote, last step first."""
+        return [self.wrote[i] for i in sorted(self.wrote, reverse=True)]
+
+
+def summarise(run_id: str, state_dir: Path | None = None) -> RunSummary | None:
+    """Add *run_id*'s journal up; ``None`` when it has no ``applied`` event."""
+    events = read_events(run_id, state_dir)
+    applied = next((e for e in events if e.get("event") == "applied"), None)
+    if applied is None:
+        return None
+    summary = RunSummary(run=run_id, name=str(applied.get("name") or ""),
+                         input=str(applied.get("input") or ""),
+                         applied_at=_number(applied.get("ts")),
+                         steps=["waiting"] * len(applied.get("jobs") or []))
+    for event in events:
+        summary.last_at = _number(event.get("ts")) or summary.last_at
+        step = event.get("step")
+        if not isinstance(step, int) or not 0 <= step < len(summary.steps):
+            continue
+        kind = event.get("event")
+        if kind == "finished":
+            ok = event.get("ok") is True
+            summary.steps[step] = ("succeeded" if ok else
+                                   "cancelled" if event.get("cancelled") else "failed")
+            if ok and event.get("wrote"):
+                summary.wrote[step] = str(event["wrote"])
+            elif not ok:
+                summary.wrote.pop(step, None)
+        elif kind in _STEP_STATE:
+            summary.steps[step] = _STEP_STATE[kind]
+            if kind == "retried":
+                summary.wrote.pop(step, None)
+    return summary
+
+
+def _number(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def list_runs(state_dir: Path | None = None, name: str | None = None) -> list[RunSummary]:
+    """Every recorded run, newest first; with *name*, only that recipe's."""
+    folder = runs_dir(state_dir)
+    try:
+        files = sorted(folder.glob("*.jsonl"))
+    except OSError:
+        return []
+    runs = [s for s in (summarise(f.stem, state_dir) for f in files
+                        if _SAFE_ID.match(f.stem)) if s is not None]
+    if name is not None:
+        runs = [r for r in runs if r.name == name]
+    return sorted(runs, key=lambda r: r.applied_at or 0.0, reverse=True)

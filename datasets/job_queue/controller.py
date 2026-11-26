@@ -747,8 +747,13 @@ class JobQueueController(QObject):
             parent_widget=lambda: self.page.window())
         self.page.saveRecipeRequested.connect(self._on_save_recipe)
         self.page.applyRecipeRequested.connect(self._on_apply_recipe)
-        self.page.deleteRecipeRequested.connect(self._on_delete_recipe)
-        self.page.recipeLogRequested.connect(self.recipes.show_log)
+        self.page.manageRecipesRequested.connect(lambda: self._show_recipe_run(""))
+        self.page.recipeLogRequested.connect(
+            lambda job_id: self._show_recipe_run(self.recipes.run_of(job_id)))
+        # Shown on the Recipes page, installed by DatasetsTab; the queue has
+        # no window of its own for a run's log.
+        self._recipes_page: Callable[[str], bool] = lambda _run: False
+        self.recipes.subscribe(self._show_recipes)
         self._show_recipes()
         self.bridge.queueChanged.connect(self._refresh_page)
         self._refresh_page()
@@ -1128,15 +1133,18 @@ class JobQueueController(QObject):
         self.page.set_recipes([(r.name, r.summary()) for r in self.recipes.recipes])
 
     def _on_save_recipe(self, job_id: str) -> None:
-        if self.recipes.save_from(job_id) is not None:
-            self._show_recipes()
+        self.recipes.save_from(job_id)
 
     def _on_apply_recipe(self, name: str) -> None:
         self.recipes.apply(name)
 
-    def _on_delete_recipe(self, name: str) -> None:
-        if self.recipes.delete(name):
-            self._show_recipes()
+    def set_recipes_page_hook(self, show: Callable[[str], bool]) -> None:
+        """``DatasetsTab`` supplies "show the Recipes page, with this run open"."""
+        self._recipes_page = show
+
+    def _show_recipe_run(self, run_id: str) -> None:
+        if not self._recipes_page(run_id):
+            self._notify("The Recipes page isn't available in this build.", "warn")
 
     def _notify(self, text: str, kind: str = "warn") -> None:
         """One seam for every "that did nothing, and here is why".

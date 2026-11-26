@@ -15,6 +15,7 @@ run.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -22,14 +23,18 @@ from pathlib import Path
 from services.job_recipes import (
     Recipe,
     RecipeError,
+    export_json,
+    import_json,
     instantiate,
     load_recipes,
     recipe_from_chain,
     save_recipes,
+    unused_name,
     with_recipe,
 )
 from services import recipe_journal
 from services.job_kinds import KIND_LABEL, short_label
+from util.json_write import write_json_atomic
 
 
 class RecipeActions:
@@ -43,8 +48,7 @@ class RecipeActions:
         self._notify = notify
         self._parent = parent_widget
         self._recipes: list[Recipe] = load_recipes(state_dir)
-        self._log_window = None
-        self._log_job = ""
+        self._listeners: list[Callable[[], None]] = []
 
     @property
     def recipes(self) -> list[Recipe]:
@@ -70,7 +74,7 @@ class RecipeActions:
         recipe = recipe_from_chain(name, jobs, job_id)
         replaced = self.get(recipe.name) is not None
         self._recipes = with_recipe(self._recipes, recipe)
-        save_recipes(self._recipes, self._state_dir)
+        self._changed()
         verb = "Replaced" if replaced else "Saved"
         self._notify(f"{verb} the recipe “{recipe.name}” ({recipe.summary()}). "
                      "Apply it from Recipes.", "success")
@@ -119,59 +123,88 @@ class RecipeActions:
         return added
 
     # ── the run's log ────────────────────────────────────────────────────────
-    def log_text(self, job_id: str) -> str:
-        """The journal of the recipe run *job_id* belongs to, as text."""
+    def run_of(self, job_id: str) -> str:
+        """The recipe run *job_id* belongs to, or ``""``."""
         job = self._bridge.queue.get(job_id)
-        run = (job.recipe or {}).get("run") if job is not None else None
-        if not run:
-            return "This job was not queued from a recipe."
+        return str((job.recipe or {}).get("run") or "") if job is not None else ""
+
+    def run_log_text(self, run_id: str) -> str:
+        """The journal of *run_id*, as text, headed by what it was."""
+        summary = recipe_journal.summarise(run_id, self._state_dir)
+        if summary is None:
+            return "No log was recorded for this run."
         labels = {j.id: j.label for j in self._bridge.queue.jobs}
-        recipe = job.recipe or {}
-        head = (f"Recipe “{recipe.get('name', '')}” applied to "
-                f"{recipe.get('input', '')} — run {run}\n"
-                f"Journal: {recipe_journal.journal_path(str(run), self._state_dir)}\n\n")
-        return head + recipe_journal.render(str(run), self._state_dir, labels)
+        head = (f"Recipe “{summary.name}” applied to {summary.input} — "
+                f"{summary.done}/{len(summary.steps)} steps done, {summary.status}\n"
+                f"Journal: {recipe_journal.journal_path(run_id, self._state_dir)}\n\n")
+        return head + recipe_journal.render(run_id, self._state_dir, labels)
 
-    def show_log(self, job_id: str) -> object:
-        """Open (or bring forward and refresh) a window showing the run's log.
+    # ── manage ───────────────────────────────────────────────────────────────
+    def subscribe(self, listener: Callable[[], None]) -> None:
+        """Call *listener* whenever the saved recipes change, from any page."""
+        self._listeners.append(listener)
 
-        Not modal: it is a record to read beside the queue, and it re-reads the
-        journal whenever the queue changes, so it follows a running chain.
-        """
-        from PySide6.QtWidgets import QPlainTextEdit
+    def _changed(self) -> None:
+        save_recipes(self._recipes, self._state_dir)
+        for listener in list(self._listeners):
+            listener()
 
-        window = self._log_window
-        if window is None:
-            window = QPlainTextEdit()
-            window.setReadOnly(True)
-            window.setObjectName("RecipeLog")
-            window.resize(760, 420)
-            self._log_window = window
-            self._bridge.queueChanged.connect(self._refresh_log)
-        self._log_job = job_id
-        window.setWindowTitle("Recipe log")
-        window.setPlainText(self.log_text(job_id))
-        window.show()
-        window.raise_()
-        return window
+    def rename(self, old: str, new: str) -> bool:
+        new = (new or "").strip()
+        recipe = self.get(old)
+        if recipe is None or not new or new == old:
+            return False
+        if self.get(new) is not None:
+            self._notify(f"There is already a recipe called “{new}”.", "warn")
+            return False
+        recipe.name = new
+        self._changed()
+        self._notify(f"Renamed “{old}” to “{new}”. Its earlier runs keep the old name "
+                     "in their logs.", "success")
+        return True
 
-    def _refresh_log(self) -> None:
-        window = self._log_window
-        if window is None or not self._log_job:
-            return
+    def duplicate(self, name: str) -> Recipe | None:
+        recipe = self.get(name)
+        if recipe is None:
+            return None
+        copy = Recipe.from_json(json.loads(json.dumps(recipe.to_json())))
+        copy.name = unused_name(self._recipes, f"{name} copy")
+        self._recipes = [*self._recipes, copy]
+        self._changed()
+        return copy
+
+    def export_to(self, name: str, path: str) -> bool:
+        recipe = self.get(name)
+        if recipe is None or not path:
+            return False
         try:
-            if window.isVisible():
-                window.setPlainText(self.log_text(self._log_job))
-        except RuntimeError:
-            # The window was deleted (app teardown, a test's reaper).
-            self._log_window = None
+            write_json_atomic(Path(path), export_json(recipe))
+        except OSError as exc:
+            self._notify(f"Could not write {path}: {exc}", "danger")
+            return False
+        self._notify(f"Exported “{name}” to {path}.", "success")
+        return True
+
+    def import_from(self, path: str) -> Recipe | None:
+        if not path:
+            return None
+        try:
+            recipe = import_json(json.loads(Path(path).read_text(encoding="utf-8")))
+        except (OSError, ValueError) as exc:
+            self._notify(f"Could not import {Path(path).name}: {exc}", "warn")
+            return None
+        recipe.name = unused_name(self._recipes, recipe.name)
+        self._recipes = [*self._recipes, recipe]
+        self._changed()
+        self._notify(f"Imported “{recipe.name}” ({recipe.summary()}).", "success")
+        return recipe
 
     # ── delete ───────────────────────────────────────────────────────────────
     def delete(self, name: str) -> bool:
         if self.get(name) is None or not self._confirm_delete(name):
             return False
         self._recipes = [r for r in self._recipes if r.name != name]
-        save_recipes(self._recipes, self._state_dir)
+        self._changed()
         self._notify(f"Deleted the recipe “{name}”.", "success")
         return True
 

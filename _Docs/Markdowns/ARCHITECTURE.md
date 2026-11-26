@@ -1363,10 +1363,13 @@ allwell/
 │   ├── validate/               ← Validate & Repair an existing dataset
 │   ├── watch_folder/           ← Watch a folder until it stops receiving files, as the
 │   │                              first step of a queued chain
-│   ├── job_queue/              ← the queue the nine tools (and Analyze) submit runs to;
+│   ├── open_in_review/         ← Open in Review: show an analysed dataset in Review, as
+│   │                              the last step of a queued chain or recipe
+│   ├── job_queue/              ← the queue the ten tools (and Analyze) submit runs to;
 │   │                              projection.py: what a queued job will write, for
 │   │                              the next step set up before it runs; recipe_actions.py:
-│   │                              save a chain as a recipe, apply one, delete one
+│   │                              the recipe store's actions; recipes_view.py +
+│   │                              recipes_controller.py: the Recipes page
 │   ├── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
 │   ├── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
 │   │                              per-scene ones → dataset folder; wells read from the
@@ -1553,6 +1556,9 @@ allwell/
 │   ├── safe.py                 ← swallow() / swallowed(): the logged suppression every module
 │   │                              reaches for (util/aw_safe.py is its pipeline-side twin, which
 │   │                              exists because util/ may not import Qt)
+│   ├── user_activity.py        ← when the person last used the app (an application event
+│   │                              filter), and review_hand_off: whether a queued Open in
+│   │                              Review step may move the window
 │   ├── app_settings.py         ← the one QSettings wrapper
 │   ├── profile.py              ← reads ALLWELL_PROFILE and resolves profiles/<name>.toml
 │   ├── debug_flags.py          ← the per-tab debug toggles, all shipping off
@@ -20569,6 +20575,30 @@ through the well map before the `seg_fp` restamp (from the destination
 `<well>_out.zip`, as the last write to that archive) — Concatenate's own
 precedent, not reinvented.
 
+**Open in Review** (`datasets/open_in_review/`) is a queueable step that hands
+an analysed dataset to Review — the end of a chain such as Watch → Convert →
+Analyze → Open in Review. `open_in_review_compute.reviewable_root` accepts a
+dataset root holding `out/pipeline_info.json` (or that `out/` folder itself)
+and nothing else: a conversion's output has nothing for Review to show, and the
+step fails saying so rather than loading an empty plate. The controller has no
+worker; it calls the `on_show_in_review` hook `DatasetsTab` receives from the
+shell (`AllWellApp._show_result_in_review`) and emits `jobFinished` at once,
+reporting what the hand-off did. A queued step passes `when_idle=True`, the
+page's own button `False`. The shell asks `core.user_activity.review_hand_off`:
+`switched` (asked by a person, or nobody is using the app — no input for
+`IDLE_AFTER_SECONDS`, or another application in front), `loaded` (someone is
+working in another pane: the dataset loads behind them and the window stays),
+or `held` (someone is reading Review itself: nothing is loaded, since that
+would replace what they are reading; the step succeeds with a message saying
+the result is ready, and a toast says it too). The load itself is the shell's
+deferred `_load_in_review_later`, so a dataset that then fails to load is
+reported by Review, not by the step. `core/user_activity.py`'s
+`UserActivity` filter is installed by the shell at start-up so the idle clock
+runs from launch. The kind is in the dataset tables (`INPUT_TARGETS` `dataset`,
+so it is offered as a next step after anything that writes a dataset), reads
+its folder and writes nothing (`job_lanes._READ_ONLY_KINDS`), and passes the
+folder on as its output.
+
 **Watch Folder** (`datasets/watch_folder/`) is the one Datasets tool that
 changes no data: a queueable job that succeeds once a folder has stopped
 receiving files, so the jobs chained after it run when an acquisition is
@@ -21293,9 +21323,18 @@ Qt event loop. Four layers:
   `job_recipes.json` beside the queue (`recipes_path`, the same
   `default_state_dir()`); `load_recipes` treats an unreadable file as no
   recipes and skips a malformed entry on its own, logging both, since the
-  Job Queue page builds at app start.
+  Job Queue page builds at app start. `export_json` / `import_json` are the
+  shared file (`{"allwell_recipe": 1, "recipe": …}`); an import is refused,
+  naming why, when the marker or version is wrong, a step is a kind this
+  version does not have, or a link points at a later step or an input the kind
+  lacks. `unused_name` gives an import or a copy a name no recipe has.
 
 - **`services/recipe_journal.py`** — the log of one recipe application, Qt-free.
+  `summarise(run_id)` adds a journal up into a `RunSummary` (each step's state
+  from its last event, the folders the steps wrote, `done`, and `status` —
+  worst first, so a failure is what a run reads as), and `list_runs` returns
+  every run, newest first, optionally one recipe's; a retried step stops
+  offering what it wrote before.
   The queue already survives a crash (`job_queue.json` rewritten on every
   change, a running job reloaded `interrupted`); what it does not keep is the
   run's story, or that its jobs belong together once some are cleared. Each
@@ -21321,19 +21360,45 @@ Qt event loop. Four layers:
   **Recipe log…** window shows (`RecipeActions.show_log`, a non-modal window
   that re-reads the journal on every queue change).
 
-- **`datasets/job_queue/recipe_actions.py`** — `RecipeActions`, the page's
-  half: `save_from(job_id)` (refuses an unsavable chain before asking for a
-  name, then replaces a recipe of the same name), `apply(name, source=None)`
-  and `delete(name)`. The three questions are one method each — `_ask_name`
+- **`datasets/job_queue/recipe_actions.py`** — `RecipeActions`, the one recipe
+  store both pages use: `save_from(job_id)` (refuses an unsavable chain before
+  asking for a name, then replaces a recipe of the same name),
+  `apply(name, source=None)`, `rename`, `duplicate`, `export_to`,
+  `import_from` and `delete`, each saving through `_changed`, which also calls
+  every `subscribe`d listener — the queue's Apply menu and the Recipes page
+  both listen, so a change on either shows on the other. `run_of(job_id)` and
+  `run_log_text(run_id)` serve the run logs. The three questions are one method each — `_ask_name`
   (`QInputDialog`), `_ask_input` (a file or folder dialog per `wants_file`) and
   `_confirm_delete` — so a test answers them as a user would. Applying adds
   the jobs one at a time **with** their links through `QueueBridge.add_job`, in
   order, so a running queue never starts a later step on the placeholder path
-  its input shows. `JobQueueController` owns one as `self.recipes`; the page
-  has a **Recipes** header button (a plain button opening a transient menu,
-  like **+ Add job**, so it draws no menu indicator) whose menu is
-  `JobQueuePage.build_recipes_menu`, and each row's ⋯ menu has **Save chain as
-  recipe…** (`JobRow.saveRecipeClicked`).
+  its input shows. `JobQueueController` owns one as `self.recipes`. The queue
+  keeps only the queue's half of recipes: a **Recipes** header button (a plain
+  button opening a transient menu, like **+ Add job**, so it draws no menu
+  indicator) whose menu, `JobQueuePage.build_recipes_menu`, lists **Apply
+  “name”…** per recipe and **Manage recipes…**, and each row's ⋯ menu has
+  **Save chain as recipe…** and, for a job queued from a recipe, **Recipe
+  log…**. Both of the last two open the Recipes page through the hook
+  `DatasetsTab` installs (`JobQueueController.set_recipes_page_hook`), with the
+  run selected. Deleting a recipe and reading a run's log are deliberately not
+  offered in the queue as well: a plan and its history belong on the plan's
+  page, and the same action in two places is two things to keep in step.
+
+- **`datasets/job_queue/recipes_view.py` + `recipes_controller.py`** — the
+  Recipes page: recipes are plans, the queue holds the jobs a plan becomes,
+  and this page holds the plans and their runs. The view lists the recipes,
+  shows the selected one's steps (each `describe_detail` with its placeholders
+  written as ‹input›, ‹input's folder›, ‹input name› by `readable`, and
+  "*input* from step *n*" per link), its notes, and its runs
+  (`recipe_journal.list_runs(name=…)`, newest first, each "when · input · done/
+  steps · status"), with the selected run's log (`RecipeActions.run_log_text`).
+  Apply, Rename, Duplicate, Export, Import and Delete go to the shared store;
+  rename, export and import paths are asked through one seam each
+  (`_ask_rename`, `_ask_export_path`, `_ask_import_path`). Runs re-read on
+  every `queueChanged`, so a run in progress updates in place. The page is a
+  `_Feature` with no `kind`, built after the Job Queue, whose store and bridge
+  it is handed (`datasets.tab._build_recipes`); `select_run(run_id)` is what the
+  queue's hook calls.
 
 - **`datasets/job_queue/projection.py`** — what a queued job is expected to
   write, before it has run, for the pages that build their controls from the

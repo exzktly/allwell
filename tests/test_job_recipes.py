@@ -223,8 +223,7 @@ def test_save_and_apply_from_the_job_queue_page(tab, tmp_path, monkeypatch):
     assert [r.name for r in load_recipes(tmp_path / "state")] == ["Nightly"]
 
     menu = controller.page.build_recipes_menu()
-    sub = next(a.menu() for a in menu.actions() if a.text() == "Nightly")
-    apply = next(a for a in sub.actions() if a.text() == "Apply to…")
+    apply = next(a for a in menu.actions() if a.text() == "Apply “Nightly”…")
     run8 = tmp_path / "run8"
     monkeypatch.setattr(controller.recipes, "_ask_input", lambda recipe: str(run8))
     apply.trigger()
@@ -242,9 +241,18 @@ def test_save_and_apply_from_the_job_queue_page(tab, tmp_path, monkeypatch):
 
 def test_the_recipes_menu_explains_itself_when_empty(tab):
     controller = tab._controllers["job_queue"]
-    actions = controller.page.build_recipes_menu().actions()
-    assert len(actions) == 1 and not actions[0].isEnabled()
+    actions = [a for a in controller.page.build_recipes_menu().actions() if a.text()]
+    assert [a.isEnabled() for a in actions] == [False, True]
     assert "Save chain as recipe" in actions[0].text()
+    assert actions[1].text() == "Manage recipes…"
+
+
+def test_manage_recipes_opens_the_recipes_page(tab):
+    controller = tab._controllers["job_queue"]
+    manage = next(a for a in controller.page.build_recipes_menu().actions()
+                  if a.text() == "Manage recipes…")
+    manage.trigger()
+    assert tab._pages.currentWidget() is tab._controllers["recipes"].page
 
 
 def test_deleting_a_recipe_asks_first(tab, tmp_path, monkeypatch):
@@ -252,12 +260,15 @@ def test_deleting_a_recipe_asks_first(tab, tmp_path, monkeypatch):
     monkeypatch.setattr(controller, "_notify", lambda *a, **k: None)
     save_recipes([recipe_from_chain("Old", _chain(), "w")], tmp_path / "state")
     controller.recipes._recipes = load_recipes(tmp_path / "state")
+    page = tab._controllers["recipes"].page
     monkeypatch.setattr(controller.recipes, "_confirm_delete", lambda name: False)
-    controller.page.deleteRecipeRequested.emit("Old")
+    page.deleteRequested.emit("Old")
     assert [r.name for r in load_recipes(tmp_path / "state")] == ["Old"]
     monkeypatch.setattr(controller.recipes, "_confirm_delete", lambda name: True)
-    controller.page.deleteRecipeRequested.emit("Old")
+    page.deleteRequested.emit("Old")
     assert load_recipes(tmp_path / "state") == []
+    # Gone from the queue's menu as well: both read the one store.
+    assert not any("Old" in a.text() for a in controller.page.build_recipes_menu().actions())
 
 
 def test_a_converter_row_offers_only_watch_jobs_as_its_input(tab, tmp_path):

@@ -59,7 +59,8 @@ to add features, how to debug, and build / environment troubleshooting), see
      [Zip Loose Folder](#zip-loose-folder) ·
      [Merge Plates](#merge-plates) ·
      [Watch Folder](#watch-folder) ·
-     [Job Queue](#job-queue)
+     [Open in Review](#open-in-review) ·
+     [Job Queue](#job-queue) · [Recipes](#recipes)
 7. [Using All-Well from a phone](#using-all-well-from-a-phone)
 7. [Statistics primer: Rare responders](#statistics-primer-rare-responders) — the reasoning behind the
    Nanowells Statistics view's Rare responders test
@@ -10834,6 +10835,30 @@ as one plate, as it does when you pick a folder on its page. **Zip Loose
 Folder** can take the watched folder as its source in the same way, for loose
 TIFs.
 
+### Open in Review
+
+Shows an analysed dataset in Review. On its own it is a shortcut — choose the
+folder and press **▶ Open in Review**. Its real use is as the **last step of a
+chain or a recipe**: queue it after Analyze (from Analyze's row, **New job
+using this output ▸ Open in Review…**) and the finished result is put in front
+of you without your having to go and find it.
+
+Because it runs unattended, a queued step is careful about your window:
+
+- **Nobody is using the app** (no key or mouse input for two minutes, or
+  another application is in front): it loads the result and switches to
+  Review.
+- **You are working in Analyze or Datasets**: it loads the result in Review
+  behind you and leaves the window where it is; the title bar shows the new
+  dataset, and the step's row says so.
+- **You are reading another dataset in Review**: it leaves Review alone, since
+  loading would replace what you are looking at, and says the result is ready
+  — on screen and on the step's row — so you can open it here when you are done.
+
+The folder must hold an analysed dataset (`out/pipeline_info.json`, which
+Analyze writes last). Pointed at a conversion's output, the step fails and
+says there is nothing to show yet, rather than opening an empty plate.
+
 ### Job Queue
 
 Lines up Analyze runs and Datasets-tool runs to work through unattended,
@@ -10950,10 +10975,12 @@ that writes into the folder being watched waits for the watch to finish.
 chain is set up the way you want it — Watch Folder → Convert → Analyze, say —
 open any of its jobs' **⋯** menu and choose **Save chain as recipe…**, and
 give it a name. The recipe keeps every job in the chain, how they are linked,
-and their settings. To use it, press **Recipes** at the top of the Job Queue,
-pick the recipe and choose **Apply to…**, then choose the folder (or, for a
-chain that starts with Convert ND2 or Convert OME-TIFF, the file) to run it
-on. The whole chain is queued, linked as before.
+and their settings. To use it, press **Recipes** at the top of the Job Queue
+and choose **Apply “*name*”…**, then choose the folder (or, for a chain that
+starts with Convert ND2 or Convert OME-TIFF, the file) to run it on. The whole
+chain is queued, linked as before. Everything else about recipes — their
+steps, renaming, copying, sharing, deleting, and every run's log — is on the
+[Recipes](#recipes) page (**Recipes ▸ Manage recipes…**).
 
 Paths in the recipe follow the input you apply it to. The original input, a
 path inside it, and a path beside it **named after it** are rewritten for the
@@ -10977,16 +11004,41 @@ says what it left out. A chain — every job linked to the one you save from,
 in either direction — can be saved as a recipe only if it starts from one job
 (two watches feeding a Concatenate have two inputs, whichever of the three you
 save from) and that job has its input set. Every job queued from a recipe says so on its row ("recipe “Nightly” · step
-2/3"), and **Recipe log…** in its **⋯** menu shows that run's log: when it was
-applied and to what, when each step started and on which folder, when the
-watch began receiving files and settled, which file the conversion chose, how
-each step ended and what it wrote, any pause, retry or removal, and any app
-restart that interrupted it. The log is kept in `recipe_runs/` beside the queue,
-one file per application, written line by line as things happen, so it
-survives a crash — at most the line being written at that moment is lost — and
-stays after the jobs are cleared from the queue. **Recipes ▸** *the recipe* **▸ Delete…** removes one; jobs already
-queued from it are not affected. Recipes are saved beside the queue and
-survive restarts.
+2/3"), and **Recipe log…** in its **⋯** menu opens that run on the Recipes page.
+
+### Recipes
+
+A recipe is a plan; the Job Queue holds the jobs a plan becomes. Apply a
+recipe and its jobs join the queue; the Recipes page is where the plans
+themselves are kept, and where you read afterwards what each use of one did.
+
+- **The list** — every saved recipe. Choose one to see its **steps** in order,
+  each with its settings and where its input comes from ("source from step
+  1"). Paths that follow the input are written as ‹input›, ‹input's folder› and
+  ‹input name›; a fixed path is shown as it is.
+- **▶ Apply to…** queues the recipe on a folder or file you choose, as the
+  queue's own Recipes menu does.
+- **Rename…**, **Duplicate** (a copy to change), **Export…** (a file to send
+  to a colleague or another computer), **Delete…** (jobs already queued from it
+  are not affected). **Import…** adds an exported recipe; one with the same
+  name as yours is imported as "*name* (2)" rather than replacing it, and a
+  file from a newer version of All-Well, or one that is damaged, is refused
+  with the reason.
+- **Runs** — every time the recipe was applied, newest first: when, to what,
+  how many steps are done, and how it stands (waiting, running, paused,
+  interrupted, failed, cancelled, done). Choose one to read its **log**: when
+  it was applied and to what, when each step started and on which folder,
+  when the watch began receiving files and settled, which file the conversion
+  chose, how each step ended and what it wrote, any pause, retry or removal,
+  and any app restart that interrupted it. The list and the log update while
+  the run is going.
+
+Recipes are saved in `job_recipes.json` beside the queue, in the app's folder
+(`~/.allwell` on macOS and Linux, `%LOCALAPPDATA%\allwell` on Windows), and
+each run's log in `recipe_runs/`, one file per run, written line by line as
+things happen — so a crash loses at most the line being written, and the log
+stays after the run's jobs are cleared from the queue. A run applied under a
+name you later renamed keeps its old name in its log.
 
 **A run you start on a tool's own page joins the queue.** Press **Run** on
 Analyze or any Datasets tool and the run appears in the Job Queue as a

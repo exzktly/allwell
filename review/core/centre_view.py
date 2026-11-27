@@ -402,6 +402,7 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_grouping_note = win._ctx.widgets.register(
             "_plotting_grouping_note", _QLabel(""))
         win._plotting_grouping_note.setProperty("textRole", "help")
+        win._plotting_grouping_note.setWordWrap(True)
         notes_lay.addWidget(win._plotting_grouping_note)
         win._plotting_grouping_grp = win._plotting_grouping_note
         win._plotting_grouping_grp.setVisible(False)

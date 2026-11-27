@@ -70,12 +70,26 @@ def build_observation_controls(ctx, band) -> None:
 
     toggle.currentChanged.connect(_on_change)
     ctx.widgets.register("_plotting_observations_toggle", toggle)
-    group = band.add_scope("Observations", toggle)
+    # A Data row, "Observations: Cells ›", whose page holds the switch, rather than a band item: the band keeps
+    # Channel, Property, Timepoints and the plot's own choices on one row (tracker §9.1 step 28).
+    from review.core import inspector_panels
+
+    row, page, page_lay = inspector_panels.make_popover_button(
+        "Observations", band, ctx=ctx, tab="data",
+        summary=lambda: toggle.segmentText(max(0, toggle.currentIndex())))
+    row.setToolTip("What a point or a bar is drawn from: cells, or nanowells")
+    toggle.setParent(page)
+    page_lay.addWidget(toggle)
+    page_lay.addStretch(1)
+    toggle.currentChanged.connect(lambda _i: inspector_panels.refresh(row))
+    ctx.widgets.register("_plotting_observations_btn", row)
+    group = band.add_scope("", row)
     group.setVisible(False)
     ctx.widgets.register("_plotting_observations_grp", group)
     # A sentence, so a help line under the band (``_plotting_notes``) rather than a band item, where a page has one.
     static = QLabel(CELLS_ONLY_TEXT)
     static.setProperty("textRole", "help")
+    static.setWordWrap(True)
     notes = ctx.widgets.get_or_none("_plotting_notes")
     if notes is not None and notes.layout() is not None:
         notes.layout().addWidget(static)
@@ -139,6 +153,11 @@ def _refresh(ctx, title: str) -> None:
             toggle.setCurrentByData(getattr(ctx.state.plot, "observations", CELLS))
         finally:
             toggle.blockSignals(blocked)
+        row = ctx.widgets.get_or_none("_plotting_observations_btn")
+        if row is not None:
+            from review.core import inspector_panels
+
+            inspector_panels.refresh(row)
     # A leaf drawing nanowells with the band's scope (not Scatter, whose axes pick their own) swaps the cell
     # controls for the Metric picker; the cell controls come back on any other leaf or under Cells.
     band_metric = effective_observations(ctx, title) == NANOWELLS and title not in OWN_AXES_LEAVES

@@ -147,13 +147,15 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     zoom_fit_btn.setToolTip("Fit the whole image in the view (100%) and recentre")
     # The zoom and the editing tools below are a tool row under the image, not band items: the band keeps what is
     # shown on one row (the user's decision, tracker §9.1 step 15). Still on screen and grouped, never in a popover.
+    # A flow, so on a phone the tools wrap onto a second line rather than squeezing their labels.
+    from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
+
     tools_row = QWidget()
-    tools_lay = QHBoxLayout(tools_row)
+    tools_lay = FlowLayout(tools_row)
     tools_lay.setContentsMargins(0, theme.Spacing.xs, 0, 0)
-    tools_lay.setSpacing(theme.Spacing.xs)
-    for w in (zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn):
-        tools_lay.addWidget(w)
-    tools_lay.addSpacing(theme.Spacing.md)
+    tools_lay.setSpacing(theme.Spacing.sm)
+    tools_lay.addWidget(flow_group(tools_row, zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn))
+    sync_flow_height(tools_row)
     reg.register("_review_image_tools_row", tools_row)
 
     # A tool: pressed in while the next click or drag deletes (``ui.buttons.mode_tool``).
@@ -218,7 +220,6 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                     lambda: reset_crop_and_overrides(ctx))
     reg.register("_review_image_edit_btn", edit_btn)
     tools_lay.addWidget(edit_btn)
-    tools_lay.addStretch(1)
 
     # ── View ▾ popover — image stage · zoom · overlay toggles ───────────
     from widgets.segmented_control import SegmentedControl as _SegmentedControl

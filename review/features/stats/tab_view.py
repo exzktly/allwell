@@ -394,6 +394,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # anything, and on the band it took a third of the row (the user's decision, tracker §9.1 step 15).
     fov_indicator = reg.register("_stats_fov_indicator", QLabel(""))
     fov_indicator.setProperty("textRole", "help")
+    fov_indicator.setWordWrap(True)                 # a line of its own under the band, so it may wrap on a phone
     fov_indicator.setContentsMargins(0, 0, 0, theme.Spacing.sm)
     body_layout.insertWidget(0, fov_indicator)
 

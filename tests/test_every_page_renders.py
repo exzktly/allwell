@@ -56,7 +56,6 @@ DESIGN_PENDING: dict[tuple[str, str], str] = {
     ("Nanowells/Extremes", "band rows"): "D16",
     ("Nanowells/Identity", "band rows"): "D16",
     ("Nanowells/Position", "band rows"): "D16",
-    ("Nanowells/QC", "band rows"): "D16",
     ("Nanowells/Statistics", "band rows"): "D16",
     ("Nanowells/Trajectories", "band rows"): "D16",
 }

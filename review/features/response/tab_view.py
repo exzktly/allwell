@@ -47,7 +47,11 @@ def _curves_summary(ctx) -> str:
     """What the Curves row reads: the X variable and the series split ("Dose · none")."""
     x_combo = ctx.widgets.get_or_none("_response_x_cb")
     x_text = (x_combo.currentText() if x_combo is not None else "") or "—"
-    return f"{_panels.short(x_text, 8)} · {_panels.short(series_button_text(ctx).split(': ', 1)[-1], 8)}"
+    series = series_button_text(ctx).split(": ", 1)[-1]
+    # Nothing splitting the curves is the usual case and says nothing worth the band's room; a split is named.
+    if series.strip().lower() in ("none", "—", ""):
+        return _panels.short(x_text, 10)
+    return f"{_panels.short(x_text, 8)} · {_panels.short(series, 8)}"
 
 
 def build_response_tab(ctx, parent: QWidget) -> None:

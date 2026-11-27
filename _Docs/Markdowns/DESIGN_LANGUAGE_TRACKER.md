@@ -6,12 +6,19 @@ the running application looks like the redraws in
 `_Docs/design/design_language_mockup.html`. It is written to be handed to another
 assistant session that has not seen the conversation that produced it.
 
-**All of this work is one pull request**, the one this file arrived in: the
-user asked for the design language as a single pull request, with the menu and
-organisation changes as another (`SURFACES_TRACKER.md`, on its own branch). So
-this tracker lives on that pull request's branch and is worked there; the
-commit that closes the last row deletes it, before the pull request merges, and
-the body says so. Counts are derived from the rows (§10 gives the command); no
+**All of this work is one pull request, and it is opened last.** The user
+asked for the design language as a single pull request, with the menu and
+organisation changes as another (`SURFACES_TRACKER.md`, on the branch
+`claude/festive-albattani-9gzkrd`). This tracker lives on the branch
+`claude/festive-albattani-9gzkrd-design-language` and is worked there. **No
+pull request is open, and none is to be opened until the work is finished**:
+CLAUDE.md §2 and §6 say to commit and push as the work goes, which costs
+nothing while no pull request exists, and to open the pull request at the end,
+which starts the one CI run that matters. A pull request was opened from this
+branch while it held only the plan (#1373); that broke the rule, and it was
+closed at the user's instruction. Do not reopen it; open a new one at the end.
+The commit that closes the last row deletes this tracker, and the pull
+request's body says so. Counts are derived from the rows (§10 gives the command); no
 total is typed anywhere in this file.
 
 **The user's instruction, verbatim:** *"I want more than token changes. I want to
@@ -225,7 +232,7 @@ it; the menu-and-organisation plan leaves it in the sidebar.
 A page's row is `done` when all of these hold, and the evidence cell says so:
 
 1. **A render of the real application, in each of the two palettes, beside the
-   mock-up's redraw**, added to the pull request's body. The comparison is of
+   mock-up's redraw**, kept for the pull request's body. The comparison is of
    structure: the same regions, the same roles, the same controls in the same
    places. Exact pixel sizes are settled in the application.
 2. **The page passes the measured checks of §5.2** with no entry for it on a
@@ -354,13 +361,16 @@ For a session that cannot open the mock-up.
 
 ## 7. How to work this plan
 
-- **One pull request for the whole plan**, already open: commit on its branch
-  and stack every phase there. Because the pull request is open, every push
-  starts a billed CI run (CLAUDE.md §2), so push by round: finish a phase,
-  verify it locally, push it once. Keep the body describing the branch as it
-  stands, and label it `minor`. Merge `origin/main` into the branch at the
-  start of each phase and before each push; never rebase or force-push it.
-  Read `git log origin/main -- <files>` for the files a phase touches first.
+- **One pull request for the whole plan, opened last.** Commit on the branch
+  and push as you go; with no pull request open a push starts no CI run and
+  keeps the work safe. Local runs are the gate: run what §7's *Lanes* item
+  lists before the push that will open the pull request. Open it only when
+  every row is `done` or `declined`, label it `minor`, and subscribe to its
+  activity in the same turn. From then on push by round, since each push to an
+  open pull request is a billed run. Merge `origin/main` into the branch at
+  the start of each phase and before opening the pull request; never rebase or
+  force-push it. Read `git log origin/main -- <files>` for the files a phase
+  touches first.
 - **Update the row in the same commit as the change**; `done` only with the
   evidence of §4.
 - **Reproduce before sweeping.** The counts in §1 were measured on one tree.
@@ -375,7 +385,7 @@ For a session that cannot open the mock-up.
 - **Lanes:** the guard family and `ruff check .` always; the full fast lane
   (it holds the UI tests CI never runs) for every phase;
   `scripts/test.sh tests/test_every_page_renders.py -m ""` and
-  `scripts/test.sh tests/test_app_smoke.py -m ""` before each push.
+  `scripts/test.sh tests/test_app_smoke.py -m ""` at the end of each phase.
 - **Budgets:** `ui/theme.py` is 2,455 lines. This work should shrink it; read
   `tests/test_monolith_budgets.py` and `tests/test_guardrails.py` first.
 - **Docs:** ARCHITECTURE.md §8 and the manual's screenshots and control names

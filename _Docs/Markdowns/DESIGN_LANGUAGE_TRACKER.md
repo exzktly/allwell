@@ -625,6 +625,19 @@ Step log (newest last):
     same font cause is the likeliest explanation of the Identity Diagnostics CI failure (step 11), still open.
 26. D15 closed: the Statistics results tables (row D15). Next, by the user's word: D14 — every band's labels above
     their controls, then the D14 leftovers (step 24).
+27. D14 labels above, the user's go-ahead ("complete D14"): `ControlBand.add_scope` sets a caption (label role, at
+    least `caption_height()`) above its control(s) in a column; the band's flow bottom-aligns a line's items
+    (`FlowLayout.setAlignBottom`) so a button with no label sits level with the labelled boxes; a line is
+    `line_height()` = caption + gap + `ROW_H` whether or not its items have labels, so `band_height()` is 64 px on
+    every page (was 44); the action zone sits at the first line's controls. `multiselect_button_text` reads
+    "Timepoints: 1 of 3" / "all 3" / "none" (the Nanowells page's spelling). Row summaries are cut with
+    `inspector_panels.short`; Bar's Reset order is on its Display page; the shared Property box and Response's own
+    have a ceiling at `Metrics.form_label_w`, eliding a long property. **Measured in the full app at the 1640 px
+    desk screen with a four-digit ON threshold: every Plotting page's band is one row** (scope zone 703 px; needs
+    Heat Map 525, Bar 677, Line 450, Response 695, Scatter 443, Distribution 409). Fast lane on `f970a9d`: 14,562
+    passed, 0 failed (after fixing what the change broke: the actions' alignment test, the Nanowells row reader now
+    reading bottoms, the deferred-import and pixel guards). D14 band-rows entries removed from `DESIGN_PENDING`;
+    every-page run on the next commit in progress.
 
 ## 10. Rows
 

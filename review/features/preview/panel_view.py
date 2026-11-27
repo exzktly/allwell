@@ -32,7 +32,7 @@ from review.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
 from widgets.stepper import Stepper
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from functools import partial
 from core.safe import swallowed
 from review.core.lazy import lazy as _lazy
@@ -109,19 +109,19 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # under both names so ctx.widgets resolves either.
     reg.register("_review_image_chan_var", chan_cb)
 
-    fov_menu = reg.register("_review_image_fov_menu", LabeledComboBox("FOV"))
+    fov_menu = reg.register("_review_image_fov_menu", unlabelled("FOV"))
     fov_menu.addItems(["—"])
     fov_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    ctrl.add_scope("", fov_menu)
+    ctrl.add_scope("FOV", fov_menu)
 
-    tp_menu = reg.register("_review_image_tp_menu", LabeledComboBox("Timepoint"))
+    tp_menu = reg.register("_review_image_tp_menu", unlabelled("Timepoint"))
     tp_menu.addItems(["—"])
     tp_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    ctrl.add_scope("", tp_menu)
+    ctrl.add_scope("Timepoint", tp_menu)
     rt.tp_var = tp_menu
     rt.tp_cb = tp_menu  # alias for review_image_controller
 

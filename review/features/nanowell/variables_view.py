@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 from core.safe import swallow
 from review.features.nanowell import controller as nwc
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import LabeledComboBox, unlabelled
 
 #: The page's widget names for the three decoration combos, keyed by the ``PlotState`` field each writes.
 DECORATION_WIDGETS = {
@@ -55,10 +55,10 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
     from review.core.inspector_panels import make_popover_button
 
     reg = ctx.widgets
-    group_cb = reg.register("_nw_groupby_cb", LabeledComboBox("Group by"))
+    group_cb = reg.register("_nw_groupby_cb", unlabelled("Group by"))
     group_cb.setToolTip(_GROUP_BY_TIP)
     group_cb.currentIndexChanged.connect(lambda _i: on_group_by(ctx, group_cb.currentData() or ""))
-    group_grp = reg.register("_nw_groupby_grp", band.add_scope("", group_cb))
+    group_grp = reg.register("_nw_groupby_grp", band.add_scope("Group by", group_cb))
     group_grp.setVisible(False)
 
     from review.core.group_by_controller import (

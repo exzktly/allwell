@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from review.core.ui_helpers import btn_primary, btn_secondary
 from widgets.canvas import make_canvas
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from widgets.page_body import build_page_body
 from review.features.stats.controller import stats_active_group
 from review.features.stats.controller import stats_apply_drag
@@ -349,14 +349,14 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     )
     stats_ctrl.add_scope("Statistic", statistic_cb)
 
-    tp_cb = reg.register("_stats_tp_cb", LabeledComboBox("Timepoint"))
+    tp_cb = reg.register("_stats_tp_cb", unlabelled("Timepoint"))
     tp_cb.addItems(["—"])
     # The timepoint is a test parameter like any other, and it was the one
     # control that changed what would be tested without invalidating what had
     # been: the previous run's results stayed on screen, and its significance
     # brackets stayed on the Bar plot, describing a different timepoint.
     tp_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", tp_cb)
+    stats_ctrl.add_scope("Timepoint", tp_cb)
 
     test_cb = reg.register("_stats_test_cb", QComboBox())
     # From the controller's roster and nowhere else. A second hand-written list
@@ -374,17 +374,17 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # the unit field on the Variables tab: greying a control out states a rule
     # the user can act on, and there is no rule here — a Welch t-test has no
     # control group, and a picker for one is not a thing they could satisfy.
-    control_cb = reg.register("_stats_control_cb", LabeledComboBox("Control"))
+    control_cb = reg.register("_stats_control_cb", unlabelled("Control"))
     control_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", control_cb)
+    stats_ctrl.add_scope("Control", control_cb)
 
-    var_a_cb = reg.register("_stats_var_a_cb", LabeledComboBox("Pair by"))
+    var_a_cb = reg.register("_stats_var_a_cb", unlabelled("Pair by"))
     var_a_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", var_a_cb)
+    stats_ctrl.add_scope("Pair by", var_a_cb)
 
-    var_b_cb = reg.register("_stats_var_b_cb", LabeledComboBox("and"))
+    var_b_cb = reg.register("_stats_var_b_cb", unlabelled("and"))
     var_b_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", var_b_cb)
+    stats_ctrl.add_scope("and", var_b_cb)
 
     refresh_stats_test_inputs(ctx)
 

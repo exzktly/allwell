@@ -488,6 +488,14 @@ Step log (newest last):
    inspector pages now anchor on (`builder_view._open_root_filter`) in place of the band, and which
    `tests/test_surface_depth_app.py` (slow, not run) reads. Its `DESIGN_PENDING` entry removed. Ruff and the 384
    fast Image Table tests green.
+4. D15/D18/D16 (part), labels outside the boxes: `unlabelled(...)` plus the band's caption for Statistics
+   (Timepoint, Control, Pair by, and), Spatial and Multivariate (Timepoint), Segmentation (`preview/panel_view.py`:
+   FOV, Timepoint) and the Nanowells Group by (`nanowell/variables_view.py`). `DESIGN_PENDING` `label inside`
+   removed for Statistics, Spatial, Multivariate and Segmentation (to be confirmed by the every-page run; a label
+   moved beside its box widens a band, so `band rows` may appear on a page not yet pending — check that first).
+   Left for later: the Nanowells Timepoint (`nanowell/tab_view.py:380`, shares one scope with the well part),
+   the Donor box inside the Compare scope (`statistics_view.py:99`), the decoration combos in a panel
+   (`variables_view.py:77`), and the Plotting sites (D14). Ruff and 402 fast tests of those pages green.
 
 ## 10. Rows
 

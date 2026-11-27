@@ -43,7 +43,7 @@ _AGGS = ("mean", "median", "count", "std")
 
 
 from widgets.control_band import ControlBand
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from ui import theme
 from widgets.spin_box import SpinBox
 
@@ -268,13 +268,13 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # paints its own "Timepoint: …" prefix), so ``add_scope`` adds it alone —
     # no separate caption to strand on a different line when the wide Faceting
     # option group ahead of it wraps.
-    tp_cb = LabeledComboBox("Timepoint")
+    tp_cb = unlabelled("Timepoint")
     tp_cb.addItem("All timepoints", None)
     tp_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_timepoints(
             ctx, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
     reg.register("_mv_tp_cb", tp_cb)
-    band.add_scope("", tp_cb)
+    band.add_scope("Timepoint", tp_cb)
     layout.addWidget(band)
 
     # ── the figure ───────────────────────────────────────────────────────────

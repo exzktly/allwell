@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from widgets.control_band import ControlBand
 from widgets.icons import make_icon
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 
 from review.core.ui_helpers import build_plot_save_menu
 from review.features.export.service import export_cell_data_from
@@ -208,13 +208,13 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_metric_cb", metric_cb)
     band.add_scope("Metric", metric_cb)
 
-    tp_cb = LabeledComboBox("Timepoint")
+    tp_cb = unlabelled("Timepoint")
     tp_cb.addItem("First available", None)
     tp_cb.setToolTip(_TP_PICKER_TOOLTIP)
     tp_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_timepoint(ctx, tp_cb.currentData()))
     reg.register("_sp_tp_cb", tp_cb)
-    band.add_scope("", tp_cb)
+    band.add_scope("Timepoint", tp_cb)
 
     # Labelled, not a bare tick. A "✓" button says nothing about what it does;
     # this one forces a fresh compute, and the glyph now says so too.

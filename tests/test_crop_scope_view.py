@@ -24,7 +24,7 @@ pd = pytest.importorskip("pandas")
 
 from PySide6.QtWidgets import QPushButton, QWidget
 
-from widgets.checkable_dropdown import CheckableDropdown
+from widgets.multi_select import MultiSelectButton as CheckableDropdown
 from review.features.crop.controller import CROP_SCOPE
 from review.features.image_browser.review_image.state import ReviewImageState
 from review.features.preview.crop_scope_view import (

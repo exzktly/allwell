@@ -130,3 +130,99 @@ def test_an_unsettled_page_applies_on_the_tick(page_ctx):
         on_change=applied.append)
     picker.boxes()[1].click()
     assert applied == [["0", "6"]]
+
+
+# ── MultiSelectButton: the same component for a form ─────────────────────────
+
+def _button(qtbot, labels=("a", "b", "c"), checked=()):
+    from widgets.multi_select import MultiSelectButton
+
+    button = MultiSelectButton(noun="things", empty_text="No things", title="Things")
+    qtbot.addWidget(button)
+    for label in labels:
+        button.addItem(label.upper(), label)
+    button.blockSignals(True)
+    button.setCheckedData(list(checked))
+    button.blockSignals(False)
+    fired = []
+    button.changed.connect(lambda: fired.append(button.checkedData()))
+    return button, fired
+
+
+def test_the_button_reads_the_choice_and_ends_in_a_chevron_not_a_menu_arrow(qtbot):
+    button, _fired = _button(qtbot)
+    assert button._button.text() == "No things ›"
+    button.setCheckedData(["b"])
+    assert button._button.text() == "1 of 3 things ›"
+    button.setCheckedData(["a", "b", "c"])
+    assert button._button.text() == "All 3 things ›"
+    assert button._button.menu() is None
+
+
+def test_pressing_it_opens_the_list_in_a_window_and_a_tick_is_one_change(qtbot):
+    button, fired = _button(qtbot, checked=("a",))
+    button._button.click()
+    page = button.page()
+    assert page is not None and page.window() is not button.window()
+    assert page.window().windowTitle() == "Things" and page.window().isVisible()
+    assert [b.text() for b in page.boxes()] == ["A", "B", "C"]
+    assert [b.isChecked() for b in page.boxes()] == [True, False, False]
+    page.boxes()[2].setChecked(True)
+    assert fired == [["a", "c"]] and button._button.text() == "2 of 3 things ›"
+    page.all_button.click()
+    assert fired == [["a", "c"], ["a", "b", "c"]], "All is one change, not one per row"
+    page.none_button.click()
+    assert fired[-1] == [] and len(fired) == 3
+
+
+def test_a_change_made_elsewhere_shows_on_the_open_page_and_a_refill_replaces_its_rows(qtbot):
+    button, fired = _button(qtbot)
+    button._button.click()
+    page = button.page()
+    button.setCheckedData(["b"])
+    assert [b.isChecked() for b in page.boxes()] == [False, True, False]
+    assert fired == [["b"]]
+    button.blockSignals(True)
+    button.clear()
+    button.addItem("X", "x")
+    button.addItem("Y", "y")
+    button.setCheckedData(["y"])
+    button.blockSignals(False)
+    assert [b.text() for b in page.boxes()] == ["X", "Y"]
+    assert [b.isChecked() for b in page.boxes()] == [False, True]
+    assert fired == [["b"]], "refilling the list is not the user choosing"
+
+
+def test_with_an_opener_the_list_is_shown_through_it_and_no_window_is_built(qtbot):
+    button, fired = _button(qtbot, checked=("a",))
+    handed = []
+    button.setOpener(handed.append)
+    button._button.click()
+    assert handed == [button] and button.page() is None
+    assert button.items() == [("a", "A"), ("b", "B"), ("c", "C")] and button.title() == "Things"
+    button.applyChecked(["c", "b"])
+    assert fired == [["b", "c"]], "the page's ticks are one change, in the list's own order"
+
+
+def test_all_and_none_go_through_the_button_so_a_subclass_can_give_them_a_meaning(qtbot):
+    """The converters' timepoint picker reads All as "every timepoint of the
+    source", whatever is listed. The page's All must reach that override."""
+    from widgets.multi_select import MultiSelectButton
+
+    calls = []
+
+    class Picker(MultiSelectButton):
+        def _set_all(self, value: bool) -> None:
+            calls.append(value)
+
+        def _bulk_enabled(self) -> bool:
+            return True
+
+    picker = Picker(noun="things")
+    qtbot.addWidget(picker)
+    picker._button.click()                       # an empty list: All is still offered
+    page = picker.page()
+    assert page.all_button.isEnabled() and page.none_button.isEnabled()
+    page.all_button.click()
+    page.none_button.click()
+    assert calls == [True, False]

@@ -23,17 +23,17 @@ from PySide6.QtWidgets import QAbstractButton, QComboBox, QLineEdit, QWidget
 
 def _controls(container: QWidget) -> list[QWidget]:
     """The settings inside *container*: its line edits, combos, checkable
-    buttons and checkable dropdowns.
+    buttons and multi-select buttons.
 
     Asked for by type, never as ``findChildren(QWidget)``: that wraps every
     widget Qt builds inside a control for its own use, and a wrapper left
     behind when Qt deletes one of those crashed the interpreter when the pane
     was torn down.
     """
-    from widgets.checkable_dropdown import CheckableDropdown
+    from widgets.multi_select import MultiSelectButton
 
     found: list[QWidget] = []
-    for kind in (QLineEdit, QComboBox, QAbstractButton, CheckableDropdown):
+    for kind in (QLineEdit, QComboBox, QAbstractButton, MultiSelectButton):
         found += container.findChildren(kind)
     return found
 

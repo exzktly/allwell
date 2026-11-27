@@ -151,26 +151,26 @@ def test_a_failed_early_read_still_reads_the_plate(controller, tmp_path, monkeyp
     assert not page._timepoint_pick.is_reading()
 
 
-def test_the_menu_itself_says_the_timepoints_are_still_being_read(controller, tmp_path, monkeypatch):
-    """Asked for after the label fix: opening the dropdown while the timepoints are not known yet showed only
-    All and None. The menu's first line now says why it is empty, and goes once the timepoints are listed."""
-    from widgets import menu_exec
-
-    shown = []
-    monkeypatch.setattr(menu_exec, "exec_transient_menu",
-                        lambda menu, _pos: shown.append([a.text() for a in menu.actions() if a.text()]))
+def test_the_page_itself_says_the_timepoints_are_still_being_read(controller, tmp_path, monkeypatch):
+    """Asked for after the label fix: opening the picker while the timepoints are not known yet showed only
+    All and None. The page says why it is empty, and lists the timepoints once they are known — with the page
+    still open, since the read finishes behind it."""
     forget_plate_metadata()
     released = _hold(monkeypatch, "source_timepoint_tokens")
     page = controller.page
     page._src_field.set_path(str(_split_plate(tmp_path)))
     page._on_source_changed()
+    picker = page._timepoint_pick
     try:
-        assert _spin_until(page._timepoint_pick.is_reading)
-        page._timepoint_pick._button.click()
-        assert shown[-1][0].startswith("Reading the timepoints…"), shown[-1]
+        assert _spin_until(picker.is_reading)
+        picker._button.click()
+        listing = picker.page()
+        assert listing is not None and listing.boxes() == []
+        assert listing._empty.text().startswith("Reading the timepoints…")
+        assert not listing._empty.isHidden()
     finally:
         released.set()
     _settle(page)
-    page._timepoint_pick._button.click()
-    assert shown[-1] == ["All", "None"], shown[-1]     # the checkboxes are widget actions, without text
-    assert not any(t.startswith("Reading") for t in shown[-1])
+    assert [b.text() for b in listing.boxes()] == picker.source_tokens() and picker.source_tokens()
+    assert listing._empty.isHidden(), "the reading note stayed over a list that has arrived"
+    assert all(b.isChecked() for b in listing.boxes()), "every timepoint is the default"

@@ -312,16 +312,17 @@ class AnalyzeQCSectionMixin:
         self._build_focus_rows(sec)
 
     def _build_shape_metrics_row(self, sec: QWidget) -> None:
-        """The shape-metric dropdown: per-cell morphology features (emitted as
+        """The shape-metric picker: per-cell morphology features (emitted as
         ``shape_…`` columns; cell centroids are always recorded)."""
         import pipeline.shape_features as _sfc
-        from widgets.checkable_dropdown import CheckableDropdown
+        from widgets.multi_select import MultiSelectButton
 
         row = self._row(sec, "Shape metrics", tooltip=(
             "Per-cell morphology features to measure, written as shape_… "
             "columns. Cell centroids are always recorded."))
-        self._shape_chips = CheckableDropdown(row, noun="metrics selected",
-                                              empty_text="No metrics selected")
+        self._shape_chips = MultiSelectButton(row, noun="metrics selected",
+                                              empty_text="No metrics selected",
+                                              title="Shape metrics")
         for key in _sfc.SELECTABLE_KEYS:
             self._shape_chips.addItem(_sfc.BY_KEY[key].label, data=key)
         self._shape_chips.setCheckedData(list(self._SHAPE_DEFAULTS))

@@ -54,17 +54,6 @@ def test_a_job_row_s_menu_does_not_pile_up(qapp, opened):
     assert row.findChildren(QMenu) == []
 
 
-def test_a_checkable_dropdown_s_menu_does_not_pile_up(qapp, opened):
-    from widgets.checkable_dropdown import CheckableDropdown
-
-    dropdown = CheckableDropdown()
-    for _ in range(5):
-        dropdown._open_menu()
-    _flush_deletes()
-    assert len(opened) == 5
-    assert dropdown.findChildren(QMenu) == []
-
-
 def test_the_chosen_action_is_still_readable_when_the_call_returns(qapp, monkeypatch):
     owner = QWidget()
     menu = QMenu(owner)

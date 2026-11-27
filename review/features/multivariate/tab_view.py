@@ -25,7 +25,7 @@ from review.features.multivariate import controller as mv_ctrl
 from review.features.multivariate.collect import (
     available_feature_columns, column_display_label,
 )
-from review.features.multivariate.feature_picker_view import build_feature_picker
+from review.features.multivariate.feature_picker_view import build_feature_picker, features_summary
 from domain.tp_match import tp_close
 
 _FIG_W, _FIG_H, _DPI = 7.6, 6.6, 100
@@ -107,9 +107,11 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_mode_seg", mode_seg)
     band.add_scope("Mode", mode_seg)
 
-    feat_btn, _feat_panel, feat_lay = make_popover_button("Features", band, ctx=ctx, tab="data")
+    feat_btn, _feat_panel, feat_lay = make_popover_button(
+        "Features", band, ctx=ctx, tab="data", summary=lambda: features_summary(ctx))
     feat_btn.setToolTip("Choose which per-cell feature columns form the matrix")
     build_feature_picker(ctx, feat_lay)
+    reg.register("_mv_features_btn", feat_btn)
     band.add_action(feat_btn)
 
     std_cb = QCheckBox("Standardize")

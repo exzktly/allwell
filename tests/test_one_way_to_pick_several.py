@@ -15,16 +15,7 @@ from tests import _surface_guards as scan
 #: ``(file, function)`` -> why the site is still there. An entry starting
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
 #: starting ``kept`` is permanent and says why.
-OLD_PICKER_IMPORTERS: dict[tuple[str, str], str] = {
-    ('analyze/qc_section.py', '<module>'):
-        'pending S12: takes widgets/multi_select instead',
-    ('analyze/section_summaries.py', '<module>'):
-        'pending S12: takes widgets/multi_select instead',
-    ('datasets/core/timepoint_picker.py', '<module>'):
-        'pending S12: takes widgets/multi_select instead',
-    ('review/features/preview/frame_scope_view.py', '<module>'):
-        'pending S12: takes widgets/multi_select instead',
-}
+OLD_PICKER_IMPORTERS: dict[tuple[str, str], str] = {}
 
 #: ``(file, function)`` -> why the site is still there. An entry starting
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
@@ -42,8 +33,6 @@ CHECK_LIST_BUILDS: dict[tuple[str, str], str] = {
         'pending S19: becomes a row and a multi-select page',
     ('ui/phone_shell.py', 'PhoneShell._text_size_row'):
         "pending S23: the phone's text-size choice becomes three plain commands",
-    ('widgets/checkable_dropdown.py', 'CheckableDropdown._open_menu'):
-        'pending S12: one of the multi-select builds',
 }
 
 

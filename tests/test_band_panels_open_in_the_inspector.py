@@ -76,6 +76,38 @@ def test_a_row_reads_its_value_and_ends_in_a_chevron(qtbot, mini_dataset):
     assert features.menu() is None
 
 
+def test_multivariate_features_is_the_one_multi_select_and_a_tick_reaches_the_matrix(qtbot, mini_dataset):
+    """The Features page is ``widgets.multi_select.MultiSelect`` — families as
+    captions, a tick per column — not a list of its own. A tick reaches
+    ``feature_cols`` (the columns the matrix is built from) and the row's
+    count; All is one change."""
+    from widgets.multi_select import MultiSelect
+
+    ctx, window, _frame, _bands = build_page(qtbot, "Multivariate", mini_dataset)
+    (features,) = _buttons(ctx, window)
+    st = ctx.state.feature_slice("multivariate")
+    features.click()
+    picker = ctx.widgets.get("_mv_feature_list")
+    assert isinstance(picker, MultiSelect) and svc.inspector(ctx).isAncestorOf(picker)
+    assert picker.headings(), "the columns are not captioned by family"
+    boxes, keys = picker.boxes(), picker.keys()
+    assert len(boxes) >= 3
+    # A saved choice is shown ticked when the page is filled — the second column, so "none" and "the first" differ.
+    st.feature_cols = [keys[1]]
+    ctx.runtime.multivariate.refresh_feature_picker()
+    boxes, keys = picker.boxes(), picker.keys()
+    assert [b.isChecked() for b in boxes] == [i == 1 for i in range(len(boxes))]
+    before = list(st.feature_cols)
+    target = next(i for i, k in enumerate(keys) if k not in before)
+    boxes[target].setChecked(True)
+    assert st.feature_cols == [k for k in keys if k in before or k == keys[target]]
+    assert features.text() == f"Features: {len(st.feature_cols)} of {len(keys)} ›"
+    picker.none_button.click()
+    assert st.feature_cols == [] and features.text() == "Features: None ›"
+    picker.all_button.click()
+    assert st.feature_cols == keys and features.text() == "Features: All ›"
+
+
 # ── a control inside the page reaches the state the plot is drawn from ────────
 
 def test_bar_display_s_grouping_toggle_inside_the_inspector_changes_the_bar_state(qtbot, mini_dataset):

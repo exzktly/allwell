@@ -24,8 +24,6 @@ WIDGET_ACTIONS: dict[tuple[str, str], str] = {
         "kept: a caption label over a group of the phone menu's entries — text, not a control, and QMenu has no caption of its own that the phone's touch styling can size",
     ('ui/phone_shell.py', 'PhoneShell._text_size_row'):
         "pending S23: the phone's text-size choice becomes three plain commands",
-    ('widgets/checkable_dropdown.py', 'CheckableDropdown._open_menu'):
-        'pending S12: one of the multi-select builds',
 }
 
 

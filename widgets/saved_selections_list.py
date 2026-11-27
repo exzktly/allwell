@@ -131,6 +131,20 @@ def _clean_reps(reps, *, allowed: set) -> list[list[str]] | None:
     return out or None
 
 
+
+def window_page(title: str, widget: QWidget, anchor: QWidget | None):
+    """The page opener used when the window gives the list none: *widget* in a
+    small window of its own. Returns the callable that closes it."""
+    from PySide6.QtWidgets import QDialog
+    window = QDialog(anchor.window() if anchor is not None else None)
+    window.setObjectName("SavedSelectionsPage")
+    window.setWindowTitle(title)
+    lay = QVBoxLayout(window)
+    lay.addWidget(widget)
+    widget.show()
+    window.show()
+    return window.close
+
 class _SelectionRow(QFrame):
     activated = Signal(str)
     visibilityToggled = Signal(str, bool)   # (id, hidden)
@@ -153,6 +167,11 @@ class _SelectionRow(QFrame):
         self._compact = False  # rail mode: hide drag/eye/kebab chrome, read-only.
         self._enabled_wells: list[str] = []
         self._plate_factory = None
+        #: ``opener(title, widget, anchor) -> close``: where a page of this row
+        #: is shown (the window's inspector); :func:`window_page` when unset.
+        self._page_opener = None
+        #: The compose page on show, if any (its close callable).
+        self._compose_pop = None
         # Anchors the compose popover — written, never read, and the only
         # Python reference keeping it alive. Dropping it closes the popup.
         self._compose_pop = None
@@ -300,12 +319,13 @@ class _SelectionRow(QFrame):
 
     # ── populate / refresh ───────────────────────────────────────────────
     def update_from(self, sel: dict, *, current: bool, composable: bool = False,
-                    enabled_wells=None, plate_factory=None) -> None:
+                    enabled_wells=None, plate_factory=None, page_opener=None) -> None:
         self._id = sel["id"]
         self._composable = bool(composable)
         if enabled_wells is not None:
             self._enabled_wells = list(enabled_wells)
         self._plate_factory = plate_factory
+        self._page_opener = page_opener
         hidden = bool(sel.get("hidden"))
         self._name.setText(str(sel.get("name", "")))
         f = self._name.font(); f.setStrikeOut(hidden); self._name.setFont(f)
@@ -455,7 +475,8 @@ class _SelectionRow(QFrame):
         self._emit_composition()
 
     def _open_compose_popover(self) -> None:
-        from widgets.popover import Popover
+        """Show the wells chooser as a page (the window's inspector, or a small
+        window of its own): a plate, then Cancel and OK."""
         plate = None
         if callable(self._plate_factory):
             try:
@@ -512,22 +533,28 @@ class _SelectionRow(QFrame):
         br.addWidget(okb)
         cv.addLayout(br)
 
-        pop = Popover(self)
-        pop.setContentWidget(content)
-        self._compose_pop = pop
+        content.setParent(self)
+        content.hide()
         enabled_set = set(enabled)
+        anchor = self._compose_btn or self._chev
+        opener = self._page_opener or window_page
+        close = opener("Wells", content, anchor)
+        self._compose_pop = close
+
+        def _done():
+            if callable(close):
+                close()
+            self._compose_pop = None
 
         def _commit():
             picked = sorted({w for w in state["ids"] if w in enabled_set}, key=_well_rank)
             self._wells = picked
-            pop.close()
+            _done()
             self._fill_chips()
             self._emit_composition()
 
         okb.clicked.connect(_commit)
-        cancel.clicked.connect(pop.close)
-        anchor = self._compose_btn or self._chev
-        pop.popup(anchor, side="bottom", align="start")
+        cancel.clicked.connect(_done)
 
     # ── interactions ─────────────────────────────────────────────────────
     def _on_body_press(self, event) -> None:
@@ -615,6 +642,8 @@ class SavedSelectionsList(QWidget):
         self._rows: dict[str, _SelectionRow] = {}
         # Same anchor role as _SelectionRow._compose_pop above.
         self._recolour_pop = None
+        self._recolour_page = None
+        self._page_opener = None
         self._composable = False
         self._compact = False  # rail-side compact / read-only render.
         self._enabled_wells: list[str] = list(_ALL_WELLS)
@@ -823,7 +852,15 @@ class SavedSelectionsList(QWidget):
 
     def _row_kwargs(self) -> dict:
         return dict(composable=self._composable, enabled_wells=self._enabled_wells,
-                    plate_factory=self._well_plate_factory)
+                    plate_factory=self._well_plate_factory, page_opener=self._page_opener)
+
+    def setPageOpener(self, opener) -> None:
+        """Show this list's pages — a row's wells chooser, Recolour — through
+        ``opener(title, widget, anchor)``, which returns the callable that
+        closes the page. Unset, each opens in a small window of its own."""
+        self._page_opener = opener
+        for row in self._rows.values():
+            row._page_opener = opener
 
     # ── view build ───────────────────────────────────────────────────────
     def _rebuild(self) -> None:
@@ -921,28 +958,21 @@ class SavedSelectionsList(QWidget):
         s = self._by_id(sel_id)
         if s is None:
             return
-        from widgets.popover import Popover
-        from widgets.color_swatch_row import ColorSwatchRow
-        pop = Popover(self)
+        from widgets.colour_page import ColourPage
         recents = [x["color"] for x in self._selections if x["id"] != sel_id][:8]
-        sw = ColorSwatchRow(allow_custom=True, recents=recents)
-        sw.setCurrentColor(s["color"])
-        content = QWidget()
-        cl = QVBoxLayout(content)
-        cl.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm,
-                              theme.Spacing.sm, theme.Spacing.sm)
-        cl.addWidget(QLabel("Recolour"))
-        cl.addWidget(sw)
-        pop.setContentWidget(content)
+        # The one colour page: the palette's swatches over the custom picker.
+        page = ColourPage(self, recents=recents)
+        page.hide()
+        page.setColor(s["color"])
 
         def _picked(c: QColor):
             s["color"] = _hex6(c)
             self._refresh_rows()
             self.entryRecoloured.emit(sel_id, s["color"])
             self._emit_changed()
-        sw.colorPicked.connect(_picked)
-        self._recolour_pop = pop
-        pop.popup(anchor, side="bottom", align="start")
+        page.colorPicked.connect(_picked)
+        self._recolour_page = page
+        self._recolour_pop = (self._page_opener or window_page)("Recolour", page, anchor)
 
     def _on_kebab(self, sel_id: str, anchor: QWidget) -> None:
         s = self._by_id(sel_id)

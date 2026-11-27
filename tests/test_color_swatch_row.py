@@ -187,65 +187,24 @@ def test_a_right_press_picks_nothing(qapp):
 
 # ── the Custom tile ──────────────────────────────────────────────────────────
 
-def test_pressing_the_custom_tile_opens_the_picker_anchored_at_it(qapp, monkeypatch):
-    """The outbound call, per §7.4 #1. Building the popover and never calling
-    ``popup`` leaves the picker correct and invisible, which is what the user
-    sees as "the Custom tile does nothing"."""
-    from widgets.color_picker_popover import ColorPickerPopover
+def test_pressing_the_custom_tile_asks_for_a_picker_and_opens_nothing_itself(qapp):
+    """The outbound call, per §7.4 #1: one ``customRequested`` per press, and
+    no popover built over the page — the caller shows the picker as a page."""
+    from PySide6.QtWidgets import QWidget
 
     w = _row(allow_custom=True, recents=RECENTS)
-    opened: list[tuple] = []
-    monkeypatch.setattr(ColorPickerPopover, "popup",
-                        lambda self, anchor, **kw: opened.append((anchor, kw)))
+    asked: list[int] = []
+    w.customRequested.connect(lambda: asked.append(1))
+    picked: list = []
+    w.colorPicked.connect(picked.append)
+    before = {id(c) for c in w.findChildren(QWidget)}
 
     _press(w, 5)                      # the Custom tile
 
-    assert len(opened) == 1, "the Custom tile must actually open the picker"
-    anchor, _kw = opened[0]
-    assert isinstance(w._picker, ColorPickerPopover)
-    assert anchor is w._picker_anchor
-    tile = w._tile_rects()[5]
-    assert anchor.geometry().topLeft().x() == int(tile.center().x())
-
-
-def test_the_picker_opens_on_the_colour_the_row_is_showing(qapp, monkeypatch):
-    """Opening the picker on the palette default rather than the current colour
-    is a silent substitution: the user opens Custom to nudge the colour they
-    have, and is handed a different one already applied."""
-    from widgets.color_picker_popover import ColorPickerPopover
-
-    w = _row(allow_custom=True)
-    monkeypatch.setattr(ColorPickerPopover, "popup", lambda self, anchor, **kw: None)
-    _press(w, 1)                      # current is now #202020
-
-    _press(w, len(w._tiles()) - 1)    # Custom
-
-    assert w._picker.color().name().upper() == "#202020"
-
-
-def test_the_picker_is_built_once_and_reused(qapp, monkeypatch):
-    from widgets.color_picker_popover import ColorPickerPopover
-
-    w = _row(allow_custom=True)
-    monkeypatch.setattr(ColorPickerPopover, "popup", lambda self, anchor, **kw: None)
-    custom = len(w._tiles()) - 1
-
-    _press(w, custom)
-    first = w._picker
-    _press(w, custom)
-
-    assert w._picker is first, "a fresh popover per press leaks one window per click"
-
-
-def test_the_picker_carries_the_rows_recents_across(qapp, monkeypatch):
-    from widgets.color_picker_popover import ColorPickerPopover
-
-    w = _row(allow_custom=True, recents=RECENTS)
-    monkeypatch.setattr(ColorPickerPopover, "popup", lambda self, anchor, **kw: None)
-
-    _press(w, 5)
-
-    assert _hexes(w._picker.recents()) == ["#AA0000", "#00BB00"]
+    assert asked == [1], "the Custom tile must ask for the picker"
+    assert picked == [], "asking for a picker is not picking a colour"
+    assert {id(c) for c in w.findChildren(QWidget)} == before, "the row built something of its own"
+    assert not hasattr(w, "_picker")
 
 
 # ── what the picker sends back ───────────────────────────────────────────────

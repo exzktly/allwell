@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidg
 
 from review.features.nanowell import controller as nwc
 from ui import theme
+from ui import buttons
 
 #: The buttons that open the Display range, one per place the image channel is offered (``tab_view``'s
 #: ``_IMAGE_CHANNEL_COMBOS``): refreshed together by :func:`refresh_display_range_buttons`.
@@ -48,8 +49,7 @@ def button_text(ctx) -> str:
 
 def build_display_range_button(ctx, name: str) -> QPushButton:
     """One of the :data:`DISPLAY_RANGE_BUTTONS`; a click opens the *min* / *max* / **Auto** row under it."""
-    button = QPushButton(button_text(ctx))
-    button.setProperty("variant", "default")
+    button = buttons.default(button_text(ctx))
     button.setToolTip(RANGE_TIP)
     button.clicked.connect(lambda _=False: open_display_range(ctx, button))
     ctx.widgets.register(name, button)
@@ -76,8 +76,7 @@ def open_display_range(ctx, anchor) -> None:
     lay.addWidget(lo_edit)
     lay.addWidget(QLabel("max"))
     lay.addWidget(hi_edit)
-    auto = QPushButton("Auto")
-    auto.setProperty("variant", "default")
+    auto = buttons.default("Auto")
     auto.setToolTip("Back to each picture's own scale (the 1st to 99th percentile of its pixels).")
     lay.addWidget(auto)
 

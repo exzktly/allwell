@@ -26,7 +26,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QRadioButton,
     QScrollArea,
     QVBoxLayout,
@@ -52,6 +51,7 @@ from datasets.core.raw_dataset import unusable_reason
 from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 from ui import text_roles
+from ui import buttons
 
 # Wide enough for "1d 6h 30m"; the gap is a short duration, not a path.
 _GAP_FIELD_W = 140
@@ -163,13 +163,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Concatenate", self)
-        self._run_btn.setProperty("variant", "primary")
+        self._run_btn = buttons.primary("▶  Concatenate", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "default")
+        self._queue_btn = buttons.default("+ Queue", self)
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -179,8 +177,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
         self._build_status_section(outer)
 
-        self._open_btn = QPushButton("Open merged dataset in Review", self)
-        self._open_btn.setProperty("variant", "default")
+        self._open_btn = buttons.default("Open merged dataset in Review", self)
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
@@ -236,7 +233,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._undo_note = QLabel("", self._undo_row)
         text_roles.set_role(self._undo_note, text_roles.HELP, tone=text_roles.ATTENTION)
         self._undo_note.setWordWrap(True)
-        self._undo_btn = QPushButton("Undo the unfinished addition…", self._undo_row)
+        self._undo_btn = buttons.default("Undo the unfinished addition…", self._undo_row)
         self._undo_btn.setObjectName("ConcatUndoAppend")
         self._undo_btn.setProperty("variant", "default")
         self._undo_btn.clicked.connect(lambda: self.undoAppendRequested.emit(self._undo_root))

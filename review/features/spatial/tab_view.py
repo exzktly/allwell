@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QPushButton, QWidget,
+    QComboBox, QWidget,
 )
 
 from widgets.control_band import ControlBand
@@ -28,6 +28,7 @@ from review.features.spatial import controller as sp_ctrl
 from review.features.spatial.collect import available_metric_columns, available_timepoints
 from domain.tp_match import tp_close
 from widgets.spin_box import SpinBox, DoubleSpinBox
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -218,8 +219,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
 
     # Labelled, not a bare tick. A "✓" button says nothing about what it does;
     # this one forces a fresh compute, and the glyph now says so too.
-    recompute_btn = QPushButton("Recompute")
-    recompute_btn.setProperty("variant", "default")
+    recompute_btn = buttons.default("Recompute")
     recompute_btn.setIcon(make_icon("refresh-cw", 14))
     recompute_btn.setToolTip(
             "Force a fresh compute.\n"

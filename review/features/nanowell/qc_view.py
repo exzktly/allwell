@@ -17,6 +17,7 @@ from review.features.nanowell import full_montage_compute as fmc
 from review.features.nanowell import qc_compute as qc
 from review.features.nanowell import resolve_compute as rc
 from review.features.nanowell.anchor_queue_view import PER_WELL_TIP, QUEUE_TIP
+from ui import buttons
 
 _WELLS = (("needing", "Needing a look"), ("all", "All"))
 WELLS_TIP = ("Which wells get a row: only those with a timepoint that is not confirmed, or every well with a grid "
@@ -27,7 +28,7 @@ _RERUN_NONE = "No well has an anchor set: there is nothing for a re-run to use."
 
 
 def _button(text: str, tip: str, on_click, *, variant: str = "default") -> QPushButton:
-    button = QPushButton(text)
+    button = buttons.default(text)
     button.setProperty("variant", variant)
     button.setToolTip(tip)
     if on_click is not None:
@@ -77,7 +78,7 @@ def _walk_button(ctx, parent):
 
     from widgets.owned_action import owned_action
 
-    button = QToolButton(parent)
+    button = buttons.tool_button(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
     button.setProperty("variant", "default")

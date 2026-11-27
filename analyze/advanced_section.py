@@ -18,12 +18,13 @@ under the name the rest of the pane reads (``_csv_prefix_edit``,
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QHBoxLayout, QLineEdit, QPushButton, QSizePolicy, QWidget,
+    QCheckBox, QFileDialog, QHBoxLayout, QLineEdit, QSizePolicy, QWidget,
 )
 
 from analyze.storage_options import build_storage_rows
 from util.state_dir import default_scratch_label
 from widgets.wrap_checkbox import WrapCheckBox
+from ui import buttons
 
 SCRATCH_HELP = (
     "Where per-well working files (zip extraction and intermediate images) are "
@@ -139,8 +140,7 @@ class AnalyzeAdvancedSectionMixin:
         self._scratch_edit.setMinimumWidth(0)
         self._scratch_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         pl.addWidget(self._scratch_edit, 1)
-        self._scratch_browse_btn = QPushButton("Browse…", pick)
-        self._scratch_browse_btn.setProperty("variant", "default")
+        self._scratch_browse_btn = buttons.default("Browse…", pick)
         self._scratch_browse_btn.clicked.connect(self._browse_scratch)
         pl.addWidget(self._scratch_browse_btn)
         sec.layout().addWidget(pick)

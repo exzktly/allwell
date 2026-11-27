@@ -22,7 +22,7 @@ import threading
 import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QVBoxLayout, QWidget
 
 from core.safe import swallow
 from services.remote_config import RemoteHost
@@ -38,6 +38,7 @@ from services.remote_hold import (
     step_launcher,
 )
 from services.remote_upload import DatasetCache
+from ui import buttons
 
 #: How often the selected host's node is read while the panel is on screen, in milliseconds.
 POLL_MS = 10_000
@@ -84,14 +85,13 @@ class GrantedNodePanel(QWidget):
         layout.addWidget(self._readout)
         row = QHBoxLayout()
         row.setSpacing(6)
-        self._request_btn = QPushButton("Request a node", self)
-        self._request_btn.setProperty("variant", "primary")
+        self._request_btn = buttons.primary("Request a node", self)
         self._request_btn.clicked.connect(self._on_request)
-        self._release_btn = QPushButton("Release", self)
+        self._release_btn = buttons.default("Release", self)
         self._release_btn.clicked.connect(self._on_release)
-        self._test_btn = QPushButton("Test the node", self)
+        self._test_btn = buttons.default("Test the node", self)
         self._test_btn.clicked.connect(self._on_test)
-        self._log_btn = QPushButton("Show log", self)
+        self._log_btn = buttons.default("Show log", self)
         self._log_btn.setToolTip("What was sent to the scheduler for this host's node and what it answered, and what "
                                  "the cluster holds about the job.")
         self._log_btn.clicked.connect(self._on_show_log)

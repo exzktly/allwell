@@ -40,6 +40,7 @@ from .tab_view import (
     IMPORT_KEY, build_recent_tile, build_saved_plot_tile, definition_subtabs,
     format_value, legend_label, legend_swatch_style,
 )
+from ui import buttons
 
 # Cell Gating's controller is reached for two refreshes the sub-tab handler and
 # the selection hook drive. Its tab body, and the other four, are built through
@@ -786,7 +787,6 @@ def _paint_rows(ctx, widget_name: str, rows, *, kind: str, on_anchor=None) -> No
 
 def _anchor_chips(parent: QWidget, wells, targets: dict, on_anchor) -> QWidget:
     """The well chips of a not-addressed row: a well an anchor can fix is a button that opens it."""
-    from PySide6.QtWidgets import QPushButton
 
     box = QWidget(parent)
     line = QHBoxLayout(box)
@@ -797,7 +797,7 @@ def _anchor_chips(parent: QWidget, wells, targets: dict, on_anchor) -> QWidget:
         if tp is None:
             line.addWidget(QLabel(well, box))
             continue
-        chip = QPushButton(well, box)
+        chip = buttons.default(well, box)
         chip.setObjectName("HomeWellChip")
         chip.setFlat(True)
         chip.setCursor(Qt.PointingHandCursor)

@@ -21,8 +21,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QWidget,
+    QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
 from review.data.field_quality_cache import (
@@ -46,6 +45,7 @@ from ui import theme
 from widgets.capped_label import CappedLabel
 from widgets.flow_layout import FlowLayout, flow_group
 from ui import text_roles
+from ui import buttons
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
 # written inline at a call site).
@@ -341,7 +341,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # a per-WELL curve is the one that answers "what will this do to my data".
     # Pooling every field and timepoint the well holds, from the column the
     # run already wrote -- no image decode.
-    foc_curve_btn = QPushButton("Distribution…", foc_head)
+    foc_curve_btn = buttons.default("Distribution…", foc_head)
     foc_curve_btn.setToolTip(
         "Plot the selected well's per-cell focus as a cumulative curve, with "
         "your cut marked and a live count of what it keeps and drops.\n"

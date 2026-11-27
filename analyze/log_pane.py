@@ -39,7 +39,7 @@ import sys as _sys
 from core.log_mirror import mirror_line
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QLabel, QPushButton, QTextEdit, QWidget,
+    QCheckBox, QLabel, QTextEdit, QWidget,
 )
 
 from pipeline import completeness
@@ -48,6 +48,7 @@ from core.safe import swallowed
 from widgets.separator import build_hline_separator
 from widgets.run_dashboard import RunDashboard
 from analyze.slurm_job_view import SlurmJobIndicator
+from ui import buttons
 
 
 #: Longest failure text the dashboard headline takes before it is cut back.
@@ -185,8 +186,7 @@ class AnalyzeLogPaneMixin:
         self._raw_log_cb.setChecked(True)
         self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
         band.add_action(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", band)
-        clear_btn.setProperty("variant", "default")
+        clear_btn = buttons.default("Clear", band)
         clear_btn.clicked.connect(self._clear_log)
         band.add_action(clear_btn)
         # No separator under the band — ``#ControlBand`` paints its own

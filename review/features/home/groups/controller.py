@@ -10,13 +10,14 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
+    QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QVBoxLayout,
 )
 
 from core.safe import swallowed
 from review.domain.batch_models import ReplicateSet
 from review.domain.plate_layout import PLATE_COLS, PLATE_ROWS
 from review.domain.viewer_state import extract_well_token as _extract_well_token
+from ui import buttons
 
 
 # Pixel geometry for the New Replicate Set dialog. Named rather than written
@@ -405,9 +406,8 @@ def build_rep_add_dialog(ctx) -> RepAddDialog:
 
     btn_row = QHBoxLayout()
     v.addLayout(btn_row)
-    ok_btn = QPushButton("Create")
-    ok_btn.setProperty("variant", "primary")
-    cancel_btn = QPushButton("Cancel")
+    ok_btn = buttons.primary("Create")
+    cancel_btn = buttons.default("Cancel")
     btn_row.addWidget(ok_btn)
     btn_row.addWidget(cancel_btn)
     btn_row.addStretch(1)

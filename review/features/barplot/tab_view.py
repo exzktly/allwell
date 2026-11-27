@@ -9,8 +9,7 @@ from review.core.channel_state_controller import (
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from review.core.ui_helpers import (
@@ -41,6 +40,7 @@ from review.features.export.service import (
     export_bar_plot_data, export_cell_data_from)
 from review.features.barplot.cell_scope_compute import cell_scope
 from ui import theme
+from ui import buttons
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -118,7 +118,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see ``update_bar_tp_selection_display``), so it needs
     # no separate caption or count label beside it.
-    tp_button = reg.register("_bar_tp_button", QPushButton("Timepoints: 0 selected"))
+    tp_button = reg.register("_bar_tp_button", buttons.default("Timepoints: 0 selected"))
     tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(
         lambda _=False: open_bar_timepoint_selector(ctx)
@@ -143,7 +143,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _disp_btn.setToolTip("Bar/point display options: grouping, pooling, how each column is drawn (bars, beeswarm, violin, histogram), significance")
 
     # Layout toggle: cluster bars by well or by timepoint.
-    group_mode_btn = reg.register("_bar_group_mode_btn", QPushButton("Grouping: Well", bar_ctrl))
+    group_mode_btn = reg.register("_bar_group_mode_btn", buttons.default("Grouping: Well", bar_ctrl))
     group_mode_btn.setProperty("variant", "toggle")
     group_mode_btn.setCheckable(True)
     group_mode_btn.setToolTip(
@@ -155,7 +155,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Replicate-pool toggle: collapse rset wells into one column or
     # expand them. Hidden when no replicate sets are active.
-    pool_reps_btn = reg.register("_bar_pool_reps_btn", QPushButton("Pooled: Off", bar_ctrl))
+    pool_reps_btn = reg.register("_bar_pool_reps_btn", buttons.default("Pooled: Off", bar_ctrl))
     pool_reps_btn.setProperty("variant", "toggle")
     pool_reps_btn.setCheckable(True)
     pool_reps_btn.setToolTip(
@@ -224,7 +224,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Significance brackets (N7): draw the Statistics tab's pairwise results onto
     # the Mean panel. Toggle stages PlotState.show_significance and redraws.
-    sig_btn = reg.register("_bar_significance_btn", QPushButton("Significance: Off", bar_ctrl))
+    sig_btn = reg.register("_bar_significance_btn", buttons.default("Significance: Off", bar_ctrl))
     sig_btn.setProperty("variant", "toggle")
     sig_btn.setCheckable(True)
     sig_btn.setChecked(bool(ctx.state.plot.show_significance))
@@ -295,7 +295,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # ── the band's action zone, flush right ─────────────────────────────────
     bar_ctrl.add_action(_disp_btn)
 
-    reset_order_btn = reg.register("_bar_reset_order_btn", QPushButton("Reset Order", bar_ctrl))
+    reset_order_btn = reg.register("_bar_reset_order_btn", buttons.default("Reset Order", bar_ctrl))
     reset_order_btn.setProperty("variant", "toggle_muted")
     reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
     bar_ctrl.add_action(reset_order_btn)

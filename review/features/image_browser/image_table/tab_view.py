@@ -23,7 +23,7 @@ from functools import partial
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QMenu, QProgressBar, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QMenu, QProgressBar, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -68,6 +68,7 @@ from review.features.image_browser.image_table.export import (
 )
 from ui import theme
 from widgets.owned_action import owned_action
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -84,7 +85,7 @@ _ZOOM_OUT_W = 32
 def _menu_button(parent, text, *, tooltip="") -> QToolButton:
     """A QToolButton that opens a QMenu on any click — styled to read like
     btn_secondary. The caller populates ``btn.menu()``."""
-    btn = QToolButton(parent)
+    btn = buttons.tool_button(parent)
     btn.setText(text)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     menu = QMenu(btn)
@@ -574,14 +575,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Zoom: − [level] +  (clicking the % resets to 100%). No "Zoom:" caption —
     # the readout in the middle already reads "100%", which says what the two
     # buttons either side of it do.
-    zoom_out = QPushButton("−", action_row)
-    zoom_out.setProperty("variant", "default")
+    zoom_out = buttons.default("−", action_row)
     zoom_out.setFixedWidth(_ZOOM_OUT_W)
     zoom_out.setToolTip("Zoom out")
     zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1 / 1.25, relative=True))
     tr.addWidget(zoom_out)
 
-    zoom_lbl = QPushButton(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
+    zoom_lbl = buttons.default(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
     zoom_lbl.setFlat(True)
     # Wide enough for the max "400%" without clipping the trailing % (52 was tight).
     zoom_lbl.setFixedWidth(_ZOOM_LBL_W)
@@ -590,8 +590,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     reg.register("_image_table_zoom_lbl", zoom_lbl)
     tr.addWidget(zoom_lbl)
 
-    zoom_in = QPushButton("+", action_row)
-    zoom_in.setProperty("variant", "default")
+    zoom_in = buttons.default("+", action_row)
     zoom_in.setFixedWidth(_ZOOM_IN_W)
     zoom_in.setToolTip("Zoom in")
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))

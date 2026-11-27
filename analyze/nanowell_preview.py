@@ -19,13 +19,14 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QFont, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from core.worker_bridge import run_off_thread
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 from ui.nanowell_sites import FUSED_COLOUR, MIN_LABEL_DIAMETER_PX, STATE_COLOURS, gray_qimage, paint_site
 from util.nanowell_anchors import origin_phrase
+from ui import buttons
 
 #: Zoom steps offered. Addresses are written only where there is room (``ui.nanowell_sites.MIN_LABEL_DIAMETER_PX``).
 ZOOMS = (("Fit", 0.0), ("50 %", 0.5), ("100 %", 1.0), ("200 %", 2.0), ("400 %", 4.0))
@@ -168,7 +169,7 @@ class NanowellPreviewWindow(QWidget):
         self._well_cb = QComboBox(self)
         self._well_cb.addItems(sorted(wells))
         self._tp_cb = QComboBox(self)
-        self._run_btn = QPushButton("Run", self)
+        self._run_btn = buttons.default("Run", self)
         self._run_btn.clicked.connect(lambda _=False: self.run())
         self._zoom_cb = QComboBox(self)
         for label, value in ZOOMS:

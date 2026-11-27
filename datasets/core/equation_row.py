@@ -32,6 +32,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 from ui import theme
 from widgets.path_field import PathField, folder_picker
 from ui import text_roles
+from ui import buttons
 
 #: Width of the ``+`` / ``=`` column between the fields. Narrow enough that the
 #: three fields keep the width, wide enough that the glyph is not clipped.
@@ -120,7 +121,7 @@ def build_equation_row(
         sl = QHBoxLayout(swap_row)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(theme.Spacing.sm)
-        swap = QPushButton("⇄  Swap dataset 1 and 2", swap_row)
+        swap = buttons.default("⇄  Swap dataset 1 and 2", swap_row)
         swap.setObjectName("EquationSwap")
         swap.setProperty("variant", "default")
         swap.clicked.connect(lambda _checked=False: on_swap())

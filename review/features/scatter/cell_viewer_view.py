@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -45,6 +44,7 @@ from PySide6.QtWidgets import (
 from review.data.cell_crop import AUTO_WINDOW, display_window, normalise
 from review.data.data_loading import get_rows
 from ui import theme
+from ui import buttons
 
 _logger = logging.getLogger(__name__)
 
@@ -144,7 +144,7 @@ class ScatterCellViewer(QWidget):
         self._title_label = QLabel("Cell")
         self._title_label.setProperty("textRole", "sectionHeading")
         head.addWidget(self._title_label, 1)
-        close_btn = QPushButton("✕")
+        close_btn = buttons.default("✕")
         close_btn.setObjectName("Ghost")
         close_btn.setFixedWidth(theme.Metrics.icon_btn_w)
         close_btn.setToolTip("Close the cell viewer")
@@ -192,7 +192,7 @@ class ScatterCellViewer(QWidget):
         self._lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
         self._lut_max_edit.editingFinished.connect(self._on_lut_typed)
         lut.addWidget(self._lut_max_edit)
-        self._auto_btn = QPushButton("Auto")
+        self._auto_btn = buttons.default("Auto")
         self._auto_btn.setToolTip("Forget this channel's shared brightness and stretch each cell "
                                   "to its own 1st–99th percentile")
         self._auto_btn.clicked.connect(self._auto_lut)
@@ -201,8 +201,7 @@ class ScatterCellViewer(QWidget):
         layout.addLayout(lut)
 
         jump = QHBoxLayout()
-        self._show_in_seg_btn = QPushButton("Show in Segmentation")
-        self._show_in_seg_btn.setProperty("variant", "default")
+        self._show_in_seg_btn = buttons.default("Show in Segmentation")
         self._show_in_seg_btn.setToolTip("Open this cell's field in Image Browser → Segmentation, "
                                          "with the cell outlined")
         self._show_in_seg_btn.clicked.connect(self._show_in_segmentation)

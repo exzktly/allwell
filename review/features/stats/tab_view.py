@@ -229,7 +229,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # thing that looks like a control row.
     from widgets.button_row import ButtonRow
     actions = ButtonRow(side)
-    actions.add(btn_primary(actions, "+ Add group", partial(stats_grp_add, ctx)))
+    actions.add(btn_secondary(actions, "+ Add group", partial(stats_grp_add, ctx)))
     actions.add(btn_secondary(actions, "Clear All",
                               partial(stats_grp_clear_all, ctx)))
     # Pull the comparison groups straight from the shared Sample-Definition

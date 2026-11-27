@@ -31,10 +31,10 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
+from ui import buttons
 
 # The cap every one of these logs already carried, matching Analyze's own raw
 # log — a long run must not grow the document unbounded.
@@ -88,8 +88,7 @@ class LogPanelMixin:
         hl.addWidget(self._raw_log_cb)
 
         if clear:
-            clear_btn = QPushButton("Clear", hdr)
-            clear_btn.setProperty("variant", "default")
+            clear_btn = buttons.default("Clear", hdr)
             clear_btn.clicked.connect(self.clear_log)
             hl.addWidget(clear_btn)
 
@@ -114,8 +113,7 @@ class LogPanelMixin:
             log_hl.setContentsMargins(12, 6, 12, 6)
             log_hl.addWidget(QLabel(log_header, self._log_hdr))
             log_hl.addStretch(1)
-            self._clear_log_btn = QPushButton("Clear log", self._log_hdr)
-            self._clear_log_btn.setProperty("variant", "default")
+            self._clear_log_btn = buttons.default("Clear log", self._log_hdr)
             self._clear_log_btn.clicked.connect(self.clear_log)
             log_hl.addWidget(self._clear_log_btn)
             outer.addWidget(self._log_hdr)

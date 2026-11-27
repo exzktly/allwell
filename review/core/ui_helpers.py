@@ -21,6 +21,7 @@ from review.core.plot_hold import HOLD_GATING
 from core.safe import swallow
 from domain.image_identity import normalize_tp
 from core.safe import swallowed
+from ui import buttons as ui_buttons
 
 
 def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
@@ -790,7 +791,7 @@ def make_popover_button(text: str, parent: QWidget):
     """
     from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
 
-    btn = QToolButton(parent)
+    btn = ui_buttons.tool_button(parent)
     btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
@@ -825,7 +826,7 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     """
     from PySide6.QtWidgets import QToolButton, QMenu
 
-    btn = QToolButton(parent)
+    btn = ui_buttons.tool_button(parent)
     btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
@@ -1015,7 +1016,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     eb_lbl.setProperty("textRole", "help")
     h.addWidget(eb_lbl)
     initial = bool(ctx.state.plot.use_sem)
-    sem_btn = QPushButton(spread_label(initial), w)
+    sem_btn = ui_buttons.default(spread_label(initial), w)
     sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
     sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
     h.addWidget(sem_btn)

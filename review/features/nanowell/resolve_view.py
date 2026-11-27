@@ -13,10 +13,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout
 
 from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import controller as nwc
+from ui import buttons
 
 #: The card's class button, by ``resolve_compute.Guide.button``: its text and tooltip.
 BUTTONS = {
@@ -56,8 +57,7 @@ def build_resolve_guide(ctx, parent) -> SimpleNamespace:
     kicker.setObjectName("NanowellResolveKicker")
     title = QLabel("")
     title.setObjectName("NanowellResolveTitle")
-    action = QPushButton("")
-    action.setProperty("variant", "primary")
+    action = buttons.primary("")
     action.clicked.connect(lambda _=False: _class_action(ctx, action.property("kind") or ""))
     head.addWidget(kicker)
     head.addWidget(title)

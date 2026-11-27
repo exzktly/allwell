@@ -33,6 +33,7 @@ from functools import partial
 from core.safe import swallowed
 from review.core.lazy import lazy as _lazy
 from ui import theme
+from ui import buttons
 
 # Height of the colour swatch chip beside a control (its width is the
 # shared theme.Metrics.swatch_w).
@@ -140,8 +141,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     zoom_fit_btn.setToolTip("Fit the whole image in the view (100%) and recentre")
     ctrl.add_scope("", zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn)
 
-    from PySide6.QtWidgets import QPushButton
-    delete_btn = QPushButton("Delete Cell", ctrl)
+    delete_btn = buttons.default("Delete Cell", ctrl)
     rt.delete_btn = delete_btn
     reg.register("_review_image_delete_btn", delete_btn)
     delete_btn.setProperty("variant", "toggle")
@@ -172,7 +172,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # Named for what it does to the *data*. The Image Table has a "Crop view"
     # that sounds the same and is not: that one crops the pixels shown, this one
     # excludes cells from every downstream number.
-    crop_btn = QPushButton("Crop cells", ctrl)
+    crop_btn = buttons.default("Crop cells", ctrl)
     rt.crop_btn = crop_btn
     reg.register("_review_image_crop_btn", crop_btn)
     crop_btn.setProperty("variant", "toggle")

@@ -13,11 +13,11 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import QLabel, QPushButton
 
 from review.features.nanowell import _anchor_queue as aq
+from ui import buttons
 
 
 def _button(text: str, tip: str, on_click) -> QPushButton:
-    button = QPushButton(text)
-    button.setProperty("variant", "default")
+    button = buttons.default(text)
     button.setToolTip(tip)
     button.clicked.connect(lambda _=False: on_click())
     return button
@@ -61,7 +61,7 @@ def build_queue_controls(ctx, band) -> SimpleNamespace:
                    lambda: aq.step(ctx, +1))
     stop = _button("Stop", f"End the queue here and restore the selection it started with ({_KEY_NAMES['stop']}).",
                    lambda: aq.stop(ctx))
-    per_well = QPushButton("One per well")
+    per_well = buttons.default("One per well")
     per_well.setProperty("variant", "toggle")       # a default button paints checked and unchecked the same
     per_well.setCheckable(True)
     per_well.setToolTip(PER_WELL_TIP)

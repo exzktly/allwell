@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QPushButton
 
 from review.core.cell_picking import cells_of
 from review.core.cell_sets_state import CellSet
+from ui import buttons
 
 
 def cells_inside(cells, verts) -> np.ndarray:
@@ -49,7 +50,7 @@ def make_lasso_button(ctx, parent, canvas_key: str, *, source: str) -> QPushButt
     """A checkable *Lasso cells* button for the plot whose canvas is registered as *canvas_key*."""
     from matplotlib.widgets import LassoSelector
 
-    btn = QPushButton("Lasso cells", parent)
+    btn = buttons.default("Lasso cells", parent)
     btn.setCheckable(True)
     btn.setProperty("variant", "default")
     btn.setToolTip("Draw round cells on the plot to save them as a set of saved cells. "

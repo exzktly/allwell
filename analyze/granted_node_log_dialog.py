@@ -26,13 +26,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from core.safe import swallow
 from services.remote_hold import GrantedNode, HoldError
+from ui import buttons
 
 #: How often the cluster-side part is read again while the window is open, in milliseconds.
 REFRESH_MS = 5_000
@@ -85,11 +85,11 @@ class GrantedNodeLogDialog(QDialog):
 
         row = QHBoxLayout()
         row.addStretch(1)
-        self._refresh_btn = QPushButton("Refresh", self)
+        self._refresh_btn = buttons.default("Refresh", self)
         self._refresh_btn.clicked.connect(self.refresh)
-        self._copy_btn = QPushButton("Copy all", self)
+        self._copy_btn = buttons.default("Copy all", self)
         self._copy_btn.clicked.connect(self._copy)
-        self._close_btn = QPushButton("Close", self)
+        self._close_btn = buttons.default("Close", self)
         self._close_btn.clicked.connect(self.close)
         for button in (self._refresh_btn, self._copy_btn, self._close_btn):
             row.addWidget(button)

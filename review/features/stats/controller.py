@@ -18,6 +18,7 @@ from review.features.stats._report import (
 )
 from review.domain.stats_compute import group_replicate_stats, on_cell_values
 from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
+from ui import buttons
 
 
 #: Every entry the Test combo offers, in the order it offers them, with what
@@ -886,7 +887,7 @@ import copy as _copy
 
 from ui import theme
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MIN_WIDTH
 from review.features.stats.group_card_view import ElidingLabel
@@ -1052,11 +1053,11 @@ def stats_refresh_group_list(ctx) -> None:
         # the row they act on. The row's own width is now its content's.
         hl.addSpacing(theme.Spacing.lg)
         idx = gi
-        ren_btn = QPushButton("✎")
+        ren_btn = buttons.default("✎")
         ren_btn.setFlat(True)
         ren_btn.clicked.connect(lambda _=False, i=idx: stats_grp_rename(ctx, i))
         hl.addWidget(ren_btn)
-        del_btn = QPushButton("✕")
+        del_btn = buttons.default("✕")
         del_btn.setFlat(True)
         del_btn.clicked.connect(lambda _=False, i=idx: stats_grp_delete(ctx, i))
         hl.addWidget(del_btn)

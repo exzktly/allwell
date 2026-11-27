@@ -33,7 +33,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -52,6 +51,7 @@ from review.domain.fold_change_pairing import (
     auto_pair,
     summary_text,
 )
+from ui import buttons
 
 #: Combo text for "this member has no control".
 NONE_LABEL = "—"
@@ -217,12 +217,12 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
     footer = QWidget(win)
     frow = QHBoxLayout(footer)
     frow.setContentsMargins(0, 0, 0, 0)
-    set_all_btn = QPushButton("Set all to ▾", footer)
-    auto_btn = QPushButton("Auto-pair ▾", footer)
+    set_all_btn = buttons.default("Set all to ▾", footer)
+    auto_btn = buttons.default("Auto-pair ▾", footer)
     frow.addWidget(set_all_btn)
     frow.addWidget(auto_btn)
     frow.addStretch(1)
-    close_btn = QPushButton("Close", footer)
+    close_btn = buttons.default("Close", footer)
     frow.addWidget(close_btn)
     root.addWidget(footer)
     close_btn.clicked.connect(win.hide)

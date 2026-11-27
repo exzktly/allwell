@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPushButton, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from review.core import cell_sets as cs
 from review.core.ui_helpers import build_section_header
+from ui import buttons
 
 _NONE = "— none —"
 
@@ -43,12 +44,10 @@ class SavedCellsPanel(QWidget):
         self.name.setPlaceholderText("Name of the selected set")
         self.name.editingFinished.connect(self._rename)
         row.addWidget(self.name, 1)
-        self.delete = QPushButton("Delete", self)
-        self.delete.setProperty("variant", "default")
+        self.delete = buttons.default("Delete", self)
         self.delete.clicked.connect(self._delete)
         row.addWidget(self.delete)
-        self.highlight = QPushButton("Highlight on Scatter", self)
-        self.highlight.setProperty("variant", "default")
+        self.highlight = buttons.default("Highlight on Scatter", self)
         self.highlight.setToolTip("Draw this set's cells solid over the faded cloud on the per-cell "
                                   "Scatter (also under the Scatter's Display ▾). Changes no number.")
         self.highlight.clicked.connect(self._highlight)

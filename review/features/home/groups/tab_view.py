@@ -84,7 +84,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # Named for its scope: an unqualified "Clear All" on a page that also holds
     # well labels, ratios and gating reads as if it clears those too.
     hdr_l.addWidget(btn_secondary(hdr, "Clear all groups", lambda: rep_clear_all(ctx)))
-    hdr_l.addWidget(btn_primary(hdr, "+ Add", lambda: rep_add(ctx)))
+    hdr_l.addWidget(btn_secondary(hdr, "+ Add", lambda: rep_add(ctx)))
 
     # Quick Replicates: three labelled fields and the button that applies them.
     # Each label sits with its field in a pair of its own, so the phone form
@@ -305,7 +305,7 @@ def _build_from_variables_row(ctx, parent: QWidget, layout) -> None:
     row_l.addStretch(1)
     button = ctx.widgets.register(
         "_rep_from_var_btn",
-        btn_primary(row, "Make replicates from variables",
+        btn_secondary(row, "Make replicates from variables",
                     lambda: rep_replicates_from_variables(ctx)))
     button.setProperty("enabledTip", _FROM_VARIABLES_TIP)
     row_l.addWidget(button)

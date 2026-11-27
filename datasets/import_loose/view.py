@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -51,6 +50,7 @@ from datasets.import_loose.import_loose_compute import (
     detection_for_grouping, scan_folder,
 )
 from ui import text_roles
+from ui import buttons
 
 
 #: A marker this tool never writes. The shared destination rule exempts a folder
@@ -218,13 +218,11 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Zip folder", self)
-        self._run_btn.setProperty("variant", "primary")
+        self._run_btn = buttons.primary("▶  Zip folder", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "default")
+        self._queue_btn = buttons.default("+ Queue", self)
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -234,8 +232,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
 
         self._build_status_section(outer)
 
-        self._open_btn = QPushButton("Open dataset in Analyze", self)
-        self._open_btn.setProperty("variant", "default")
+        self._open_btn = buttons.default("Open dataset in Analyze", self)
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInAnalyzeRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)

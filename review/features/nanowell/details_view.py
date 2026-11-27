@@ -15,7 +15,8 @@ from __future__ import annotations
 from ui import text_roles
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from ui import buttons
 
 _TIP = "The figure's footer: its counts, what it leaves out or marks, and how to read it."
 
@@ -57,7 +58,7 @@ def build_details_panel(ctx, parent) -> QWidget:
     outer.setContentsMargins(0, 0, 0, 0)
     outer.setSpacing(2)
     head = QHBoxLayout()
-    button = QToolButton(panel)
+    button = buttons.tool_button(panel)
     button.setCheckable(True)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setProperty("variant", "default")

@@ -17,7 +17,7 @@ from functools import partial
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QBoxLayout, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -39,6 +39,7 @@ from review.features.image_browser.playground.controller import (
 )
 from review.features.image_browser.playground.renderer import render_playground_display
 from review.features.image_browser.playground.nanowell_view import build_nanowell_section
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -265,14 +266,12 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     file_row = QWidget(controls)
     frl = QHBoxLayout(file_row)
     frl.setContentsMargins(0, 2, 0, 2)
-    open_btn = QPushButton("Open image…", file_row)
-    open_btn.setProperty("variant", "default")
+    open_btn = buttons.default("Open image…", file_row)
     open_btn.setToolTip(
         "Load a single image file straight from disk, instead of a frame from "
         "the loaded dataset. Works with no dataset open at all — the intended "
         "way to tune segmentation before running a plate.")
-    clear_btn = QPushButton("Use dataset", file_row)
-    clear_btn.setProperty("variant", "default")
+    clear_btn = buttons.default("Use dataset", file_row)
     clear_btn.setToolTip("Go back to the frame selected above.")
     frl.addWidget(open_btn)
     frl.addWidget(clear_btn)
@@ -418,7 +417,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     seg_btn_row = QWidget(controls)
     sbl = QHBoxLayout(seg_btn_row)
     sbl.setContentsMargins(0, 2, 0, 2)
-    seg_btn = QPushButton("Segment", seg_btn_row)
+    seg_btn = buttons.default("Segment", seg_btn_row)
     seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
     hint = QLabel("Tuned here, then run the plate: type the same two values into "
                   "Analyze → Channel Tokens → Nucleus probability / Overlap.",
@@ -446,13 +445,13 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     sweep_row = QWidget(controls)
     swl = QHBoxLayout(sweep_row)
     swl.setContentsMargins(0, 2, 0, 2)
-    sweep_btn = QPushButton("Threshold curve…", sweep_row)
+    sweep_btn = buttons.default("Threshold curve…", sweep_row)
     sweep_btn.setToolTip(
         "Segment the displayed frame at a range of probability thresholds and "
         "plot how many nuclei each one finds.\n"
         "Slower than Segment — it runs the detector across the whole range — "
         "and it suggests no threshold: the curve is the answer.")
-    sweep_stop_btn = QPushButton("Stop", sweep_row)
+    sweep_stop_btn = buttons.default("Stop", sweep_row)
     sweep_stop_btn.setToolTip(
         "Stop after the threshold now running. What was measured so far is "
         "still plotted.")
@@ -477,7 +476,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # Not given a Stop twin: the sweep is M segmentations and runs for
     # minutes, while this is one measurement per outline over a mask that
     # already exists.
-    focus_btn = QPushButton("Focus distribution…", seg_btn_row)
+    focus_btn = buttons.default("Focus distribution…", seg_btn_row)
     focus_btn.setToolTip(
         "Measure every outline on screen and plot how sharp each cell is, "
         "with your own cut marked and a live count of what it keeps and "
@@ -562,7 +561,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         on_change()
     lmin.editingFinished.connect(_on_lut_edit)
     lmax.editingFinished.connect(_on_lut_edit)
-    lut_auto = QPushButton("Auto", lut_row)
+    lut_auto = buttons.default("Auto", lut_row)
     lut_auto.setFixedWidth(_LUT_AUTO_W)   # 46 clipped "Auto" to "Autc" under the button padding
     lut_auto.setToolTip("Reset the LUT min/max to the displayed frame's range.")
 
@@ -669,13 +668,13 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         st = ctx.state.playground
         st.zoom = max(0.1, min(8.0, st.zoom * delta))
         render_playground_display(ctx)
-    zout = QPushButton("−", zoom_row)
+    zout = buttons.default("−", zoom_row)
     zout.setFixedWidth(theme.Metrics.icon_btn_w)
     zout.clicked.connect(lambda _=False: _zoom(1 / 1.25))
-    zin = QPushButton("+", zoom_row)
+    zin = buttons.default("+", zoom_row)
     zin.setFixedWidth(theme.Metrics.icon_btn_w)
     zin.clicked.connect(lambda _=False: _zoom(1.25))
-    zfit = QPushButton("Fit", zoom_row)
+    zfit = buttons.default("Fit", zoom_row)
     zfit.clicked.connect(lambda _=False: (setattr(ctx.state.playground, "zoom", 1.0),
                                           render_playground_display(ctx)))
     zl.addWidget(zout)

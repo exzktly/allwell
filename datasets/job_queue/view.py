@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QMenu,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -38,6 +37,7 @@ from datasets.job_queue.row import JobRow
 from widgets import menu_exec
 from widgets.owned_action import owned_action
 from ui import text_roles
+from ui import buttons
 
 # The order the "+ Add job" menu offers the tools in — Analyze first because
 # it is the run everything else exists to prepare for or tidy up after, then
@@ -172,8 +172,7 @@ class JobQueuePage(QWidget):
 
         # Primary action at the left edge, matching every other Datasets
         # page's own Run/Check/Convert button.
-        self._start_btn = QPushButton("▶  Start queue", self)
-        self._start_btn.setProperty("variant", "primary")
+        self._start_btn = buttons.primary("▶  Start queue", self)
         self._start_btn.clicked.connect(self.startToggled)
         hl.addWidget(self._start_btn)
 
@@ -181,8 +180,7 @@ class JobQueuePage(QWidget):
         # discards whatever is in flight. Two buttons because they are two
         # different answers to "I want this to stop", and the destructive one
         # should never be the one reached for by default.
-        self._stop_btn = QPushButton("■  Stop job", self)
-        self._stop_btn.setProperty("variant", "destructive")
+        self._stop_btn = buttons.destructive("■  Stop job", self)
         self._stop_btn.setEnabled(False)
         self._stop_btn.setToolTip(
             "Cancel the running job outright, discarding whatever it has in "
@@ -193,8 +191,7 @@ class JobQueuePage(QWidget):
         # The page can now answer "how do I add one?" by itself. Previously
         # the only thing here was a button for Analyze specifically, and every
         # other kind had to be started from its own page.
-        self._add_btn = QPushButton("+  Add job", self)
-        self._add_btn.setProperty("variant", "default")
+        self._add_btn = buttons.default("+  Add job", self)
         self._add_btn.setToolTip(
             "Open a tool's page to set up a new queued job.")
         self._add_btn.clicked.connect(self._open_add_menu)
@@ -203,15 +200,14 @@ class JobQueuePage(QWidget):
         # A plain button that opens a transient menu, as "+ Add job" does: it
         # has no QMenu attached, so Qt draws no indicator and the label needs
         # no caret (CLAUDE.md §7.12).
-        self._recipes_btn = QPushButton("Recipes", self)
-        self._recipes_btn.setProperty("variant", "default")
+        self._recipes_btn = buttons.default("Recipes", self)
         self._recipes_btn.setToolTip(
             "Queue a saved chain of jobs on a new folder or file. Save a chain "
             "from any of its jobs' ⋯ menu: “Save chain as recipe…”.")
         self._recipes_btn.clicked.connect(self._open_recipes_menu)
         hl.addWidget(self._recipes_btn)
 
-        self._clear_btn = QPushButton("Clear completed", self)
+        self._clear_btn = buttons.default("Clear completed", self)
         self._clear_btn.setToolTip(
             "Remove every finished job — succeeded, failed, cancelled or "
             "blocked. Pending and running jobs are left alone.")
@@ -220,7 +216,7 @@ class JobQueuePage(QWidget):
 
         # The blunt one, beside the careful one. Clear completed keeps what is
         # still waiting; this empties the queue, so the controller asks first.
-        self._clear_all_btn = QPushButton("Clear all", self)
+        self._clear_all_btn = buttons.default("Clear all", self)
         self._clear_all_btn.setEnabled(False)
         self._clear_all_btn.setToolTip(
             "Remove every job from the queue, waiting or finished, after "

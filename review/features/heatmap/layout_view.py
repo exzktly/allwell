@@ -46,7 +46,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QSpinBox,
@@ -67,6 +66,7 @@ from core.safe import swallowed
 from review.core.dnd import WELL_MIME  # shared drag/drop token
 from ui import theme
 from widgets.spin_box import SpinBox
+from ui import buttons
 
 #: The one layout this editor owns. Persisted under this name, so it stays
 #: ``"Sidebar"`` although the editor is drawn in the plot's right dock.
@@ -375,7 +375,7 @@ def build_heatmap_layout_editor(ctx, band_parent: QWidget, dock: QWidget | None)
 
     # A text toggle beside Display ▾ and Save ▾, filled like them; the theme's
     # ``toggle`` variant rings it in the accent while the panel is open.
-    button = QPushButton(LAYOUT_BUTTON_TEXT, band_parent)
+    button = buttons.default(LAYOUT_BUTTON_TEXT, band_parent)
     button.setCheckable(True)
     button.setProperty("variant", "toggle")
     button.setToolTip(
@@ -524,16 +524,14 @@ class _LayoutPanel(QWidget):
         actions_l = QHBoxLayout(actions)
         actions_l.setContentsMargins(0, 0, 0, 0)
         actions_l.setSpacing(sp.sm)
-        autopop_btn = QPushButton("Auto-populate from selection", actions)
-        autopop_btn.setProperty("variant", "primary")
+        autopop_btn = buttons.primary("Auto-populate from selection", actions)
         autopop_btn.setToolTip(
             "Place the wells the plate shows as selected into this grid in plate "
             "order. The grid grows if it needs more cells to hold them."
         )
         autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(ctx))
         actions_l.addWidget(autopop_btn, 1)
-        clear_btn = QPushButton("Clear", actions)
-        clear_btn.setProperty("variant", "default")
+        clear_btn = buttons.default("Clear", actions)
         clear_btn.setToolTip("Empty every cell of the grid; its size and labels stay")
         clear_btn.clicked.connect(lambda _=False: _on_clear_all(ctx))
         actions_l.addWidget(clear_btn, 0)

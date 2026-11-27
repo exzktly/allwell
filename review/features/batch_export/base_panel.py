@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QProgressBar,
-    QPushButton,
     QScrollArea,
     QToolButton,
     QVBoxLayout,
@@ -45,7 +44,6 @@ from review.features.batch_export._common import (
     ask_name_dialog,
     btn_card,
     btn_danger,
-    btn_primary,
     btn_secondary,
     _clear_layout_helper,
     _logger,
@@ -98,6 +96,7 @@ _TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
 from review.domain.numeric import is_number
+from ui import buttons
 
 
 #: The three answers the scale combos offer, and what each means to
@@ -585,8 +584,8 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         title.setFont(f)
         hdr1.addWidget(title)
         hdr1.addStretch(1)
-        hdr1.addWidget(btn_primary(None, "+ Add", self._grp_add))
-        qs_btn = QToolButton()
+        hdr1.addWidget(btn_secondary(None, "+ Add", self._grp_add))
+        qs_btn = buttons.tool_button()
         # Plain dropdown-style button \u2014 no visible arrow indicator.
         # Qt's `QToolButton::menu-indicator` is the small dropdown
         # caret Qt paints when a menu is attached; hide it via QSS.
@@ -2094,7 +2093,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         eb_row.setContentsMargins(12, 2, 12, 2)
         self._add_bold_label(eb_row, "Error band:", min_width=_FIELD_LABEL_W)
         initial_sem = bool(ctx.state.plot.use_sem)
-        sem_btn = QPushButton(spread_label(initial_sem))
+        sem_btn = buttons.default(spread_label(initial_sem))
         sem_btn.setProperty("variant", "sem" if initial_sem else "sem_warn")
         sem_btn.setToolTip(
             "Switch the spread used by line/bar batch exports between\n"
@@ -2134,8 +2133,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
     ) -> None:
         run_row = QHBoxLayout()
         run_row.setContentsMargins(12, 8, 12, 8)
-        self._run_btn = QPushButton(button_text)
-        self._run_btn.setProperty("variant", "primary")
+        self._run_btn = buttons.primary(button_text)
         self._run_btn.clicked.connect(self._run_batch)
         run_row.addWidget(self._run_btn)
         self._prog_lbl = QLabel("")

@@ -22,13 +22,14 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from services.remote_batch_step import DEFAULT_UPLOAD_AHEAD, UPLOAD_AHEAD_CHOICES
 from services.remote_config import default_remote_index, load_remotes
 from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
+from ui import buttons
 
 
 class AnalyzeRunFooterMixin:
@@ -156,8 +157,7 @@ class AnalyzeRunFooterMixin:
         self._remote_cb.setCurrentIndex(
             default_remote_index(self._remote_cb.count()))
         rl.addWidget(self._remote_cb, 1)
-        self._manage_remotes_btn = QPushButton("Manage…", remote_widget)
-        self._manage_remotes_btn.setProperty("variant", "default")
+        self._manage_remotes_btn = buttons.default("Manage…", remote_widget)
         self._manage_remotes_btn.setToolTip(
             "Add, edit, delete, test, or bootstrap remote-execution hosts.")
         self._manage_remotes_btn.clicked.connect(self.open_manage_remotes)

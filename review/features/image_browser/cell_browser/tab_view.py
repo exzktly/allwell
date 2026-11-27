@@ -14,7 +14,7 @@ from ui import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from widgets.control_band import ControlBand
@@ -28,6 +28,7 @@ from review.features.image_browser.cell_browser.collect import cell_browser_chan
 from review.features.image_browser.cell_browser.state import CellBrowserState
 from review.features.image_browser.cell_browser.worker import CellImageLoader
 from widgets.lut_cmaps import resolve_channel_tint
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -135,8 +136,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("", count_lbl)
     reg.register("_cell_browser_count_label", count_lbl)
 
-    load_more = QPushButton("Load next", ctrl)
-    load_more.setProperty("variant", "default")
+    load_more = buttons.default("Load next", ctrl)
     load_more.clicked.connect(lambda _=False: ctl.load_next_page(ctx))
     load_more.setEnabled(False)
     ctrl.add_action(load_more)
@@ -145,7 +145,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # Generate: the display controls (channels / LUT / color / source /
     # boundaries) only *stage* their state; pressing Generate re-composites the
     # gallery with everything staged (same gate as the sidebar "Apply filters").
-    generate_btn = QPushButton("Generate", ctrl)
+    generate_btn = buttons.default("Generate", ctrl)
     generate_btn.setObjectName("Primary")
     generate_btn.setToolTip(
         "Re-render the gallery with the current channels / LUT / colors / "
@@ -358,19 +358,18 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         hi_e.setFixedWidth(_HI_E_W)
         hi_e.setPlaceholderText("auto")
         rl.addWidget(hi_e)
-        auto_btn = QPushButton("Auto", row)
-        auto_btn.setProperty("variant", "default")
+        auto_btn = buttons.default("Auto", row)
         rl.addWidget(auto_btn)
 
         # Per-channel display colour: a swatch (opens a colour popover) + a reset
         # back to the default palette colour. Staged → applied on Generate.
         rl.addWidget(QLabel("color", row))
-        swatch = QPushButton("", row)
+        swatch = buttons.default("", row)
         swatch.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)
         swatch.setToolTip("Display colour for this channel. Applied on Generate.")
         _paint_cb_swatch(swatch, _cb_effective_tint(iv, tok, i))
         rl.addWidget(swatch)
-        reset_c = QPushButton("✕", row)
+        reset_c = buttons.default("✕", row)
         reset_c.setFixedWidth(_RESET_C_W)
         reset_c.setObjectName("Ghost")
         reset_c.setToolTip("Reset this channel's colour to the default.")

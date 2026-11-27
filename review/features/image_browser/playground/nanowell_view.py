@@ -21,11 +21,12 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QDialog, QHBoxLayout, QHeaderView, QLabel, QPushButton, QScrollArea,
+    QAbstractItemView, QApplication, QDialog, QHBoxLayout, QHeaderView, QLabel, QScrollArea,
     QSplitter, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ui.theme import Colors
+from ui import buttons as ui_buttons
 
 #: Mark kind -> colour token. Found and dark sites are told apart at a glance; the origin and the square are the
 #: two marks addressing hangs on.
@@ -182,7 +183,7 @@ def _build_popup(ctx) -> QDialog:
     facts_scroll.setWidget(popup._facts)
     rl.addWidget(facts_scroll, 2)
     buttons = QHBoxLayout()
-    popup._copy = QPushButton("Copy settings", right)
+    popup._copy = ui_buttons.default("Copy settings", right)
     popup._copy.setToolTip("Put the suggested settings and the measurements behind them on the clipboard as text.")
     popup._copy.clicked.connect(lambda _=False: QApplication.clipboard().setText(popup._text))
     buttons.addWidget(popup._copy)
@@ -240,13 +241,13 @@ def build_nanowell_section(ctx, controls: QWidget, layout, row, *, archive_dir, 
     buttons = QWidget(controls)
     bl = QHBoxLayout(buttons)
     bl.setContentsMargins(0, _BUTTON_ROW_PAD_V, 0, _BUTTON_ROW_PAD_V)
-    archive_btn = QPushButton("Well archive…", buttons)
+    archive_btn = ui_buttons.default("Well archive…", buttons)
     archive_btn.setToolTip(
         "Choose a raw well archive (<well>.zip, with the dataset's acquisition.json beside it, as in a dataset's in/ "
         "folder). Its tiles at the first timepoint are stitched as a run stitches them, the array is found in the "
         "montage, and the Nanowells settings it implies are shown. Opens on the loaded dataset's archive for the "
         "selected well, when there is one.")
-    frame_btn = QPushButton("From this frame", buttons)
+    frame_btn = ui_buttons.default("From this frame", buttons)
     frame_btn.setToolTip(
         "Search the raw frame on screen (a dataset frame, or an image opened with Open image…: one tile or an "
         "already-stitched well) at the pixel size given below.")

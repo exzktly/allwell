@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
-    QPushButton,
     QTableWidget,
     QVBoxLayout,
     QWidget,
@@ -29,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from review.domain.ratio_models import RatioMetric
 from widgets.spin_box import DoubleSpinBox
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -100,17 +100,17 @@ class RatioMetricsPanel(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        add_btn = QPushButton("+ Add ratio", self)
+        add_btn = buttons.default("+ Add ratio", self)
         add_btn.clicked.connect(self._on_add)
         btn_row.addWidget(add_btn)
 
-        remove_btn = QPushButton("− Remove selected", self)
+        remove_btn = buttons.default("− Remove selected", self)
         remove_btn.clicked.connect(self._remove_selected)
         btn_row.addWidget(remove_btn)
 
         btn_row.addStretch(1)
 
-        apply_btn = QPushButton("Apply", self)
+        apply_btn = buttons.default("Apply", self)
         apply_btn.setDefault(True)
         apply_btn.clicked.connect(self._on_apply)
         btn_row.addWidget(apply_btn)

@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QProgressBar,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -76,6 +75,7 @@ from datasets.ome_import.ome_import_compute import (
 from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
 from datasets.core.timepoint_picker import TimepointPicker
+from ui import buttons
 
 # Widths of the small numeric boxes. Named, not written at the call site, both
 # because ARCHITECTURE §8 asks for it and because a literal passed through a
@@ -200,13 +200,11 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Convert", self)
-        self._run_btn.setProperty("variant", "primary")
+        self._run_btn = buttons.primary("▶  Convert", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "default")
+        self._queue_btn = buttons.default("+ Queue", self)
         self._queue_btn.setToolTip("Add this conversion to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -233,8 +231,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
         self._build_status_section(outer)
 
-        self._open_btn = QPushButton("Open dataset in Analyze", self)
-        self._open_btn.setProperty("variant", "default")
+        self._open_btn = buttons.default("Open dataset in Analyze", self)
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(
             lambda: self.openInAnalyzeRequested.emit(self._dest_root))
@@ -333,8 +330,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._suggest_label.setProperty("textRole", "help")
         self._suggest_label.setWordWrap(True)
         sl.addWidget(self._suggest_label, 1)
-        self._suggest_btn = QPushButton("Apply again", self._suggest_row)
-        self._suggest_btn.setProperty("variant", "default")
+        self._suggest_btn = buttons.default("Apply again", self._suggest_row)
         self._suggest_btn.setToolTip(
             "Fill the grid, FOVs per well, serpentine direction, frame order "
             "and — when the metadata names it — the starting well, from the "
@@ -484,16 +480,14 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         bl = QHBoxLayout(btn_row)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
-        self._seed_btn = QPushButton("Generate path from grid", btn_row)
-        self._seed_btn.setProperty("variant", "default")
+        self._seed_btn = buttons.default("Generate path from grid", btn_row)
         self._seed_btn.setToolTip(
             "Fill the plate with the serpentine path of the grid above, as an "
             "editable starting point."
         )
         self._seed_btn.clicked.connect(self._generate_path)
         bl.addWidget(self._seed_btn)
-        self._clear_path_btn = QPushButton("Clear path", btn_row)
-        self._clear_path_btn.setProperty("variant", "default")
+        self._clear_path_btn = buttons.default("Clear path", btn_row)
         self._clear_path_btn.setToolTip(
             "Clear the clicked ordering and return to the live grid preview."
         )

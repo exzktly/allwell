@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QRadioButton,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QRadioButton,
     QScrollArea, QVBoxLayout, QWidget,
 )
 
@@ -75,6 +75,7 @@ from review.features.home.cell_gating.optimizer_view import (
     build_optimizer_window, show_optimizer_window,
 )
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -210,8 +211,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
 def _jump_row(ctx, parent: QWidget, scroll: QScrollArea) -> QWidget:
     """A button at the top of the page that scrolls to the CDFs, which sit under every control they are read against —
     on a phone that is more than two screens down, and nothing at the top said the plot was there at all."""
-    button = QPushButton("Jump to the CDFs ↓", parent)
-    button.setProperty("variant", "default")
+    button = buttons.default("Jump to the CDFs ↓", parent)
     button.setToolTip("Scroll down to the cumulative distributions the thresholds below are read against.")
 
     def jump() -> None:
@@ -281,7 +281,7 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
     radio = QRadioButton(label, row)
     radio.setToolTip(tooltip)
     layout.addWidget(radio)
-    btn = QPushButton("All gates", row)
+    btn = buttons.default("All gates", row)
     btn.setMinimumWidth(_GATE_BTN_MIN_W)
     btn.setToolTip(btn_tooltip)
     btn.clicked.connect(lambda _=False: _open_gate_filter_menu(ctx, mode))
@@ -386,8 +386,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
     auto_row = QWidget(frame)
     auto_row_layout = FlowLayout(auto_row)
     auto_row_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 0)
-    auto_btn = QPushButton("Auto-threshold all channels", auto_row)
-    auto_btn.setProperty("variant", "default")
+    auto_btn = buttons.default("Auto-threshold all channels", auto_row)
     auto_btn.setToolTip(
         "Compute a default ON cutoff per channel via Otsu on "
         "a per-cell + matched-background-pixel distribution sampled from "
@@ -397,8 +396,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
     )
     auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx))
     auto_row_layout.addWidget(auto_btn)
-    opt_btn = QPushButton("Optimize ON cutoff…", auto_row)
-    opt_btn.setProperty("variant", "default")
+    opt_btn = buttons.default("Optimize ON cutoff…", auto_row)
     opt_btn.setToolTip(
         "Open the optimizer: scan a range of cutoffs for one channel and apply "
         "the one that best separates two wells' fraction-on.")

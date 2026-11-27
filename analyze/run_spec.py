@@ -38,6 +38,7 @@ from services.run_detect import (
 )
 from services.run_spec import RunSpec, RunSpecError
 from widgets.flow_layout import FlowLayout
+from ui import buttons
 
 
 class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
@@ -197,16 +198,14 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         layout = FlowLayout(row, margin=0)
         layout.setContentsMargins(12, 10, 12, 10)
 
-        self._run_btn = QPushButton("▶  Run Pipeline", row)
-        self._run_btn.setProperty("variant", "primary")
+        self._run_btn = buttons.primary("▶  Run Pipeline", row)
         self._run_btn.clicked.connect(self._run)
         layout.addWidget(self._run_btn)
 
         layout.addWidget(self._build_suspend_button(row))
         layout.addWidget(self._build_queue_button(row))
 
-        self._stop_btn = QPushButton("■  Stop", row)
-        self._stop_btn.setProperty("variant", "destructive")
+        self._stop_btn = buttons.destructive("■  Stop", row)
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         layout.addWidget(self._stop_btn)
@@ -231,7 +230,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         self._stop_btn.setVisible(running)
 
     def _build_queue_button(self, parent) -> QPushButton:
-        self._queue_btn = QPushButton("+ Queue", parent)
+        self._queue_btn = buttons.default("+ Queue", parent)
         self._queue_btn.setToolTip(
             "Add this run to the Job Queue instead of running it now. It waits "
             "its turn in Datasets → Job Queue, which runs one job at a time.")
@@ -336,7 +335,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         browse = getattr(self, "_browse_btn", None)
         if browse is None or browse.parentWidget() is None:
             return
-        button = QToolButton(browse.parentWidget())
+        button = buttons.tool_button(browse.parentWidget())
         button.setObjectName("QueuedOutputButton")
         # No caret in the text: ``hasMenu`` gives it the theme's one shared
         # chevron. A "▾" label beside Qt's own menu indicator drew two arrows

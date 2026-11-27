@@ -9,12 +9,13 @@ from ui import theme
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
+    QHBoxLayout, QLabel, QProgressBar, QTextEdit,
     QVBoxLayout, QWidget,
 )
 from widgets.separator import build_hline_separator
 from core.log_view import append_entry, log_formatter
 from core.worker_bridge import GuiLogRelay
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -153,8 +154,7 @@ def build_bottom(win) -> None:
     win._progress_bar.hide()
     sr_l.addWidget(win._progress_bar)
 
-    win._log_btn = QPushButton("Log \u25b4", status_row)
-    win._log_btn.setProperty("variant", "default")
+    win._log_btn = buttons.default("Log \u25b4", status_row)
     win._log_btn.clicked.connect(lambda _=False: win._toggle_log())
     sr_l.addWidget(win._log_btn)
 
@@ -173,8 +173,7 @@ def build_bottom(win) -> None:
     hdr_lbl.setProperty("textRole", "eyebrow")
     lh_l.addWidget(hdr_lbl)
     lh_l.addStretch(1)
-    clear_btn = QPushButton("Clear", log_hdr)
-    clear_btn.setProperty("variant", "default")
+    clear_btn = buttons.default("Clear", log_hdr)
     clear_btn.clicked.connect(lambda _=False: win._clear_log())
     lh_l.addWidget(clear_btn)
 

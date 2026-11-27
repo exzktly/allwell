@@ -37,6 +37,7 @@ from review.features.saved_cells import controller as ctl
 from ui import theme
 from widgets.flow_layout import FlowLayout
 from widgets.page_body import build_page_body
+from ui import buttons
 
 _SET_COLUMNS = ("Name", "Cells", "From", "In use")
 #: A frame or a padding is drawn on both sides of what it surrounds.
@@ -138,8 +139,7 @@ def _button_row(parent: QWidget, lay: QVBoxLayout) -> FlowLayout:
 
 
 def _button(parent: QWidget, text: str, tip: str, *, checkable: bool = False) -> QPushButton:
-    btn = QPushButton(text, parent)
-    btn.setProperty("variant", "default")
+    btn = buttons.default(text, parent)
     btn.setToolTip(tip)
     btn.setCheckable(checkable)
     return btn

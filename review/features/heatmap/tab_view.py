@@ -12,7 +12,7 @@ from review.core.channel_state_controller import on_plot_channel_selected
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QInputDialog, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from review.core.ui_helpers import (
@@ -30,6 +30,7 @@ from review.features.heatmap.layout_view import build_heatmap_layout_editor
 from review.core.channel_state_controller import refresh_heatmap_aggregation_options
 from core.safe import swallowed
 from ui import theme
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -149,8 +150,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     disp_l.addWidget(vmax_edit)
 
-    transpose_btn = QPushButton("⇄ Transpose", disp)
-    transpose_btn.setProperty("variant", "default")
+    transpose_btn = buttons.default("⇄ Transpose", disp)
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
     transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx))
     disp_l.addWidget(transpose_btn)

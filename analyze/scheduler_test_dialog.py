@@ -21,13 +21,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from core.safe import swallowed
 from services.scheduler_probe import ProbeResult, ProbeRun, summarize
+from ui import buttons
 
 
 class _Bridge(QObject):
@@ -67,7 +67,7 @@ class SchedulerTestDialog(QDialog):
         layout.addWidget(self._summary_lbl)
         row = QHBoxLayout()
         row.addStretch(1)
-        self._close_btn = QPushButton("Cancel", self)
+        self._close_btn = buttons.default("Cancel", self)
         self._close_btn.clicked.connect(self.close)
         row.addWidget(self._close_btn)
         layout.addLayout(row)

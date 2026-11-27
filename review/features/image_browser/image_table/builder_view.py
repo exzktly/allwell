@@ -57,6 +57,7 @@ from review.features.image_browser.image_table.image_compose import (
 )
 from widgets.owned_action import owned_action
 from review.data.nanowell_images import display_token, is_metric_map as _is_metric_token
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -732,7 +733,7 @@ def _wrapping(lbl: QLabel) -> QLabel:
 
 
 def _x_btn(tip: str, on_click) -> QToolButton:
-    b = QToolButton()
+    b = buttons.tool_button()
     b.setObjectName("ITBX")
     b.setText("✕")
     b.setCursor(Qt.PointingHandCursor)
@@ -900,7 +901,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # A–H, columns 1–12 — using the builder's first channel as the (fixed) image.
     # Correctly labels every plate row, unlike the Wrap-N band trick (which only
     # labels the first band). Wells come from the sidebar plate selection.
-    plate_btn = QToolButton(parent)
+    plate_btn = buttons.tool_button(parent)
     plate_btn.setObjectName("ITBClear")
     plate_btn.setText("Plate A–H × 1–12")
     plate_btn.setCheckable(True)
@@ -931,7 +932,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     _rt(ctx).wrap_stepper = wrap
     header.addWidget(wrap)
 
-    clear_btn = QToolButton(parent)
+    clear_btn = buttons.tool_button(parent)
     clear_btn.setObjectName("ITBClear")
     clear_btn.setText("Clear builder")
     clear_btn.setCursor(Qt.PointingHandCursor)
@@ -1262,7 +1263,7 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
     h.addWidget(_swatch(_cmap_swatch(cs.colormap)))
     h.addWidget(_text(display_token(cs.channel), "ITBChanLbl"))
     h.addStretch(1)
-    gear = QToolButton(pill)
+    gear = buttons.tool_button(pill)
     gear.setObjectName("ITBOpt")
     gear.setText(f"⚙ {_render_label(cs)}")
     gear.setCursor(Qt.PointingHandCursor)
@@ -1293,12 +1294,12 @@ def _overlay_toggle(ctx, ax) -> QWidget:
     sl.setContentsMargins(0, 0, 0, 0)
     sl.setSpacing(0)
 
-    sep = QToolButton(seg)
+    sep = buttons.tool_button(seg)
     sep.setObjectName("ITBSeg")
     sep.setText("Separate")
     sep.setCursor(Qt.PointingHandCursor)
     sep.setProperty("on", "false" if ax.overlay else "true")
-    ovl = QToolButton(seg)
+    ovl = buttons.tool_button(seg)
     ovl.setObjectName("ITBSeg")
     ovl.setText("⧉ Overlay")
     ovl.setCursor(Qt.PointingHandCursor)
@@ -1560,7 +1561,7 @@ def _lut_row(ctx, token: str, specs: list) -> QFrame:
     h.addWidget(_text("max", "ITBLutTag"))
     h.addWidget(_edit_field("max"))
 
-    fit = QToolButton(row)
+    fit = buttons.tool_button(row)
     fit.setObjectName("ITBLutFit")
     fit.setText("Auto")
     fit.setCursor(Qt.PointingHandCursor)
@@ -1650,7 +1651,7 @@ def _build_tray(ctx, spec) -> None:
         lay.addWidget(_tray_chip(ctx, name))
     if metrics:
         open_ = bool(getattr(_rt(ctx), "metric_tray_open", False))
-        toggle = QToolButton(body)
+        toggle = buttons.tool_button(body)
         toggle.setObjectName("ITBOpt")
         toggle.setText(f"{'▾' if open_ else '▸'} Nanowell metrics ({len(metrics)})")
         toggle.setCursor(Qt.PointingHandCursor)

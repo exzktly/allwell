@@ -38,6 +38,7 @@ except Exception:  # pragma: no cover
     _NP_AVAILABLE = False
 
 from review.core.ui_helpers import btn_secondary
+from ui import buttons
 
 _logger = logging.getLogger(__name__)
 
@@ -145,7 +146,7 @@ class CropTool:
     # ── UI builders ─────────────────────────────────────────────────────────
 
     def make_button(self, parent: QWidget) -> QPushButton:
-        btn = QPushButton(self._button_label, parent)
+        btn = buttons.default(self._button_label, parent)
         btn.setProperty("variant", "toggle")
         btn.setCheckable(True)
         btn.setToolTip(self._tooltip_for(False))

@@ -10,7 +10,7 @@ the one-line-removable property ``tests/test_feature_removal.py`` enforces.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QFrame, QPushButton, QScrollArea, QWidget,
+    QFrame, QScrollArea, QWidget,
 )
 
 from core.safe import swallow
@@ -34,6 +34,7 @@ from review.features.response.controller import (
     redraw_response, refresh_response_metric_combo, response_channel,
     set_compare_series, set_fit_bound, set_fit_model, update_timepoint_button,
 )
+from ui import buttons
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
 _FIG_W, _FIG_H, _DPI = 7.2, 4.6, 100
@@ -99,7 +100,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # variables a figure can be split by is the number the plate has.
     # Self-describing, so it needs no caption: the button names what it splits
     # by, which is what a reader of four curves needs to know.
-    series_btn = reg.register("_response_series_btn", QPushButton("Series: None"))
+    series_btn = reg.register("_response_series_btn", buttons.default("Series: None"))
     series_btn.setProperty("variant", "default")
     series_btn.setToolTip(
         "Split the members into one curve per combination of these variables' "
@@ -111,7 +112,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # The Bar tab's picker, over this tab's own selection. Self-describing —
     # the button's own text carries the count, so it needs no caption beside it.
     tp_button = reg.register("_response_tp_button",
-                             QPushButton("Timepoints: 0 selected"))
+                             buttons.default("Timepoints: 0 selected"))
     tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(lambda _=False: open_timepoint_selector(ctx))
     band.add_scope("", tp_button)

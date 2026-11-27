@@ -27,10 +27,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from ui import theme
+from ui import buttons
 
 #: The definition column's width. A fixed rail, so the plate beside it does not
 #: reflow every time a variable is renamed.
@@ -167,7 +168,7 @@ def _build_header(ctx, parent: QWidget, reg) -> QWidget:
     row.addWidget(showing)
     row.addStretch(1)
 
-    undo = reg.register("_var_undo", QPushButton("↶  Undo", host))
+    undo = reg.register("_var_undo", buttons.default("↶  Undo", host))
     undo.setObjectName("HomeAction")
     undo.setToolTip("Put the variables back the way they were before the last "
                     "change on this tab.")

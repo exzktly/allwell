@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHeaderView, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -19,6 +18,7 @@ from widgets.button_row import ButtonRow
 
 from . import collect as tc
 from . import controller as tcc
+from ui import buttons
 
 #: Column headings, in order.
 COLUMNS = ("Stage", "Well", "Field", "Time", "Problem", "Decision")
@@ -68,12 +68,12 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
     # was squeezed until its caption read as a fragment. Wrapped, every one
     # keeps its whole caption and the row grows taller instead.
     button_row = ButtonRow(parent)
-    open_btn = QPushButton("Open in Segmentation", button_row)
-    exclude_btn = QPushButton("Exclude field…", button_row)
-    accept_btn = QPushButton("Accept", button_row)
-    reopen_btn = QPushButton("Reopen", button_row)
-    rerun_btn = QPushButton("Re-run wells…", button_row)
-    anchor_btn = QPushButton("Set anchor…", button_row)
+    open_btn = buttons.default("Open in Segmentation", button_row)
+    exclude_btn = buttons.default("Exclude field…", button_row)
+    accept_btn = buttons.default("Accept", button_row)
+    reopen_btn = buttons.default("Reopen", button_row)
+    rerun_btn = buttons.default("Re-run wells…", button_row)
+    anchor_btn = buttons.default("Set anchor…", button_row)
     for btn, tip in (
         (open_btn, "Show this field in Image Browser → Segmentation."),
         (exclude_btn, "Leave the selected fields out of every plot, statistic "

@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
 
 from core import phone_layout
 from ui import phone_fit
+from ui import buttons as ui_buttons
 
 #: The property ``PhoneShell`` sets on the window it rearranges itself, which
 #: is never given a phone form here.
@@ -272,7 +273,7 @@ class _PhoneForm(QObject):
         closers = self._bring_down_buttons(avail.width(), unit)
         self.close_button: QPushButton | None = None
         if _closable(window) and not closers:
-            self.close_button = QPushButton(CLOSE_TEXT, self.foot)
+            self.close_button = ui_buttons.default(CLOSE_TEXT, self.foot)
             self.close_button.setObjectName("PhoneWindowClose")
             self.close_button.setToolTip("Close this window — what its title bar's ✕ does.")
             self.close_button.clicked.connect(lambda _=False: self._win.close())

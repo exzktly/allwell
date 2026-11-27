@@ -10,12 +10,13 @@ add/remove pattern in ``criteria_view``.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QComboBox, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from core.safe import swallowed
 from review.features.image_browser.cell_browser.collect import sort_field_options
 from ui import theme
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -44,8 +45,7 @@ def build_cell_browser_sort_section(ctx, parent_layout) -> None:
     ctx.runtime.cell_browser.sort_host = rows_lay
     ctx.runtime.cell_browser.sort_rows = []
 
-    add_btn = QPushButton("+ Add sort key")
-    add_btn.setProperty("variant", "default")
+    add_btn = buttons.default("+ Add sort key")
     add_btn.clicked.connect(lambda _=False: add_sort_row(ctx))
     parent_layout.addWidget(add_btn)
 
@@ -69,7 +69,7 @@ def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
     combo.setMinimumWidth(theme.Metrics.combo_min_w_sm)
 
     # Direction toggle: checked = descending (▼), unchecked = ascending (▲).
-    dir_btn = QPushButton("▲ Asc", row)
+    dir_btn = buttons.default("▲ Asc", row)
     dir_btn.setCheckable(True)
     dir_btn.setFixedWidth(theme.Metrics.short_field_w)
     dir_btn.setToolTip("Toggle ascending / descending")
@@ -80,7 +80,7 @@ def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
     _sync_dir()
     dir_btn.toggled.connect(_sync_dir)
 
-    rm = QPushButton("✕", row)
+    rm = buttons.default("✕", row)
     rm.setFixedWidth(_RM_W)
     rm.setObjectName("Ghost")
 

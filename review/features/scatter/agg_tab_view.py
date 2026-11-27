@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from PySide6.QtWidgets import (
-    QComboBox, QPushButton, QVBoxLayout,
+    QComboBox, QVBoxLayout,
     QWidget,
 )
 
@@ -20,6 +20,7 @@ from review.features.export.service import (
     export_cell_data_from, export_scatter_agg_data)
 from review.features.scatter.cell_scope_compute import agg_cell_scope
 from review.features.scatter._observations import build_axis_controls
+from ui import buttons
 
 
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
@@ -94,7 +95,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see update_tp_selection_display), so it needs no
     # separate caption or count label beside it.
-    agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Timepoints: 0 selected"))
+    agg_tp_button = reg.register("_scatter_agg_tp_button", buttons.default("Timepoints: 0 selected"))
     agg_tp_button.setProperty("variant", "default")
     agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
     ctrl.add_scope("", agg_tp_button)

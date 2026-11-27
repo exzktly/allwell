@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from review.data.fov_selection import (
     available_fovs,
@@ -31,6 +31,7 @@ from review.data.fov_selection import (
     selected_fovs,
 )
 from widgets import menu_exec
+from ui import buttons
 
 # Pixel geometry for this row, named rather than written at the call sites
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site). The vertical
@@ -64,7 +65,7 @@ def build_fov_selection_row(ctx, parent: QWidget, *, indent: int,
     label = QLabel("Fields of view:", row)
     label.setToolTip(_TOOLTIP)
     layout.addWidget(label)
-    btn = QPushButton("All FOVs", row)
+    btn = buttons.default("All FOVs", row)
     btn.setMinimumWidth(_FOV_BTN_MIN_W)
     btn.setToolTip(_TOOLTIP)
     btn.clicked.connect(lambda _=False: open_fov_menu(ctx, on_apply))

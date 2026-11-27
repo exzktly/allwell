@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from review.domain.plate_layout import FILL_ALONG_COLS, FILL_ALONG_ROWS
 from widgets.spin_box import SpinBox
+from ui import buttons as ui_buttons
 
 
 #: Widest the plate column may render. The plate itself is capped narrower
@@ -186,7 +187,7 @@ def _build_selection_row(ctx, host: QWidget, column, reg) -> None:
          "Select every well holding the same value as the wells you have "
          "selected."),
     ):
-        button = reg.register(name, QPushButton(text, host))
+        button = reg.register(name, ui_buttons.default(text, host))
         button.setObjectName("VariablesLink")
         button.setToolTip(tip)
         links.addWidget(button)
@@ -324,7 +325,7 @@ def _build_groups(ctx, host: QWidget, column, reg) -> None:
 
 
 def _action(parent: QWidget, text: str) -> QPushButton:
-    button = QPushButton(text, parent)
+    button = ui_buttons.default(text, parent)
     button.setObjectName("HomeAction")
     return button
 
@@ -379,7 +380,7 @@ def value_chip(label: str, value_id: str, parent: QWidget, *,
     chip would still be needed to say which value is being painted. Two steps
     that always mean the same thing beat one that sometimes means the opposite.
     """
-    button = QPushButton(label, parent)
+    button = ui_buttons.default(label, parent)
     button.setObjectName("VariableValueChip")
     button.setCheckable(False)
     button.setCursor(Qt.PointingHandCursor)

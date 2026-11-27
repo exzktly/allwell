@@ -12,8 +12,7 @@ from review.data.data_loading import get_rows
 
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget, QWidgetAction, QCheckBox,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QScrollArea, QVBoxLayout, QWidget, QWidgetAction, QCheckBox,
 )
 
 from core.safe import swallowed
@@ -28,6 +27,7 @@ from review.features.image_browser.cell_browser.sort_view import (
     cell_browser_sort_refresh,
 )
 from ui import theme
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -94,8 +94,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     gate_pick_row = QWidget(parent)
     gpl = QHBoxLayout(gate_pick_row)
     gpl.setContentsMargins(16, 0, 0, 0)
-    gate_pick_btn = QPushButton("Gate", gate_pick_row)
-    gate_pick_btn.setProperty("variant", "default")
+    gate_pick_btn = buttons.default("Gate", gate_pick_row)
     gate_pick_btn.setToolTip("Choose which scatter gate(s) define the cells.")
     gate_pick_btn.clicked.connect(lambda _=False: _open_gate_select(ctx))
     gpl.addWidget(gate_pick_btn)
@@ -136,8 +135,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     ctx.runtime.cell_browser.criteria_rows_host = rows_host
     ctx.runtime.cell_browser.criteria_rows = []
 
-    add_btn = QPushButton("+ Add criterion", parent)
-    add_btn.setProperty("variant", "default")
+    add_btn = buttons.default("+ Add criterion", parent)
     add_btn.clicked.connect(lambda _=False: _add_row(ctx))
     lay.addWidget(add_btn)
     ctx.runtime.cell_browser.add_criterion_btn = add_btn
@@ -161,8 +159,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     tp_row = QWidget(parent)
     trl = QHBoxLayout(tp_row)
     trl.setContentsMargins(0, 0, 0, 0)
-    tp_btn = QPushButton("Timepoints", tp_row)
-    tp_btn.setProperty("variant", "default")
+    tp_btn = buttons.default("Timepoints", tp_row)
     tp_btn.clicked.connect(lambda _=False: _open_multiselect(
         ctx, tp_btn, ctx.runtime.cell_browser.tp_selections, ctx.runtime.cell_browser.tp_label))
     trl.addWidget(tp_btn)
@@ -177,8 +174,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     fov_row = QWidget(parent)
     frl = QHBoxLayout(fov_row)
     frl.setContentsMargins(0, 0, 0, 0)
-    fov_btn = QPushButton("FOVs", fov_row)
-    fov_btn.setProperty("variant", "default")
+    fov_btn = buttons.default("FOVs", fov_row)
     fov_btn.clicked.connect(lambda _=False: _open_multiselect(
         ctx, fov_btn, ctx.runtime.cell_browser.fov_selections, ctx.runtime.cell_browser.fov_label))
     frl.addWidget(fov_btn)
@@ -365,7 +361,7 @@ def _add_row(ctx, column: str = "") -> None:
     combo.setMinimumWidth(theme.Metrics.combo_min_w_sm)
     lo = QLineEdit(row); lo.setPlaceholderText("min"); lo.setFixedWidth(_LO_W)
     hi = QLineEdit(row); hi.setPlaceholderText("max"); hi.setFixedWidth(_HI_W)
-    rm = QPushButton("✕", row)
+    rm = buttons.default("✕", row)
     rm.setFixedWidth(_RM_W)
     rm.setObjectName("Ghost")
     rl.addWidget(combo, 1)

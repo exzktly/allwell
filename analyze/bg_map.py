@@ -57,7 +57,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QButtonGroup, QDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QRadioButton,
+    QButtonGroup, QDialog, QHBoxLayout, QLabel, QMenu, QRadioButton,
     QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -71,6 +71,7 @@ from util.well_token import (
 from core.safe import swallow
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
+from ui import buttons
 
 #: Every position on a 96-well plate, for the editor's fallback when no input
 #: folder has been picked yet. Offering the whole plate is better than offering
@@ -154,8 +155,7 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_window = None
         self._bg_map_undo = []
         row = self._row(sec, "Blank pairing")
-        self._bg_map_btn = QPushButton("Pair blanks…", row)
-        self._bg_map_btn.setProperty("variant", "default")
+        self._bg_map_btn = buttons.default("Pair blanks…", row)
         self._bg_map_btn.setToolTip(
             "Pair each blank with the wells it corrects, instead of pooling "
             "every Background well into one plate-wide reference. Use this when "
@@ -498,8 +498,7 @@ class AnalyzeBackgroundMapMixin:
         # field and nowhere else. The button that used to be here invented one
         # off the end of the plate when the field named none, which turns a
         # sample well into the reference for the rest of the plate.
-        self._bg_map_undo_btn = QPushButton("Undo", win)
-        self._bg_map_undo_btn.setProperty("variant", "default")
+        self._bg_map_undo_btn = buttons.default("Undo", win)
         self._bg_map_undo_btn.setToolTip(
             "Step back one drag, split or clear (Ctrl+Z).")
         self._bg_map_undo_btn.clicked.connect(self._bg_map_undo_last)
@@ -507,7 +506,7 @@ class AnalyzeBackgroundMapMixin:
         undo_key = QShortcut(QKeySequence.StandardKey.Undo, win)
         undo_key.activated.connect(self._bg_map_undo_last)
 
-        split = QToolButton(win)
+        split = buttons.tool_button(win)
         split.setText("Split plate…")
         split.setPopupMode(QToolButton.InstantPopup)
         split.setStyleSheet(
@@ -522,14 +521,13 @@ class AnalyzeBackgroundMapMixin:
         split.setMenu(self._bg_map_split_menu)
         footer.addWidget(split)
 
-        clear = QPushButton("Clear pairing", win)
-        clear.setProperty("variant", "default")
+        clear = buttons.default("Clear pairing", win)
         clear.setToolTip("Drop the map and pool every blank into one reference.")
         clear.clicked.connect(self._bg_map_clear)
         footer.addWidget(clear)
 
         footer.addStretch(1)
-        close = QPushButton("Close", win)
+        close = buttons.default("Close", win)
         close.clicked.connect(win.hide)
         footer.addWidget(close)
         outer.addLayout(footer)
@@ -1017,7 +1015,7 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_row_group.addButton(pick, index)
         line.addWidget(pick, 1)
 
-        clear = QToolButton(row)
+        clear = buttons.tool_button(row)
         clear.setText("✕")
         clear.setToolTip(f"Take every well away from {blank}. {blank} stays a "
                          f"blank — remove it from the Background well field to "

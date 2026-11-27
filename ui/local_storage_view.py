@@ -20,7 +20,7 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout,
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QVBoxLayout,
     QWidget,
 )
 
@@ -28,6 +28,7 @@ from core import local_storage as ls
 from core.worker_bridge import run_off_thread
 from ui import text_roles
 from util.state_dir import gui_state_dir
+from ui import buttons as ui_buttons
 
 #: Indent of an area's description under its checkbox, matching the reset
 #: dialog's (``review/core/reset_scopes_view.py``).
@@ -95,16 +96,14 @@ class StorageDialog(QDialog):
         buttons = QWidget(self)
         bl = QHBoxLayout(buttons)
         bl.setContentsMargins(0, 0, 0, 0)
-        self._open_btn = QPushButton("Open folder", buttons)
-        self._open_btn.setProperty("variant", "default")
+        self._open_btn = ui_buttons.default("Open folder", buttons)
         self._open_btn.clicked.connect(self._open_folder)
         bl.addWidget(self._open_btn)
         bl.addStretch(1)
-        self._clear_btn = QPushButton("Clear selected", buttons)
-        self._clear_btn.setProperty("variant", "destructive")
+        self._clear_btn = ui_buttons.destructive("Clear selected", buttons)
         self._clear_btn.clicked.connect(self.clear_selected)
         bl.addWidget(self._clear_btn)
-        close = QPushButton("Close", buttons)
+        close = ui_buttons.default("Close", buttons)
         close.clicked.connect(self.close)
         bl.addWidget(close)
         layout.addWidget(buttons)

@@ -25,8 +25,7 @@ from pathlib import Path
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QTabWidget, QVBoxLayout, QWidget,
+    QFrame, QGridLayout, QHBoxLayout, QLabel, QPlainTextEdit, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -40,6 +39,7 @@ from widgets.page_body import build_page_body
 from . import collect as hc
 from ._phone import SIDE_BY_SIDE, HomeScroll, watch_layout
 from .plate_panel import build_home_plate, state_color, state_label
+from ui import buttons
 
 #: The em-dash a figure the page could not obtain renders as.
 DASH = "—"
@@ -283,7 +283,7 @@ def _build_masthead(ctx, page: QWidget, reg) -> QWidget:
     actions.setSpacing(theme.Spacing.xs)
     from .controller import HOME_ACTIONS
     for key, label in HOME_ACTIONS:
-        button = QPushButton(label, host)
+        button = buttons.default(label, host)
         button.setObjectName("HomeAction")
         button.clicked.connect(_action_handler(ctx, key))
         actions.addWidget(button)
@@ -313,7 +313,7 @@ def _build_next_step(ctx, page: QWidget, reg) -> QWidget:
     text = reg.register("_home_next_text", QLabel("", frame))
     text.setWordWrap(True)
     row.addWidget(text, 1)
-    button = reg.register("_home_next_button", QPushButton("", frame))
+    button = reg.register("_home_next_button", buttons.default("", frame))
     button.clicked.connect(lambda _c=False: _run_next_step(ctx))
     row.addWidget(button)
     layout.addLayout(row)
@@ -464,7 +464,7 @@ def _build_health_and_receipt(ctx, page: QWidget, reg) -> QHBoxLayout:
 
     health_card, health_layout = _card(page, "Health")
     health_layout.addWidget(reg.register("_home_health", _rows_host(health_card)), 1)
-    validate = QPushButton("Check this dataset now", health_card)
+    validate = buttons.default("Check this dataset now", health_card)
     validate.setObjectName("HomeAction")
     validate.clicked.connect(_action_handler(ctx, "validate"))
     health_layout.addWidget(validate, 0, Qt.AlignLeft)
@@ -548,7 +548,7 @@ def build_recent_tile(ctx, parent: QWidget, entry) -> QWidget:
     most often wanted on.
     """
     label, sublabel, on_click, enabled, tooltip, on_remove = entry
-    button = QPushButton(parent)
+    button = buttons.default("", parent)
     button.setObjectName("HomeRecentTile")
     button.setText(entry_row_text(label, sublabel))
     button.setEnabled(bool(enabled))
@@ -653,7 +653,7 @@ def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
     transparent to the mouse so a click anywhere on the tile still reaches the
     button.
     """
-    tile = QPushButton(parent)
+    tile = buttons.default("", parent)
     tile.setObjectName("HomeThumbTile")
     tile.setFixedSize(_THUMB_W, _THUMB_H + _THUMB_CAPTION_H)
     tile.setCursor(Qt.PointingHandCursor)

@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import QComboBox, QPushButton
+from PySide6.QtWidgets import QComboBox
 
 from review.features.nanowell import _rare_controller as rc
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import rare_donor_compute as donors
 from review.features.nanowell import statistics_compute as sc
+from ui import buttons
 
 _UNIT_TIP = ("What one value of a sample is.\n"
              "Wells: each well is a sample and its nanowells are the values — whether these wells' distributions\n"
@@ -83,8 +84,7 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     test.setToolTip(_TEST_TIP)
     test.currentIndexChanged.connect(lambda _i: nwc.set_stats_test(ctx, test.currentData() or sc.TEST_KEYS[0]))
     ctx.widgets.register("_nw_stats_test_cb", test)
-    flagged = QPushButton("Review flagged crops")
-    flagged.setProperty("variant", "default")
+    flagged = buttons.default("Review flagged crops")
     flagged.setToolTip(_FLAGGED_TIP)
     flagged.clicked.connect(lambda _=False: rc.open_flagged_popout(ctx))
     ctx.widgets.register("_nw_stats_flagged_btn", flagged)

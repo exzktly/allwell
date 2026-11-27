@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHeaderView, QLabel, QPushButton, QTableWidget, QWidget,
+    QHeaderView, QLabel, QTableWidget, QWidget,
 )
 from review.core.lazy import lazy as _lazy
 # Lazy so Review CSV imports without Image Browser present (keeps it deletable).
@@ -16,6 +16,7 @@ refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
 from widgets.labeled_combo import LabeledComboBox
 from widgets.page_body import build_page_body
+from ui import buttons
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``)
@@ -49,8 +50,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_scope("", tp_cb)
 
-    refresh_btn = QPushButton("Refresh", ctrl)
-    refresh_btn.setProperty("variant", "default")
+    refresh_btn = buttons.default("Refresh", ctrl)
     refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))
     ctrl.add_action(refresh_btn)
 

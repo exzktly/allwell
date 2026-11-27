@@ -63,6 +63,7 @@ from widgets.delayed_tooltip import DelayedToolTip
 from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
 from widgets.spin_box import SpinBox
+from ui import buttons
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("qc", "QC"), ("array", "Array"), ("trajectories", "Trajectories"),
@@ -902,7 +903,7 @@ def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
     """The Extremes view's **Timepoints** menu: which of the well's timepoints the montage shows as columns, each
     named by its hours as the Timepoint control names it. Fewer columns give larger crops. The ranking timepoint is
     always shown, so its entry is checked and greyed; *All timepoints* clears the choice."""
-    button = QToolButton(parent)
+    button = buttons.tool_button(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(_EXTREMES_TPS_TIP)
@@ -972,7 +973,7 @@ def _detail_header(ctx, parent) -> QHBoxLayout:
     row.setContentsMargins(0, 0, 0, 0)
     title = QLabel("Selected nanowell", parent)
     title.setProperty("textRole", "label")
-    close = QPushButton("✕", parent)
+    close = buttons.default("✕", parent)
     close.setObjectName("Ghost")
     close.setFixedWidth(theme.Metrics.icon_btn_w)
     close.setToolTip("Close the site detail and clear the nanowell selection")
@@ -997,8 +998,7 @@ def _crops_header(ctx, parent) -> QWidget:
     sync_flow_height(host)
     title = QLabel("Crops over time", host)
     title.setProperty("textRole", "label")
-    button = QPushButton("Pop out", host)
-    button.setProperty("variant", "default")
+    button = buttons.default("Pop out", host)
     button.setToolTip("Open the first selected nanowell's crops at every timepoint, large, in a window of their own "
                       "— on one brightness scale, so changes between timepoints read as changes. The window "
                       "follows the selection.")
@@ -1016,8 +1016,7 @@ def _crops_header(ctx, parent) -> QWidget:
 
 def _go_to_button(ctx, name: str, parent) -> QPushButton:
     """**Go to nanowell**: the crops' nanowell on Identity ▸ Blink (``controller.go_to_site_in_blink``)."""
-    button = QPushButton("Go to nanowell", parent)
-    button.setProperty("variant", "default")
+    button = buttons.default("Go to nanowell", parent)
     button.setToolTip(_GO_TO_TIP)
     button.clicked.connect(lambda _=False: nwc.go_to_site_in_blink(ctx))
     ctx.widgets.register(name, button)
@@ -1183,8 +1182,7 @@ class _PopoutWindow(QDialog):
 
 
 def _button(text: str, tip: str, on_click) -> QPushButton:
-    button = QPushButton(text)
-    button.setProperty("variant", "default")
+    button = buttons.default(text)
     button.setToolTip(tip)
     if on_click is not None:
         button.clicked.connect(lambda _=False: on_click())
@@ -1193,7 +1191,7 @@ def _button(text: str, tip: str, on_click) -> QPushButton:
 
 def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
     """The Array view's *Layers* menu: each switchable layer, the nanowells' colouring, and the presets."""
-    button = QToolButton(parent)
+    button = buttons.tool_button(parent)
     button.setText("Layers")
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)

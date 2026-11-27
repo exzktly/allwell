@@ -35,8 +35,7 @@ from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPlainTextEdit, QPushButton, QToolButton,
-    QVBoxLayout, QWidget,
+    QMessageBox, QPlainTextEdit, QVBoxLayout, QWidget,
 )
 
 from services.remote_config import (
@@ -57,6 +56,7 @@ from analyze.scheduler_test_dialog import SchedulerTestDialog
 from services.subprocess_text import TEXT_UTF8
 from ui import theme
 from widgets.spin_box import SpinBox
+from ui import buttons
 
 
 # Alias must look like a TOML bare key — letters, digits, dash, underscore.
@@ -246,8 +246,7 @@ class RemoteFormDialog(QDialog):
         self._ssh_alias_edit = QLineEdit(host.ssh_alias, ssh_row)
         self._ssh_alias_edit.setPlaceholderText("user@host or ~/.ssh/config alias")
         ssh_row_layout.addWidget(self._ssh_alias_edit, 1)
-        self._test_btn = QPushButton("Test SSH", ssh_row)
-        self._test_btn.setProperty("variant", "default")
+        self._test_btn = buttons.default("Test SSH", ssh_row)
         self._test_btn.clicked.connect(self._test_ssh)
         ssh_row_layout.addWidget(self._test_btn)
         form.addRow("SSH alias *", ssh_row)
@@ -266,8 +265,7 @@ class RemoteFormDialog(QDialog):
             "Empty = use ~/.ssh/config (recommended) or click Setup…"
         )
         key_row_layout.addWidget(self._ssh_key_edit, 1)
-        self._setup_key_btn = QPushButton("Setup SSH Key…", key_row)
-        self._setup_key_btn.setProperty("variant", "default")
+        self._setup_key_btn = buttons.default("Setup SSH Key…", key_row)
         self._setup_key_btn.setToolTip(
             "Generate a passphrase-less Ed25519 key and walk through "
             "copying it to the remote so future runs don't need a password."
@@ -339,8 +337,7 @@ class RemoteFormDialog(QDialog):
         )
         self._profile_combo.activated.connect(self._on_profile_chosen)
         prof_row.addWidget(self._profile_combo, 1)
-        self._fetch_prof_btn = QPushButton("Fetch", self._scheduled_box)
-        self._fetch_prof_btn.setProperty("variant", "default")
+        self._fetch_prof_btn = buttons.default("Fetch", self._scheduled_box)
         self._fetch_prof_btn.setToolTip(
             "Read jupyterhub_config.py on the remote and list its compute "
             "profiles (no JupyterHub webpage needed)."
@@ -369,8 +366,7 @@ class RemoteFormDialog(QDialog):
         # programmatic setText, so no feedback loop).
         self._compute_launcher_edit.textEdited.connect(self._on_launcher_edited)
         launcher_row.addWidget(self._compute_launcher_edit, 1)
-        self._test_sched_btn = QPushButton("Test", self._scheduled_box)
-        self._test_sched_btn.setProperty("variant", "default")
+        self._test_sched_btn = buttons.default("Test", self._scheduled_box)
         self._test_sched_btn.setToolTip(
             "Send a short job through this command the way a run is sent, and "
             "report the node it got: CPUs, GPUs, and whether Cellpose can use them.")
@@ -499,7 +495,7 @@ class RemoteFormDialog(QDialog):
             or bool(host.remote_scratch_dir)
         )
 
-        self._advanced_btn = QToolButton(self)
+        self._advanced_btn = buttons.tool_button(self)
         self._advanced_btn.setText("Advanced (remote paths)")
         self._advanced_btn.setCheckable(True)
         self._advanced_btn.setArrowType(
@@ -1059,8 +1055,7 @@ class SSHKeyWizardDialog(QDialog):
         self._key_path_lbl = QLabel(f"Key path: {self._key_path}", self)
         self._key_path_lbl.setProperty("textRole", "help")
         layout.addWidget(self._key_path_lbl)
-        self._generate_btn = QPushButton("Generate key", self)
-        self._generate_btn.setProperty("variant", "primary")
+        self._generate_btn = buttons.primary("Generate key", self)
         self._generate_btn.clicked.connect(self._on_generate)
         layout.addWidget(self._generate_btn)
         self._generate_status_lbl = QLabel("", self)
@@ -1090,8 +1085,7 @@ class SSHKeyWizardDialog(QDialog):
         mono.setStyleHint(QFont.TypeWriter)
         self._command_edit.setFont(mono)
         cmd_row.addWidget(self._command_edit, 1)
-        self._copy_btn = QPushButton("Copy", self)
-        self._copy_btn.setProperty("variant", "default")
+        self._copy_btn = buttons.default("Copy", self)
         self._copy_btn.clicked.connect(self._on_copy_command)
         cmd_row.addWidget(self._copy_btn)
         layout.addLayout(cmd_row)
@@ -1100,8 +1094,7 @@ class SSHKeyWizardDialog(QDialog):
         step3_title = QLabel("Step 3 — Verify", self)
         step3_title.setProperty("textRole", "sectionHeading")
         layout.addWidget(step3_title)
-        self._verify_btn = QPushButton("I ran the command — verify now", self)
-        self._verify_btn.setProperty("variant", "primary")
+        self._verify_btn = buttons.primary("I ran the command — verify now", self)
         self._verify_btn.clicked.connect(self._on_verify)
         layout.addWidget(self._verify_btn)
         self._verify_status_lbl = QLabel("", self)
@@ -1371,11 +1364,10 @@ class BootstrapLogDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
-        self._cancel_btn = QPushButton("Cancel", self)
-        self._cancel_btn.setProperty("variant", "destructive")
+        self._cancel_btn = buttons.destructive("Cancel", self)
         self._cancel_btn.clicked.connect(self._on_cancel)
         btn_row.addWidget(self._cancel_btn)
-        self._close_btn = QPushButton("Close", self)
+        self._close_btn = buttons.default("Close", self)
         self._close_btn.setEnabled(False)
         self._close_btn.clicked.connect(self.accept)
         btn_row.addWidget(self._close_btn)
@@ -1611,30 +1603,28 @@ class ManageRemotesDialog(QDialog):
         # ── Buttons ─────────────────────────────────────────────────────
         right = QVBoxLayout()
         right.setSpacing(6)
-        self._add_btn = QPushButton("Add…", self)
-        self._add_btn.setProperty("variant", "primary")
+        self._add_btn = buttons.primary("Add…", self)
         self._add_btn.clicked.connect(self._on_add)
         right.addWidget(self._add_btn)
 
-        self._edit_btn = QPushButton("Edit…", self)
+        self._edit_btn = buttons.default("Edit…", self)
         self._edit_btn.clicked.connect(self._on_edit)
         right.addWidget(self._edit_btn)
 
-        self._delete_btn = QPushButton("Delete", self)
-        self._delete_btn.setProperty("variant", "destructive")
+        self._delete_btn = buttons.destructive("Delete", self)
         self._delete_btn.clicked.connect(self._on_delete)
         right.addWidget(self._delete_btn)
 
         right.addSpacing(8)
-        self._test_btn = QPushButton("Test", self)
+        self._test_btn = buttons.default("Test", self)
         self._test_btn.clicked.connect(self._on_test)
         right.addWidget(self._test_btn)
 
-        self._bootstrap_btn = QPushButton("Bootstrap…", self)
+        self._bootstrap_btn = buttons.default("Bootstrap…", self)
         self._bootstrap_btn.clicked.connect(self._on_bootstrap)
         right.addWidget(self._bootstrap_btn)
 
-        self._storage_btn = QPushButton("Storage…", self)
+        self._storage_btn = buttons.default("Storage…", self)
         self._storage_btn.setToolTip(
             "See the run and dataset folders this host holds, what project each came from, "
             "and delete them or set them to expire.")
@@ -1642,7 +1632,7 @@ class ManageRemotesDialog(QDialog):
         right.addWidget(self._storage_btn)
 
         right.addStretch(1)
-        self._close_btn = QPushButton("Close", self)
+        self._close_btn = buttons.default("Close", self)
         self._close_btn.clicked.connect(self.accept)
         right.addWidget(self._close_btn)
         layout.addLayout(right)

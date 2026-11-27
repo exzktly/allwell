@@ -24,6 +24,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLineEdit, QPushButton, QW
 
 from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
+from ui import buttons
 
 #: A channel's roles, ``(value, label)``.
 CHANNEL_ROLES = (
@@ -56,8 +57,7 @@ class AnalyzeChannelRowsMixin:
         """Under the rows: "+ Add channel", and the option that adds the
         input's own channels to the rows when the run starts
         (``services.run_detect.add_detected_channels``)."""
-        add_btn = QPushButton("+ Add channel", sec)
-        add_btn.setProperty("variant", "default")
+        add_btn = buttons.default("+ Add channel", sec)
         add_btn.setFixedWidth(self._ADD_BTN_W)
         add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
         sec.layout().addWidget(add_btn)
@@ -101,7 +101,7 @@ class AnalyzeChannelRowsMixin:
         role.setToolTip(ROLE_TIP)
         rl.addWidget(role)
 
-        remove_btn = QPushButton("✕", row)
+        remove_btn = buttons.default("✕", row)
         remove_btn.setFixedWidth(self._REMOVE_BTN_W)   # wide enough that the button padding doesn't clip ✕
         remove_btn.setProperty("variant", "default")
         remove_btn.setToolTip("Remove this channel")

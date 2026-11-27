@@ -58,7 +58,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -66,6 +66,7 @@ from services import run_journal
 from services.run_detect import DetectionError, add_detected_channels, resolve_detection
 from pipeline import completeness
 from core.safe import swallow, swallowed
+from ui import buttons
 
 #: How long the input field must stay still before anything touches the disk.
 #: ``textChanged`` fires on every keystroke, so a path typed rather than picked
@@ -165,13 +166,13 @@ class AnalyzePreflightMixin:
         actions.setContentsMargins(0, theme.Spacing.xs, 0, 0)
         actions.setSpacing(theme.Spacing.sm)
         actions.addStretch(1)
-        dismiss = QPushButton("Dismiss", row)
+        dismiss = buttons.default("Dismiss", row)
         dismiss.setToolTip(
             "Close this report for the folder in the form. It comes back if "
             "you point somewhere else, or once a run has written here again.")
         dismiss.clicked.connect(self._dismiss_preflight)
         actions.addWidget(dismiss)
-        self._preflight_load_btn = QPushButton("Load these settings", row)
+        self._preflight_load_btn = buttons.default("Load these settings", row)
         self._preflight_load_btn.setToolTip(
             "Fill the form with the settings that produced the output already "
             "in this folder. Reprocessing options are left as you have them.")

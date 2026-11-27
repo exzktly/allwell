@@ -16,8 +16,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFrame, QGridLayout, QHBoxLayout, QInputDialog, QLabel,
-    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton,
-    QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from review.features.export.style import (
@@ -58,6 +57,7 @@ from review.domain.time_rescale import (
     factor_for_interval as _factor_for_interval,
     rescale_for as _rescale_for,
 )
+from ui import buttons
 
 _logger = logging.getLogger("review")
 
@@ -473,7 +473,7 @@ class ExportStyleSidebar(QWidget):
             # single drag-to-draw on the plot; gating.py disarms after the gate
             # is drawn and calls _scatter_gate_draw_sync(False) to restore the
             # button label.
-            draw_btn = QPushButton("Draw gate")
+            draw_btn = buttons.default("Draw gate")
 
             def _arm_draw(_=False, _b=draw_btn) -> None:
                 set_gate_draw_mode(self._app._ctx, True)
@@ -487,7 +487,7 @@ class ExportStyleSidebar(QWidget):
                 if not on:
                     _b.setText("Draw gate")
             self._app._ctx.runtime.scatter.gate_draw_sync = _sync_draw_toggle
-            clear_btn = QPushButton("Clear gates")
+            clear_btn = buttons.default("Clear gates")
             clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())
             kit.add_full(s_gates, clear_btn)
             self._gate_count_label = QLabel(self._gate_count_text())
@@ -1304,7 +1304,7 @@ class ExportStyleSidebar(QWidget):
         # has no way to re-enable autoscale (the same reason the Reset button
         # redraws). ``_autoscale_axes`` does the three things that together
         # amount to "forget them".
-        auto_btn = QPushButton("Auto scale")
+        auto_btn = buttons.default("Auto scale")
         auto_btn.setToolTip(
             "Clear the typed limits — X, Y and colour — on every panel of this "
             "figure and let the plot scale its own axes again.")
@@ -1454,15 +1454,15 @@ class ExportStyleSidebar(QWidget):
                 bbl = QHBoxLayout(btns)
                 bbl.setContentsMargins(0, 0, 0, 0)
                 bbl.setSpacing(sp.xs)
-                up = QPushButton("▴")
+                up = buttons.default("▴")
                 up.setObjectName("Ghost")
                 up.setToolTip("Move up")
                 up.clicked.connect(lambda _=False, lw=list_widget: self._move_list_item(lw, -1))
-                down = QPushButton("▾")
+                down = buttons.default("▾")
                 down.setObjectName("Ghost")
                 down.setToolTip("Move down")
                 down.clicked.connect(lambda _=False, lw=list_widget: self._move_list_item(lw, +1))
-                apply_b = QPushButton("Apply")
+                apply_b = buttons.default("Apply")
                 apply_b.setObjectName("Primary")
                 apply_b.clicked.connect(lambda _=False: self._apply_line_order())
                 bbl.addWidget(up)
@@ -1507,11 +1507,11 @@ class ExportStyleSidebar(QWidget):
         act_row = QHBoxLayout()
         act_row.setContentsMargins(0, 0, 0, 0)
         act_row.setSpacing(sp.xs)
-        reset_btn = QPushButton("Reset")
+        reset_btn = buttons.default("Reset")
         reset_btn.clicked.connect(lambda _=False: self._reset_defaults())
-        save_btn = QPushButton("Save Preset")
+        save_btn = buttons.default("Save Preset")
         save_btn.clicked.connect(lambda _=False: self._save_preset())
-        exp_btn = QPushButton("Export…")
+        exp_btn = buttons.default("Export…")
         exp_btn.setObjectName("Primary")
         exp_btn.clicked.connect(lambda _=False: self._export())
         # Equal flex on the three action buttons so they share the row

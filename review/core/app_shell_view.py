@@ -23,6 +23,7 @@ from review.core.status_view import build_bottom
 from widgets.separator import build_hline_separator
 from review.domain.dataset_name import dataset_display_name
 from widgets.owned_action import owned_action
+from ui import buttons
 
 
 #: The left panel's width, shared by all three modes — Review's own rail,
@@ -68,7 +69,7 @@ def _dataset_button(win, parent):
     Home had known the answer the whole time.
     """
     from PySide6.QtWidgets import QMenu, QToolButton
-    btn = QToolButton(parent)
+    btn = buttons.tool_button(parent)
     btn.setObjectName("DatasetButton")
     btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
     btn.setPopupMode(QToolButton.InstantPopup)

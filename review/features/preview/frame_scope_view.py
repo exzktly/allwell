@@ -21,7 +21,7 @@ from __future__ import annotations
 from functools import partial
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QLabel, QWidget
 
 from review.core.frame_scope import (
     ScopeSpec, apply_scope_change, current_frame, read_scope,
@@ -30,6 +30,7 @@ from review.core.frame_scope import (
 from core.safe import swallowed
 from review.core.ui_helpers import make_popover_button
 from widgets.checkable_dropdown import CheckableDropdown
+from ui import buttons
 
 # Width the three dropdowns share, so they line up as a column. This is what a
 # caption label used to supply as a side effect of its own minimum width; the
@@ -167,8 +168,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     for _i, _dd in enumerate(dropdowns):
         _dd.changed.connect(partial(_commit, _i, _dd))
 
-    plate_btn = QPushButton("Use plate selection", panel)
-    plate_btn.setProperty("variant", "default")
+    plate_btn = buttons.default("Use plate selection", panel)
     plate_btn.setToolTip(
         "Arm the wells currently selected on the plate. The plate selection "
         "itself is not changed."
@@ -195,8 +195,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     plate_btn.clicked.connect(lambda _=False: _use_plate_selection())
     lay.addWidget(plate_btn)
 
-    reset_btn = QPushButton(spec.reset_label, panel)
-    reset_btn.setProperty("variant", "default")
+    reset_btn = buttons.default(spec.reset_label, panel)
     reset_btn.setToolTip(spec.reset_tooltip)
 
     def _reset() -> None:

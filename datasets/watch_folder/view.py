@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -31,6 +30,7 @@ from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.watch_folder.watch_folder_compute import DEFAULT_QUIET_MINUTES, WatchStatus
 from widgets.path_field import PathField, folder_picker
 from widgets.spin_box import DoubleSpinBox
+from ui import buttons
 
 #: Shown under the folder field when the folder is not there yet. Muted, not
 #: red: watching a folder the acquisition software will create is a normal
@@ -144,13 +144,11 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         bl = QHBoxLayout(btn_row)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Start watching", self)
-        self._run_btn.setProperty("variant", "primary")
+        self._run_btn = buttons.primary("▶  Start watching", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         bl.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "default")
+        self._queue_btn = buttons.default("+ Queue", self)
         self._queue_btn.setToolTip(
             "Add this watch to the Job Queue, to run ahead of the jobs that "
             "should wait for the folder.")

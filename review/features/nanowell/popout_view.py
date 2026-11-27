@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QMenu, QToolButton, QWidge
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.crop_grid_compute import POPOUT_MAX_COLS, POPOUT_ROW_CHOICES, grid_label, rows_label
 from widgets.owned_action import owned_action
+from ui import buttons
 
 _TPS_TIP = ("Which of the timepoints the pop-out shows, one panel each (in the Hex layout, one composite each, side "
             "by side). Fewer panels are drawn larger. All shows every timepoint; None clears every tick, so a few can "
@@ -33,7 +34,7 @@ _SAVE_TIP = "Save the nanowell over time as it is drawn here: a figure file, the
 
 
 def _menu_button(parent, name: str, tip: str, ctx) -> tuple[QToolButton, QMenu]:
-    button = QToolButton(parent)
+    button = buttons.tool_button(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(tip)

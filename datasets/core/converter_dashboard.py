@@ -27,12 +27,12 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QWidget,
 )
 
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from ui import buttons
 
 #: How far through a well counts as "being converted" rather than "pending".
 #: Any fraction above zero: the first plane written is the tell, and a well
@@ -141,13 +141,13 @@ class ConverterDashboard(PlateProgress):
         self._pick_note.setWordWrap(True)
         row.addWidget(self._pick_note, 1)
 
-        self._pick_all = QPushButton("Convert all", self._pick_row)
+        self._pick_all = buttons.default("Convert all", self._pick_row)
         self._pick_all.setToolTip(
             "Clear the selection, so every well the source holds is converted")
         self._pick_all.clicked.connect(lambda: self.set_selected_wells([]))
         row.addWidget(self._pick_all)
 
-        self._pick_invert = QPushButton("Invert", self._pick_row)
+        self._pick_invert = buttons.default("Invert", self._pick_row)
         self._pick_invert.setToolTip(
             "Convert the wells that are not picked, and skip the ones that are")
         self._pick_invert.clicked.connect(self._invert_selection)

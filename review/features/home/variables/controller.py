@@ -31,6 +31,7 @@ from core.safe import swallow
 from review.domain import sample_variables as sv
 from review.domain import variable_series as vseries
 from review.domain.plate_layout import wells_in_fill_lines
+from ui import buttons
 
 _logger = logging.getLogger("review")
 
@@ -714,7 +715,6 @@ def _selection_sentence(vset, variable_id, picked) -> str:
 
 def _paint_chips(ctx, variable) -> None:
     """One chip per value, plus a No value. Select wells, then click a chip."""
-    from PySide6.QtWidgets import QPushButton
 
     from .plate_view import value_chip
 
@@ -740,7 +740,7 @@ def _paint_chips(ctx, variable) -> None:
         # "No value", not "Clear". It is the state the plots already name
         # ``no value``, and "Clear" beside a "Delete this variable" and a
         # "Remove value" was a third destructive word for a third scope.
-        clear = QPushButton("No value", host)
+        clear = buttons.default("No value", host)
         clear.setObjectName("HomeAction")
         clear.setToolTip("Unassign the selected wells — they go back to being "
                          "ringed and uncounted.")

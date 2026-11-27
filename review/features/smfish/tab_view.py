@@ -32,8 +32,7 @@ import logging
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QVBoxLayout, QWidget,
+    QComboBox, QDialog, QLabel, QLineEdit, QMessageBox, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -49,6 +48,7 @@ from review.domain.viewer_state import make_schema_extractor, extract_well_token
 from review.core.channel_state_controller import recalculate_threshold
 from review.data.data_loading import load_and_project
 from core.safe import swallowed
+from ui import buttons
 
 logger = logging.getLogger("smfish_tab")
 
@@ -232,23 +232,20 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("LUT Max", lut_max_edit)
 
-    apply_btn = QPushButton("Apply Global Threshold", ctrl)
-    apply_btn.setProperty("variant", "default")
+    apply_btn = buttons.default("Apply Global Threshold", ctrl)
     apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx))
     ctrl.add_action(apply_btn)
 
-    refresh_btn = QPushButton("Refresh", ctrl)
-    refresh_btn.setProperty("variant", "default")
+    refresh_btn = buttons.default("Refresh", ctrl)
     refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx))
     ctrl.add_action(refresh_btn)
 
-    overlay_btn = reg.register("_smfish_overlay_btn", QPushButton("Hide Overlays", ctrl))
+    overlay_btn = reg.register("_smfish_overlay_btn", buttons.default("Hide Overlays", ctrl))
     overlay_btn.setProperty("variant", "default")
     overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx))
     ctrl.add_action(overlay_btn)
 
-    cdf_btn = QPushButton("This Frame CDF", ctrl)
-    cdf_btn.setProperty("variant", "default")
+    cdf_btn = buttons.default("This Frame CDF", ctrl)
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     ctrl.add_action(cdf_btn)
 

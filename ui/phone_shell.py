@@ -56,6 +56,7 @@ from core.safe import swallowed
 from ui import phone_window, theme
 from widgets import form_registry
 from widgets.control_band import ControlBand
+from ui import buttons
 
 
 def all_live_widgets() -> list:
@@ -1297,7 +1298,7 @@ class PhoneShell(QObject):
         # ☰ slides the pane's whole left panel — Review's sections and well
         # plate, the Analyze form — out over the page from the left; ✕ while
         # it is out.
-        self.menu_button = QToolButton()
+        self.menu_button = buttons.tool_button()
         self.menu_button.setObjectName("PhoneMenuButton")
         self.menu_button.setText("☰")
         self.menu_button.setCheckable(True)
@@ -1309,7 +1310,7 @@ class PhoneShell(QObject):
         self.back_button = history.make_button("back") if history is not None else None
         self.forward_button = history.make_button("forward") if history is not None else None
 
-        self.page_button = QToolButton()
+        self.page_button = buttons.tool_button()
         self.page_button.setObjectName("PhonePageButton")
         self.page_button.setPopupMode(QToolButton.InstantPopup)
         self._page_menu = QMenu(self.page_button)
@@ -1318,7 +1319,7 @@ class PhoneShell(QObject):
 
         # The page's own controls (channel, property, fold change, display,
         # threshold, …) live in a sheet behind this, so the plot gets the screen.
-        self.controls_button = QToolButton()
+        self.controls_button = buttons.tool_button()
         self.controls_button.setObjectName("PhoneControlsButton")
         self.controls_button.setText("⚙ Controls")
         self.controls_button.clicked.connect(self.toggle_controls)
@@ -1326,7 +1327,7 @@ class PhoneShell(QObject):
         # The well picker, one tap from the page: the page's plate and its
         # All / None slide up in a sheet of their own, with the plot left in
         # view above them, so a well tapped is a bar drawn where the eye is.
-        self.wells_button = QToolButton()
+        self.wells_button = buttons.tool_button()
         self.wells_button.setObjectName("PhoneWellsButton")
         self.wells_button.setText("Wells")
         self.wells_button.clicked.connect(self.toggle_wells)
@@ -1347,7 +1348,7 @@ class PhoneShell(QObject):
 
         # ⋯: text size, reload, help, the app log, and the way back to the
         # desk — one flat menu, no submenus.
-        self.options_button = QToolButton()
+        self.options_button = buttons.tool_button()
         self.options_button.setObjectName("PhoneOptionsButton")
         self.options_button.setText("⋯")
         self.options_button.setPopupMode(QToolButton.InstantPopup)
@@ -2580,7 +2581,7 @@ class PhoneShell(QObject):
 
     def _text_size_row(self):
         """The ⋯ menu's first item: Text size, as three buttons in one row."""
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidgetAction
+        from PySide6.QtWidgets import QHBoxLayout, QWidgetAction
         act = QWidgetAction(self._menu)
         row = QWidget()
         row.setObjectName("PhoneTextSizeRow")
@@ -2589,7 +2590,7 @@ class PhoneShell(QObject):
         lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
         lay.addWidget(QLabel("Text size", row), 1)
         for size in phone_layout.TEXT_SIZES:
-            b = QPushButton(phone_layout.TEXT_SIZE_LABEL[size][0], row)
+            b = buttons.default(phone_layout.TEXT_SIZE_LABEL[size][0], row)
             b.setObjectName("PhoneTextSizeButton")
             b.setCheckable(True)
             b.setChecked(size == self._text_size)

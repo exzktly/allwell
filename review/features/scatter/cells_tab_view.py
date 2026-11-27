@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from PySide6.QtWidgets import (
-    QComboBox, QLabel, QPushButton, QVBoxLayout,
+    QComboBox, QLabel, QVBoxLayout,
     QWidget,
 )
 
@@ -28,6 +28,7 @@ from review.features.scatter.gating import (
     on_gate_edit_motion, on_gate_edit_press, on_gate_edit_release,
 )
 from review.features.scatter._observations import build_axis_controls
+from ui import buttons
 
 
 def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
@@ -89,7 +90,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see update_scatter_tp_selection_display), so it needs
     # no separate caption or count label beside it.
-    tp_button = reg.register("_scatter_tp_button", QPushButton("Timepoints: 0 selected", ctrl))
+    tp_button = reg.register("_scatter_tp_button", buttons.default("Timepoints: 0 selected", ctrl))
     tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
     ctrl.add_scope("", tp_button)
@@ -129,7 +130,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # one well selected the view auto-stacks into one panel per well (overlaying
     # several time-coloured clouds on one axis would be unreadable).
     color_by_tp_btn = reg.register(
-        "_scatter_color_by_tp_btn", QPushButton("Color by time: Off", ctrl))
+        "_scatter_color_by_tp_btn", buttons.default("Color by time: Off", ctrl))
     color_by_tp_btn.setProperty("variant", "toggle")
     color_by_tp_btn.setCheckable(True)
     color_by_tp_btn.setToolTip(
@@ -154,7 +155,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # filter tucked inside a popover from being forgotten — and what travels
     # into a copied or saved figure, where no control does.
     apply_gates_btn = reg.register(
-        "_scatter_apply_gates_btn", QPushButton("Apply gates: Off", _disp_panel))
+        "_scatter_apply_gates_btn", buttons.default("Apply gates: Off", _disp_panel))
     apply_gates_btn.setProperty("variant", "toggle")
     apply_gates_btn.setCheckable(True)
     apply_gates_btn.setToolTip(

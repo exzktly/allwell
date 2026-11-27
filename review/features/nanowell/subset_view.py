@@ -35,6 +35,7 @@ from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 from widgets.owned_action import owned_action
 from widgets.spin_box import DoubleSpinBox
 from ui import text_roles
+from ui import buttons
 
 #: The combo's entries: the Starting cells presets as the band names them, then the editor.
 _PRESET_LABELS = {"any": "All nanowells", "occupied": "Starting cells ≥1 (occupied)",
@@ -277,7 +278,7 @@ class _ConditionRow(QWidget):
         self.op_cb.setToolTip(_OP_TIP)
         self.a_spin, self.b_spin = DoubleSpinBox(), DoubleSpinBox()
         self.and_label = QLabel("and")
-        self.tiles_btn = QToolButton()
+        self.tiles_btn = buttons.tool_button()
         self.tiles_btn.setToolTip(_TILES_TIP)
         self.tiles_btn.setPopupMode(QToolButton.InstantPopup)
         self.tiles_btn.setProperty("variant", "default")
@@ -293,7 +294,7 @@ class _ConditionRow(QWidget):
         self._frozen = condition if ss.is_window(condition.field) else None
         self.window_label = QLabel()
         self.window_label.setToolTip(_WINDOW_TIP)
-        self.remove_btn = QToolButton()
+        self.remove_btn = buttons.tool_button()
         self.remove_btn.setText("×")
         self.remove_btn.setToolTip("Remove this condition")
         self.remove_btn.setProperty("variant", "default")
@@ -483,8 +484,7 @@ class SubsetEditor(QFrame):
         self.match_cb.currentIndexChanged.connect(lambda _i: self.changed())
         head.addWidget(self.match_cb)
         head.addWidget(QLabel("of these conditions:"))
-        self.close_btn = QPushButton("Close")
-        self.close_btn.setProperty("variant", "default")
+        self.close_btn = buttons.default("Close")
         top = QHBoxLayout()
         top.addWidget(head_host, 1)
         top.addWidget(self.close_btn, 0, Qt.AlignTop)   # Close keeps the top-right corner however the words wrap
@@ -520,22 +520,19 @@ class SubsetEditor(QFrame):
         lay.addLayout(self.rows_box)
         foot_host = QWidget(body)
         foot = _flow(foot_host)
-        self.add_btn = QPushButton("+ Add condition")
-        self.add_btn.setProperty("variant", "default")
+        self.add_btn = buttons.default("+ Add condition")
         self.add_btn.clicked.connect(self.add)
-        self.clear_btn = QPushButton("Clear")
-        self.clear_btn.setProperty("variant", "default")
+        self.clear_btn = buttons.default("Clear")
         self.clear_btn.setToolTip("Remove every condition: every nanowell is used.")
         self.clear_btn.clicked.connect(self.clear)
         foot.addWidget(self.add_btn)
         foot.addWidget(self.clear_btn)
         # Edits change the conditions written here only; Apply draws them, Reset puts back the subset in use. A plate
         # redrawn on every keystroke recomputed every view for each half-typed bound.
-        self.reset_btn = QPushButton("Reset")
-        self.reset_btn.setProperty("variant", "default")
+        self.reset_btn = buttons.default("Reset")
         self.reset_btn.setToolTip(_RESET_TIP)
         self.reset_btn.clicked.connect(self.reset)
-        self.apply_btn = QPushButton("Apply")
+        self.apply_btn = buttons.default("Apply")
         self.apply_btn.setToolTip(_APPLY_TIP)
         self.apply_btn.clicked.connect(self.apply)
         foot.addWidget(self.reset_btn)
@@ -550,8 +547,7 @@ class SubsetEditor(QFrame):
         outer.addWidget(self.scroll)
 
     def _name_button(self, text: str, tip: str, slot) -> QPushButton:
-        button = QPushButton(text)
-        button.setProperty("variant", "default")
+        button = buttons.default(text)
         button.setToolTip(tip)
         button.clicked.connect(slot)
         return button
@@ -882,7 +878,7 @@ def build_subset_control(ctx, band, tp_text) -> SimpleNamespace:
     #: The saved names the combo lists now (``_fill_combo``).
     listed: list = []
     _fill_combo(combo, [], listed)
-    edit_btn = QToolButton()
+    edit_btn = buttons.tool_button()
     edit_btn.setText("Edit…")
     edit_btn.setCheckable(True)
     edit_btn.setToolTip(_EDIT_TIP)

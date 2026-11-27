@@ -28,13 +28,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from review.domain import plot_members as _members
 from review.domain import variable_pairing as _vp
+from ui import buttons
 
 
 def _vset(ctx):
@@ -102,7 +102,7 @@ def build_variable_pairing_row(ctx, scope: str, parent: QWidget) -> QWidget:
     within_line.setContentsMargins(0, 0, 0, 0)
     line.addWidget(within_box)
     line.addStretch(1)
-    pair_btn = QPushButton("Pair", row)
+    pair_btn = buttons.default("Pair", row)
     pair_btn.setObjectName("fcPairByVariable")
     line.addWidget(pair_btn)
     outer.addWidget(row)

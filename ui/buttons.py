@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtWidgets import QPushButton, QToolButton, QWidget
 
 PRIMARY = "primary"
 DEFAULT = "default"
@@ -66,6 +66,16 @@ def quiet(text: str, parent: QWidget | None = None, **kw) -> QPushButton:
 def destructive(text: str, parent: QWidget | None = None, **kw) -> QPushButton:
     """A command that removes something that cannot be got back."""
     return button(text, DESTRUCTIVE, parent, **kw)
+
+
+def tool_button(parent: QWidget | None = None, kind: str = DEFAULT) -> QToolButton:
+    """A tool button of *kind* — for a button that opens a menu, carries only an icon, or sits in a toolbar —
+    styled by the same four rules as a push button. Its text, icon and menu are the caller's."""
+    if kind not in KINDS:
+        raise ValueError(f"{kind!r} is not a kind of button; the kinds are {KINDS}")
+    b = QToolButton(parent)
+    b.setProperty("variant", kind)
+    return b
 
 
 def set_kind(b, kind: str) -> None:

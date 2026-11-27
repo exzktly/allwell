@@ -22,7 +22,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from analyze.advanced_section import AnalyzeAdvancedSectionMixin
@@ -53,6 +53,7 @@ from analyze.seg_params import AnalyzeSegParamsMixin
 from widgets.flow_layout import FlowLayout, sync_flow_height
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
+from ui import buttons
 
 
 #: The nanowell section, or a stand-in that is nothing, by the build's profile (``analyze.nanowell_hook``).
@@ -106,8 +107,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # pipeline_info.json — to re-run a failed run or append new data. First
         # in the section, above the folder it sets (as asked for), and inside
         # it rather than floating above every section as it used to.
-        self._open_pinfo_btn = QPushButton("Use settings from a previous run…", sec)
-        self._open_pinfo_btn.setProperty("variant", "default")
+        self._open_pinfo_btn = buttons.default("Use settings from a previous run…", sec)
         self._open_pinfo_btn.setToolTip(
             "Open a run's pipeline_info.json and fill the whole form from it, "
             "input folder included.")
@@ -141,8 +141,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # Never disabled: choosing a folder is what lets the schema be detected,
         # so a lock on the folder until the schema was valid pointed each half
         # of the form at the other. A schema problem stops Run instead.
-        self._browse_btn = QPushButton("Browse…", in_pick)
-        self._browse_btn.setProperty("variant", "default")
+        self._browse_btn = buttons.default("Browse…", in_pick)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
         sec.layout().addWidget(in_pick)

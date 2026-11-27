@@ -42,7 +42,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -71,6 +70,7 @@ from ui import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from ui import text_roles
+from ui import buttons
 
 #: Widths of the small numeric boxes. Named rather than written at the call
 #: site, both because ARCHITECTURE §8 asks for it and because a literal passed
@@ -360,17 +360,17 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Convert", row)
+        self._run_btn = buttons.default("▶  Convert", row)
         set_variant(self._run_btn, "primary")
         self._run_btn.clicked.connect(self.runRequested.emit)
         layout.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", row)
+        self._queue_btn = buttons.default("+ Queue", row)
         set_variant(self._queue_btn, "default")
         self._queue_btn.setToolTip("Add this conversion to the Job Queue "
                                    "instead of running it now")
         self._queue_btn.clicked.connect(self.queueRequested.emit)
         layout.addWidget(self._queue_btn)
-        self._open_btn = QPushButton("Open dataset in Analyze", row)
+        self._open_btn = buttons.default("Open dataset in Analyze", row)
         set_variant(self._open_btn, "default")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(

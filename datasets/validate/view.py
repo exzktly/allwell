@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -35,6 +34,7 @@ from datasets.core.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
 from datasets.validate.validate_compute import DatasetReport, wells_needing_force
 from datasets.core.dataset_fields import is_dataset
+from ui import buttons
 
 
 
@@ -108,27 +108,23 @@ class ValidatePage(LogPanelMixin, QWidget):
         bl = QHBoxLayout(btn_row)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Check", self)
-        self._run_btn.setProperty("variant", "primary")
+        self._run_btn = buttons.primary("▶  Check", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.checkRequested)
         bl.addWidget(self._run_btn)
         # Second, right after the primary action -- matching every other
         # Datasets tool's run-row ordering (Run, then +Queue, then any
         # secondary actions specific to this tool).
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "default")
+        self._queue_btn = buttons.default("+ Queue", self)
         self._queue_btn.setToolTip("Add this check to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
         bl.addWidget(self._queue_btn)
-        self._repair_btn = QPushButton("Apply repairs", self)
-        self._repair_btn.setProperty("variant", "default")
+        self._repair_btn = buttons.default("Apply repairs", self)
         self._repair_btn.setEnabled(False)
         self._repair_btn.clicked.connect(self.applyRepairsRequested)
         bl.addWidget(self._repair_btn)
-        self._complete_btn = QPushButton("Complete this run in Analyze", self)
-        self._complete_btn.setProperty("variant", "default")
+        self._complete_btn = buttons.default("Complete this run in Analyze", self)
         self._complete_btn.setVisible(False)
         self._complete_btn.clicked.connect(
             lambda: self.completeRunRequested.emit(self._dataset_root))

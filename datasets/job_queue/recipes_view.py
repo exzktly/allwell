@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from datasets.core.log_panel import hrule as _hrule
 from widgets.flow_layout import FlowLayout
+from ui import buttons
 
 #: The recipe list's ceiling: enough for a handful of rows before it scrolls,
 #: so the selected recipe's steps below stay on screen.
@@ -95,8 +96,7 @@ class RecipesPage(QWidget):
 
         top = QWidget(self)
         tl = FlowLayout(top, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
-        self._import_btn = QPushButton("Import…", self)
-        self._import_btn.setProperty("variant", "default")
+        self._import_btn = buttons.default("Import…", self)
         self._import_btn.setToolTip("Add a recipe exported from All-Well, here or elsewhere.")
         self._import_btn.clicked.connect(self.importRequested)
         tl.addWidget(self._import_btn)
@@ -137,7 +137,7 @@ class RecipesPage(QWidget):
                 ("duplicate", "Duplicate", "default", self.duplicateRequested),
                 ("export", "Export…", "default", self.exportRequested),
                 ("delete", "Delete…", "destructive", self.deleteRequested)):
-            button = QPushButton(text, actions)
+            button = buttons.default(text, actions)
             button.setProperty("variant", variant)
             button.clicked.connect(lambda _checked=False, s=signal: s.emit(self._current))
             al.addWidget(button)
@@ -180,8 +180,7 @@ class RecipesPage(QWidget):
         self._runs_line.setProperty("textRole", "help")
         self._runs_line.setWordWrap(True)
         dl.addWidget(self._runs_line)
-        self._runs_btn = QPushButton("Show runs", self._detail)
-        self._runs_btn.setProperty("variant", "default")
+        self._runs_btn = buttons.default("Show runs", self._detail)
         self._runs_btn.setToolTip("Every time this recipe was applied, with each run's log.")
         self._runs_btn.clicked.connect(lambda: self.showRunsRequested.emit(self._current))
         dl.addWidget(self._runs_btn, 0, Qt.AlignLeft)

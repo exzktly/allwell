@@ -1061,7 +1061,6 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
 # lives in ``export``. Re-exported so the tab_view toolbar wiring is unchanged.
 from review.features.image_browser.image_table.export import (  # noqa: F401
     _export_opts,
-    image_table_open_export_settings,
     _build_export_figure,
     image_table_export,
     image_table_export_pptx,

@@ -183,21 +183,25 @@ def test_builder_clear_empties_the_shelf(qtbot):
     assert ctx.runtime.image_table.builder_dirty is True   # cues a Generate
 
 
-# ── the ⚙ channel menu — must be parented (else GC'd) + render modes on top ───
+# ── the ⚙ channel options — a page, not a menu ────────────────────────────────
 
-def test_channel_menu_is_parented_and_lists_render_modes(qtbot):
-    from PySide6.QtWidgets import QWidget
+def _page_controls(page):
+    from PySide6.QtWidgets import QCheckBox, QComboBox
+    return ({c.objectName(): c for c in page.findChildren(QComboBox)},
+            {c.objectName(): c for c in page.findChildren(QCheckBox)})
+
+
+def test_the_channel_page_lists_render_modes_and_the_cell_options(qtbot, monkeypatch):
+    monkeypatch.setattr(B, "_edit", lambda _ctx: None)
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
-    host = QWidget()
-    qtbot.addWidget(host)
-    menu = B._channel_menu(ctx, ChannelSpec("GFP", "corrected"), host)
-    # Regression: QToolButton.setMenu doesn't own the menu, so a parentless
-    # QMenu is garbage-collected and the ⚙ opens nothing. It must be parented.
-    assert menu.parent() is host
-    labels = [a.text() for a in menu.actions()]
-    for mode in ("corrected", "raw", "cell mask", "> threshold"):
-        assert mode in labels          # render modes one click from the chip
-    assert "Boundary outline" in labels
+    page = B.channel_page(ctx, ChannelSpec("GFP", "corrected"))
+    qtbot.addWidget(page)
+    combos, boxes = _page_controls(page)
+    render = combos["ITBRender"]
+    assert [render.itemText(i) for i in range(render.count())] == ["corrected", "raw", "cell mask", "> threshold"]
+    assert set(boxes) == {"ITBColourCells", "ITBBoundary", "ITBLog"}
+    cmaps = [combos["ITBColormap"].itemText(i) for i in range(combos["ITBColormap"].count())]
+    assert "Greens" in cmaps and "Magenta" in cmaps
 
 
 def test_recognised_fluorophores_get_standard_colours():
@@ -430,28 +434,44 @@ def test_the_root_pill_s_button_opens_the_filter_as_a_page_of_ticks(qtbot, monke
     assert not well.findChildren(QToolButton, "ITBRootBtn")
 
 
-def test_channel_menu_is_flat_no_submenus(qtbot):
-    # The ⚙ menu must stay flat: an eager addMenu() submenu + keepalive created a
-    # GC cycle that could fault under native macOS menus. Colour items live at the
-    # top level, and no action carries a child QMenu.
-    from PySide6.QtWidgets import QWidget
-    host = QWidget()
-    qtbot.addWidget(host)
+def test_the_channel_page_s_controls_mutate_the_channel_spec(qtbot, monkeypatch):
+    edits = []
+    monkeypatch.setattr(B, "_edit", lambda _ctx: edits.append(1))
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
-    menu = B._channel_menu(ctx, ChannelSpec("GFP", "corrected"), host)
-    assert all(a.menu() is None for a in menu.actions())      # no submenus at all
-    labels = [a.text() for a in menu.actions()]
-    assert "Greens" in labels and "Magenta" in labels         # colour is flat, top-level
-
-
-def test_channel_menu_actions_mutate_channel_spec(qtbot):
-    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
-    from PySide6.QtWidgets import QWidget
-    parent = QWidget()
-    qtbot.addWidget(parent)
     cs = ChannelSpec("GFP", "corrected")
-    menu = B._channel_menu(ctx, cs, parent)
-    [a for a in menu.actions() if a.text() == "cell mask"][0].trigger()
-    assert cs.render == "mask"
-    [a for a in menu.actions() if a.text() == "Boundary outline"][0].trigger()
+    page = B.channel_page(ctx, cs)
+    qtbot.addWidget(page)
+    combos, boxes = _page_controls(page)
+    assert not boxes["ITBColourCells"].isEnabled(), "an intensity image has no cells to colour"
+    combos["ITBRender"].setCurrentIndex(combos["ITBRender"].findData("mask"))
+    assert cs.render == "mask" and boxes["ITBColourCells"].isEnabled()
+    boxes["ITBBoundary"].setChecked(True)
     assert cs.boundary is True
+    combos["ITBColormap"].setCurrentIndex(combos["ITBColormap"].findData("Magenta"))
+    assert cs.colormap == "Magenta"
+    assert len(edits) == 3, "each change re-renders once"
+
+
+
+def test_a_channel_s_gear_opens_its_page_in_the_inspector_and_a_second_press_leaves_it(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QToolButton
+
+    from review.core import inspector_service
+
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
+    shown, popped = [], []
+    monkeypatch.setattr(inspector_service, "push",
+                        lambda _ctx, key, title, widget, **kw: shown.append((key, title, widget)) or True)
+    monkeypatch.setattr(inspector_service, "is_showing", lambda _ctx, w: bool(shown) and shown[-1][2] is w)
+    monkeypatch.setattr(inspector_service, "pop", lambda _ctx: popped.append(1))
+    spec = B.builder_spec(ctx)
+    cs = ChannelSpec("GFP", "corrected")
+    pill = B._chan_pill(ctx, spec, "rows", 0, cs)
+    qtbot.addWidget(pill)
+    (gear,) = pill.findChildren(QToolButton, "ITBOpt")
+    assert gear.menu() is None, "the ⚙ still drops a menu"
+    gear.click()
+    (key, title, page), = shown
+    assert key == B.CHANNEL_PAGE_KEY and page.objectName() == "ImageTableChannelPage"
+    gear.click()
+    assert popped == [1] and len(shown) == 1

@@ -21,10 +21,6 @@ OLD_PICKER_IMPORTERS: dict[tuple[str, str], str] = {}
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
 #: starting ``kept`` is permanent and says why.
 CHECK_LIST_BUILDS: dict[tuple[str, str], str] = {
-    ('review/features/image_browser/image_table/builder_view.py', '_add_baseline_choices'):
-        "pending S18: the channel gear's options become a page",
-    ('review/features/image_browser/image_table/builder_view.py', '_fill_channel_menu'):
-        "pending S18: the channel gear's options become a page",
     ('review/features/nanowell/qc_view.py', '_walk_button'):
         'pending S19: becomes a row and a multi-select page',
     ('review/features/nanowell/tab_view.py', '_layers_button'):

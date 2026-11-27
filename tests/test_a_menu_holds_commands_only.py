@@ -15,8 +15,6 @@ from tests import _surface_guards as scan
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
 #: starting ``kept`` is permanent and says why.
 CHECKABLE_ACTIONS: dict[tuple[str, str], str] = {
-    ('review/features/image_browser/image_table/tab_view.py', 'build_image_table_tab'):
-        "pending S18: Crop view's choices become a page",
 }
 
 #: ``(file, function)`` -> why the site is still there. An entry starting
@@ -35,8 +33,6 @@ SUBMENUS: dict[tuple[str, str], str] = {
         'kept: one level — the two ways to retry a job whose output finished jobs used, which the plain Retry cannot choose between',
     ('review/features/batch_export/variable_select_panel.py', 'VariableSelectMixin._vsel_add_quick_setup_menu'):
         'kept: one level — one group per value of the variable chosen in it',
-    ('review/features/image_browser/image_table/tab_view.py', 'build_image_table_tab'):
-        'pending S18: the quality submenu becomes a Style page',
     ('review/features/nanowell/tab_view.py', '_layers_button'):
         'pending S19: Layers becomes a row and a page',
     ('widgets/path_field.py', 'PathField.add_browse_alternative'):

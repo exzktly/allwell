@@ -31,8 +31,7 @@ from string import Template
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
-    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -54,7 +53,6 @@ from review.features.image_browser.image_table.grid_layout import (
 from review.features.image_browser.image_table.image_compose import (
     LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant, _is_nuc_seg,
 )
-from widgets.owned_action import owned_action
 from review.data.nanowell_images import display_token, is_metric_map as _is_metric_token
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -1277,15 +1275,10 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
     gear.setObjectName("ITBOpt")
     gear.setText(f"⚙ {_render_label(cs)}")
     gear.setCursor(Qt.PointingHandCursor)
-    gear.setPopupMode(QToolButton.InstantPopup)
-    # Build the menu LAZILY on open, not eagerly for every chip at load. Parent it
-    # to the button (setMenu doesn't take ownership, so a parentless QMenu is
-    # GC'd) and (re)fill it in aboutToShow — so nothing is constructed until the
-    # user actually clicks a ⚙, and no long-lived menu objects accumulate across
-    # refreshes (which, with native macOS menus + GC timing, could fault).
-    menu = QMenu(gear)
-    menu.aboutToShow.connect(lambda m=menu, c=cs: _fill_channel_menu(ctx, m, c))
-    gear.setMenu(menu)
+    gear.setToolTip("This channel's options: render, cells, outline, scale and colour")
+    # The options are a page of the inspector, built when the ⚙ is pressed —
+    # not a menu of radio items and ticks.
+    gear.clicked.connect(lambda _=False, c=cs, g=gear: open_channel_page(ctx, c, g))
     h.addWidget(gear)
     h.addWidget(_x_btn("Remove channel",
                        lambda a=axis, i=idx: (_remove_channel(spec, a, i), _edit(ctx))))
@@ -1701,65 +1694,84 @@ def _render_label(cs: ChannelSpec) -> str:
     return s + ("+outline" if cs.boundary else "")
 
 
-def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
-    """(Re)populate a channel's ⚙ menu in place. Flat — no submenus and no
-    cross-referenced child menus (an earlier ``addMenu``-submenu + keepalive
-    created a GC cycle that could fault under native macOS menus). Colour also
-    lives in the LUT box below; it's mirrored here for one-click access."""
-    menu.clear()
-    _add_baseline_choices(ctx, menu, cs)
-
-    # Render mode — corrected / raw / cell mask / > threshold (radio-like).
-    hdr = menu.addAction("Render")
-    hdr.setEnabled(False)
-    for key, label in _RENDER_MODES:
-        act = owned_action(menu, label)
-        act.setCheckable(True)
-        act.setChecked(cs.render == key)
-        act.triggered.connect(lambda _c=False, k=key: (_set_render(cs, k), _edit(ctx)))
-
-    menu.addSeparator()
-    # Only a binary render has label ids to colour — the other two draw the
-    # intensity image, where there is no per-cell distinction to make. Shown
-    # greyed rather than hidden so the option does not appear and disappear as
-    # the render is switched.
-    lc = owned_action(menu, "Colour cells")
-    lc.setCheckable(True)
-    lc.setChecked(bool(cs.label_colors))
-    lc.setEnabled(cs.render in ("mask", "threshold"))
-    lc.setToolTip(
-        "Give every cell its own colour instead of painting them all white — two "
-        "nuclei that touch are otherwise one white shape. The colour is a fixed "
-        "function of the label id, so it does not change between redraws."
-    )
-    lc.triggered.connect(
-        lambda c=False: (_set_attr(cs, "label_colors", bool(c)), _edit(ctx)))
-
-    b = owned_action(menu, "Boundary outline")
-    b.setCheckable(True)
-    b.setChecked(bool(cs.boundary))
-    b.triggered.connect(lambda c=False: (_set_attr(cs, "boundary", bool(c)), _edit(ctx)))
-
-    lg = owned_action(menu, "Log scale")
-    lg.setCheckable(True)
-    lg.setChecked(bool(cs.log))
-    lg.triggered.connect(lambda c=False: (_set_attr(cs, "log", bool(c)), _edit(ctx)))
-
-    menu.addSeparator()
-    chdr = menu.addAction("Colour / LUT")
-    chdr.setEnabled(False)
-    for name in ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]:
-        act = owned_action(menu, name)
-        act.setCheckable(True)
-        act.setChecked(cs.colormap == name)
-        act.triggered.connect(lambda _c=False, n=name: (_set_attr(cs, "colormap", n), _edit(ctx)))
-    return menu
+#: The inspector page a channel's ⚙ opens.
+CHANNEL_PAGE_KEY = "image_table/channel"
 
 
-def _channel_menu(ctx, cs: ChannelSpec, parent=None) -> QMenu:
-    """Build a fully-populated ⚙ menu (used directly by tests; the live chips
-    build it lazily via :func:`_fill_channel_menu` on ``aboutToShow``)."""
-    return _fill_channel_menu(ctx, QMenu(parent), cs)
+def channel_page(ctx, cs: ChannelSpec, parent: QWidget | None = None) -> QWidget:
+    """A channel's options as a page: what it is drawn as, the cells' colours,
+    the outline, the scale, the colour map — and, for a fold-change map, what
+    the fold change is relative to. Each control edits *cs* and re-renders."""
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout
+
+    page = QWidget(parent)
+    page.setObjectName("ImageTableChannelPage")
+    form = QFormLayout(page)
+    form.setContentsMargins(0, 0, 0, 0)
+
+    def combo(name: str, items, current, on_pick) -> QComboBox:
+        cb = QComboBox(page)
+        cb.setObjectName(name)
+        for data, text in items:
+            cb.addItem(text, data)
+        idx = next((i for i, (data, _t) in enumerate(items) if data == current), 0)
+        cb.setCurrentIndex(idx)
+        cb.currentIndexChanged.connect(lambda _i, c=cb: (on_pick(c.currentData()), _edit(ctx)))
+        return cb
+
+    choices = baseline_choices(ctx, cs.channel)
+    if choices:
+        from review.data.nanowell_images import metric_baseline, metric_label, metric_token
+        label = metric_label(cs.channel)
+        form.addRow("Fold change relative to", combo(
+            "ITBBaseline", choices, metric_baseline(cs.channel),
+            lambda code: _set_attr(cs, "channel", metric_token(label, code))))
+
+    form.addRow("Render", combo("ITBRender", _RENDER_MODES, cs.render, lambda k: _set_render(cs, k)))
+
+    def check(name: str, text: str, attr: str, tip: str = "") -> QCheckBox:
+        box = QCheckBox(text, page)
+        box.setObjectName(name)
+        box.setChecked(bool(getattr(cs, attr)))
+        if tip:
+            box.setToolTip(tip)
+        box.toggled.connect(lambda on, a=attr: (_set_attr(cs, a, bool(on)), _edit(ctx)))
+        form.addRow(box)
+        return box
+
+    colour_cells = check(
+        "ITBColourCells", "Colour cells", "label_colors",
+        "Give every cell its own colour instead of painting them all white — two nuclei that touch are otherwise one "
+        "white shape. Only a cell mask or a threshold has cells to colour.")
+    colour_cells.setEnabled(cs.render in ("mask", "threshold"))
+    check("ITBBoundary", "Boundary outline", "boundary")
+    check("ITBLog", "Log scale", "log")
+    names = ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]
+    form.addRow("Colour / LUT", combo("ITBColormap", [(n, n) for n in names], cs.colormap,
+                                      lambda n: _set_attr(cs, "colormap", n)))
+    render = page.findChild(QComboBox, "ITBRender")
+    render.currentIndexChanged.connect(
+        lambda _i: colour_cells.setEnabled(render.currentData() in ("mask", "threshold")))
+    return page
+
+
+def open_channel_page(ctx, cs: ChannelSpec, anchor: QWidget) -> QWidget | None:
+    """Show *cs*'s options as a page of the inspector, from its ⚙."""
+    from review.core import inspector_service
+
+    old = getattr(anchor, "_aw_channel_page", None)
+    if old is not None and inspector_service.is_showing(ctx, old):
+        inspector_service.pop(ctx)                 # the ⚙ is a toggle, as every row is
+        return None
+    if old is not None and not inspector_service.inspector(ctx).holds(old):
+        old.deleteLater()
+    # Built afresh on every open, so it shows the channel as it is now, and
+    # parented to its ⚙ so it goes when the shelf rebuilds its chips.
+    page = channel_page(ctx, cs, anchor)
+    page.hide()
+    anchor._aw_channel_page = page
+    inspector_service.push(ctx, CHANNEL_PAGE_KEY, display_token(cs.channel), page, tab="data", anchor=anchor)
+    return page
 
 
 def _set_render(cs: ChannelSpec, key: str) -> None:
@@ -1784,26 +1796,6 @@ def baseline_choices(ctx, token: str) -> list[tuple[str | None, str]]:
         if str(label).strip():
             choices.append((baseline_timepoint_code(str(label).strip()), str(label).strip()))
     return choices
-
-
-def _add_baseline_choices(ctx, menu: QMenu, cs: ChannelSpec) -> None:
-    """A fold-change map's **Fold change relative to** choices, at the top of its ⚙ menu. Choosing one rewrites the
-    channel's token (``nanowell_images.metric_token``), so the baseline travels with the channel — two rows of one
-    metric can take their fold changes from two timepoints side by side."""
-    from review.data.nanowell_images import metric_baseline, metric_label, metric_token
-
-    choices = baseline_choices(ctx, cs.channel)
-    if not choices:
-        return
-    hdr = menu.addAction("Fold change relative to")
-    hdr.setEnabled(False)
-    current, label = metric_baseline(cs.channel), metric_label(cs.channel)
-    for code, text in choices:
-        act = owned_action(menu, text)
-        act.setCheckable(True)
-        act.setChecked(code == current)
-        act.triggered.connect(lambda _c=False, c=code: (_set_attr(cs, "channel", metric_token(label, c)), _edit(ctx)))
-    menu.addSeparator()
 
 
 def _set_attr(cs: ChannelSpec, attr: str, val) -> None:

@@ -18,9 +18,7 @@ data — no per-cell selector grid, per-row LUT table, or held-value combos here
 
 from __future__ import annotations
 
-from functools import partial
 
-from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QLabel,
     QMenu, QProgressBar, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
@@ -40,7 +38,6 @@ from review.features.image_browser.image_table.controller import (
     image_table_export,
     image_table_export_pptx,
     image_table_generate,
-    image_table_open_export_settings,
     image_table_refresh_empty_state,
     image_table_repopulate_dropdowns,
     image_table_rebuild_grid,
@@ -60,13 +57,8 @@ from review.features.image_browser.image_table.builder_view import (
     build_shelf, builder_mark_inclusion_stale, builder_notify_rendered,
     builder_flush_pending, builder_set_stacked, builder_transpose,
 )
+from review.features.image_browser.image_table.export import build_export_settings
 from review.features.image_browser.image_table.grid_ops import build_cell_row
-from review.features.image_browser.image_table.export import (
-    GALLERY_QUALITY_LABELS,
-    GALLERY_QUALITY_PRESETS,
-    gallery_quality_px,
-    set_gallery_quality,
-)
 from ui import theme
 from widgets.owned_action import owned_action
 
@@ -76,6 +68,9 @@ from widgets.owned_action import owned_action
 _CB_MIN_W = 132
 _EMPTY_STATE_MIN_H = 180
 _THRESH_CHAN_CB_MIN_W = 96
+#: The Crop view menu's first command, as it reads with the crop tool off and on.
+CROP_START_TEXT = "Start cropping (drag on an image)"
+CROP_STOP_TEXT = "Stop cropping"
 _ZOOM_IN_W = 32
 _ZOOM_LBL_W = 60
 _ZOOM_OUT_W = 32
@@ -282,6 +277,12 @@ def _build_style_panel(ctx, panel: QWidget, pl) -> None:
            "Draw a translucent dark box behind the label for legibility.")
 
     pl.addLayout(grid)
+    # What the "Export settings…" dialog and the Saved Plots quality submenu
+    # held: rows of this page, applied as they are changed.
+    _cap_export = QLabel("Export", panel)
+    _cap_export.setObjectName("Muted")
+    pl.addWidget(_cap_export)
+    pl.addWidget(build_export_settings(ctx, panel))
     pl.addStretch(1)
 
 
@@ -405,21 +406,16 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
                             tooltip="Crop the region every image shows")
     cmenu = crop_btn.menu()
     _crop = ctx.runtime.image_table.crop_tool
-    crop_act = QAction("Crop the view (drag on an image)", cmenu)
-    crop_act.setCheckable(True)
-    crop_act.setChecked(bool(_crop.mode))
-    crop_act.toggled.connect(lambda _c=False: _crop.toggle_mode())
-    cmenu.addAction(crop_act)
+    # A command that says what it will do, not a tick: "Start cropping" while
+    # the crop tool is off, "Stop cropping" while it is on.
+    crop_act = owned_action(cmenu, CROP_START_TEXT)
+    crop_act.triggered.connect(lambda _c=False: _crop.toggle_mode())
     reg.register("_image_table_crop_act", crop_act)
     reset_crop_act = owned_action(cmenu, "Show the full field again")
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
     def _sync_crop_menu() -> None:
-        blocked = crop_act.blockSignals(True)
-        try:
-            crop_act.setChecked(bool(_crop.mode))
-        finally:
-            crop_act.blockSignals(blocked)
+        crop_act.setText(CROP_STOP_TEXT if _crop.mode else CROP_START_TEXT)
     cmenu.aboutToShow.connect(_sync_crop_menu)
     # The crop state rides on the Crop button rather than in a loose caption
     # beside it — the row read "Crop ▾  (full FOV)", two controls' worth of
@@ -500,30 +496,6 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     owned_action(emenu, "Save to Saved Plots").triggered.connect(
         lambda _=False: image_table_save_to_gallery(ctx))
 
-    # Quick-pick resolution/speed preset for "Save to Saved Plots" — the same
-    # setting "Export settings…" exposes, surfaced here too since downsampling
-    # speed is the thing users tend to want to change right before saving.
-    quality_menu = emenu.addMenu("Save to Saved Plots quality")
-    quality_group = QActionGroup(quality_menu)
-    quality_group.setExclusive(True)
-    quality_actions: dict[str, QAction] = {}
-    for _qkey in GALLERY_QUALITY_PRESETS:
-        _gallery_px = GALLERY_QUALITY_PRESETS[_qkey][1]
-        _qact = owned_action(quality_menu, f"{GALLERY_QUALITY_LABELS[_qkey]} — {_gallery_px}px")
-        _qact.setCheckable(True)
-        quality_group.addAction(_qact)
-        _qact.triggered.connect(partial(set_gallery_quality, ctx, _qkey))
-        quality_actions[_qkey] = _qact
-
-    def _sync_quality_check():
-        current = gallery_quality_px(ctx)
-        for key, act in quality_actions.items():
-            act.setChecked(GALLERY_QUALITY_PRESETS[key] == current)
-    quality_menu.aboutToShow.connect(_sync_quality_check)
-
-    emenu.addSeparator()
-    owned_action(emenu, "Export settings…").triggered.connect(
-        lambda _=False: image_table_open_export_settings(ctx))
     tr.addWidget(export_btn)
 
     # Zoom: − [level] +  (clicking the % resets to 100%). No "Zoom:" caption —

@@ -328,8 +328,8 @@ def test_a_baseline_the_page_does_not_know_is_no_frame_and_says_so(qtbot, tmp_pa
     assert "'sometime' is not a baseline" in nanowell_frame_of(cache, "A01", token, "24").note
 
 
-def test_the_channel_menu_offers_each_baseline_and_choosing_one_rewrites_the_channel(qtbot, tmp_path, monkeypatch):
-    from PySide6.QtWidgets import QMenu
+def test_the_channel_page_offers_each_baseline_and_choosing_one_rewrites_the_channel(qtbot, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QComboBox
 
     from review.features.image_browser.image_table import builder_view as BV
 
@@ -339,16 +339,18 @@ def test_the_channel_menu_offers_each_baseline_and_choosing_one_rewrites_the_cha
     assert BV.baseline_choices(ctx, COUNT) == []                  # not a fold change: nothing to be relative to
     monkeypatch.setattr(BV, "_edit", lambda _ctx: None)
     (cs,) = _use(ctx, [COUNT_FC])
-    menu = BV._channel_menu(ctx, cs)
-    actions = {a.text(): a for a in menu.actions()}
-    assert actions["The Nanowells page's baseline (now earliest)"].isChecked()
-    actions["24h"].trigger()
+    page = BV.channel_page(ctx, cs)
+    qtbot.addWidget(page)
+    base = page.findChild(QComboBox, "ITBBaseline")
+    assert base.currentText() == "The Nanowells page's baseline (now earliest)"
+    base.setCurrentIndex(base.findText("24h"))
     assert cs.channel == "NW: Count fold change @tp:24h" and cs.axis_token() == cs.channel
-    again = BV._channel_menu(ctx, cs)                     # kept: Qt deletes an unreferenced menu's actions
-    assert {a.text(): a for a in again.actions()}["24h"].isChecked()
-    plain = BV._channel_menu(ctx, _use(ctx, [COUNT])[0])
-    assert "Fold change relative to" not in [a.text() for a in plain.actions()]
-    assert isinstance(plain, QMenu)
+    again = BV.channel_page(ctx, cs)
+    qtbot.addWidget(again)
+    assert again.findChild(QComboBox, "ITBBaseline").currentText() == "24h"
+    plain = BV.channel_page(ctx, _use(ctx, [COUNT])[0])
+    qtbot.addWidget(plain)
+    assert plain.findChild(QComboBox, "ITBBaseline") is None
 
 
 def test_the_key_says_what_each_fold_change_is_relative_to(qtbot, tmp_path):

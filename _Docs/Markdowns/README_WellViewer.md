@@ -6809,7 +6809,7 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     scale, so grey means unchanged and a doubling and a halving are equally strong; the colour key always marks where
     1 falls. The values
     follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots. To take
-    a fold change from a particular timepoint instead, open the channel's ⚙ menu and choose under **Fold change
+    a fold change from a particular timepoint instead, press the channel's ⚙ and choose under **Fold change
     relative to**: the page's baseline, the earliest or first measurable timepoint, or any timepoint of the run. The
     row then reads e.g. *NW: Count fold change vs 0h*, and adding the same metric twice with two baselines shows them
     side by side. The colour key always says what each fold change is relative to.
@@ -8125,7 +8125,7 @@ channel for every well).
   axis to make it vary; click the **×** on a root to drop it back to Fixed. Wells
   come from the sidebar plate; changing that selection — including **Select all /
   none** — re-runs the layout in place.
-- **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
+- **Per-channel render options** — each channel chip's **⚙** opens a page of its options: **Raw /
   Corrected**, **Mask**, **> threshold** (renders that channel's
   ON-cutoff binary — ThreshFracOn, or ThreshCountOn when the selected Property
   is a spot count — positive cells white), **Colour cells**, a **boundary** outline
@@ -8219,7 +8219,7 @@ channel for every well).
   12 columns, so a tall table turned on its side can leave images off the end;
   the status line says how many, and **Wrap** bands the columns to show them
   all. In Plate mode it turns the plate on its side — columns 1–12 down the rows,
-  rows A–H across — and a second Transpose turns it back) · **Crop view ▾** (drag a region on any image — the button reads
+  rows A–H across — and a second Transpose turns it back) · **Crop view ▾** (**Start cropping**, then drag a region on any image — the button reads
   the current crop, `Crop view · (full FOV)` when there is none). This crops what
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value
@@ -8299,11 +8299,12 @@ channel for every well).
   column axis labels, the vertical group strips, the corner label, and the extra
   spacing between groups. The saved image also reads at the same brightness as the
   grid on screen. Because the axis labels already identify every cell, the per-cell
-  titles are off — switch **Show titles** on in the Export settings dialog if you want
+  titles are off — switch **Show titles** on under **Style › Export** if you want
   them repeated above each image as well.
 - **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
-  **Standard**, **High**), picked either from the Save menu's quick-pick submenu
-  or the Export settings dialog. It also sets how large each field's own picture is
+  **Standard**, **High**), picked under **Style › Export**, with the other
+  export settings (margin, cell gap, titles, PNG DPI, transparent background);
+  each applies as you change it. It also sets how large each field's own picture is
   inside the saved grid's PowerPoint frames — a saved grid keeps one image per
   field, so it takes noticeably more room in the dataset folder than the single
   snapshot did, and this preset is the control over that. Save to Saved Plots

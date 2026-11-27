@@ -86,11 +86,15 @@ def _win(monkeypatch, paths, *, data_dir=None, opened=None):
 
 
 def _labels(menu):
-    """The menu's entries up to its settings section: ``Palette`` ends every fill and is
-    ``tests/test_palette_setting.py``'s to test."""
+    """The menu's entries up to its settings section: the ``Palette: …`` entries and their note follow the
+    recents in every fill and are ``tests/test_palette_setting.py``'s to test (the dataset tools after them, which
+    a stub window without the tools does not show, are ``tests/test_dataset_tools.py``'s)."""
+    from ui.palette_setting import APPLIES_NEXT_START
+
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts[-1] == "Palette", texts
-    return texts[:-1]
+    at = next(i for i, t in enumerate(texts) if t.startswith("Palette: "))
+    assert texts[at:at + 3][-1] == APPLIES_NEXT_START, texts
+    return texts[:at]
 
 
 def test_the_menu_lists_the_datasets_opened_recently(qapp, tmp_path, monkeypatch):

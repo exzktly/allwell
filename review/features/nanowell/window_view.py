@@ -1,7 +1,8 @@
 """The Distribution window's strip and the pop-out's controls for it.
 
-The **strip** sits between the control band and the figure, shown on the Distribution view while a window exists
-for the metric and axis drawn: the sentence ``_window_controller.strip_text`` writes, on a line of its own the width of
+The **strip** is the inspector's **Window** page, opened from the status line's Window chip under the figure
+(``status_view``) — unasked when a window is drawn — and shown on the Distribution view while a window exists for the
+metric and axis drawn: the sentence ``_window_controller.strip_text`` writes, on a line of its own the width of
 the strip, and beneath it the controls — typed **Low** and **High** fields (precision, and a way to edit on a phone,
 where dragging is clumsy), the *every | any timepoint* choice, **This panel only**, **Open in pop-out**, **Use as
 Subset** and **✕** — in a flow that wraps onto as many lines as the width needs, so none is cut off on a phone. Each

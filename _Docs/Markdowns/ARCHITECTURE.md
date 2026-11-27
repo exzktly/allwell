@@ -14216,8 +14216,9 @@ whether Shift was held); a release within `CLICK_SLOP_PX` is the click it always
 becomes a window, drawn dashed while it is dragged and stored through `_store`, which saves and redraws. Shift held at
 the press or the release (`_window_controller.extends`, reading matplotlib's `MouseEvent.modifiers`) makes the drag
 *add* its box — `DistributionWindow.added` onto the window drawn for the metric and axis — instead of replacing it. Hand-rolled rather than matplotlib's selectors, which
-the figure's clearing on every redraw would destroy. `window_view.build_window_strip` is the strip (`NanowellWindowStrip`)
-above the figure and `_nw_window_refresh` keeps it on the window; the pop-out's **Show** / **Layout** / pager row is
+the figure's clearing on every redraw would destroy. `window_view.build_window_strip` is the strip (`NanowellWindowStrip`),
+the **Window** page of the inspector opened from the status line's Window chip (below), and `_nw_window_refresh`
+keeps it on the window; the pop-out's **Show** / **Layout** / pager row is
 `window_view.build_popout_window_controls` (`_nw_popout_window_refresh`). In the pop-out's Window mode
 (`NanowellState.popout_source`, `popout_layout`, persisted; `window_page` not) `controller.draw_popout` calls
 `_window_controller.draw_window_popout`: one page of `NanowellState.popout_rows` rows (persisted, one of
@@ -15090,7 +15091,20 @@ Identity) draw no nanowell's value, so Metric, Channel, the Values row (with eve
 (`subset_view` `shown_on`, which hides its editor too and brings it back as it was left) are hidden there; the
 Nanowell box is hidden on QC, Statistics and Position (`refresh_goto_controls`, `NO_GOTO_VIEWS`), and Group by on QC (`variables_view`), since QC reads every
 well of the plate ungrouped; `test_nanowell_page_views_ui.py::test_a_control_with_no_role_on_a_view_is_not_shown_there`
-walks every view. Within a view every control that cannot act is greyed with
+walks every view. **The status line** (`status_view.build_status_line`, `_nw_status_line`) sits under the figure,
+above the Details footer: one chip per condition that shapes the figure, in the order `status_view.CHIPS` — the
+Subset (*Subset: … ›*, opening the Subset's Conditions page), excluded wells (*Excluded: A01* or *Excluded: 3 wells*,
+a menu: the band's own *Excluded (n)* menu, so the two cannot disagree), a Distribution window (*Window: 1.2–3.4 ›*,
+opening the **Window** page that holds the strip), Home's Cell Gating where it left cells or fields out
+(*Cell Gating: 1,204 cells left out ›*, opening Home ▸ Cell Gating through the `cell_gating.show` service) and a
+Resolve walk (*Resolve: 3 of 17 · B04 at 24h ›*, opening the **Resolve** page that holds the guide card).
+`status_view.chip_texts` decides which apply — the Subset and Cell Gating not on `NO_VALUE_VIEWS`, the window only
+on Distribution, the walk only on its view — and the line is hidden when none does. `StatusLine.refresh` opens the
+Window or Resolve page when its condition has just begun, as the strip and card used to appear unasked, and leaves
+it when the condition ends; it runs from `refresh_controls`, from `_window_controller.after_draw` on every view's
+draw (Cell Gating's tally arrives with a draw) and after a window edit. The strip and the card are built hidden in
+a holder widget that is never shown, so a refresh that shows one shows it only where the inspector put it
+(`tests/test_nanowell_status_line.py`). Within a view every control that cannot act is greyed with
   its reason after its own tooltip (`tab_view._grey`, `_refresh_array_greying`): Image on Lattice; the image
   channel unless Image is Full resolution; *1:1* with no image pixel; Set anchor with the first clause
   of `anchor_controls`' predicate that fails (`controller.anchor_unavailable_reason`); Clear anchor and Re-run
@@ -15183,8 +15197,12 @@ walks every view. Within a view every control that cannot act is greyed with
   box the reader typed.
 
   **The guide card** (`resolve_view`, `_nw_resolve_guide`, styled `QWidget#NanowellResolveGuide` in `ui/theme.py`)
-  sits between the band and the figure and is shown while a walk runs and the page is on the view its current item is
-  on (`_anchor_queue.current_view`). `_anchor_queue.current_guide` builds its text with `resolve_compute.guide_for`:
+  is the **Resolve** page of the inspector, opened from the status line's Resolve chip (below) — unasked when a walk
+  starts — and is shown while a walk runs and the page is on the view its current item is
+  on (`_anchor_queue.current_view`). The page carries the walk's Back, Skip and Stop under the card
+  (`_nw_resolve_back_btn` / `_skip_` / `_stop_`, Back greyed before the first timepoint), so the walk is stepped from
+  the status line; the band's *Queue* group keeps them too, with One per well, in the Well's place, because their
+  keys (← → Esc) are `QShortcut`s of that group and would stop working whenever a page holding them was closed. `_anchor_queue.current_guide` builds its text with `resolve_compute.guide_for`:
   a kicker (`Resolving: not addressed · 3 of 17`), the well and timepoint (hours added only when the label does not
   already say them, `hours_suffix`), and three rows — *Problem* (the state in words, with the grid record's or the
   identity check's reason; a partial timepoint's cause codes in words, `_CAUSES`), *Do this* (what to click, and the

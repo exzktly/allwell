@@ -608,7 +608,8 @@ When several wells and timepoints need an anchor — the usual state after a run
 instead of picking each one. Choose the class under **Problem ▾** (each listed with its count — *not addressed*,
 *contradicted*, *inconclusive*, *partial*, *not located*) and press **Resolve** (*Resolve: 330 timepoints*), or
 simply **click any cell** that needs a look: that timepoint opens, and the walk goes on through every other
-timepoint of the same class. Each one opens where it is fixed, with a card above the figure that says:
+timepoint of the same class. Each one opens where it is fixed, with the **Resolve** page of the Inspector (opened
+for you, and again from the **Resolve** chip under the figure) saying:
 
 - **Problem** — what is wrong with this timepoint, with the run's or the identity check's reason;
 - **Do this** — exactly what to click, and where. On the montage a dashed **ring** marks the best evidence of where
@@ -6759,6 +6760,12 @@ is said on the status line, and nothing is selected. An address the well's table
 its well, so the nanowell selected before is let go and the site detail closes; the other two change nothing. The box is not shown on the **QC**, **Statistics** and
 **Position** views, whose figures draw no single nanowell (one row per well, a test's table, each ring's summary).
 
+**The status line.** Under the figure, a row of chips says what is shaping it, one chip for each that applies —
+**Subset** (its conditions), **Excluded** (the wells left out), **Window** (a Distribution window's range),
+**Cell Gating** (how many cells Home's Cell Gating leaves out) and **Resolve** (where a Resolve walk is). Press a
+chip to open what owns it: the Subset's conditions, the menu that brings excluded wells back, the Window's page,
+Home ▸ Cell Gating, or the Resolve walk's guide. With nothing applying there is no row.
+
 **Each view shows only the controls it uses.** A control with no role on a view is not on its band: the **QC** and
 **Identity** views draw no nanowell's value, so Metric, Channel, Values and Subset (with its editor, if
 open) are not shown there; QC shows no Group by; and QC, Statistics and Position show no Nanowell box. On a view that does use a control but
@@ -7253,12 +7260,13 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   one beside it, and a box that strays a little past a column's edge does not take the next column. A box over a
   whole column covers that column on every panel. Where a dot sits sideways inside its swarm never matters. A
   translucent band marks what it covers, and a ring marks each member's dot.
-- A strip appears above the figure while a window exists for the metric and axis drawn. It says the range and how many
+- While a window exists for the metric and axis drawn, a **Window** chip under the figure reads its range, and its
+  **Window** page in the Inspector (opened for you when you draw one) says the range and how many
   nanowells are inside — over several timepoints, both **inside at every covered timepoint** and **at any** — and how
   many members have no dot on the figure, by reason: *in panels not drawn* (past the twelve a figure draws), *in
   densities*, *in overflow*. A nanowell with no value is never inside.
-- The bar is the sentence on a line of its own with the controls wrapping beneath it, so on a phone every control stays
-  whole and reachable.
+- The page is the sentence on a line of its own with the controls wrapping beneath it, so on a phone every control
+  stays whole and reachable.
 - **Low** and **High** take typed numbers (Enter to apply; a number the wrong way round is swapped, text that is not a
   number is put back), which is also the way to adjust a window on a phone. **every timepoint | any timepoint**
   chooses which of the two counts is the window's members: *every* needs a value inside the range at each covered

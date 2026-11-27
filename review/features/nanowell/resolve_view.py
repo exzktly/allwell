@@ -1,11 +1,12 @@
-"""The *Resolve* walk's guide card: a strip above the Nanowells figure, shown while a walk runs on the view its
+"""The *Resolve* walk's guide card: the inspector's **Resolve** page, opened from the status line's Resolve chip
+under the Nanowells figure (``status_view``) — unasked when a walk starts — and shown while a walk runs on the view its
 timepoint is shown on, saying in three lines what is wrong with the timepoint, exactly what to do and where, and what
 happens next (``resolve_compute.guide_for``, through ``_anchor_queue.current_guide``).
 
 It carries the one action the class takes beside a click on the montage — *Looks right — next* for a partial
 timepoint, *Exclude well* for one not located, *Re-run anchored wells…* for an anchor waiting — so the button the
 *Do this* line names sits beside it. *Back*, *Skip* and *Stop*, with their keys (← → Esc), stay on the band's *Queue*
-group directly above the card (``anchor_queue_view``).
+group (``anchor_queue_view``), whose shortcuts would stop working whenever a page holding them was closed.
 """
 
 from __future__ import annotations
@@ -40,7 +41,8 @@ def _class_action(ctx, kind: str) -> None:
 
 
 def build_resolve_guide(ctx, parent) -> SimpleNamespace:
-    """The card, hidden until a walk runs; the page puts it between the band and the figure."""
+    """The card, hidden until a walk runs; the page builds it in no layout, and the status line lends it to the
+    inspector as the Resolve page."""
     from ui import theme
 
     frame = QFrame(parent)
@@ -81,14 +83,31 @@ def build_resolve_guide(ctx, parent) -> SimpleNamespace:
         bodies[key] = body
     grid.setColumnStretch(1, 1)
     col.addLayout(grid)
+    # The walk's own steps, on the page as well as on the band's Queue group: the page is reached from the status
+    # line wherever the band is, and the group keeps the keys (← → Esc).
+    steps = QHBoxLayout()
+    steps.setSpacing(theme.Spacing.sm)
+    walk = {}
+    for key, text, tip, act in (("back", "Back", "Show the previous timepoint in the queue (←).", lambda: aq.step(ctx, -1)),
+                                ("skip", "Skip", "Leave this timepoint and show the next one (→).", lambda: aq.step(ctx, +1)),
+                                ("stop", "Stop", "End the walk here (Esc).", lambda: aq.stop(ctx))):
+        button = QPushButton(text)
+        button.setProperty("variant", "secondary")
+        button.setToolTip(tip)
+        button.clicked.connect(lambda _=False, fn=act: fn())
+        steps.addWidget(button)
+        walk[key] = button
+    steps.addStretch(1)
+    col.addLayout(steps)
     frame.hide()
     reg = ctx.widgets
     for name, widget in (("_nw_resolve_guide", frame), ("_nw_resolve_kicker", kicker), ("_nw_resolve_title", title),
-                         ("_nw_resolve_action_btn", action)):
+                         ("_nw_resolve_action_btn", action), ("_nw_resolve_back_btn", walk["back"]),
+                         ("_nw_resolve_skip_btn", walk["skip"]), ("_nw_resolve_stop_btn", walk["stop"])):
         reg.register(name, widget)
     for key, body in bodies.items():
         reg.register(f"_nw_resolve_{key}", body)
-    return SimpleNamespace(frame=frame, kicker=kicker, title=title, bodies=bodies, action=action)
+    return SimpleNamespace(frame=frame, kicker=kicker, title=title, bodies=bodies, action=action, walk=walk)
 
 
 def refresh_resolve_guide(ctx, view: str, c: SimpleNamespace) -> None:
@@ -106,3 +125,5 @@ def refresh_resolve_guide(ctx, view: str, c: SimpleNamespace) -> None:
     c.action.setText(text)
     c.action.setToolTip(tip)
     c.action.setProperty("kind", guide.button)
+    queue = aq.active_queue(ctx)
+    c.walk["back"].setEnabled(queue is not None and queue.index > 0)

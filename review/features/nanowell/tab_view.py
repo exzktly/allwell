@@ -58,6 +58,7 @@ from review.features.nanowell.statistics_view import (
     build_statistics_controls, fill_control_combo, refresh_statistics_controls,
 )
 from review.core.inspector_panels import as_display_row, make_popover_button
+from review.features.nanowell.status_view import build_status_line
 from review.features.nanowell.values_view import ValuesLines, build_values_row, refresh_values_row
 from widgets.control_band import ControlBand
 from widgets.delayed_tooltip import DelayedToolTip
@@ -517,10 +518,13 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     # *Excluded (n)* names wells: it follows Exclude, before the Values row, on every view.
     band.place_trailing(exclusion.excluded_group, grp_values)
     layout.addWidget(band)
-    # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
-    guide = build_resolve_guide(ctx, plot_area)
-    layout.addWidget(guide.frame)
-    layout.addWidget(build_window_strip(ctx, plot_area))
+    # The Resolve walk's guide card and the Distribution window's strip are pages of the inspector, opened from the
+    # status line under the figure (``status_view``): built hidden, in no layout, in a holder that is never shown, so a
+    # refresh that shows one shows it only where the inspector has put it.
+    pages_holder = QWidget(main)
+    pages_holder.hide()
+    guide = build_resolve_guide(ctx, pages_holder)
+    window_strip = build_window_strip(ctx, pages_holder)
 
     # ── the figures ─────────────────────────────────────────────────────────
     card = PlotCard(main, figsize=(_FIG_W, _FIG_H), constrained=False, header=False)
@@ -608,6 +612,11 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     figure_layout.addWidget(figure_scroll)
     figures = wrap_with_empty_state(ctx.window, figure_host, icon="hexagon", reason=nwc.nanowell_empty_reason)
     layout.addWidget(figures, 1)
+    # One chip per condition that shapes the figure — Subset, excluded wells, a window, Cell Gating, a Resolve walk —
+    # each opening the page that owns it.
+    status = build_status_line(ctx, plot_area, window_page=window_strip, resolve_page=guide.frame,
+                               excluded_menu_of=lambda: exclusion.excluded.menu())
+    layout.addWidget(status.host)
     layout.addWidget(build_details_panel(ctx, plot_area))  # the Distribution's footer, out of its figure
 
     show_detail = _detail_tab(ctx, detail, card)
@@ -742,6 +751,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                     window_refresh()
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
             refresh_values_row(grp_values, values_lines)
+            status.refresh()
             variables.refresh(view)
         finally:
             for w, b in zip(controls, blocked):

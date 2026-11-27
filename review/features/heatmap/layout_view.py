@@ -524,7 +524,7 @@ class _LayoutPanel(QWidget):
         actions_l = QHBoxLayout(actions)
         actions_l.setContentsMargins(0, 0, 0, 0)
         actions_l.setSpacing(sp.sm)
-        autopop_btn = buttons.primary("Auto-populate from selection", actions)
+        autopop_btn = buttons.default("Auto-populate from selection", actions)
         autopop_btn.setToolTip(
             "Place the wells the plate shows as selected into this grid in plate "
             "order. The grid grows if it needs more cells to hold them."

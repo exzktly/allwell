@@ -22401,9 +22401,11 @@ edge until the pointer is on it, secondary ink — toolbars and the commands
 beside a primary one) and *destructive* (the default button with a red label).
 The kind is the `variant` property; `buttons.qss` writes the four rules, each
 with its own hover, pressed and disabled states, and `theme.qss()` includes
-them. `button(text, kind, …)` and the four named builders build one, and
-`set_kind` changes a built button's kind and re-polishes. `ui_helpers.btn_*`
-build through it. `tests/test_button_kinds.py` measures each kind's drawn fill,
+them. `button(text, kind, …)` and the four named builders build a push button,
+`tool_button(parent, kind)` a tool button (a menu or icon button), and
+`set_kind` changes a built button's kind and re-polishes. Every pane builds its
+buttons through them (`ui_helpers.btn_*` included), and a page shows at most one
+primary button, the action that produces its result. `tests/test_button_kinds.py` measures each kind's drawn fill,
 label ink and weight; `tests/test_buttons_have_one_of_four_kinds.py` fails on
 any other variant value set anywhere (a call, a conditional, a table row, a
 helper's default), with the buttons that carry an on/off state on its roster

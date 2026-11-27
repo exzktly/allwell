@@ -56,12 +56,27 @@ def _thin_side(axis, side: str, lo: float, hi: float, renderer) -> bool:
     return was != [label.get_visible() for label in labels]
 
 
+#: The most redraws in a row :func:`keep_ticks_apart` asks for before it lets a figure be.
+_MAX_ROUNDS = 3
+
+
 def keep_ticks_apart(canvas) -> None:
     """Thin *canvas*'s crowded tick labels after each draw (:func:`thin_crowded_ticks`), and draw once more when that
     changed anything. A draw that changes nothing asks for none, so it settles."""
+    # A pass may change the layout it measured — hidden labels give a layout engine room, a wider margin narrows the
+    # axes — and the next draw then judges again. Most settle in one more draw; one that does not would ask for draws
+    # for ever (an Image Browser figure did, and its page never finished drawing), so a run of redraws asked for here
+    # is cut at _MAX_ROUNDS, and counted afresh after a draw that changed nothing.
+    rounds = {"n": 0}
+
     def on_draw(event) -> None:
         thinned = thin_crowded_ticks(event.canvas.figure, event.renderer)
-        if keep_labels_on_figure(event.canvas.figure, event.renderer) or thinned:
+        moved = keep_labels_on_figure(event.canvas.figure, event.renderer)
+        if not (thinned or moved):
+            rounds["n"] = 0
+            return
+        if rounds["n"] < _MAX_ROUNDS:
+            rounds["n"] += 1
             event.canvas.draw_idle()
 
     canvas.mpl_connect("draw_event", on_draw)
@@ -78,6 +93,10 @@ def keep_labels_on_figure(fig, renderer) -> bool:
     # Only axes the subplot parameters place: one placed by hand (``add_axes``) would not move, and asking again on
     # every draw would never settle.
     placed = [ax for ax in fig.axes if ax.get_subplotspec() is not None]
+    # Nor a figure that also has axes placed by hand (a colour bar, a key): moving the subplots would move them into
+    # it — a Heat Map's cell labels ran into its colour bar's numbers.
+    if len(placed) != len(fig.axes):
+        return False
     lefts = [ax.yaxis.label.get_window_extent(renderer).x0 for ax in placed
              if ax.yaxis.label.get_visible() and ax.yaxis.label.get_text().strip()]
     lefts += [t.get_window_extent(renderer).x0 for ax in placed for t in ax.get_yticklabels()

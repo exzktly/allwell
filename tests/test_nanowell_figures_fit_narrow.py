@@ -173,3 +173,15 @@ def test_a_short_figure_keeps_room_for_its_plot_above_the_footer():
     assert kept[-1].startswith("… ") and "more lines" in kept[-1]
     plot_pt = (1.0 - renderer._footer_share(short)) * short.get_figheight() * 72.0
     assert plot_pt >= renderer._PLOT_ROOM_PT - 1e-6
+
+
+def test_a_figure_with_hand_placed_axes_keeps_its_margin():
+    """Moving the subplots on a figure that also has hand-placed axes (a colour bar) would move them into it."""
+    fig = _figure(3.0, 2.0)
+    ax = fig.add_subplot(1, 1, 1)
+    fig.add_axes((0.9, 0.1, 0.05, 0.8))
+    fig.subplots_adjust(left=0.01)
+    ax.set_ylabel("Cell count", fontsize=14)
+    fig.canvas.draw()
+    assert not figure_fit.keep_labels_on_figure(fig, fig.canvas.get_renderer())
+    assert fig.subplotpars.left == 0.01

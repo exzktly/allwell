@@ -27,3 +27,20 @@ def test_a_card_given_the_decorators_thins_its_crowded_tick_labels(qtbot):
     card.canvas.draw()
     shown = [t for t in ax.xaxis.get_major_ticks() if t.label1.get_visible()]
     assert 1 < len(shown) < 31
+
+
+def test_a_figure_whose_passes_never_settle_stops_asking_for_draws(qtbot, monkeypatch):
+    """A pass that changes what the next draw measures could ask for draws for ever: an Image Browser page in the tour
+    never finished drawing. The run of redraws asked for is cut."""
+    from review.core import figure_fit
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard(None, figsize=(2.0, 2.0), constrained=False, header=False)
+    qtbot.addWidget(card)
+    monkeypatch.setattr(figure_fit, "thin_crowded_ticks", lambda fig, renderer: True)     # never settles
+    asked = []
+    monkeypatch.setattr(card.canvas, "draw_idle", lambda: asked.append(1))
+    figure_fit.keep_ticks_apart(card.canvas)
+    for _ in range(10):
+        card.canvas.draw()
+    assert len(asked) == figure_fit._MAX_ROUNDS

@@ -13,9 +13,10 @@ from PySide6.QtWidgets import (
     QToolTip, QVBoxLayout, QWidget,
 )
 
+from review.core.inspector_panels import as_display_row, make_popover_button
 from review.core.ui_helpers import (
     add_menu_action, btn_card, btn_secondary,
-    make_action_menu_button, make_popover_button,
+    make_action_menu_button,
 )
 from widgets.control_band import ControlBand
 from review.features.preview.crop_scope_view import (
@@ -211,7 +212,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
 
     # ── View ▾ popover — image stage · zoom · overlay toggles ───────────
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
-    view_btn, view_panel, view_lay = make_popover_button("View ▾", ctrl)
+    view_btn, view_panel, view_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
     view_btn.setToolTip("Image stage, zoom, and overlay toggles")
 
     # Image-stage selector: Raw / Flat-field (recomputed) / Corrected (final).
@@ -296,7 +297,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     il.addWidget(status)
 
     # ── LUT ▾ popover — display brightness (min/max) ────────────────────
-    lut_btn, lut_panel, lut_lay = make_popover_button("LUT ▾", ctrl)
+    lut_btn, lut_panel, lut_lay = make_popover_button("Brightness", ctrl, ctx=ctx)
     lut_btn.setToolTip("Display brightness (min/max) for the active channel")
 
     lut_range_row = QWidget(lut_panel)
@@ -319,7 +320,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                                           lambda: review_image_auto_lut(ctx)))
     lut_lay.addWidget(lut_range_row)
 
-    ctrl.add_action(lut_btn)
+    view_lay.addWidget(as_display_row(lut_btn))      # a row of the Display tab
 
     # ON-cutoff quick-edit — inline on the control row (its original home), not
     # tucked inside the LUT ▾ popover. Edits the active channel's cutoff for the
@@ -356,7 +357,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     ctrl.add_scope("", thr_row)
 
     # ── Colors ▾ popover — per-element display colours + reset ──────────
-    colors_btn, colors_panel, colors_lay = make_popover_button("Colors ▾", ctrl)
+    colors_btn, colors_panel, colors_lay = make_popover_button("Colours", ctrl, ctx=ctx)
     colors_btn.setToolTip("Boundary / Selected / Tint colours and reset")
     swatches: dict = {}
     rt.color_swatches = swatches
@@ -388,7 +389,11 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                 "channel by the chosen RGB.")
     colors_lay.addWidget(btn_secondary(colors_panel, "Reset colors",
                                        lambda: reset_review_image_colors(ctx)))
-    ctrl.add_action(colors_btn)
+    view_lay.addWidget(as_display_row(colors_btn))   # a row of the Display tab
+    # The row ends in Display · Style · Share on every page; this page has no
+    # figure to style or to save, so those two are disabled buttons, not gaps.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(ctrl)
 
     canvas = QScrollArea(inner)
     rt.canvas = canvas

@@ -8,9 +8,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     make_band_controls,
-    build_plot_save_menu, make_plot_with_right_dock, make_popover_button,
+    build_plot_save_menu, make_plot_with_right_dock,
     make_properties_button, plotting_band_slot)
 from review.features.scatter.controller import redraw_scatter_agg_orchestrate
 from review.features.scatter.tp_selector_view import open_timepoint_selector
@@ -105,7 +106,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     # Error band (SEM/SD) for the aggregate's mean±spread points collapses into
     # a "Display ▾" popover (matches line/bar), instead of a card-controls row.
-    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
     _disp_btn.setToolTip("Error band (SEM/SD) for the aggregate points")
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=False))
     ctrl.add_action(_disp_btn)
@@ -123,6 +124,10 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_action(_export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_agg"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False, header=False)
     from review.core.ui_helpers import apply_plot_card_decorators

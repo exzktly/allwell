@@ -148,14 +148,6 @@ def on_tab_change(ctx, _e=None) -> None:
     with swallow("re-evaluate the Decorate button for the new tab"):
         refresh_decoration_combos(ctx)
 
-    # Dismiss any open figure configurator on tab change -- the user can
-    # re-open it on the new tab via the plot card's sliders IconButton.
-    for sb in list((ctx.widgets.get_or_none("_export_style_sidebars") or {}).values()):
-        try:
-            sb._close_dock()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-
     _frames = _sidebar_section_frames(ctx)
     for _frame in _frames:
         _frame.setVisible(False)

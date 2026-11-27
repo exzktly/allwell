@@ -59,6 +59,10 @@ TABS: tuple[tuple[str, str], ...] = (
     ("data", "Data"), ("display", "Display"), ("style", "Style"), ("detail", "Detail"),
 )
 
+#: Tabs whose first page takes the tab's whole height: the Style panel is a
+#: list that scrolls itself.
+FILLED_TABS = frozenset({"style"})
+
 #: The settings key the desk column's width is remembered under.
 WIDTH_SETTING = "review/inspector_width"
 
@@ -208,7 +212,7 @@ def _fill_roots(ctx, h: InspectorHost) -> None:
             continue
         for key, widget in found.items():
             if widget is not None and insp.tabWidget(key) is None:
-                insp.setTabWidget(key, widget)
+                insp.setTabWidget(key, widget, fill=key in FILLED_TABS)
 
 
 def fill(ctx) -> None:
@@ -294,6 +298,34 @@ def open_tab(ctx, tab: str | None = None, *, anchor: QWidget | None = None) -> b
     insp.popToRoot(tab)
     insp.showTab(tab)
     return True
+
+
+def open_tab_with(ctx, tab: str, widget: QWidget, *, fill: bool = False,
+                  anchor: QWidget | None = None) -> bool:
+    """Open the inspector on *tab* with *widget* as that tab's first page —
+    for a tab whose content is built on demand (the Style panel of the figure
+    whose button was pressed)."""
+    serve_widget(ctx, anchor)
+    h = host(ctx)
+    _fill_roots(ctx, h)
+    insp = h.inspector
+    if insp.tabWidget(tab) is not widget:
+        insp.setTabWidget(tab, None)
+        insp.setTabWidget(tab, widget, fill=fill)
+    if not _open_host(ctx, h):
+        return False
+    h.wanted = True
+    insp.popToRoot(tab)
+    insp.showTab(tab)
+    return True
+
+
+def shows_root(ctx, tab: str, widget: QWidget) -> bool:
+    """Whether the inspector is open on *tab*'s first page and it is *widget*."""
+    if not is_open(ctx):
+        return False
+    insp = inspector(ctx)
+    return insp.currentTab() == tab and insp.depth() == 0 and insp.tabWidget(tab) is widget
 
 
 def toggle_tab(ctx, tab: str, *, anchor: QWidget | None = None) -> bool:

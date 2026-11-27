@@ -100,14 +100,15 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Fold-change normalization collapses into a popover button (C1) so it no
     # longer needs its own row; the stretch pushes the action buttons right.
     from review.core.fold_change_controls_view import install_fold_change_controls
-    from review.core.ui_helpers import make_popover_button
-    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", bar_ctrl)
+    from review.core import inspector_panels
+    from review.core.inspector_panels import make_popover_button
+    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change", bar_ctrl, ctx=ctx, tab="data")
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
     install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="bar")
     # The Bar tab's own second stage, below the shared controls; refreshed
-    # each time the popover opens so a variable defined since is offered.
+    # each time the page is shown so a variable defined since is offered.
     _rel_row = build_relative_to_row(ctx, _fc_panel, _fc_lay)
-    _fc_btn.menu().aboutToShow.connect(_rel_row._aw_refresh)
+    inspector_panels.on_open(_fc_btn, _rel_row._aw_refresh)
     bar_ctrl.add_action(_fc_btn)
 
     # Multi-timepoint picker — mirrors the scatter plot's
@@ -138,8 +139,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # C1: the display toggles + error band collapse into a "Display ▾" popover so
     # the bar control area stays a single compact row. ``_disp_lay`` is the popover
     # body; the widgets are added there instead of inline (addWidget reparents them).
-    from review.core.ui_helpers import make_popover_button as _make_popover_button
-    _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", bar_ctrl)
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display", bar_ctrl, ctx=ctx, root=True)
     _disp_btn.setToolTip("Bar/point display options: grouping, pooling, how each column is drawn (bars, beeswarm, violin, histogram), significance")
 
     # Layout toggle: cluster bars by well or by timepoint.
@@ -310,6 +310,10 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     )
     bar_ctrl.add_action(export_btn)
     bar_ctrl.add_action(make_properties_button(ctx, bar_ctrl, "bar"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(bar_ctrl)
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False,

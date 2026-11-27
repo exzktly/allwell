@@ -94,6 +94,7 @@ class CollapsibleSection(QWidget):
     # Glyphs scale with the header font, so no hardcoded pixel art.
     _CHEVRON_OPEN = "▾"   # ▾
     _CHEVRON_SHUT = "▸"   # ▸
+    _CHEVRON_PAGE = "›"   # the header opens a page rather than unfolding
 
     def __init__(self, title: str = "", parent: QWidget | None = None,
                  *, expanded: bool = True) -> None:
@@ -103,6 +104,7 @@ class CollapsibleSection(QWidget):
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         self._expanded = bool(expanded)
+        self._opener = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -163,6 +165,32 @@ class CollapsibleSection(QWidget):
     def toggle(self) -> None:
         self.setExpanded(not self._expanded)
 
+    # ── a header that opens the body somewhere else ──────────────────────
+    def setOpener(self, opener) -> None:
+        """Make the header a **row**: a click calls ``opener(self)`` instead
+        of unfolding the section in place, and the section stays folded.
+
+        For a host that shows a section's body as a page of its own (an
+        inspector): the folded header — title on the left, the section's
+        value widget on the right — is already the row that names the page.
+        ``None`` puts the fold back."""
+        self._opener = opener
+        if opener is not None and self._expanded:
+            self._expanded = False
+            self._anim.stop()
+            self._apply_state(animate=False)
+        self._apply_state(animate=False)
+
+    def body(self) -> QWidget:
+        """The widget the section's rows are in — what an opener shows."""
+        return self._body
+
+    def freeBody(self) -> QWidget:
+        """The body with its folded height limit lifted, ready to be shown
+        elsewhere; it is still this section's, hidden, until it is lent."""
+        self._body.setMaximumHeight(_QWIDGETSIZE_MAX)
+        return self._body
+
     # ── title property ───────────────────────────────────────────────────
     def titleText(self) -> str:
         return self._header.title_label.text()
@@ -174,6 +202,9 @@ class CollapsibleSection(QWidget):
 
     # ── internals ────────────────────────────────────────────────────────
     def _on_header_clicked(self) -> None:
+        if self._opener is not None:
+            self._opener(self)
+            return
         self.toggle()
 
     def _content_height(self) -> int:
@@ -181,7 +212,8 @@ class CollapsibleSection(QWidget):
 
     def _apply_state(self, *, animate: bool) -> None:
         self._header.chevron.setText(
-            self._CHEVRON_OPEN if self._expanded else self._CHEVRON_SHUT
+            self._CHEVRON_PAGE if self._opener is not None
+            else self._CHEVRON_OPEN if self._expanded else self._CHEVRON_SHUT
         )
         target = self._content_height() if self._expanded else 0
         if not animate:

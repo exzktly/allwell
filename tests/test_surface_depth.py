@@ -128,21 +128,20 @@ def test_the_crawl_opens_a_menu_s_submenu_and_counts_it(main, monkeypatch):
 # ── every page, through its real builder ──────────────────────────────────────
 
 #: The Review pages crawled here: every page the registry builds with
-#: ``build(ctx, frame)`` whose controls are built into that frame.
+#: ``build(ctx, frame)``. A Plotting leaf is built with the Plotting page's
+#: shared band registered first (``tests/_minimal_shell.build_page``), so its
+#: controls are on screen as they are in the application.
 PAGES = (
     "Home", "Statistics", "Multivariate", "Spatial", "Nanowells", "smFISH",
     "Review CSV", "Saved Cells", "Saved Plots",
+    "Heat Map", "Bar Plots", "Line Graphs", "Response Curves", "Scatter Plot",
+    "Distribution",
 )
 
 #: Pages the registry builds that this file cannot crawl, with what was
 #: measured. They are crawled on the built application instead, in the slow
 #: lane (``tests/test_every_page_renders.py``).
 CRAWLED_ON_THE_BUILT_APP: dict[str, str] = {
-    **{leaf: "a Plotting leaf puts its controls in the Plotting page's shared band, which "
-             "`centre_view.build_centre` builds for a whole window; built alone its frame "
-             "holds no button (measured: the crawl pressed nothing)"
-       for leaf in ("Heat Map", "Bar Plots", "Line Graphs", "Response Curves",
-                    "Scatter Plot", "Distribution")},
     "Image Browser": "its leaves expect the rail's sidebar frames (`_sidebar_image_table_frame`, "
                      "`_sidebar_cell_browser_frame`), which the shell builds; pressed without "
                      "them the crawl segfaults in the minimal shell (measured)",
@@ -157,21 +156,9 @@ PENDING: dict[str, str] = {}
 
 
 def _built_page(qtbot, name: str, dataset):
-    from tests._minimal_shell import load_dataset, minimal_shell
-    ctx, window = minimal_shell(qtbot)
-    window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features   # as ReviewApp sets them
-    load_dataset(ctx, dataset)
-    host = QWidget()
-    QVBoxLayout(host)
-    window.setCentralWidget(host)
-    frame = QWidget(host)
-    host.layout().addWidget(frame)
-    ctx.features.get(name).build(ctx, frame)
-    window.resize(1400, 900)
-    window.show()
-    qtbot.waitExposed(window)
-    QApplication.processEvents()
-    return ctx, window, frame
+    from tests._minimal_shell import build_page
+    ctx, window, _frame, _bands = build_page(qtbot, name, dataset)
+    return ctx, window, window._h_pane.widget(1)
 
 
 def test_the_page_list_is_the_registry_s():

@@ -501,6 +501,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
     band.add_action(export_btn)
     band.add_action(make_properties_button(ctx, band, "nanowell"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(band)
     # *Excluded (n)* names wells: it follows Exclude on the second row, on every view.
     band.place_trailing(exclusion.excluded_group, grp_baseline)
     reg.register("_nw_band_breaks", (selection_row_end, filter_row_end))

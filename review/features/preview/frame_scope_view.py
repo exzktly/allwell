@@ -25,10 +25,11 @@ from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from review.core.frame_scope import (
     ScopeSpec, apply_scope_change, current_frame, read_scope,
-    refresh_scope_button, reset_scope, scope_options, write_scope_field,
+    refresh_scope_button, reset_scope, scope_options, scope_value, write_scope_field,
 )
 from core.safe import swallowed
-from review.core.ui_helpers import make_popover_button
+from review.core import inspector_panels
+from review.core.inspector_panels import make_popover_button
 from widgets.checkable_dropdown import CheckableDropdown
 
 # Width the three dropdowns share, so they line up as a column. This is what a
@@ -50,7 +51,7 @@ _COMMIT_DEBOUNCE_MS = 400
 def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     """Build *spec*'s scope popover button for the Segmentation control band."""
     btn, panel, lay = make_popover_button(
-        f"{spec.title}: {spec.unarmed_text}", ctrl)
+        spec.title, ctrl, ctx=ctx, tab="data", summary=lambda: scope_value(ctx, spec))
     btn.setToolTip(spec.tooltip)
     ctx.widgets.register(spec.button_key, btn)
 
@@ -209,10 +210,8 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     reset_btn.clicked.connect(lambda _=False: _reset())
     lay.addWidget(reset_btn)
 
-    menu = btn.menu()
-    if menu is not None:
-        menu.aboutToShow.connect(_repopulate)
-        # Closing the popover is the user saying they are done ticking, so the
-        # pending re-derivation runs then rather than waiting out its timer.
-        menu.aboutToHide.connect(_flush)
+    inspector_panels.on_open(btn, _repopulate)
+    # Leaving the page is the user saying they are done ticking, so the
+    # pending re-derivation runs then rather than waiting out its timer.
+    inspector_panels.on_close(btn, _flush)
     return btn

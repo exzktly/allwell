@@ -72,12 +72,11 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # per-channel display LUT (AppState.image_view, S4), so brightness tuned
     # here also applies in Review Image / Image Table; the rows are rebuilt to
     # track the dataset's channels in ``cell_browser_refresh``.
-    from review.core.ui_helpers import make_popover_button
-    lut_btn, lut_panel, lut_lay = make_popover_button("LUT ▾", ctrl)
+    from review.core.inspector_panels import as_display_row, make_popover_button
+    lut_btn, lut_panel, lut_lay = make_popover_button("Brightness", ctrl, ctx=ctx)
     lut_btn.setToolTip(
         "Per-channel display brightness (min/max). Blank / Auto = auto-scale each "
         "cell. Shared with the other image viewers.")
-    ctrl.add_action(lut_btn)
     reg.register("_cell_browser_lut_btn", lut_btn)
     reg.register("_cell_browser_lut_panel", lut_panel)
     reg.register("_cell_browser_lut_layout", lut_lay)
@@ -86,9 +85,11 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # Secondary display toggles (Boundaries / Spot counts / Source stage) collapse
     # into a "Display ▾" popover so the row stays readable at narrow (Split View)
     # widths — Channels / LUT / Generate are the controls that matter inline.
-    disp_btn, disp_panel, disp_lay = make_popover_button("Display ▾", ctrl)
-    disp_btn.setToolTip("Cell display options: boundaries, spot counts, image source")
+    disp_btn, disp_panel, disp_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
+    disp_btn.setToolTip("Cell display options: brightness, boundaries, spot counts, image source")
     ctrl.add_action(disp_btn)
+    # Brightness is a row of the Display tab, opening its own page.
+    disp_lay.addWidget(as_display_row(lut_btn))
 
     boundary_cb = QCheckBox("Boundaries", disp_panel)
     boundary_cb.setChecked(True)
@@ -199,6 +200,11 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         cell_browser_refresh,
         cell_browser_sidebar_refresh,
     )
+
+    # The row ends in Display · Style · Share on every page; this page has no
+    # figure to style or to save, so those two are disabled buttons, not gaps.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(ctrl)
 
     cell_browser_refresh(ctx)
 

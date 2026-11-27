@@ -18,8 +18,6 @@ from tests import _surface_guards as scan
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
 #: starting ``kept`` is permanent and says why.
 WIDGET_ACTIONS: dict[tuple[str, str], str] = {
-    ('review/core/ui_helpers.py', 'make_popover_button'):
-        'pending S05: the popover seam pushes an inspector page',
     ('review/features/barplot/controller.py', 'open_bar_timepoint_selector'):
         'pending S12: one of the multi-select builds',
     ('review/features/home/cell_gating/fov_view.py', 'open_fov_menu'):

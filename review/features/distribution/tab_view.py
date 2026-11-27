@@ -143,6 +143,10 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_action(export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "distribution"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(ctrl)
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False, header=False)
     from review.core.ui_helpers import apply_plot_card_decorators

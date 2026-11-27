@@ -116,6 +116,14 @@ class ControlBandSlot(QWidget):
         item.setVisible(self._band.is_slot_current(self._name))
         return item
 
+    def items(self) -> list[QWidget]:
+        """Everything this leaf put in the band, scope groups and actions."""
+        return list(self._items)
+
+    @property
+    def band(self) -> "ControlBand":
+        return self._band
+
     def setSlotVisible(self, visible: bool) -> None:  # Qt-ish naming
         """Show or hide everything this leaf put in the band.
 
@@ -155,6 +163,7 @@ class ControlBand(QWidget):
         self._slots: dict[str, ControlBandSlot] = {}
         #: The form the band is laid out as (``setForm``), or ``None``.
         self._form = None
+        self._action_rank = None
         self._form_items: tuple[list, list] = ([], [])
         #: Which leaf's controls the row is showing. ``_NO_SLOT`` until the page
         #: first selects one, which is what lets a band with no leaves at all
@@ -265,7 +274,34 @@ class ControlBand(QWidget):
         _fit_checkboxes((widget,))
         widget.setParent(self)
         self._actions.addWidget(widget)
+        if self._action_rank is not None:
+            self.order_actions(self._action_rank)     # the fixed buttons stay last
         return widget
+
+    def actions(self) -> list[QWidget]:
+        """The action zone's widgets, in the order they are laid out."""
+        if self._form is not None:
+            return list(self._form_items[1])
+        return [self._actions.itemAt(i).widget() for i in range(self._actions.count())
+                if self._actions.itemAt(i).widget() is not None]
+
+    def order_actions(self, rank) -> None:
+        """Re-lay the action zone by ``rank(widget)``, lowest first, keeping
+        the order actions were added in among equals. The band's fixed buttons
+        rank last, so they end the row whichever leaf added them and whenever."""
+        self._action_rank = rank
+        if self._form is not None:
+            return                       # a form lays actions out its own way
+        widgets = self.actions()
+        ordered = sorted(widgets, key=rank)          # ``sorted`` is stable
+        if ordered == widgets:
+            return
+        for w in widgets:
+            self._actions.removeWidget(w)
+        for w in ordered:
+            hidden = w.isHidden()
+            self._actions.addWidget(w)
+            w.setHidden(hidden)
 
     def setStacked(self, on: bool) -> None:
         """Flow the right-hand actions in with the scope controls.

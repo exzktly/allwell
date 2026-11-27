@@ -83,15 +83,15 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # Fold-change normalization collapses into a popover button (C1) so it no
     # longer needs its own row.
     from review.core.fold_change_controls_view import install_fold_change_controls
-    from review.core.ui_helpers import make_popover_button
-    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", line_ctrl)
+    from review.core.inspector_panels import make_popover_button
+    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change", line_ctrl, ctx=ctx, tab="data")
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
     install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="line")
     line_ctrl.add_action(_fc_btn)
 
     # Error band (SEM/SD + Spread) collapses into a "Display ▾" popover (C1)
     # rather than a separate card-controls row beneath the figure.
-    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", line_ctrl)
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display", line_ctrl, ctx=ctx, root=True)
     _disp_btn.setToolTip("Error band (SEM/SD) and per-FOV spread")
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
     line_ctrl.add_action(_disp_btn)
@@ -106,6 +106,10 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     )
     line_ctrl.add_action(export_btn)
     line_ctrl.add_action(make_properties_button(ctx, line_ctrl, "line"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(line_ctrl)
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,

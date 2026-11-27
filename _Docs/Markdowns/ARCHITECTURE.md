@@ -577,10 +577,74 @@ and the desk's geometry unchanged after a round trip.
 tap away rather than only in ☰; the label follows a tool picked from ☰ through
 the same page watcher.
 
+**The inspector.** Anything that changes what a Review page shows is in one
+place: the window's **inspector** (`widgets/inspector.Inspector`), of which
+there is one per Review window. It has four tabs — **Data**, **Display**,
+**Style**, **Detail** — and under each tab a stack of pages: a tab's first page
+is the tab's own widget, and a sub-option (Fold change, Fit, Colour & split,
+Brightness) is a page pushed on top of it, reached with one press and left with
+the back arrow. Its header is the same on every page: ‹ (hidden on a tab's first
+page), a breadcrumb above the page's title, and a button reading **Close**. A
+tab the page has nothing for is disabled, never removed, so the inspector has
+one shape everywhere. Nothing it shows is built for it: every widget is *lent*
+— its parent, its index in that parent's layout, its width limits and its
+hidden flag are read before it moves, and it goes back exactly there when its
+page is popped, when the inspector closes, and when the inspector is deleted.
+Two details of lending are easy to get wrong and are held by
+`tests/test_inspector.py`: a widget's place is its index among the widgets that
+were there, so two widgets lent from one layout may come back in either order;
+and a lent widget its owner deletes takes its page off the stack rather than
+leaving a dead wrapper on it.
+
+The inspector has two hosts and features never ask which is in use
+(`review/core/inspector_service.py`, the only thing a feature calls: `push`,
+`open_tab` / `toggle_tab`, `show_detail`, `close`). **At the desk** it is a
+column at the right of the splitter Review's pages sit in (`_h_pane`; the rail
+stays pane 0), a `widgets/docked_panel.DockedPanel` whose width the user drags
+and which is remembered (`review/inspector_width` in the settings). It is laid
+out beside the page, not over it, and it stays open while the user works: a
+page change gives the last page its widgets back and fills the inspector from
+the new one (`inspector_service.sync`, called from
+`tab_controller.on_tab_change`), closing the column on a page with nothing to
+show and returning it on the next page that has. **In phone layout** it is what
+the Controls sheet holds (below). In Split View it serves the focused pane —
+`current_centre_tab` already returns that pane's leaf — and because a button
+press does not move Split View's focus, `inspector_service.serve_widget`
+focuses the pane a pressed control sits in before its page is shown.
+
+A page's panels of live options are pages of the inspector
+(`review/core/inspector_panels.make_popover_button`, which returns the
+`(button, content, content_layout)` every page builds against). A panel is one
+of three kinds. The **root of a tab** (`root=True`) is the page's one panel of
+display options: its button reads **Display**, and its content is the
+inspector's Display tab. A **Data panel** (`tab="data"`) keeps a button in the
+band that reads its current value and ends in a chevron — `Fold change: vs DMSO
+›` — and shows its panel as a page; pressing it again leaves the page. A
+**Display panel that is not the root** (Brightness, Colours) is a row of the
+Display tab, which the page adds to its root panel's layout with
+`as_display_row`. A panel refreshes itself through `on_open` (run before it is
+shown) and settles a deferred update through `on_close` (run when its page is
+left), which are what a popover's `aboutToShow` and `aboutToHide` were. The
+band's action row ends in three fixed buttons on every page, in one order —
+**Display · Style · Share** — from one factory
+(`review/core/band_fixed_actions.finish_band`): it finds the page's three by
+the `bandRole` each builder declares, adds a *disabled* button for any the page
+has no use for, and keeps the three last however late another action is added.
+`tests/test_a_page_has_the_three_fixed_actions.py` holds both halves: every
+function that builds a band or claims a Plotting slot calls the factory, and
+the rows of pages built through their real builders end in the three.
+
 **The Controls sheet.** A Review page's own controls — its `ControlBand`
-(channel, property, display, threshold, …) — are hidden in phone layout so the
-plot gets the screen, and **⚙ Controls** lends the current page's band to a sheet:
-a bottom `Drawer` upright, as tall as its content up to 60 % of the window and
+(channel, property, threshold, …) — are hidden in phone layout so the
+plot gets the screen, and **⚙ Controls** opens the window's inspector in a sheet
+with the current page's band lent to it as the **Data** tab
+(`ui/phone_inspector.py`; the inspector is the window's own, handed to the
+shell through `PhoneHandles.inspector`, and it outlives a sheet that is rebuilt
+when the phone turns). The page's Display panel is the tab beside it, and a
+panel that opens a page — at the desk a value button in the band — is a row of
+the Data tab, so nothing opens on top of the sheet. The sheet is
+a bottom `Drawer` upright, as tall as its content up to 60 % of the window — or
+the whole room above the strip for a page pushed `large`, an editor — and
 rising from just above the strip (`Drawer(bottom_inset=…)`, read off the strip's
 place each time, `PhoneShell._foot_strip`) so its **Done ✕** stays where the
 thumb opened it, or a 390 pt right-hand panel sideways — as wide as the phone held upright, so whatever
@@ -588,7 +652,7 @@ fits the sheet upright fits the panel (`LANDSCAPE_SHEET_PT`; at 360 pt the Image
 Table's LUT rows overflowed it). On the Duo unfolded (`PhoneShell.is_docked`:
 phone layout on the inner screen) the sheet is **docked** instead: a column left
 of the page, *in* the layout rather than over it, so every change is seen on the
-plot beside it as it is made (`ui/phone_dock.DockedSheet`). It answers the part
+plot beside it as it is made (`widgets/docked_panel.DockedPanel`, the panel the desk docks its inspector in, at the other side). It answers the part
 of `Drawer`'s interface the shell uses, so the same lend, form and give-back
 apply; it is the first pane of Review's `_h_pane` splitter
 (`PhoneHandles.centre_split` — the splitter the rail sits in at the desk, which
@@ -626,13 +690,16 @@ request), because a parent layout asks the band's *own* layout for a height,
 which as a form of actions alone answers −1 and left the row's one-row floor in
 charge: Cell Gating's form was 44 px in the docked column. The row's floor
 returns with the row. The form is
-the same widgets, moved and given back, in three sections in a fixed order —
-**Display** (actions that open a panel of live options), **Actions** (commands,
-the Properties toggle) and **Data** (every scope control: the band's own
-definition of scope). The button grids come first because they are a row or two
-on every page, while Data runs as long as the page has controls: on Nanowells,
-with a dozen Data rows, grids laid out after it sat some 560 px of scrolling
-below the top, and Decorate read as missing. A Data control is one row: its label in a column
+the same widgets, moved and given back: **Data rows** — every scope control
+(the band's own definition of scope), then every action that opens a page of
+the inspector (its `bandPanel` property is `"row"`), each a row like any other
+with its title in the label column and its value and chevron in the control —
+under a short **Actions** grid of whatever commands the page keeps in its band.
+An action that is the root of an inspector tab (`bandPanel` is `"root"`: the
+Display button) is in neither: its panel is the tab beside the form, and a
+button for it would be a second way to the same place, so it is *parked* —
+kept, hidden, with the visibility its page gave it — and returns to the row
+with the rest. A Data control is one row: its label in a column
 `SHEET_LABEL_PT` (112 pt) wide, the control stretched over the rest (a width
 pin, such as a touch stepper's, lifted for the length of the form), the row at
 least `TOUCH_ROW_PT` tall and `TOUCH_GAP_PT` from the next. The label is found
@@ -647,15 +714,14 @@ spans the row. A standalone label in the scope zone (a hint such as "Plots draw
 one member per selected well.") is a caption at the top of Data. A combo's own
 chip stylesheet gives way to the application's for the length of the form, so
 every combo reads alike, and a combo may shrink to six characters and elide
-rather than widen the sheet. Display and Actions are grids of equal-width cells,
+rather than widen the sheet. Actions is a grid of equal-width cells,
 up to three to a row (two rows of two rather than three and one), fewer when the
 widest button would not fit its cell at the form's width; enabled buttons come
 first, so a disabled one is never left between two live ones; an icon-only
 button reads its `sheetText` property (else its tooltip's first clause) beside
-its icon. Which of the two an action joins is the `bandRole` property its shared
-builder sets — `make_popover_button` "display", `make_action_menu_button`
-"action", since both drop a menu — and, without one, a button with a menu is
-Display and anything else Actions. The page keeps owning visibility: a row, a
+its icon. Where an action goes is what its builder declared
+(`control_band_form.section_of_action`), never whether it happens to drop a
+menu. The page keeps owning visibility: a row, a
 cell and a section follow the show / hide of the widget the page shows and hides
 (`_Mirror`), so `show_slot` reshapes the form. The band's row margins are dropped
 while it is a form, since the sheet pads its content, and `heightForWidth`
@@ -1629,12 +1695,20 @@ allwell/
 │   │                              Controls sheet, the switch both ways, the window fitting its
 │   │                              screen, the live restyle and the rescale pass (§2, §8). Handed every pane widget it moves
 │   │                              by allwell.py, so it imports no pane
+│   ├── phone_inspector.py      ← the Controls sheet as the inspector's phone host: mounting the
+│   │                              window's inspector in a sheet, taking it out before the sheet
+│   │                              is rebuilt, and how tall the bottom sheet stands (§2)
 │   └── phone_window.py         ← phone layout's form for a window of its own (a dialog, a
 │                                  pop-out): the screen covered, the content in a drag-scrolled
 │                                  body, the window's buttons and a Close ✕ at its foot, and the
 │                                  desk form given back (§2). Qt-only and pane-free; phone_shell
 │                                  finds the windows and calls in
 ├── widgets/                     ← reusable Qt widgets (no app coupling) — including
+│                                  inspector.py (Inspector: tabs, a stack of pages per tab,
+│                                  one header, and the lending of the widgets it shows) and
+│                                  docked_panel.py (DockedPanel: a column docked at either
+│                                  side of a splitter — the desk's inspector, a foldable's
+│                                  Controls) and
 │                                  separator.py (the two divider builders every pane
 │                                  uses) and page_stack.py (NamedPageStack, the
 │                                  name-keyed QStackedWidget all three panes build on,
@@ -1737,6 +1811,13 @@ review/
 │   ├── sidebar_view.py               ← the rail's main frame: plate, selection footer, hint (§5.4)
 │   ├── saved_selections.py           ← the Saved selections drawer and its add / load / delete (§5.4)
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
+│   ├── inspector_service.py          ← the window's one inspector and its two hosts — a column at the
+│   │                                    desk, the Controls sheet on a phone; the only door features
+│   │                                    use: push / open_tab / show_detail / close (§2 *The inspector*)
+│   ├── inspector_panels.py           ← make_popover_button: a band button whose panel is a page of
+│   │                                    the inspector — a tab's root, a Data row, a Display row (§2)
+│   ├── band_fixed_actions.py         ← finish_band: the one factory that ends every band's action
+│   │                                    row in Display · Style · Share (§2)
 │   ├── phone_panel_sheet.py          ← phone layout's Properties sheet: lends a plot's right dock to a
 │   │                                    full-width Drawer over the page and gives it back (§2)
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
@@ -21883,7 +21964,7 @@ Notable members worth knowing about by name:
 | `CropTool` (`review/data/crop_tool.py`) | The drag-a-region crop shared by Image Table and Segmentation. `set_status_widget(widget, template=…)` writes the crop state into an existing control's text — the Image Table's Crop button reads `Crop · (full FOV)` — instead of a separate caption beside it; `make_status_label` still returns a standalone label for call sites that want one. |
 | `LabeledComboBox` (`widgets/labeled_combo.py`) | A `QComboBox` that paints its own scope label as a fixed prefix inside the closed box ("Channel: RFP", "Timepoint: 4.0h") rather than sitting beside a separate `QLabel`. `currentText()` / `currentIndex()` / every Qt signal still report the plain item value — only `paintEvent` changes, drawing `opt.currentText` set to the prefixed string. `sizeHint()` measures *only what's actually painted* (the current item's text plus the prefix, via `self.style().sizeFromContents(QStyle.CT_ComboBox, opt, content, self)`), not plain `QComboBox`'s default — which measures every item in the list up front (`AdjustToContentsOnFirstShow`) and sizes the closed box to the widest one, so a metric combo showing "N" sat as wide as its longest possible entry ("Property: Fraction Threshold On") the whole time. Callers must not layer `setFixedWidth` / `setMinimumContentsLength` / a QSS `min-width` on top — every one of those re-floors the box wider than its current content needs, which is exactly the waste this widget exists to cut; centre_view.py's Channel/Property combos and `review_csv/tab_view.py`'s Timepoint and FOV combos carried exactly that stale floor from before the box was made self-sizing, until removed. Before a caller populates the combo (or an empty dataset leaves it with no items), `currentText()` is `""` — `_painted_text()` falls back to the bare label ("Timepoint") rather than painting nothing, since a blank sliver reads as broken once the box tracks content width; `paintEvent` calls the same `_painted_text()` rather than duplicating the fallback, so painting and sizing can't drift apart. A repaint recomputes `sizeHint()` and calls `updateGeometry()` when it changed, which is what catches a text change made under `blockSignals(True)` (a common "seed without re-triggering the handler" pattern that suppresses `currentIndexChanged` but not Qt's own repaint scheduling). `setFitsWidest(True)` is the one sanctioned departure from fitting the current entry: `sizeHint()` then measures every entry as it would be painted (prefix included) and takes the widest, so the box holds one width whatever is chosen and changes only when its entries do — for a pair of pickers whose row must not jump as the choice changes (Scatter's nanowell X / Y pickers, `scatter/_observations.build_axis_controls`; Scatter's per-cell Channel and Property combos, plain `QComboBox`es, get the same from `AdjustToContents`, which unlike the default refits when a channel change refills them). Either way `showPopup` floors the list's width at `popup_width()` — every row's own delegate `sizeHint`, plus frame and scroll bar — before Qt sizes the popup: Qt widens a popup only to the widest entry's text measured in the box's font (`QComboBoxPrivate::computeWidthHint`), not to what each row adds around it, and `sizeHintForColumn` reads only the rows already on screen. `tests/test_labeled_combo.py`, and through the real builder `tests/test_scatter_draws_nanowell_observations.py::test_every_scatter_axis_picker_keeps_one_width_whatever_is_chosen`. `ControlBand.add_scope("", combo)` is called with an empty label for one of these — the combo describes itself, so it's added alone rather than paired with a caption. Used for Plotting's page-level Channel and Property combos, every single-select Timepoint combo across Review (Stats, Spatial, Multivariate, Distribution, Heat Map, smFISH, Review CSV, Segmentation preview) — Heat Map's was a `StyledSlider` until unified onto the same combo every sibling tab uses — and every FOV combo (smFISH, Review CSV, Segmentation preview). Not every folded scope control is a `LabeledComboBox`: the checkbox-menu multi-select buttons (Bar Plots' and Scatter Cells/Agg's Timepoints pickers) fold the same way but by a different means, since there's no per-item combo box to paint a prefix on — `core.ui_helpers.multiselect_button_text` builds the readout string and the button's own `setText` carries it. The `ControlBand.add_scope(label, widget)` pairing is still what every other scope control uses — Heat Map's own Aggregation combo included, since there's no per-tab convention for what its prefix would read. |
 | `multiselect_button_text` (`core/ui_helpers.py`) | The button-text counterpart to `LabeledComboBox` for a checkbox-menu multi-select control (the "Select Timepoints" pattern Bar Plots and both Scatter sub-tabs use): folds a prefix and a `{token: bool}` selection dict into one string — `"Timepoints: 2/5 selected"`, `"Timepoints: All 5 selected"`, `"Timepoints: 0 selected"` — for the picker button's own text, in place of a separate count `QLabel` beside it. The three call sites (`barplot/controller.py::update_bar_tp_selection_display`, `scatter/controller.py::update_scatter_tp_selection_display` / `update_tp_selection_display`) call it on every selection change; `persistence/view_state.py`'s bar-tab restore path calls it directly too, since it predates and is Qt-free like the rest of `core`. |
-| `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Save ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. `ROW_H` (28px; `band_height()` == 44 with the band's own padding) is what one row measures, whatever it holds — set as a real `setMinimumHeight`, because a parent layout asks the band's `QWidgetItem`, which delegates to `wid->layout()->heightForWidth()` and never reaches an override on the class. Its object name is `ControlBand`, which is data-gated (§5.2). A page whose body is a stack of leaf views still gets **one** band: each leaf claims a `ControlBandSlot` through `band.slot(name)`, adds its controls through the slot's mirror of `add_scope` / `add_action`, and `show_slot` shows one leaf's while hiding the rest. A slot is a real widget — a child of the band that is never laid out, so it is never painted — because leaves parent popover contents to what they think is their band. Items claimed by a slot that is not current arrive hidden, since `QLayout.addWidget` shows what it is handed and leaves build lazily. Both `add_scope` and `add_action` pass any `QCheckBox` they are handed through `widgets/checkbox_fit.fit_checkbox_width`, for the same reason `trailing=True` lives on the band rather than in each builder: the rule belongs with the control row, not in a builder's memory. `setForm(True, label_width=, row_height=, gap=)` lays the band out as a one-column form instead of a row — Data rows of label + control, Display and Actions as equal-width grids — in `widgets/control_band_form.py` (phone layout's Controls sheet, §2 *The Controls sheet*); `setForm(False)` gives the row back, in its order, trailing items last. |
+| `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — the buttons that open inspector pages, then Display, Style and Share). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. `ROW_H` (28px; `band_height()` == 44 with the band's own padding) is what one row measures, whatever it holds — set as a real `setMinimumHeight`, because a parent layout asks the band's `QWidgetItem`, which delegates to `wid->layout()->heightForWidth()` and never reaches an override on the class. Its object name is `ControlBand`, which is data-gated (§5.2). A page whose body is a stack of leaf views still gets **one** band: each leaf claims a `ControlBandSlot` through `band.slot(name)`, adds its controls through the slot's mirror of `add_scope` / `add_action`, and `show_slot` shows one leaf's while hiding the rest. A slot is a real widget — a child of the band that is never laid out, so it is never painted — because leaves parent popover contents to what they think is their band. Items claimed by a slot that is not current arrive hidden, since `QLayout.addWidget` shows what it is handed and leaves build lazily. Both `add_scope` and `add_action` pass any `QCheckBox` they are handed through `widgets/checkbox_fit.fit_checkbox_width`, for the same reason `trailing=True` lives on the band rather than in each builder: the rule belongs with the control row, not in a builder's memory. `setForm(True, label_width=, row_height=, gap=)` lays the band out as a one-column form instead of a row — Data rows of label + control, the panel rows among them, over a grid of the band's remaining commands — in `widgets/control_band_form.py` (the inspector's Data tab in phone layout, §2 *The Controls sheet*); `setForm(False)` gives the row back, in its order, trailing items last. `actions()` lists the action zone and `order_actions(rank)` re-lays it and keeps it so ranked as actions are added, which is how the three fixed buttons — Display, Style, Share (`review/core/band_fixed_actions.finish_band`) — end every row. |
 | `ReservedWidthButton` (`widgets/reserved_width_button.py`) | A `QPushButton` whose minimum width fits the widest of the labels it may show (`reserve(labels, slack)`), for a toggle whose label changes with its state inside a popover that is sized once, at its first show — the FOV toggle's "FOV" / "FOV ✓" (`review/core/plot_toggles.refresh_fov_btn_state`, built by `ui_helpers.make_band_controls` and the batch-export panel). Both register it through `plot_toggles.register_fov_button`, the one way onto `ctx.runtime.fov.btns`, which raises `TypeError` for any other button type — a plain button would get no reservation — so the restyle calls `reserve` unconditionally; `tests/test_fov_button_bank_is_typed.py` holds the refusal, the reservation through the real builder, and an AST scan that nothing else appends to the bank. The width is the button's own rather than a number its caller measured once, because it is read off the font: it is measured off the polished font and again after a UI scale (`_aw_rescale`), so a button built while phone layout's larger text was on does not keep the phone's width at the desk (115 px against 64). |
 | `ButtonRow` (`widgets/button_row.py`) | **A row of buttons that wraps rather than forcing its host wider.** A `QHBoxLayout` of buttons reports the sum of their widths as its minimum, and that minimum propagates: the Statistics comparison-group editor's three actions made the column they sit in about 370px at its narrowest, enough to push the well map out of the row beside it at a pane width where the two still fitted. Wrapping, the row's minimum is its widest single button. It is a widget rather than a `FlowLayout` built at the feature site for a second reason: `ControlBand` owns the one wrapping row of *controls* a page has, `tests/test_control_band_adoption.py` is the guard that stops a tab growing a second one beside it, and a bare `FlowLayout` in an adopted module is indistinguishable from the thing that guard exists to catch. A ButtonRow takes buttons acting on the section around them; anything that selects what a page *shows* is a scope control and belongs in the band. It calls `sync_flow_height` on itself, because a wrapped second line inside a `QStackedWidget` page is otherwise drawn behind whatever sits below it. |
 | `WrapRadioRow` (`widgets/wrap_radio.py`) | **A radio button whose label wraps to the width it is given.** A plain `QRadioButton` reports its whole text as its minimum width, so a long-label radio in a scroll area pins the page that wide and the right-hand part is out of reach where a horizontal bar is off. The row pairs a text-less `QRadioButton` (`row.radio`, which joins a `QButtonGroup` and emits `toggled` as a plain one does) with a word-wrapped label that presses it, so its minimum collapses to about one word. The radio counterpart of `WrapCheckBox`. |

@@ -217,9 +217,11 @@ class Inspector(QWidget):
         return dict(self._tabs).get(key, "")
 
     def setTabWidget(self, key: str, widget: QWidget | None, *,
-                     free_children: bool = False) -> None:
+                     free_children: bool = False, fill: bool = False) -> None:
         """Lend *widget* to tab *key* as its first page; ``None`` gives the
-        tab's widget back and leaves the tab disabled."""
+        tab's widget back and leaves the tab disabled. *fill* gives the widget
+        the tab's whole height (a panel that scrolls its own content) rather
+        than the height it asks for."""
         if key not in self._tab_slots:
             raise KeyError(key)
         old = self._tab_widgets.get(key)
@@ -229,7 +231,7 @@ class Inspector(QWidget):
             del self._tab_widgets[key]
             self._give_back(old)
         if widget is not None:
-            self._lend(widget, self._tab_slots[key], free_children=free_children)
+            self._lend(widget, self._tab_slots[key], free_children=free_children, fill=fill)
             self._tab_widgets[key] = widget
         self._sync_tab_bar()
         if key == self._current and not self._tab_usable(key) and not self._pages[key]:
@@ -428,7 +430,8 @@ class Inspector(QWidget):
                 return slot
         return None
 
-    def _lend(self, widget: QWidget, slot: QScrollArea, *, free_children: bool) -> None:
+    def _lend(self, widget: QWidget, slot: QScrollArea, *, free_children: bool,
+              fill: bool = False) -> None:
         home = widget.parentWidget()
         layout = home.layout() if home is not None else None
         index = layout.indexOf(widget) if layout is not None else -1
@@ -445,7 +448,7 @@ class Inspector(QWidget):
                      if c.parentWidget() is widget] if free_children else [])
         loan = _Loan(widget, home, layout, index, _widths(widget), widget.isHidden(), children)
         self._loans.append(loan)
-        slot.widget().layout().insertWidget(0, widget)
+        slot.widget().layout().insertWidget(0, widget, 100 if fill else 0)
         for w in (widget, *(c for c, _ in children)):
             w.setMinimumWidth(0)
             w.setMaximumWidth(_QWIDGETSIZE_MAX)

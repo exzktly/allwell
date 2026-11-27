@@ -110,12 +110,26 @@ def test_make_action_menu_button_draws_one_arrow(host):
         assert _arrows(button) == 1, text
 
 
-def test_make_popover_button_draws_one_arrow(host):
-    from review.core.ui_helpers import make_popover_button
+def test_a_button_that_opens_an_inspector_page_draws_no_menu_arrow(host):
+    """A panel's button opens a page of the inspector, not a menu: a value
+    button ends in "›", a tab's root reads its name, and neither carries a
+    "▾" or Qt's indicator — an arrow that says "menu" over something that is
+    not one is the third convention this work removes.
 
-    for text in ("Display", "Display ▾"):
-        button = make_popover_button(text, host)[0]
-        assert _arrows(button) == 1, text
+    Wrong implementations: the caret left in the label, a ``QMenu`` still set
+    on the button (Qt then draws its indicator), ``InstantPopup`` left on."""
+    from review.core.inspector_panels import make_popover_button
+
+    value, _c, _l = make_popover_button("Fold change ▾", host, tab="data", summary=lambda: "vs DMSO")
+    bare, _c, _l = make_popover_button("Fit", host, tab="data")
+    root, _c, _l = make_popover_button("Display ▾", host, root=True)
+    assert value.text() == "Fold change: vs DMSO ›"
+    assert bare.text() == "Fit ›"
+    assert root.text() == "Display"
+    for button in (value, bare, root):
+        assert button.menu() is None
+        assert "▾" not in button.text()
+        assert not draws_menu_indicator(button), button.text()
 
 
 def test_the_nanowells_excluded_button_draws_one_arrow(host):

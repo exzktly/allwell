@@ -540,11 +540,18 @@ def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
     :func:`wrap_ctrl_row_with_properties` scaffolding that a ``FlowLayout`` row
     required to get a button to the right edge.
     """
-    from widgets.icon_button import IconButton
-    btn = IconButton("sliders-horizontal", parent, tooltip=tooltip)
-    # What it reads where a band is laid out as a form, beside its icon.
-    btn.setProperty("sheetText", "Properties")
-    btn.clicked.connect(lambda _=False: ctx.figures.open_style_panel(figure_key))
+    from PySide6.QtWidgets import QToolButton
+    btn = QToolButton(parent)
+    btn.setText("Style")
+    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    btn.setProperty("variant", "secondary")
+    btn.setToolTip(tooltip)
+    # One of the band's three fixed buttons (``band_fixed_actions``).
+    btn.setProperty("bandRole", "style")
+    btn.setProperty("sheetText", "Style")
+    from review.core import style_tab
+    style_tab.register(btn, ctx, figure_key)
+    btn.clicked.connect(lambda _=False, b=btn: style_tab.press(b))
     return btn
 
 
@@ -789,46 +796,12 @@ def _with_caret(text: str) -> str:
     return text if text.rstrip().endswith("▾") else f"{text} ▾"
 
 
-def make_popover_button(text: str, parent: QWidget):
-    """A compact toolbar button that opens a small panel ("popover") on click.
-
-    Returns ``(button, content_widget, content_layout)`` — add controls to
-    ``content_layout`` and they appear in the popup. Used to collapse rarely-
-    changed plotting controls (e.g. Fold change) off the always-visible control
-    bar (C1), trading one row of vertical space for one click.
-    """
-    from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
-
-    btn = QToolButton(parent)
-    btn.setText(_with_caret(text))
-    btn.setPopupMode(QToolButton.InstantPopup)
-    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "secondary")
-    # The label carries the ▾ caret (added above if the caller left it off), so
-    # hide QToolButton's native menu-indicator — the two would otherwise render
-    # as overlapping double arrows.
-    btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
-    # A panel of live options: how the plot is shown. A band laid out as a
-    # form (phone layout's Controls sheet) puts it under Display.
-    btn.setProperty("bandRole", "display")
-    menu = QMenu(btn)
-    content = QWidget(menu)
-    content_layout = QVBoxLayout(content)
-    content_layout.setContentsMargins(10, 8, 10, 8)
-    content_layout.setSpacing(4)
-    wa = QWidgetAction(menu)
-    wa.setDefaultWidget(content)
-    menu.addAction(wa)
-    btn.setMenu(menu)
-    return btn, content, content_layout
-
-
 def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     """A compact toolbar button that drops a menu of *actions* on click.
 
     Returns ``(button, menu)`` — add ``QAction``s (or use ``add_menu_action``)
-    to ``menu``. Unlike :func:`make_popover_button` (which hosts live widgets in
-    a panel), this is for click-and-close commands — Export CSV, Save figure,
+    to ``menu``. Unlike ``inspector_panels.make_popover_button`` (whose panel of
+    live widgets is a page of the inspector), this is for click-and-close commands — Export CSV, Save figure,
     etc. Used to collapse a cluster of action buttons into one entry so a
     control row stays reachable when Split View narrows the pane.
     """
@@ -842,7 +815,7 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     if tooltip:
         btn.setToolTip(tooltip)
     # The label carries the ▾ caret (added above if the caller left it off), so
-    # hide the native indicator — mirrors make_popover_button.
+    # hide the native indicator.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
     # Click-and-close commands: a band laid out as a form puts it under
     # Actions, although it drops a menu like a Display panel does.
@@ -903,8 +876,10 @@ def build_plot_save_menu(
         copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
     )
 
-    button, menu = make_action_menu_button("Save ▾", band,
-                                           tooltip="Save this plot and its data")
+    button, menu = make_action_menu_button("Share ▾", band,
+                                           tooltip="Save or copy this plot and its data")
+    # One of the band's three fixed buttons (``band_fixed_actions``).
+    button.setProperty("bandRole", "share")
     data_action = add_menu_action(menu, data_label, data_cb, tooltip=data_tooltip)
     add_menu_action(menu, cells_label, cells_cb,
                     tooltip="Every cell this plot was computed from, all columns")

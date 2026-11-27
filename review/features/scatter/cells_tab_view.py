@@ -8,9 +8,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     make_plot_with_right_dock,
-    build_plot_save_menu, make_popover_button, make_properties_button,
+    build_plot_save_menu, make_properties_button,
     plotting_band_slot)
 from review.core.saved_set_combo import SavedSetHighlightCombo
 from review.features.scatter._cell_rings import paint_focus_ring
@@ -108,7 +109,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Secondary display options (Layout + Colour-by-time) collapse into a
     # "Display ▾" popover so the per-cell scatter control row stays readable —
     # the X/Y Channel & Property selectors are the controls that matter inline.
-    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
     _disp_btn.setToolTip(
         "Scatter display options: layout, colour-by-time, the gate filter and a highlighted set of saved cells")
     ctrl.add_action(_disp_btn)
@@ -208,6 +209,10 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_action(_export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_cells"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False, header=False)
     from review.core.ui_helpers import apply_plot_card_decorators

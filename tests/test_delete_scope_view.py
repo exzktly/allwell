@@ -14,6 +14,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
+from tests import _panels as panels  # noqa: E402
+
 from PySide6.QtWidgets import QWidget
 
 from review.features.image_browser.review_image.state import ReviewImageState
@@ -90,7 +92,7 @@ def test_opening_the_popover_arms_nothing(built):
     """Seeding the dropdowns from the displayed frame must not count as an
     edit — looking at the scope is not setting it."""
     ctx, btn, _parent = built
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     ri = ctx.state.review_image
     assert ri.delete_scope_wells is None
     assert ri.delete_scope_fovs is None
@@ -122,7 +124,7 @@ def test_reset_disarms_and_relabels(built, qtbot):
     ri = ctx.state.review_image
     ri.delete_scope_wells = {"A01", "B02"}
     from PySide6.QtWidgets import QPushButton
-    reset = next(b for b in btn.menu().findChildren(QPushButton)
+    reset = next(b for b in panels.content(btn).findChildren(QPushButton)
                  if b.text() == "Reset to this frame")
     reset.click()
     assert ri.delete_scope_wells is None
@@ -135,7 +137,7 @@ def test_use_plate_selection_arms_selected_wells_without_writing_them(qtbot):
     qtbot.addWidget(parent)
     btn = build_delete_scope_control(ctx, parent)
     from PySide6.QtWidgets import QPushButton
-    plate = next(b for b in btn.menu().findChildren(QPushButton)
+    plate = next(b for b in panels.content(btn).findChildren(QPushButton)
                  if b.text() == "Use plate selection")
     plate.click()
     # Z99 is not a loaded well, so it is filtered out.
@@ -152,9 +154,9 @@ def test_baseline_timepoint_is_offered_and_seeded(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     btn = build_delete_scope_control(ctx, parent)
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     from widgets.checkable_dropdown import CheckableDropdown
-    tps_dd = btn.menu().findChildren(CheckableDropdown)[2]
+    tps_dd = panels.content(btn).findChildren(CheckableDropdown)[2]
     assert [str(d) for d in tps_dd.checkedData()] == ["0"]
     assert "" not in [tps_dd._data[i] for i in range(tps_dd.count())]
 
@@ -167,9 +169,9 @@ def test_mixed_parseable_and_opaque_well_labels_do_not_break_the_popover(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     btn = build_delete_scope_control(ctx, parent)
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     from widgets.checkable_dropdown import CheckableDropdown
-    wells_dd = btn.menu().findChildren(CheckableDropdown)[0]
+    wells_dd = panels.content(btn).findChildren(CheckableDropdown)[0]
     labels = [wells_dd._labels[i] for i in range(wells_dd.count())]
     assert labels == ["A01", "B02", "summary_all"]
 
@@ -179,9 +181,9 @@ def test_ticking_one_dropdown_arms_only_that_field(built):
     screen — the untouched fields keep following the displayed frame, or moving
     to the next FOV would silently put the user outside their own scope."""
     ctx, btn, _parent = built
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     from widgets.checkable_dropdown import CheckableDropdown
-    dropdowns = btn.menu().findChildren(CheckableDropdown)
+    dropdowns = panels.content(btn).findChildren(CheckableDropdown)
     assert len(dropdowns) == 3
     dropdowns[0].setCheckedData(["A01", "B02"])
     ri = ctx.state.review_image

@@ -250,6 +250,10 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     from review.core.cell_lasso_view import make_lasso_button
     band.add_action(make_lasso_button(ctx, band, "_sp_canvas", source="lasso · Spatial map"))
     band.add_action(make_properties_button(ctx, band, "spatial"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(band)
 
     # ── parameters: colony detection, boundary, summary display ─────────────
     # Each group is shown only when the current (level, viz) actually consumes

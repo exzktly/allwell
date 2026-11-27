@@ -18,6 +18,8 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("PySide6")
+
+from tests import _panels as panels  # noqa: E402
 pd = pytest.importorskip("pandas")
 
 from PySide6.QtWidgets import QPushButton, QWidget
@@ -101,7 +103,7 @@ def built(qtbot):
 
 
 def _dropdowns(btn):
-    return btn.menu().findChildren(CheckableDropdown)
+    return panels.content(btn).findChildren(CheckableDropdown)
 
 
 def test_starts_unarmed_and_says_all_frames(built):
@@ -119,7 +121,7 @@ def test_unarmed_popover_seeds_every_option_not_the_displayed_frame(built):
     un-armed field means. The crop's means every value, and showing one ticked
     well would misstate a crop that is filtering the whole plate."""
     ctx, btn, _parent = built
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     wells_dd, fovs_dd, tps_dd = _dropdowns(btn)
     assert sorted(str(d) for d in wells_dd.checkedData()) == ["A01", "B02", "C03"]
     assert sorted(str(d) for d in fovs_dd.checkedData()) == ["1", "2"]
@@ -133,7 +135,7 @@ def test_unarmed_popover_seeds_every_option_not_the_displayed_frame(built):
 
 def test_ticking_one_dropdown_arms_only_that_field(built):
     ctx, btn, _parent = built
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     _dropdowns(btn)[0].setCheckedData(["A01", "B02"])
     ds = ctx.state.dataset
     assert ds.crop_scope_wells == {"A01", "B02"}
@@ -148,9 +150,9 @@ def test_arming_reprojects_crop_pass_once_the_burst_settles(built):
     the next cache miss. It waits only for the run of ticks to finish —
     closing the popover is the user saying they are done."""
     ctx, btn, _parent = built
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     _dropdowns(btn)[0].setCheckedData(["A01"])
-    btn.menu().aboutToHide.emit()
+    panels.hide(btn)
     cache = ctx.state.dataset.cache
     assert list(cache["A01"]["Crop_Pass"]) == [1, 0]   # in scope: box applies
     assert list(cache["B02"]["Crop_Pass"]) == [1, 1]   # out of scope: untouched
@@ -160,7 +162,7 @@ def test_arming_reprojects_crop_pass_once_the_burst_settles(built):
 def test_reset_widens_back_to_every_frame(built):
     ctx, btn, _parent = built
     ctx.state.dataset.crop_scope_wells = {"A01"}
-    reset = next(b for b in btn.menu().findChildren(QPushButton)
+    reset = next(b for b in panels.content(btn).findChildren(QPushButton)
                  if b.text() == CROP_SCOPE.reset_label)
     reset.click()
     ds = ctx.state.dataset
@@ -176,7 +178,7 @@ def test_use_plate_selection_arms_selected_wells_without_writing_them(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     btn = build_crop_scope_control(ctx, parent)
-    plate = next(b for b in btn.menu().findChildren(QPushButton)
+    plate = next(b for b in panels.content(btn).findChildren(QPushButton)
                  if b.text() == "Use plate selection")
     plate.click()
     # Z99 is not a loaded well, so it is filtered out.
@@ -192,9 +194,9 @@ def test_scope_change_without_a_box_says_so_rather_than_excluded_zero(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     btn = build_crop_scope_control(ctx, parent)
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     _dropdowns(btn)[0].setCheckedData(["A01"])
-    btn.menu().aboutToHide.emit()
+    panels.hide(btn)
     assert any("draw a crop rectangle" in s for s in ctx.statuses)
 
 
@@ -210,14 +212,14 @@ def test_each_tick_writes_state_but_only_one_recompute_runs(built, monkeypatch):
     calls: list[int] = []
     monkeypatch.setattr(frame_scope_view, "apply_scope_change",
                         lambda *_a, **_k: calls.append(1))
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     wells_dd = _dropdowns(btn)[0]
     for picked in (["A01"], ["A01", "B02"], ["A01", "B02", "C03"]):
         wells_dd.setCheckedData(picked)
     assert ctx.state.dataset.crop_scope_wells == {"A01", "B02", "C03"}
     assert btn.text().startswith("Crop scope: all wells")   # 3 of 3
     assert calls == []                                      # still settling
-    btn.menu().aboutToHide.emit()                           # closing flushes it
+    panels.hide(btn)                           # closing flushes it
     assert calls == [1]
 
 
@@ -229,8 +231,8 @@ def test_closing_the_popover_with_nothing_pending_recomputes_nothing(built,
     calls: list[int] = []
     monkeypatch.setattr(frame_scope_view, "apply_scope_change",
                         lambda *_a, **_k: calls.append(1))
-    btn.menu().aboutToShow.emit()
-    btn.menu().aboutToHide.emit()
+    panels.show(btn)
+    panels.hide(btn)
     assert calls == []
 
 
@@ -241,7 +243,7 @@ def test_plate_selection_leaves_the_effect_number_on_the_status_line(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     btn = build_crop_scope_control(ctx, parent)
-    plate = next(b for b in btn.menu().findChildren(QPushButton)
+    plate = next(b for b in panels.content(btn).findChildren(QPushButton)
                  if b.text() == "Use plate selection")
     plate.click()
     assert "Crop scope updated" in ctx.statuses[-1]
@@ -256,9 +258,9 @@ def test_scope_change_is_persisted(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     btn = build_crop_scope_control(ctx, parent)
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     _dropdowns(btn)[0].setCheckedData(["A01"])
-    btn.menu().aboutToHide.emit()
+    panels.hide(btn)
     assert "crop_region" in saved
 
 
@@ -270,7 +272,7 @@ def test_a_pending_change_is_not_lost_when_the_popover_is_destroyed(qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     btn = build_crop_scope_control(ctx, parent)
-    btn.menu().aboutToShow.emit()
+    panels.show(btn)
     _dropdowns(btn)[0].setCheckedData(["A01"])
     assert "Crop_Pass" not in ctx.state.dataset.cache["A01"].columns
 

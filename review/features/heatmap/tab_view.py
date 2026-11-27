@@ -15,10 +15,10 @@ from PySide6.QtWidgets import (
     QPushButton, QVBoxLayout, QWidget,
 )
 
+from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     build_plot_save_menu,
     make_plot_with_right_dock,
-    make_popover_button,
     make_properties_button,
     plotting_band_slot,
 )
@@ -113,7 +113,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # they are set once and left. One click is the right price for the row.
     # Not only colour any more: the per-cell ``±`` and the sample-map tick
     # labels are appearance by the same test and live here too.
-    display_btn, disp, disp_l = make_popover_button("Display ▾", band)
+    display_btn, disp, disp_l = make_popover_button("Display", band, ctx=ctx, root=True)
     display_btn.setToolTip(
         "Colour map, scale, layout, per-cell error and tick labels")
 
@@ -214,6 +214,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     band.add_action(export_btn)
 
     band.add_action(make_properties_button(ctx, band, "heatmap"))
+
+    # The row ends in Display · Style · Share on every page; a slot this page
+
+    # does not use is a disabled button, never a gap.
+
+    from review.core.band_fixed_actions import finish_band
+
+    finish_band(band)
 
 
     # ── Figure (in a v2 PlotCard — card chrome + MplToolbar) ────────────────

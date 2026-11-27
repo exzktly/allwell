@@ -196,6 +196,12 @@ layout, control sizes and spacing. Nothing about a dataset or an export changes
 with it: the well colours that identify samples, and the white-background
 palette figures are exported in, are the same in either.
 
+The well colours were redrawn so that every one reads against the dark plot
+background, and wells you select together — neighbours along a row or down a
+column — stay distinguishable, including for colour-blind readers. A selection
+whose colour is already saved with a dataset keeps it; selections made from now
+on take the new colours, so a dataset saved before the change can show both.
+
 The pipeline alone (no GUI) can be invoked directly — useful for CI or
 batch processing on headless workers. `--input_dir` must hold one `<WELL>.zip`
 per well; the pipeline refuses loose images and per-well folders, naming them,

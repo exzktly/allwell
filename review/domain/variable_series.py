@@ -49,25 +49,28 @@ UNASSIGNED_COLOR = theme.Colors.text_primary
 
 #: Which entries of the plate palette a variable's values take, in order.
 #:
-#: Not the palette's first n. Those are far apart to a trichromat — 116 in RGB
-#: at six values — and collapse for a dichromat: **28** under protanopia and
-#: **43** under deuteranopia at six values, and **10** under deuteranopia at
-#: eight, against the 30 this module's own tests record as "one colour to any
-#: reader". Roughly one man in twelve reads a figure that way, and *Colour by*
-#: has no second channel carrying the same fact, so two values sharing an ink
-#: is not a degraded reading of the figure — it is a wrong one, with nothing on
-#: screen to say so.
+#: Not the palette's first n. Those are ordered for wells a person selects
+#: together, not for six values side by side in one legend: the first six
+#: measure 55 apart in RGB for a trichromat and **12** under deuteranopia, against
+#: the 30 this module's own tests record as "one colour to any reader". Roughly
+#: one man in twelve reads a figure that way, and *Colour by* has no second
+#: channel carrying the same fact, so two values sharing an ink is not a
+#: degraded reading of the figure — it is a wrong one, with nothing on screen to
+#: say so.
 #:
 #: Chosen by measuring: greedily maximising the closest pair across all four
 #: views at once — trichromat, protanope, deuteranope, tritanope — under the
-#: Viénot–Brettel–Mollon simulation. Six values now measure 108 / 92 / 93 / 100
-#: rather than 116 / 28 / 43 / 67: a little less separation for a trichromat,
-#: and three times as much for everyone else. Two and three values come out
-#: *better* on every view than the palette's own head did.
+#: Viénot–Brettel–Mollon simulation, while keeping clear of the Mixed and
+#: no-value inks. On the design language's palette the closest pair, worst view,
+#: is 229 at two values, 118 at three, 61 at six, 49 at eight and 25 at sixteen.
+#: That is less than the old palette gave (250 / 180 / 90 / 75 / 45): its 96
+#: colours all clear 3 : 1 on a dark plot and on white, which narrows their
+#: lightness. Accepting the lower separation, rather than giving values a palette
+#: of their own, was the user's decision.
 #:
 #: ``tests/test_colour_and_split_by_variable.py`` re-measures both halves, so
 #: the numbers above cannot drift away from the picks below.
-VALUE_PICKS = (0, 49, 11, 47, 41, 22, 85, 8, 3, 89, 38, 34, 78, 57, 87, 59)
+VALUE_PICKS = (0, 16, 9, 57, 72, 37, 58, 76, 10, 35, 1, 85, 39, 2, 91, 14)
 
 
 def value_colors(variable, *, offset: int = 0) -> dict:

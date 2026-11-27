@@ -127,7 +127,7 @@ def _separation(colours) -> float:
         for i, x in enumerate(values) for y in values[i + 1:])
 
 
-@pytest.mark.parametrize("n,floor", [(2, 150.0), (3, 150.0), (6, 100.0)])
+@pytest.mark.parametrize("n,floor", [(2, 295.0), (3, 145.0), (6, 64.0)])
 def test_the_palette_entries_are_far_enough_apart(n, floor):
     """Measured, not assumed. The plate palette is already ordered so that
     consecutive entries are far apart; spreading picks across all 96 of them
@@ -143,8 +143,12 @@ def test_the_palette_entries_are_far_enough_apart(n, floor):
 #: and the three dichromacies — measured the way ``tests/_cvd.py`` measures.
 #: Lower as *n* grows because the space is finite; a set that fell below the
 #: last row would be a legend the reader has to guess at.
-CVD_FLOORS = ((2, 250.0), (3, 180.0), (4, 160.0), (6, 90.0), (8, 75.0),
-              (16, 45.0))
+#: What the plate palette reaches since the design language's 96 colours replaced the old ones: all 96 clear
+#: 3 : 1 on a dark plot and on white, which narrows their lightness, and the value inks are drawn from them. The
+#: floors were 250 / 180 / 160 / 90 / 75 / 45 on the old palette; lowering them to what this one reaches was the
+#: user's decision, over giving values a palette of their own (DESIGN_LANGUAGE_TRACKER.md, row D30).
+CVD_FLOORS = ((2, 229.0), (3, 118.0), (4, 87.0), (6, 60.0), (8, 48.0),
+              (16, 25.0))
 
 
 @pytest.mark.parametrize("n,floor", CVD_FLOORS)

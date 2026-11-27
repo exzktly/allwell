@@ -47,29 +47,29 @@ def test_rep_sets_pool_and_colour_override_and_solo():
     # G1 pools A01+A02 (rank colour of A01); G2 honours its explicit colour;
     # the solo well A03 yields last with its own rank colour.
     assert _tuples(ctx) == [
-        ("G1", "#6AB2FB", [0.0, 1.0]),
+        ("G1", "#338CED", [0.0, 1.0]),
         ("G2", "#123456", [3.0]),
-        ("A03", "#0606F9", [2.0]),
+        ("A03", "#00A888", [2.0]),
     ]
 
 
 def test_no_rep_sets_uses_selected_wells():
     ctx = _ctx(selections=[], selected=["A02", "A01"])
     assert _tuples(ctx) == [
-        ("A01", "#6AB2FB", [0.0]),
-        ("A02", "#06F906", [1.0]),
+        ("A01", "#338CED", [0.0]),
+        ("A02", "#E76624", [1.0]),
     ]
 
 
 def test_no_selection_falls_back_to_all_wells():
     ctx = _ctx(selections=[])
     assert _tuples(ctx, fallback_to_all=True) == [
-        ("A01", "#6AB2FB", [0.0]),
-        ("A02", "#06F906", [1.0]),
-        ("A03", "#0606F9", [2.0]),
-        ("B01", "#774C22", [3.0]),
-        ("B02", "#131386", [4.0]),
-        ("B03", "#05C783", [5.0]),
+        ("A01", "#338CED", [0.0]),
+        ("A02", "#E76624", [1.0]),
+        ("A03", "#00A888", [2.0]),
+        ("B01", "#1C6E80", [3.0]),
+        ("B02", "#C588B0", [4.0]),
+        ("B03", "#D302C5", [5.0]),
     ]
 
 

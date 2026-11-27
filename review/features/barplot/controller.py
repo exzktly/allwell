@@ -497,6 +497,11 @@ def refresh_bar_layout_btn_state(ctx) -> None:
         pool_btn.setVisible(True)
         pool_btn.setEnabled(has_rsets)
         pool_btn.setChecked(bool(plot.bar_pool_replicates))
+    # Reset order is enabled while a custom order is in force — and an order also arrives by a restored view or
+    # saved plot, and leaves by a reset of the plot state, neither of which passes the drag or the button.
+    reset_btn = ctx.widgets.get_or_none("_bar_reset_order_btn")
+    if reset_btn is not None:
+        reset_btn.setEnabled(plot.bar_order is not None)
         pool_btn.setToolTip(
             "Collapse each replicate set's wells into one pooled column "
             "(off = one column per well)." if has_rsets

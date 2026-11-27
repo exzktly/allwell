@@ -1,7 +1,7 @@
 """Regression tests for the smFISH Apply-Global cross-thread refresh.
 
 Pins the bug where the user had to close and reopen the app to see new
-smfish_count values after pressing Apply Global Threshold:
+smfish_count values after pressing Apply global threshold:
 
     The worker (``apply_global_threshold_async``) runs CSV writeback
     on a daemon thread and invokes ``after_csv_cb()`` from inside that
@@ -11,7 +11,7 @@ smfish_count values after pressing Apply Global Threshold:
     worker daemon thread has no Qt event loop, so the timer was
     created in a thread where it could never fire, and the refresh
     silently dropped on the floor. The user saw the status label flip
-    to "Apply to All complete. Line/Bar plots refreshed." (that path
+    to "Apply global threshold complete. Line/Bar plots refreshed." (that path
     DID marshal correctly via ``done_cb``) but the plots and Review
     CSV table kept showing pre-apply counts until restart.
 

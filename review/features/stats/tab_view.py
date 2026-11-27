@@ -451,12 +451,12 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         if n == 1:
             return EmptyReason(
                 "One comparison group so far.",
-                "Add a second group to run a test — + Add group under "
+                "Add a second group to run a test — Add group under "
                 "Comparison groups above.",
             )
         return EmptyReason(
             "No comparison groups yet.",
-            "Click + Add group under Comparison groups above, select the card "
+            "Click Add group under Comparison groups above, select the card "
             "it makes, then drag wells on the map.",
         )
 

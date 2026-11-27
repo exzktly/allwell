@@ -138,7 +138,7 @@ def on_release(ctx, st, event) -> None:
         # Dropping the gate redraws, so the members are read off the model drawn without it. With Shift the gate's
         # nanowells are carried into the window, so they are kept as well as the new box's.
         ctx.notify.set_status(
-            "The earlier window's nanowells were carried into this one: Use as Subset keeps both." if gate_sites else
+            "The earlier window's nanowells were carried into this one: Use as subset keeps both." if gate_sites else
             "The earlier window was taken out of the Subset: this one selects from every nanowell. Hold Shift while "
             "dragging to add to it instead.")
         model = st.window_model

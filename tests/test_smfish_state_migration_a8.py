@@ -40,7 +40,8 @@ def test_toggle_overlays_flips_the_slice(viewer_app, qtbot):
     assert app._app_state.smfish.show_overlays is True
     _smfish_toggle_overlays(app._ctx)
     assert app._app_state.smfish.show_overlays is False
-    assert app._smfish_overlay_btn.text() == "Show Overlays"
+    # A switch (design language D13): its label stays "Show overlays" and its state says which.
+    assert app._smfish_overlay_btn.isChecked() is False
     _smfish_toggle_overlays(app._ctx)
     assert app._app_state.smfish.show_overlays is True
-    assert app._smfish_overlay_btn.text() == "Hide Overlays"
+    assert app._smfish_overlay_btn.isChecked() is True

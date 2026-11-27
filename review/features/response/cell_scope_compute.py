@@ -34,7 +34,7 @@ _DRAWN = {
     EVENTS_METRIC_KEY: (
         "count of the cells with plot_above_threshold=1, per timepoint",
         "a member's point is the mean of its wells' counts (of its fields' "
-        "counts with Spread: FOV on)"),
+        "counts with Spread across FOVs on)"),
 }
 _DRAWN_MEAN = (
     "mean of the value column over plot_above_threshold=1, per timepoint",

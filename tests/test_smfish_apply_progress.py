@@ -1,6 +1,6 @@
 """smFISH "Apply global threshold" progress reporting.
 
-Apply to All drives the shared status-row progress bar the same way a dataset
+Apply global threshold drives the shared status-row progress bar the same way a dataset
 load does. The bar is only honest if the worker reports every step of both
 passes — the per-well counting pass and the CSV-write pass — and if every
 terminal path still reaches ``done_cb``, which is what hides the bar again.

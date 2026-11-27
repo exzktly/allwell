@@ -54,8 +54,8 @@ def agg_empty_message(ctx, cut_sink: dict | None) -> str:
         return ("No points to plot.\n\n"
                 f"The per-field count on the {axis} axis is undefined:\n"
                 "a well's FOV labels could not be read from its filenames,\n"
-                "so Spread: FOV has no fields to count over.\n\n"
-                "Turn Spread: FOV off to plot each well's own count.")
+                "so Spread across FOVs has no fields to count over.\n\n"
+                "Turn Spread across FOVs off to plot each well's own count.")
     cutoff = float(info.get("cutoff", 0.0))
     n_total = int(info.get("n_total", 0))
     # Ask the shared predicate rather than re-testing the suffix here; a second

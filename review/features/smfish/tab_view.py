@@ -480,7 +480,7 @@ def _smfish_set_status(ctx, text: str) -> None:
     ctx.runtime.smfish.status_label.setText(text)
 
 
-# Apply to All reuses the status-row progress bar that a dataset load drives,
+# Apply global threshold reuses the status-row progress bar that a dataset load drives,
 # so the two long operations in the app report themselves the same way. The
 # three helpers below are the only place this tab touches that widget, and all
 # of them run on the GUI thread — the worker reaches them through
@@ -966,12 +966,12 @@ def _smfish_apply_to_all(ctx) -> None:
             # it was and where to look.
             QMessageBox.warning(
                 frame, "smFISH",
-                f"Apply to All did not finish: {shortfall} well(s) were not "
+                f"Apply global threshold did not finish: {shortfall} well(s) were not "
                 "written and still hold their previous counts. The log names "
                 "which wells and why.",
             )
             return
-        QMessageBox.information(frame, "smFISH", "Apply to All finished.")
+        QMessageBox.information(frame, "smFISH", "Apply global threshold finished.")
 
     # Cancel event used by load_controller / app shutdown to abort
     # the in-flight smFISH run before it overwrites CSVs from a
@@ -1063,5 +1063,5 @@ def _smfish_refresh_app_cache(ctx) -> None:
             refresh_review_csv()
         except Exception:
             logging.getLogger("review").exception(
-                "Review CSV refresh after Apply Global Threshold failed"
+                "Review CSV refresh after Apply global threshold failed"
             )

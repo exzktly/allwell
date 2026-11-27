@@ -391,13 +391,16 @@ def test_the_walk_s_keys_skip_go_back_and_stop_only_while_it_runs(qtbot, tmp_pat
 def test_every_on_off_button_on_the_array_band_shows_when_it_is_on(qtbot, tmp_path):
     """The UX review measured it: a default button's variant rule overrides the theme's ``:checked`` fill, so *Set anchor*,
     *Overlays* and *One per well* painted on and off identically (``#1a2230`` both) and nobody could tell whether a
-    click would set an anchor. A checkable button there takes the theme's ``toggle`` variant."""
-    from PySide6.QtWidgets import QPushButton
+    click would set an anchor. The design language (D13) draws each as what it is: *Set anchor* arms a pointer mode,
+    so it is a pressed-in tool (``ui.buttons.mode_tool``); *Overlays* and *One per well* act at once, so they are
+    switches."""
+    from PySide6.QtWidgets import QToolButton
 
     from tests.test_nanowell_page import _page, _write_nanowell_dataset
+    from widgets.toggle_switch import ToggleSwitch
 
     ctx = _page(qtbot, _write_nanowell_dataset(tmp_path))
-    names = ("_nw_anchor_btn", "_nw_overlays_btn", "_nw_queue_per_well_btn")
-    buttons = {name: ctx.widgets.get_or_none(name) for name in names}
-    assert all(isinstance(b, QPushButton) and b.isCheckable() for b in buttons.values()), buttons
-    assert {name: b.property("variant") for name, b in buttons.items()} == dict.fromkeys(names, "toggle")
+    anchor = ctx.widgets.get_or_none("_nw_anchor_btn")
+    assert isinstance(anchor, QToolButton) and anchor.isCheckable() and anchor.property("modeTool") is True
+    for name in ("_nw_overlays_btn", "_nw_queue_per_well_btn"):
+        assert isinstance(ctx.widgets.get_or_none(name), ToggleSwitch), name

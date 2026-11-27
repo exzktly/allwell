@@ -479,7 +479,7 @@ def test_an_undefined_per_field_count_is_not_reported_as_a_cut(monkeypatch):
     ctx.notify = SimpleNamespace(set_status=statuses.append)
     message = agg_empty_message(ctx, sink)
     assert "cut by the ON cutoff" not in message
-    assert "FOV labels" in message and "Spread: FOV" in message
+    assert "FOV labels" in message and "Spread across FOVs" in message
     # Nothing to lower, so nothing is pushed to the status line either.
     assert statuses == []
 

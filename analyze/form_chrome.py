@@ -312,7 +312,9 @@ class AnalyzeFormChromeMixin:
                 _lbl.setMaximumWidth(_QWIDGETSIZE_MAX)
             else:
                 _lbl.setFixedWidth(theme.Metrics.form_label_w)
-            _rl.setAlignment(_lbl, Qt.AlignLeft | (Qt.AlignBottom if phone else Qt.AlignVCenter))
+            # On a phone the label takes the row's whole width: aligned, a box layout gives a word-wrapped label
+            # only its wrapped hint's width and one line's height, and a long label clips.
+            _rl.setAlignment(_lbl, Qt.Alignment() if phone else Qt.AlignLeft | Qt.AlignVCenter)
 
         _arrange(False)
         form_registry.register(row, _arrange)

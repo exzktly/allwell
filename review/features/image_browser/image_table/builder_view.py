@@ -1846,10 +1846,10 @@ def _open_root_filter(ctx, dim: str, anchor: QWidget) -> None:
     """Show a root's value filter as a page of ticks in the inspector."""
     from review.core import inspector_pages
     all_vals, checked = root_filter_values(ctx, dim)
-    # Anchored on the page's band, not on the pill's button: the shelf rebuilds
+    # Anchored on the page, not on the pill's button: the shelf rebuilds
     # its pills on every edit, and a page whose owner was deleted under it
     # would go with it. One page per dimension, so the two do not share ticks.
-    anchor = ctx.widgets.get_or_none("_image_table_band") or anchor
+    anchor = ctx.widgets.get_or_none("_image_table_page") or anchor
     inspector_pages.open_multi_select(
         ctx, anchor, key=f"{ROOT_FILTER_KEY}/{dim}", title=_ROOT_FILTER_TITLE.get(dim, dim),
         items=all_vals, checked=checked,

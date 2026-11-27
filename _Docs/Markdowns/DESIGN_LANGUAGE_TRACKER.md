@@ -481,10 +481,13 @@ Step log (newest last):
    builds no band. Commit `d36c539`.
 2. D18 (part): Playground builds no band either — `widgets.page_body.build_bandless_body` (new), used by Saved Cells
    and Playground; `tests/test_control_band_adoption.py` counts it as a page's one control-row decision. Its
-   `DESIGN_PENDING` entry removed. Still open in D18: Image Table's empty band (its band is the anchor
-   `builder_view.py:1852` places a popover from, and `tests/test_surface_depth_app.py` reads it — move that anchor
-   first), Segmentation's `band rows` and `label inside`. Also fixed: the `unlabelled` test crashed its xdist
-   worker by calling `deleteLater()` on a widget the reaper fixture deletes too.
+   `DESIGN_PENDING` entry removed. Still open in D18 after step 3: Segmentation's `band rows` and `label inside`. Also fixed: the `unlabelled` test crashed its xdist
+   worker by calling `deleteLater()` on a widget the reaper fixture deletes too. Commit `791e292`.
+3. D18 (part): Image Table builds no band (`build_bandless_body`, sides flush as before, top inset `Spacing.md`); the
+   body is registered as `image_table.tab_view.PAGE_KEY` (`_image_table_page`), which the shelf's root-filter
+   inspector pages now anchor on (`builder_view._open_root_filter`) in place of the band, and which
+   `tests/test_surface_depth_app.py` (slow, not run) reads. Its `DESIGN_PENDING` entry removed. Ruff and the 384
+   fast Image Table tests green.
 
 ## 10. Rows
 

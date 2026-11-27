@@ -30,7 +30,7 @@ from review.core.ui_helpers import btn_primary
 from widgets import form_registry
 from widgets.separator import build_hline_separator
 from widgets.flow_layout import FlowLayout
-from widgets.page_body import build_page_body
+from widgets.page_body import build_bandless_body
 from widgets.stepper import Stepper
 from review.features.image_browser.image_table.controller import (
     image_table_copy_png,
@@ -75,6 +75,10 @@ CROP_STOP_TEXT = "Stop cropping"
 _ZOOM_IN_W = 32
 _ZOOM_LBL_W = 60
 _ZOOM_OUT_W = 32
+
+
+#: The page body, registered: the inspector anchors the shelf's filter pages on it.
+PAGE_KEY = "_image_table_page"
 
 
 def _menu_button(parent, text, *, tooltip="") -> QToolButton:
@@ -293,13 +297,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # readers resolve. State lists/dicts + the crop tool stay on app.
     reg = ctx.widgets
     """Construct the Image Table tab inside *parent*."""
-    # The band is empty here — this tab authors its grid through the builder
-    # shelf and acts on it through the action strip below, neither of which is a
-    # scope control — but it is still added, so the top of this page is drawn at
-    # the same height as every other page's (widgets/page_body.py).
-    band, body = build_page_body(parent)
+    # No control band: this tab authors its grid through the builder shelf and acts on it through the action
+    # strip below, neither of which is a scope control, and an empty band reads as a row of missing controls
+    # (``widgets.page_body.build_bandless_body``). The sides stay flush as before; only the top takes the inset
+    # the band used to stand in for.
+    body = build_bandless_body(parent, inset=0)
+    body.layout().setContentsMargins(0, theme.Spacing.md, 0, 0)
     body.layout().setSpacing(0)
-    reg.register("_image_table_band", band)
+    reg.register(PAGE_KEY, body)
 
     # State defaults — controller methods read these.
     # Image Table data/options/caches live on the typed ImageTableState

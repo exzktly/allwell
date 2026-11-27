@@ -116,6 +116,11 @@ def keep_labels_on_figure(fig, renderer) -> bool:
     bottoms += [t.get_window_extent(renderer).y0 for ax in placed for t in ax.get_xticklabels()
                 if t.get_visible() and t.get_text().strip()]
     low = -min(bottoms, default=0.0)
+    # A note written along the figure's foot (the Observations line) is ground the labels may not take either.
+    feet = [t.get_window_extent(renderer) for t in fig.texts
+            if t.get_visible() and t.get_text().strip() and t.get_window_extent(renderer).y1 < fig.bbox.height * 0.2]
+    if feet and bottoms:
+        low = max(low, max(f.y1 for f in feet) - min(bottoms))
     if low > 0.5 and fig.bbox.height > 0:
         bottom = fig.subplotpars.bottom + (low + 4.0) / fig.bbox.height
         if bottom < fig.subplotpars.top - 0.2:
@@ -190,13 +195,13 @@ def _overlaps(a, b) -> bool:
 
 
 def keep_keys_off_labels(fig, renderer) -> bool:
-    """Move a key that covers a label to the first place in :data:`_LEGEND_PLACES` where it covers none and stays on
-    the figure; a key placed outside its axes on purpose (``bbox_to_anchor``) is left where it was put."""
+    """Move a key that covers a label to the place in :data:`_LEGEND_PLACES` covering fewest, staying on the figure;
+    a key anchored outside its axes (``bbox_to_anchor``) keeps its anchor and is placed around it."""
     changed = False
     texts = figure_texts(fig)
     for ax in fig.axes:
         legend = ax.get_legend()
-        if legend is None or not legend.get_visible() or legend._bbox_to_anchor is not None:
+        if legend is None or not legend.get_visible():
             continue
         own = {id(x) for x in legend.get_texts()} | {id(legend.get_title())}
         others = [t.get_window_extent(renderer) for t in texts if id(t) not in own]
@@ -209,6 +214,8 @@ def keep_keys_off_labels(fig, renderer) -> bool:
         best_loc, best = original, cost()
         if best == 0:
             continue
+        # A key anchored outside its axes (beside or under the plot) keeps its anchor and is tried at each place
+        # around it: on a phone the key under the plot sat on the x label.
         # The place covering fewest labels, and the one it had when none is better: a key moved to the last place
         # tried, clear or not, covered more on Line Graphs than where its renderer put it.
         for place in _LEGEND_PLACES:
@@ -322,10 +329,10 @@ def fit_label_to_axis(ax, renderer) -> bool:
             e = label.get_window_extent(renderer)
             return e.height if label is ax.yaxis.label else e.width
 
-        if length() > along:
+        if length() > along or _off(label.get_window_extent(renderer), ax.figure):
             for share in (0.9, 0.8, 0.7, _SMALLEST):
                 label.set_fontsize(size * share)
-                if length() <= along:
+                if length() <= along and not _off(label.get_window_extent(renderer), ax.figure):
                     break
             else:
                 prop = label.get_fontproperties()

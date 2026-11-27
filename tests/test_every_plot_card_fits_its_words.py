@@ -228,3 +228,50 @@ def test_the_tick_check_pairs_each_tick_with_its_own_label(qtbot):
     from PySide6.QtWidgets import QApplication
 
     QApplication.processEvents()                   # the canvas's pending idle draw, while it is still alive
+
+
+def test_a_note_along_the_foot_raises_the_margin_above_it():
+    from review.core import figure_fit
+
+    fig = _agg(3.0, 2.0)
+    ax = fig.add_subplot(1, 1, 1)
+    fig.subplots_adjust(bottom=0.15)
+    ax.set_xlabel("GFP mean intensity", fontsize=10)
+    note = fig.text(0.01, 0.002, "Observations: cells · pooled from 3 nanowells", fontsize=9, va="bottom")
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    assert figure_fit.keep_labels_on_figure(fig, r)
+    fig.canvas.draw()
+    assert not figure_fit._overlaps(ax.xaxis.label.get_window_extent(r), note.get_window_extent(r))
+
+
+def test_a_colour_bar_label_past_the_right_edge_is_made_to_fit():
+    from review.core import figure_fit
+
+    fig = _agg(3.0, 3.0)
+    bar = fig.add_axes((0.87, 0.1, 0.05, 0.8))     # a short label, no longer than the bar, just past the edge
+    bar.yaxis.set_label_position("right")
+    bar.set_ylabel("Mean intensity", fontsize=20)
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    assert figure_fit._off(bar.yaxis.label.get_window_extent(r), fig)
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    figure_fit.fit_label_to_axis(bar, r)
+    assert not figure_fit._off(bar.yaxis.label.get_window_extent(r), fig)
+
+
+def test_a_key_anchored_outside_its_axes_moves_off_a_label_it_covers():
+    from review.core import figure_fit
+
+    fig = _agg(3.0, 3.0)
+    ax = fig.add_axes((0.15, 0.3, 0.8, 0.6))
+    ax.plot([0, 1], [0, 1], label="A01")
+    ax.set_xlabel("Time (hours)", fontsize=12)
+    # Anchored to a point on the x label itself: every place around that point covers it.
+    legend = ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12))
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    assert figure_fit._overlaps(legend.get_window_extent(r), ax.xaxis.label.get_window_extent(r))
+    assert figure_fit.keep_keys_off_labels(fig, r)
+    assert not figure_fit._overlaps(legend.get_window_extent(r), ax.xaxis.label.get_window_extent(r))

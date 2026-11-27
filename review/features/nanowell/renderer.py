@@ -341,7 +341,12 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     rows, cols = _grid(len(panels))
     bottom = 0.10 if footer_out else 0.10 + _FOOTER_BASE + _line_step(fig) * _FOOTER_LINES
     top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT)
-    _adjust(fig, left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
+    # The left margin in points — the y tick numbers and the y label beside them — rather than a share: with the
+    # inspector open beside the page the figure is narrower and its type the same size, and at 7% "Cell count"
+    # started 8 px left of the figure.
+    label_pt = _PREF_PT * (GRID_TYPE_SCALE if len(panels) > 1 else SINGLE_TYPE_SCALE)
+    left = min(0.2, max(0.07, (_POSITION_TICKS_PT + 3 * 1.3 * label_pt + 8.0) / max(_figure_pt(fig)[0], 1.0)))
+    _adjust(fig, left=left, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
                         hspace=0.62)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(panels))] if panels else []
     rings = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}

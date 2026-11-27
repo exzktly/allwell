@@ -16,7 +16,7 @@ def test_a_text_segment_paints_its_text(qtbot):
     from PySide6.QtWidgets import QApplication
 
     from ui import theme
-    
+
     app = QApplication.instance()
     before = app.styleSheet()
     app.setStyleSheet(theme.qss())                  # the app's sheet: without it the platform style drew the text

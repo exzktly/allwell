@@ -1339,6 +1339,15 @@ class PhoneShell(QObject):
         self.wells_button.setText("Wells")
         self.wells_button.clicked.connect(self.toggle_wells)
 
+        # Share, the fourth permanent slot: it opens the menu of commands the
+        # page's own Share button holds (save the figure, copy it, save its
+        # data). The button has no menu of its own — the menu is the page's —
+        # so the one arrow is the caret in its label (CLAUDE.md §7.12).
+        self.share_button = QToolButton()
+        self.share_button.setObjectName("PhoneShareButton")
+        self.share_button.setText("Share ▾")
+        self.share_button.clicked.connect(self.open_share)
+
         self._band_spacer = QWidget()
         self._band_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
@@ -1445,23 +1454,54 @@ class PhoneShell(QObject):
 
     def _phone_only(self) -> list[QWidget]:
         return [self.menu_button, *self._history_buttons(), self.page_button,
-                self.wells_button, self.controls_button, self._band_spacer,
-                self.options_button, self._strip]
+                self.wells_button, self.controls_button, self.share_button,
+                self._band_spacer, self.options_button, self._strip]
 
     def _place_page_controls(self, *, landscape: bool) -> None:
-        """The page menu, Wells and Controls: in the strip at the window's
-        foot upright, in the bar sideways."""
+        """The page menu, Wells, Controls and Share: in the strip at the
+        window's foot upright, in the bar sideways."""
         strip_lay = self._strip.layout()
         band = self._h.band
         band_lay = band.layout() if band is not None else None
         if landscape and band_lay is not None:
             at = band_lay.indexOf(self._band_spacer)
-            for i, b in enumerate((self.page_button, self.wells_button, self.controls_button)):
+            for i, b in enumerate(self.strip_buttons()):
                 band_lay.insertWidget(at + i, b, 0, Qt.AlignVCenter)
         else:
             strip_lay.insertWidget(0, self.page_button)
             strip_lay.addWidget(self.wells_button)
             strip_lay.addWidget(self.controls_button)
+            strip_lay.addWidget(self.share_button)
+
+    def strip_buttons(self) -> list[QWidget]:
+        """The four permanent slots, in order: page, Wells, Controls, Share."""
+        return [self.page_button, self.wells_button, self.controls_button, self.share_button]
+
+    def _current_share(self) -> QToolButton | None:
+        """The Share button of the page on screen — the one in its band (or in
+        the block of controls it declared) that its builder gave the
+        ``share`` role — or ``None`` on a page with nothing to share."""
+        band = self._current_band()
+        if band is None:
+            return None
+        for b in band.findChildren(QToolButton):
+            if (b.property("bandRole") == "share" and not b.isHidden() and b.isEnabled()
+                    and not b.property("bandPlaceholder") and b.menu() is not None):
+                return b
+        return None
+
+    def open_share(self) -> None:
+        """Pop the page's Share menu up from the strip's Share button. One
+        surface: the sheets close first."""
+        share = self._current_share()
+        if share is None:
+            return
+        self.close_sheets(now=True)
+        menu = share.menu()
+        at = self.share_button.mapToGlobal(self.share_button.rect().topRight())
+        size = menu.sizeHint()
+        from PySide6.QtCore import QPoint
+        menu.popup(QPoint(at.x() - size.width(), at.y() - size.height()))
 
     def _sync_log_badge(self) -> None:
         """Mirror the log button's "!" onto ⋯, where the App log item is: the
@@ -1822,7 +1862,7 @@ class PhoneShell(QObject):
             strip_lay.setContentsMargins(self.pt(8), self.pt(4), self.pt(8), self.pt(4))
             strip_lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
             self._strip.setFixedHeight(self.pt(phone_layout.TOP_BAR_PT))
-            for b in (self.page_button, self.wells_button, self.controls_button):
+            for b in self.strip_buttons():
                 b.setFixedHeight(self.pt(phone_layout.TOUCH_MIN_PT))
         self._size_canvases(on)
         if band is not None and band.layout() is not None:
@@ -2568,15 +2608,26 @@ class PhoneShell(QObject):
             self.page_button.setText(_button_label(self._h.current_tool()))
         elif bar is not None:
             self.page_button.setText(_button_label(bar.tabText(bar.currentIndex())))
-        self.controls_button.setVisible(review and self._current_band() is not None)
+        # In Review the four slots are permanent: one a page cannot use is
+        # disabled, never removed, so each is where the thumb last found it.
         wells_open = self._wells_sheet is not None and self._wells_sheet.isOpen()
-        self.wells_button.setVisible(review and (wells_open or bool(self._well_picker())))
+        controls_open = self._sheet is not None and self._sheet.isOpen()
+        for button, usable in (
+                (self.wells_button, wells_open or bool(self._well_picker())),
+                (self.controls_button, controls_open or self._current_band() is not None),
+                (self.share_button, self._current_share() is not None)):
+            button.setVisible(review)
+            button.setEnabled(bool(usable))
+        if review and bar is None:
+            # A section with no pages of its own: the slot stays, naming the
+            # section, with nothing to pick.
+            self.page_button.setVisible(True)
+            self.page_button.setText(self._current_section_label())
+        self.page_button.setEnabled(not review or bar is not None)
         self._sync_wells_label()
         land = bool(self._landscape)
         self._strip.setVisible((review or tools or views) and not land
-                               and any(b.isVisibleTo(self._strip) for b in (
-                                   self.page_button, self.wells_button,
-                                   self.controls_button)))
+                               and any(b.isVisibleTo(self._strip) for b in self.strip_buttons()))
         if not review:
             self.close_sheets()
         else:

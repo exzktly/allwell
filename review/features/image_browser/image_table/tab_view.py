@@ -519,18 +519,19 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     thresh_chan_cb.currentTextChanged.connect(_sync_thresh_for_channel)
     tr.addWidget(thresh_stepper)
 
-    # Save ▾ menu button: clicking anywhere on it opens the menu (no
+    # The Share menu button: clicking anywhere on it opens the menu (no
     # split default-action — that surprised users by firing "Export to
     # File" on a plain click instead of showing the options).
     #
-    # "Save", not "Export", because that is the verb every plot tab's
-    # equivalent button carries (``core.ui_helpers.build_plot_save_menu``).
-    # This tab cannot go through that builder — its menu is not a plot card's,
-    # it offers no CSV and no per-cell rows — so the one thing the two have in
-    # common is the word on the button, and it was the word that differed.
+    # "Share", because that is the word every plot tab's equivalent button
+    # carries (``core.ui_helpers.build_plot_save_menu``). This tab cannot go
+    # through that builder — its menu is not a plot card's, it offers no CSV
+    # and no per-cell rows — so what the two share is the word on the button
+    # and the ``share`` role, which is how phone layout's foot strip finds it.
     export_btn = _menu_button(
-        action_row, "Save", tooltip="Save, copy, or export this table.",
+        action_row, "Share", tooltip="Save, copy, or export this table.",
     )
+    export_btn.setProperty("bandRole", "share")
     emenu = export_btn.menu()
     owned_action(emenu, "Export to File…").triggered.connect(
         lambda _=False: image_table_export(ctx))

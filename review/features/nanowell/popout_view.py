@@ -4,7 +4,7 @@
 while several are ticked), **Channels** adds channels beside the page's
 image channel (a row of crops each), **Grid** sets the shape the panels are laid out in — or, while the pop-out shows many nanowells as rows of crops
 (the Distribution window's in the Rows layout, or the rare-responder tests' flagged ones), how many rows a page holds,
-the pager recounting its pages to match — and **Save ▾** saves,
+the pager recounting its pages to match — and **Share ▾** saves,
 copies or files the figure. Each writes one ``NanowellState`` field through the controller
 (``set_popout_timepoints``, ``set_popout_channels``, ``set_popout_grid`` / ``set_popout_rows``,
 ``save_popout_figure``); the rules those
@@ -92,7 +92,7 @@ def _channel_name(st, channel: str) -> str:
 
 
 def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
-    """The row: **Timepoints**, **Channels**, **Grid** and **Save ▾**, each timepoint named by *timepoint_text*
+    """The row: **Timepoints**, **Channels**, **Grid** and **Share ▾**, each timepoint named by *timepoint_text*
     ``(tp, times_h)`` as the page's Timepoint control names it. Registers ``_nw_popout_refresh`` (each
     button's text put back on the state) and ``_nw_popout_rebuild_menus`` (what opening each menu does)."""
     from review.core.plot_card_actions import copy_active_card_as_svg, save_card_to_gallery
@@ -204,7 +204,7 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
     ctx.widgets.register("_nw_popout_refresh", refresh)
     ctx.widgets.register("_nw_popout_rebuild_menus", lambda: (rebuild_tps(), rebuild_channels(), rebuild_grid()))
 
-    save_btn, save_menu = make_action_menu_button("Save ▾", window, tooltip=_SAVE_TIP)
+    save_btn, save_menu = make_action_menu_button("Share ▾", window, tooltip=_SAVE_TIP)
     add_menu_action(save_menu, "Save figure…", lambda: nwc.save_popout_figure(ctx))
     add_menu_action(save_menu, "Copy figure as SVG", lambda: copy_active_card_as_svg(ctx, "_nw_popout_card"))
     save_menu.addSeparator()

@@ -72,9 +72,11 @@ ROLE_PROPERTY = "bandRole"
 PANEL_PROPERTY = "bandPanel"
 PANEL_ROOT = "root"
 PANEL_ROW = "row"
-#: Roles whose button opens an inspector tab: in the form — itself a tab of
-#: that inspector — the tab is one tap away, so the button is not shown.
-TAB_ROLES = ("display", "style")
+#: The band's three fixed buttons. None is shown in the form: the form is a
+#: tab of the inspector, where Display and Style are the tabs beside it, and
+#: the host that shows the form gives Share a permanent place of its own (the
+#: foot of a phone).
+TAB_ROLES = ("display", "style", "share")
 #: Where :func:`section_of_action` puts an action that is not in the form.
 PARKED = "Parked"
 #: What ends the text of a button that opens a page.

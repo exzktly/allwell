@@ -1516,11 +1516,13 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     assert shell.wells_button.text() == "Wells · 3"
 
 
-def test_a_page_with_no_picker_offers_no_wells_button(qapp, app_sheet):
+def test_a_page_with_no_picker_keeps_its_wells_slot_disabled(qapp, app_sheet):
+    """A slot a page cannot use is disabled, never removed: the four buttons
+    at the foot are where the thumb last found them on every page."""
     _win, shell, *_ = _wells_window(qapp, lambda s, f: [])
     shell.set_on(True)
     _pump(qapp)
-    assert not shell.wells_button.isVisible()
+    assert shell.wells_button.isVisible() and not shell.wells_button.isEnabled()
     shell.open_wells()                 # nothing to lend: nothing opens
     assert shell._wells_sheet is None
 
@@ -1553,11 +1555,13 @@ def test_the_page_menu_lists_this_section_s_pages_and_never_the_sections(qapp, a
     shell._fill_page_menu()
     picks = [a.text() for a in shell._page_menu.actions() if not a.isSeparator() and a.isEnabled()]
     assert picks == ["Bar Plots", "Line Graphs", "Scatter Plot"]
-    # A section with no pages of its own: no page button.
+    # A section with no pages of its own: the slot stays, naming the section,
+    # with nothing to pick.
     current_bar["bar"] = None
     nav.setCurrentKey("Statistics")
     shell.refresh()
-    assert not shell.page_button.isVisible()
+    assert shell.page_button.isVisible() and not shell.page_button.isEnabled()
+    assert shell.page_button.text() == "Statistics"
 
 
 def test_an_empty_plot_s_hint_says_where_the_plate_is_on_a_phone():
@@ -2305,3 +2309,91 @@ def test_an_unmounted_inspector_survives_the_sheet_it_was_in(qapp):
     shiboken6.delete(mount)
     assert shiboken6.isValid(insp) and insp.parentWidget() is None
     shiboken6.delete(insp)
+
+
+# ── the foot strip's four permanent slots, and Share ──────────────────────────
+
+def _share_window(qapp, *, with_share: bool):
+    """A page whose band holds a Share menu button (or none), built the way
+    ``ui_helpers.build_plot_save_menu`` builds it: a menu of commands, role
+    ``share``."""
+    from PySide6.QtWidgets import QMenu, QPushButton, QToolButton
+
+    from widgets.control_band import ControlBand
+    win = _window()
+    QVBoxLayout(win)
+    page = QWidget(win)
+    QVBoxLayout(page)
+    win.layout().addWidget(page)
+    band = ControlBand(page)
+    page.layout().addWidget(band)
+    band.add_scope("Channel", QPushButton("GFP"))
+    chosen: list[str] = []
+    share = None
+    if with_share:
+        share = QToolButton(band)
+        share.setText("Share ▾")
+        share.setProperty("bandRole", "share")
+        menu = QMenu(share)
+        for label in ("Save figure…", "Copy figure as SVG"):
+            menu.addAction(label).triggered.connect(lambda _=False, name=label: chosen.append(name))
+        share.setMenu(menu)
+        band.add_action(share)
+    shell = _shell(win, band_roots=lambda: [page])
+    return win, shell, band, share, chosen
+
+
+def test_the_strip_has_four_slots_in_one_order_and_share_is_disabled_on_a_page_with_nothing_to_share(
+        qapp, app_sheet):
+    win, shell, _band, _share, _chosen = _share_window(qapp, with_share=False)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.refresh()
+    slots = shell.strip_buttons()
+    assert slots == [shell.page_button, shell.wells_button, shell.controls_button, shell.share_button]
+    xs = [b.mapTo(win, b.rect().topLeft()).x() for b in slots[1:]]
+    assert xs == sorted(xs), "the slots are not in page · Wells · Controls · Share order"
+    assert all(b.isVisible() for b in slots[1:])
+    assert shell.controls_button.isEnabled()
+    assert not shell.share_button.isEnabled()
+    assert not shell.wells_button.isEnabled()        # this page has no well picker either
+
+
+def test_share_pops_the_page_s_own_menu_and_an_entry_reaches_its_command(qapp, app_sheet):
+    """Wrong implementations: a Share button that is offered and opens nothing,
+    one that opens a menu of its own that is not the page's, and one that
+    opens the menu on top of the Controls sheet (two surfaces)."""
+    from PySide6.QtTest import QTest
+
+    from tests import _surface_checks as surf
+    win, shell, _band, share, chosen = _share_window(qapp, with_share=True)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.refresh()
+    assert shell.share_button.isEnabled() and shell.share_button.text() == "Share ▾"
+    assert shell.share_button.menu() is None, "one arrow: the caret in the label, no Qt indicator"
+    shell.open_controls()
+    QTest.qWait(250)
+    shell.share_button.click()
+    QTest.qWait(250)
+    _pump(qapp)
+    menu = share.menu()
+    assert menu.isVisible(), "Share opened nothing"
+    assert not shell._sheet.isOpen(), "the menu opened over the Controls sheet"
+    assert surf.depth(win) == 1, surf.describe(surf.open_transients(win))
+    menu.actions()[1].trigger()
+    assert chosen == ["Copy figure as SVG"]
+    menu.close()
+
+
+def test_the_page_s_share_button_is_not_shown_again_inside_the_controls_sheet(qapp, app_sheet):
+    from PySide6.QtTest import QTest
+    win, shell, band, share, _chosen = _share_window(qapp, with_share=True)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.open_controls()
+    QTest.qWait(250)
+    assert not share.isVisibleTo(win), "Share is in the sheet as well as at the foot"
+    assert share in band.form().parked()
+    shell.refresh()
+    assert shell.share_button.isEnabled(), "a parked Share button stopped counting as the page's"

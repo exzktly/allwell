@@ -47,7 +47,7 @@ import re
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
-    QAbstractButton, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel,
+    QAbstractButton, QBoxLayout, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel,
     QSizePolicy, QStyle, QStyleOptionButton, QStyleOptionToolButton,
     QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
@@ -288,10 +288,11 @@ class BandForm:
         prefix dropped, a button painted as its value only. ``""`` for an item
         that describes itself."""
         lay = item.layout()
-        if isinstance(lay, QHBoxLayout):
+        if isinstance(lay, QBoxLayout):
             first = lay.itemAt(0).widget() if lay.count() else None
             # The caption ``add_scope`` bundled, or one a page bundled itself
-            # (a row that starts with a label and holds a control after it).
+            # (a row that starts with a label and holds a control after it), or
+            # the label a ``LabelledField`` sets above its control.
             if isinstance(first, QLabel) and lay.count() > 1 and first.text():
                 stretches = [lay.stretch(i) for i in range(lay.count())]
                 for i in range(1, lay.count()):

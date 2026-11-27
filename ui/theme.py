@@ -592,6 +592,9 @@ class Metrics:
     # floor for call sites that cannot use ``sizeHint()`` because they run before
     # the global stylesheet is applied and it under-reports there.
     checkbox_chrome_w = 34
+    # The label column of a form (``widgets/form_grid.FormGrid``): one width for every row, so the controls
+    # line up. The redraws' 112.
+    form_label_w   = 112
 
 
 def _icon_path(name: str) -> str:

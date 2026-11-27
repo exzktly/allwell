@@ -67,6 +67,12 @@ def scenarios(qapp, phone_screen):
 
     shutil.rmtree(SNAPSHOT_DATASET.parent, ignore_errors=True)
     dataset = build_mini_dataset(SNAPSHOT_DATASET)
+    # An empty history of recent datasets: it is the application's settings, shared by every test in the process,
+    # and Home's Recent datasets card grows with whatever earlier tests opened — the snapshot measured one card
+    # 122 px tall alone and 204 px after other files had run.
+    from core.app_settings import app_settings
+    from review.core import recent_datasets
+    recent_datasets.store(app_settings(), [])
     # The theme the app starts in, as ``allwell.main`` applies it (``tests/_page_render_case.start_window``
     # says why a window built without it shows the blue baseline). A theme bundle moves colours only today, so
     # the recorded geometry is the same in either palette; the theme is applied so that stops being an accident.

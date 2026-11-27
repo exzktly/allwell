@@ -2397,3 +2397,30 @@ def test_the_page_s_share_button_is_not_shown_again_inside_the_controls_sheet(qa
     assert share in band.form().parked()
     shell.refresh()
     assert shell.share_button.isEnabled(), "a parked Share button stopped counting as the page's"
+
+
+def test_the_more_menu_reaches_dataset_tools_and_manage_remote_servers(qapp, app_sheet):
+    """Both were out of reach in phone layout: the resets, copy analysis,
+    reveal folder and storage were title-bar icons hidden as fat-finger
+    targets, and Manage Remote Servers' button is in that same hidden bar."""
+    from ui.dataset_tools import DatasetToolsList, Tool
+    ran: list[str] = []
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win, dataset_tools=lambda: [Tool("Reveal folder", "Show it.", lambda: ran.append("reveal"))],
+                   manage_remotes=lambda: ran.append("remotes"))
+    shell.set_on(True)
+    _pump(qapp)
+    shell._fill_menu()
+    by_text = {a.text(): a for a in shell._menu.actions()}
+    assert "Dataset tools…" in by_text and "Manage remote servers…" in by_text
+    by_text["Manage remote servers…"].trigger()
+    assert ran == ["remotes"]
+    by_text["Dataset tools…"].trigger()
+    _pump(qapp)
+    lists = [w for w in qapp.topLevelWidgets() if isinstance(w, DatasetToolsList) and w.isVisible()]
+    assert len(lists) == 1
+    lists[0].buttons["Reveal folder"].click()
+    _pump(qapp)
+    assert ran == ["remotes", "reveal"]
+    lists[0].deleteLater()

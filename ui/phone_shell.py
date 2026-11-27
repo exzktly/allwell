@@ -132,6 +132,11 @@ class PhoneHandles:
     #: screen just before the sheet opens (the page's Display and Style tabs).
     inspector: Callable[[], object] | None = None
     fill_inspector: Callable[[], None] | None = None
+    #: The commands about the open dataset (``ui.dataset_tools.Tool``), which
+    #: ⋯ › *Dataset tools* lists; and Manage Remote Servers, whose button is
+    #: in the title bar phone layout hides.
+    dataset_tools: Callable[[], list] | None = None
+    manage_remotes: Callable[[], None] | None = None
     #: Roots whose page control bands phone layout moves into the Controls
     #: sheet (Review's pages, the Analyze output page). Datasets keeps its own:
     #: its tools put their Run buttons there.
@@ -2793,6 +2798,17 @@ class PhoneShell(QObject):
         self._menu.close()
         QTimer.singleShot(0, lambda: self.set_on(False))
 
+    def open_dataset_tools(self) -> None:
+        """⋯ › *Dataset tools*: the commands about the open dataset as a
+        full-screen list. The two resets ask first and do nothing until
+        confirmed (``ui/dataset_tools.py``)."""
+        from ui import dataset_tools
+        tools = self._h.dataset_tools() if self._h.dataset_tools is not None else []
+        if not tools:
+            return
+        self.close_sheets(now=True)
+        dataset_tools.open_list(self._win, list(tools))
+
     def _fill_menu(self) -> None:
         from widgets.owned_action import owned_action
         m = self._menu
@@ -2814,5 +2830,9 @@ class PhoneShell(QObject):
             fwd = owned_action(m, "Forward ›")
             fwd.setEnabled(history.can_forward())
             fwd.triggered.connect(history.forward)
+        if self._h.manage_remotes is not None:
+            owned_action(m, "Manage remote servers…").triggered.connect(self._h.manage_remotes)
+        if self._h.dataset_tools is not None and self._h.mode() == "review":
+            owned_action(m, "Dataset tools…").triggered.connect(self.open_dataset_tools)
         m.addSeparator()
         owned_action(m, "Desktop layout").triggered.connect(self._leave_from_menu)

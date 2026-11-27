@@ -475,56 +475,10 @@ class AllWellApp(QMainWindow):
         self._present_btn.toggled.connect(self._on_present_toggled)
         ra.addWidget(self._present_btn)
 
-        # Discard analysis decisions — sample definitions, gating, curation,
-        # ratios, smFISH thresholds, Batch Export groups — picked from a
-        # checklist. The companion to the rotate-ccw "reset view" beside it:
-        # that one drops how the data looks, this one drops what was decided
-        # about it. Both scopes are defined in persistence/reset_scopes.py.
-        self._reset_saves_btn = IconButton("trash-2")
-        self._reset_saves_btn.setToolTip(
-            "Reset analysis — choose what to discard: sample definitions, "
-            "gating, curation, ratio metrics, smFISH thresholds, Batch Export "
-            "groups. Your image and CSV files are never touched."
-        )
-        self._reset_saves_btn.clicked.connect(self._on_reset_saves_clicked)
-        ra.addWidget(self._reset_saves_btn)
-
-        # Copy analysis decisions — sample variables and definitions, gating,
-        # ratios, Batch Export groups, saved plots — from another dataset into
-        # this one, after a preview of how each fits. The roster and the fit
-        # check live in review/domain/recipe_compute.py.
-        self._copy_analysis_btn = IconButton("copy")
-        self._copy_analysis_btn.setToolTip(
-            "Copy analysis from another dataset or a recipe file — sample "
-            "definitions, gating, ratio metrics, Batch Export groups and saved "
-            "plots, with a preview of what fits before anything is written — "
-            "or save this dataset's analysis as a recipe file."
-        )
-        self._copy_analysis_btn.clicked.connect(self._on_copy_analysis_clicked)
-        ra.addWidget(self._copy_analysis_btn)
-
-        self._open_btn = IconButton("home")
-        self._open_btn.setToolTip(
-            "Reveal the current dataset's folder in your file manager "
-            "(use ⌘O to load a different dataset)."
-        )
-        self._open_btn.clicked.connect(self._reveal_dataset_in_file_manager)
-        ra.addWidget(self._open_btn)
-
-        # Reset the view tier: wells, group visibility, fold-change scopes,
-        # per-tab controls, plot and figure preferences, draw order, the heatmap
-        # arrangement and the Image Table grid. Asks first, but discards no
-        # scientific decision — those belong to the trash can beside it.
-        # ``rotate-ccw`` reads as "undo / reset"; the plain ``x`` icon
-        # previously sitting here was too close to a window-close glyph.
-        self._reset_view_btn = IconButton("rotate-ccw")
-        self._reset_view_btn.setToolTip(
-            "Reset view — selected wells, fold-change, per-tab controls, plot "
-            "and figure preferences, heatmap and Image Table layout. Sample "
-            "definitions, gating, and curation are left alone."
-        )
-        self._reset_view_btn.clicked.connect(self._on_reset_view_clicked)
-        ra.addWidget(self._reset_view_btn)
+        # Copy analysis, reveal folder, storage and the two resets are not
+        # icons in this cluster any more: they are *Dataset tools*, the last
+        # group of the dataset menu at the head of the rail and a list behind
+        # ⋯ in phone layout (``_dataset_tools``, ``ui/dataset_tools.py``).
 
         # The help drawer is the one control up here that is not about a loaded
         # dataset: it opens a manual documenting all three modes, and Analyze
@@ -538,16 +492,6 @@ class AllWellApp(QMainWindow):
         self._help_btn.setToolTip("Open the help drawer")
         self._help_btn.clicked.connect(self._toggle_help_drawer)
 
-        # The app's own files on this machine — logs, the font cache, temporary
-        # working folders, the open dataset's row cache — measured and cleared
-        # from one dialog (ui/local_storage_view.py). Outside the Review
-        # cluster for the help button's reason: none of it is about the loaded
-        # dataset alone, and a disk filling up is not a Review-only problem.
-        self._storage_btn = IconButton("hard-drive")
-        self._storage_btn.setToolTip(
-            "Storage — see how much space the app's logs, caches and temporary "
-            "files take, and clear them. Your data and analysis are not touched.")
-        self._storage_btn.clicked.connect(self._open_storage_dialog)
         self._storage_dialog = None
 
         # Remote node status, and the way into Manage Remotes, from every mode:
@@ -761,11 +705,8 @@ class AllWellApp(QMainWindow):
         # remaining controls can be thumb-sized. The status bar goes too; its
         # log "!" is mirrored onto ⋯.
         desk_only = [w for w in (
-            getattr(self, "_present_btn", None), getattr(self, "_reset_saves_btn", None),
-            getattr(self, "_copy_analysis_btn", None), getattr(self, "_open_btn", None),
-            getattr(self, "_reset_view_btn", None), getattr(self, "_refresh_btn", None),
+            getattr(self, "_present_btn", None), getattr(self, "_refresh_btn", None),
             getattr(self, "_help_btn", None), getattr(self, "_statusbar", None),
-            getattr(self, "_storage_btn", None),
             # The desk's ‹ › sit after the mode bar; phone layout has its own
             # Back beside ☰ (and Forward in ⋯), so these step aside.
             getattr(self, "_history_back_btn", None),
@@ -823,8 +764,13 @@ class AllWellApp(QMainWindow):
             wells_count=lambda: len(review._ctx.state.selection.selected_wells or ()),
             inspector=lambda: inspector_service.inspector(review._ctx),
             fill_inspector=lambda: inspector_service.fill(review._ctx),
+            dataset_tools=self._dataset_tools,
+            manage_remotes=self._open_manage_remotes,
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
+        # Review's dataset menu lists these as its last group; the key is
+        # ``app_shell_view.DATASET_TOOLS_KEY``.
+        review._ctx.widgets.register("_dataset_tools", self._dataset_tools)
         # The Controls sheet is the phone's host for Review's one inspector.
         inspector_service.set_phone_host(review._ctx, self._phone)
         # Among the small icon buttons at the header row's right end, just
@@ -1614,7 +1560,6 @@ class AllWellApp(QMainWindow):
                   getattr(split, "pane_combo", None),
                   getattr(self, "_review_actions", None),
                   getattr(self, "_remote_node_btn", None),
-                  getattr(self, "_storage_btn", None),
                   getattr(self, "_help_btn", None)):
             if w is not None:
                 # Re-parenting by hand first: a widget that already belongs to
@@ -1807,11 +1752,44 @@ class AllWellApp(QMainWindow):
         if review is None:
             return
         from review.core.recipe_view import copy_analysis_menu
-        btn = self._copy_analysis_btn
         menu = copy_analysis_menu(review._ctx, self,
                                   reload_after=self._reload_current_dataset)
+        # Under the dataset's own button, whose menu this was chosen from (it
+        # has closed, so one menu is open); in phone layout that button is in
+        # the rail's drawer, and the menu opens in the middle of the window.
+        btn = getattr(review, "_dataset_btn", None)
+        at = (btn.mapToGlobal(btn.rect().bottomLeft()) if btn is not None and btn.isVisible()
+              else self.mapToGlobal(self.rect().center()))
         # ``popup``, not ``exec``: the menu must not block the event loop.
-        menu.popup(btn.mapToGlobal(btn.rect().bottomLeft()))
+        menu.popup(at)
+
+    def _dataset_tools(self) -> list:
+        """The commands about the open dataset, in the order they are listed."""
+        from ui.dataset_tools import Tool
+        return [
+            Tool("Copy analysis…",
+                 "Copy sample definitions, gating, ratio metrics, Batch Export groups and "
+                 "saved plots from another dataset or a recipe file, with a preview of "
+                 "what fits — or save this dataset's analysis as a recipe file.",
+                 self._on_copy_analysis_clicked),
+            Tool("Reveal folder",
+                 "Show the current dataset's folder in your file manager.",
+                 self._reveal_dataset_in_file_manager),
+            Tool("Storage…",
+                 "See how much space the app's logs, caches and temporary files take, "
+                 "and clear them. Your data and analysis are not touched.",
+                 self._open_storage_dialog),
+            Tool("Reset view…",
+                 "Reset selected wells, fold-change, per-tab controls, plot and figure "
+                 "preferences, and the heatmap and Image Table layout. Sample "
+                 "definitions, gating and curation are left alone.",
+                 self._on_reset_view_clicked, destructive=True),
+            Tool("Reset analysis…",
+                 "Choose what to discard: sample definitions, gating, curation, ratio "
+                 "metrics, smFISH thresholds, Batch Export groups. Your image and CSV "
+                 "files are never touched.",
+                 self._on_reset_saves_clicked, destructive=True),
+        ]
 
     def _toggle_log_drawer(self) -> None:
         if self._log_drawer is None:

@@ -34,6 +34,8 @@ _ICON_PX = 14
 _TRACK_INSET = 3
 _TRACK_RADIUS = 9
 _SEGMENT_RADIUS = 6
+#: Room each side of a segment's label at the desk, where the pill is as wide as its segments need.
+_SEGMENT_PAD = theme.Spacing.md
 
 
 def tab_bar_height() -> int:
@@ -74,7 +76,7 @@ class _ModeSegment(QWidget):
 
         row = QHBoxLayout(self)
         # Room each side of the label, so a pill sized to its natural width does not run its segments together.
-        row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, 0)
+        row.setContentsMargins(_SEGMENT_PAD, 0, _SEGMENT_PAD, 0)
         row.setSpacing(theme.Spacing.xs + 2)
         row.addStretch(1)
 
@@ -207,12 +209,13 @@ class ModeBar(QWidget):
         The labels stay because they are the only thing that says what each
         segment is on a touch screen, where a tooltip never appears.
         """
-        pad = (theme.Spacing.sm if pad is None else int(pad)) if compact else 0
+        pad = (theme.Spacing.sm if pad is None else int(pad)) if compact else _SEGMENT_PAD
         self._compact = compact
+        # Compact, the pill gives its track's width to the band it shares with the page button.
+        inset = 0 if compact else _TRACK_INSET
+        self._row.setContentsMargins(inset, inset, inset, inset)
         for seg in self._segments:
             seg.setIconShown(not compact)
-            # Flush, the segments are as wide as the bar shares out; at its
-            # own width in a band, they need their own room around the label.
             seg.layout().setContentsMargins(pad, 0, pad, 0)
         self._equalise_widths()
 

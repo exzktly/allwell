@@ -18,6 +18,7 @@ from review.core.ui_helpers import (
 from review.features.export.service import (
     export_cell_data_from, export_distribution_data)
 from review.features.distribution.cell_scope_compute import cell_scope
+from review.features.distribution.controller import LEFT_MARGIN
 from review.data.data_loading import get_all_timepoints
 from widgets.labeled_combo import LabeledComboBox
 from widgets.spin_box import SpinBox
@@ -154,7 +155,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_card", card)
     fig = reg.register("_distribution_fig", card.figure)
     reg.register("_distribution_ax", fig.add_subplot(1, 1, 1))
-    fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
+    fig.subplots_adjust(top=0.93, bottom=0.12, left=LEFT_MARGIN, right=0.97)
     reg.register("_distribution_canvas", card.canvas)
     # NOTE: no shared SEM/SD band control here. The card's controls row stays
     # hidden because this tab draws per-group histograms / KDEs / violins and

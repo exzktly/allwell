@@ -1110,6 +1110,9 @@ _P_SEEN = "_awPhoneSeen"
 #: the upright strip, where the page button needs the room.
 SHARE_TEXT = "Share ▾"
 SHARE_GLYPH = "⇪"
+#: The Controls slot's name: its word beside the gear sideways, its tooltip and accessible name upright, where it
+#: is the gear alone.
+CONTROLS_TEXT = "Controls"
 
 
 class PhoneShell(QObject):
@@ -1340,7 +1343,7 @@ class PhoneShell(QObject):
         self.controls_button.setObjectName("PhoneControlsButton")
         # The drawn gear beside the word (design language §3.6), not the "⚙" character.
         from widgets import icons as _icons
-        self.controls_button.setText("Controls")
+        self.controls_button.setText(CONTROLS_TEXT)
         self.controls_button.setIcon(_icons.make_icon("sliders", 16, dpr=self.controls_button.devicePixelRatioF() or 1.0))
         self.controls_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         # It keeps its name while its sheet is open, and shows that it is by
@@ -1499,6 +1502,14 @@ class PhoneShell(QObject):
         # (its name in the tooltip and accessible name); sideways, in the bar,
         # it is worded.
         self.share_button.setText(SHARE_TEXT if landscape else SHARE_GLYPH)
+        # Controls likewise: its drawn gear alone upright, where the page button needs the room — measured, the
+        # gear and the word left "Response Curves ▾" 130 px of the 147 it needs — and the gear and the word
+        # sideways. Its name is its tooltip and accessible name either way.
+        self.controls_button.setText(CONTROLS_TEXT if landscape else "")
+        self.controls_button.setToolButtonStyle(
+            Qt.ToolButtonTextBesideIcon if landscape else Qt.ToolButtonIconOnly)
+        self.controls_button.setToolTip(CONTROLS_TEXT)
+        self.controls_button.setAccessibleName(CONTROLS_TEXT)
 
     def strip_buttons(self) -> list[QWidget]:
         """The four permanent slots, in order: page, Wells, Controls, Share."""

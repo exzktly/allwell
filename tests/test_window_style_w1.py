@@ -24,7 +24,12 @@ def window(qapp):
     for _ in range(10):
         QApplication.processEvents()
     yield win
+    # Closed and deleted, not only closed: a window left alive answers the next test's ReviewApp (its signals
+    # reach a live shell), and the closed-app test then counts what that shell built as a leak.
     win.close()
+    win.deleteLater()
+    for _ in range(5):
+        QApplication.processEvents()
 
 
 def _pixel(widget, x: int, y: int) -> str:

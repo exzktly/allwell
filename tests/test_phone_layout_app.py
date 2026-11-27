@@ -312,7 +312,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         _pump(qapp)
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.text() == "Controls" and shell.controls_button.isChecked()
+        assert shell.controls_button.accessibleName() == "Controls" and shell.controls_button.isChecked()
         assert shell._inspector().close_button.text() == "Close"
         # At most 60 % of the window (Plotting's controls fill that on this
         # small screen), and no scrim: the plot above it is what the controls

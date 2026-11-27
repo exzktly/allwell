@@ -107,7 +107,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # in the section, above the folder it sets (as asked for), and inside
         # it rather than floating above every section as it used to.
         self._open_pinfo_btn = QPushButton("Use settings from a previous run…", sec)
-        self._open_pinfo_btn.setProperty("variant", "secondary")
+        self._open_pinfo_btn.setProperty("variant", "default")
         self._open_pinfo_btn.setToolTip(
             "Open a run's pipeline_info.json and fill the whole form from it, "
             "input folder included.")
@@ -142,7 +142,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # so a lock on the folder until the schema was valid pointed each half
         # of the form at the other. A schema problem stops Run instead.
         self._browse_btn = QPushButton("Browse…", in_pick)
-        self._browse_btn.setProperty("variant", "secondary")
+        self._browse_btn.setProperty("variant", "default")
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
         sec.layout().addWidget(in_pick)

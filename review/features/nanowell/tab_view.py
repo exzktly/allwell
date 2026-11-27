@@ -906,7 +906,7 @@ def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(_EXTREMES_TPS_TIP)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setProperty("hasMenu", True)
     menu = QMenu(button)
     button.setMenu(menu)
@@ -998,7 +998,7 @@ def _crops_header(ctx, parent) -> QWidget:
     title = QLabel("Crops over time", host)
     title.setObjectName("Caption")
     button = QPushButton("Pop out", host)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setToolTip("Open the first selected nanowell's crops at every timepoint, large, in a window of their own "
                       "— on one brightness scale, so changes between timepoints read as changes. The window "
                       "follows the selection.")
@@ -1017,7 +1017,7 @@ def _crops_header(ctx, parent) -> QWidget:
 def _go_to_button(ctx, name: str, parent) -> QPushButton:
     """**Go to nanowell**: the crops' nanowell on Identity ▸ Blink (``controller.go_to_site_in_blink``)."""
     button = QPushButton("Go to nanowell", parent)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setToolTip(_GO_TO_TIP)
     button.clicked.connect(lambda _=False: nwc.go_to_site_in_blink(ctx))
     ctx.widgets.register(name, button)
@@ -1184,7 +1184,7 @@ class _PopoutWindow(QDialog):
 
 def _button(text: str, tip: str, on_click) -> QPushButton:
     button = QPushButton(text)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setToolTip(tip)
     if on_click is not None:
         button.clicked.connect(lambda _=False: on_click())
@@ -1198,7 +1198,7 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(_LAYERS_TIP)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setProperty("hasMenu", True)
     menu = QMenu(button)
     button.setMenu(menu)
@@ -1396,7 +1396,7 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
     overlays_btn = _button("Overlays", _OVERLAYS_TIP, None)
     overlays_btn.setCheckable(True)
-    overlays_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
+    overlays_btn.setProperty("variant", "toggle")         # a default button paints checked and unchecked the same
     overlays_btn.setChecked(True)
     overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
     reg.register("_nw_overlays_btn", overlays_btn)
@@ -1436,7 +1436,7 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     # The anchor's buttons last: actions on the picture, after the settings that say how it is drawn.
     anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
     anchor_btn.setCheckable(True)
-    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
+    anchor_btn.setProperty("variant", "toggle")         # a default button paints checked and unchecked the same
     anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
     clear_anchor_btn = _button("Clear anchor", _CLEAR_ANCHOR_TIP, lambda: nwc.clear_anchor(ctx))
     # Shorter here than on the QC view, where it has room: every button beside it already says "anchor".

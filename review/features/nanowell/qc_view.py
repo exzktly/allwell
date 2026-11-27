@@ -26,7 +26,7 @@ RERUN_TIP = ("Open Analyze on this dataset, limited to the wells with an anchor,
 _RERUN_NONE = "No well has an anchor set: there is nothing for a re-run to use."
 
 
-def _button(text: str, tip: str, on_click, *, variant: str = "secondary") -> QPushButton:
+def _button(text: str, tip: str, on_click, *, variant: str = "default") -> QPushButton:
     button = QPushButton(text)
     button.setProperty("variant", variant)
     button.setToolTip(tip)
@@ -80,7 +80,7 @@ def _walk_button(ctx, parent):
     button = QToolButton(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setProperty("hasMenu", True)
     button.setToolTip(WALK_TIP)
     menu = QMenu(button)

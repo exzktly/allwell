@@ -133,7 +133,7 @@ def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path)
     ctrl = ConcatenateController(on_open_in_review=lambda _p: None)
     page = ctrl.page
     assert page._run_btn.property("variant") == "primary"
-    assert page._open_btn.property("variant") == "secondary"
+    assert page._open_btn.property("variant") == "default"
 
     page._ds1_field.set_path(str(ds1))
     page._ds2_field.set_path(str(ds2))
@@ -144,7 +144,7 @@ def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path)
 
     assert ctrl._last_result[0] is True
     assert page._open_btn.property("variant") == "primary"
-    assert page._run_btn.property("variant") == "secondary"
+    assert page._run_btn.property("variant") == "default"
 
     # Picking dataset 1 again (any interactive input change) hands the
     # primary emphasis back to the run button.

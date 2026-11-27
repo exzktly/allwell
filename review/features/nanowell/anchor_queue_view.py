@@ -17,7 +17,7 @@ from review.features.nanowell import _anchor_queue as aq
 
 def _button(text: str, tip: str, on_click) -> QPushButton:
     button = QPushButton(text)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setToolTip(tip)
     button.clicked.connect(lambda _=False: on_click())
     return button
@@ -62,7 +62,7 @@ def build_queue_controls(ctx, band) -> SimpleNamespace:
     stop = _button("Stop", f"End the queue here and restore the selection it started with ({_KEY_NAMES['stop']}).",
                    lambda: aq.stop(ctx))
     per_well = QPushButton("One per well")
-    per_well.setProperty("variant", "toggle")       # "secondary" paints checked and unchecked the same
+    per_well.setProperty("variant", "toggle")       # a default button paints checked and unchecked the same
     per_well.setCheckable(True)
     per_well.setToolTip(PER_WELL_TIP)
     per_well.toggled.connect(lambda on: aq.set_per_well(ctx, on))

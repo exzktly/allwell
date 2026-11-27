@@ -223,7 +223,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
         self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setProperty("variant", "default")
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -234,7 +234,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._build_status_section(outer)
 
         self._open_btn = QPushButton("Open dataset in Analyze", self)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn.setProperty("variant", "default")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInAnalyzeRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
@@ -318,7 +318,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             # Promoted to the primary action on success, demoting Convert —
             # see ConcatenatePage.show_open_in_review for the reasoning.
             set_variant(self._open_btn, "primary")
-            set_variant(self._run_btn, "secondary")
+            set_variant(self._run_btn, "default")
 
     def revalidate_fields(self, *, ok: bool = False) -> None:
         """Re-run the destination field's validator against current disk

@@ -46,13 +46,13 @@ class SelectionFooter(QWidget):
         lay.addWidget(self._count, 1)
 
         self._all = QPushButton("All", self)
-        self._all.setProperty("variant", "secondary")
+        self._all.setProperty("variant", "default")
         self._all.setToolTip(all_tooltip)
         self._all.clicked.connect(lambda _=False: self.selectAllRequested.emit())
         lay.addWidget(self._all)
 
         self._none = QPushButton("None", self)
-        self._none.setProperty("variant", "secondary")
+        self._none.setProperty("variant", "default")
         self._none.setToolTip(none_tooltip)
         self._none.clicked.connect(lambda _=False: self.selectNoneRequested.emit())
         lay.addWidget(self._none)

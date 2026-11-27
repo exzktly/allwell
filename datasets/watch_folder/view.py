@@ -150,7 +150,7 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         self._run_btn.clicked.connect(self.runRequested)
         bl.addWidget(self._run_btn)
         self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setProperty("variant", "default")
         self._queue_btn.setToolTip(
             "Add this watch to the Job Queue, to run ahead of the jobs that "
             "should wait for the folder.")

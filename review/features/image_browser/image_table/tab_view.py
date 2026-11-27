@@ -92,7 +92,7 @@ def _menu_button(parent, text, *, tooltip="") -> QToolButton:
     btn.setPopupMode(QToolButton.InstantPopup)
     if tooltip:
         btn.setToolTip(tooltip)
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
     return btn
 
@@ -575,7 +575,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # the readout in the middle already reads "100%", which says what the two
     # buttons either side of it do.
     zoom_out = QPushButton("−", action_row)
-    zoom_out.setProperty("variant", "secondary")
+    zoom_out.setProperty("variant", "default")
     zoom_out.setFixedWidth(_ZOOM_OUT_W)
     zoom_out.setToolTip("Zoom out")
     zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1 / 1.25, relative=True))
@@ -591,7 +591,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr.addWidget(zoom_lbl)
 
     zoom_in = QPushButton("+", action_row)
-    zoom_in.setProperty("variant", "secondary")
+    zoom_in.setProperty("variant", "default")
     zoom_in.setFixedWidth(_ZOOM_IN_W)
     zoom_in.setToolTip("Zoom in")
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))

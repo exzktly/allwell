@@ -95,7 +95,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     gpl = QHBoxLayout(gate_pick_row)
     gpl.setContentsMargins(16, 0, 0, 0)
     gate_pick_btn = QPushButton("Gate", gate_pick_row)
-    gate_pick_btn.setProperty("variant", "secondary")
+    gate_pick_btn.setProperty("variant", "default")
     gate_pick_btn.setToolTip("Choose which scatter gate(s) define the cells.")
     gate_pick_btn.clicked.connect(lambda _=False: _open_gate_select(ctx))
     gpl.addWidget(gate_pick_btn)
@@ -137,7 +137,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     ctx.runtime.cell_browser.criteria_rows = []
 
     add_btn = QPushButton("+ Add criterion", parent)
-    add_btn.setProperty("variant", "secondary")
+    add_btn.setProperty("variant", "default")
     add_btn.clicked.connect(lambda _=False: _add_row(ctx))
     lay.addWidget(add_btn)
     ctx.runtime.cell_browser.add_criterion_btn = add_btn
@@ -162,7 +162,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     trl = QHBoxLayout(tp_row)
     trl.setContentsMargins(0, 0, 0, 0)
     tp_btn = QPushButton("Timepoints", tp_row)
-    tp_btn.setProperty("variant", "secondary")
+    tp_btn.setProperty("variant", "default")
     tp_btn.clicked.connect(lambda _=False: _open_multiselect(
         ctx, tp_btn, ctx.runtime.cell_browser.tp_selections, ctx.runtime.cell_browser.tp_label))
     trl.addWidget(tp_btn)
@@ -178,7 +178,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     frl = QHBoxLayout(fov_row)
     frl.setContentsMargins(0, 0, 0, 0)
     fov_btn = QPushButton("FOVs", fov_row)
-    fov_btn.setProperty("variant", "secondary")
+    fov_btn.setProperty("variant", "default")
     fov_btn.clicked.connect(lambda _=False: _open_multiselect(
         ctx, fov_btn, ctx.runtime.cell_browser.fov_selections, ctx.runtime.cell_browser.fov_label))
     frl.addWidget(fov_btn)

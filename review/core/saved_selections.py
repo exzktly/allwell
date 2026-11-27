@@ -72,7 +72,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
         name_edit.setPlaceholderText("Name current selection…")
         nr.addWidget(name_edit, 1)
         add_btn = QPushButton("Add", name_row)
-        add_btn.setProperty("variant", "secondary")
+        add_btn.setProperty("variant", "default")
         add_btn.setToolTip(
             "Save the wells currently selected under a name you can get back. "
             "A saved selection only restores which wells are lit — it pools "

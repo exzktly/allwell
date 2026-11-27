@@ -119,7 +119,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # selected" readout (see ``update_bar_tp_selection_display``), so it needs
     # no separate caption or count label beside it.
     tp_button = reg.register("_bar_tp_button", QPushButton("Timepoints: 0 selected"))
-    tp_button.setProperty("variant", "secondary")
+    tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(
         lambda _=False: open_bar_timepoint_selector(ctx)
     )

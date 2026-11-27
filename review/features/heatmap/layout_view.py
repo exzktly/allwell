@@ -533,7 +533,7 @@ class _LayoutPanel(QWidget):
         autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(ctx))
         actions_l.addWidget(autopop_btn, 1)
         clear_btn = QPushButton("Clear", actions)
-        clear_btn.setProperty("variant", "secondary")
+        clear_btn.setProperty("variant", "default")
         clear_btn.setToolTip("Empty every cell of the grid; its size and labels stay")
         clear_btn.clicked.connect(lambda _=False: _on_clear_all(ctx))
         actions_l.addWidget(clear_btn, 0)

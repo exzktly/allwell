@@ -49,7 +49,7 @@ def build_goto_controls(ctx, band) -> GotoControls:
     edit.textChanged.connect(lambda text: gtc.go_to_nanowell(ctx, "") if not text.strip() else None)
     ctx.widgets.register("_nw_goto_edit", edit)
     origin = QPushButton("Origin")
-    origin.setProperty("variant", "secondary")
+    origin.setProperty("variant", "default")
     origin.setToolTip(_ORIGIN_TIP)
     origin.clicked.connect(lambda _=False: go_to(ctx, edit, "0,0"))
     ctx.widgets.register("_nw_goto_origin_btn", origin)

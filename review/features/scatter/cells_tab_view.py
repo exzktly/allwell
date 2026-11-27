@@ -90,7 +90,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # selected" readout (see update_scatter_tp_selection_display), so it needs
     # no separate caption or count label beside it.
     tp_button = reg.register("_scatter_tp_button", QPushButton("Timepoints: 0 selected", ctrl))
-    tp_button.setProperty("variant", "secondary")
+    tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
     ctrl.add_scope("", tp_button)
     # Hidden legacy single-tp combo — kept so export / save-figure paths that

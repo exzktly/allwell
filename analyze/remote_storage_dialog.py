@@ -174,7 +174,7 @@ class RemoteStorageDialog(QDialog):
 
         actions = QHBoxLayout()
         self._delete_btn = QPushButton("Delete…", self)
-        self._delete_btn.setProperty("variant", "danger")
+        self._delete_btn.setProperty("variant", "destructive")
         self._delete_btn.clicked.connect(self._on_delete)
         actions.addWidget(self._delete_btn)
         actions.addSpacing(12)

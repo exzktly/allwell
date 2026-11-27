@@ -181,7 +181,7 @@ class JobQueuePage(QWidget):
         # different answers to "I want this to stop", and the destructive one
         # should never be the one reached for by default.
         self._stop_btn = QPushButton("■  Stop job", self)
-        self._stop_btn.setProperty("variant", "danger")
+        self._stop_btn.setProperty("variant", "destructive")
         self._stop_btn.setEnabled(False)
         self._stop_btn.setToolTip(
             "Cancel the running job outright, discarding whatever it has in "
@@ -193,7 +193,7 @@ class JobQueuePage(QWidget):
         # the only thing here was a button for Analyze specifically, and every
         # other kind had to be started from its own page.
         self._add_btn = QPushButton("+  Add job", self)
-        self._add_btn.setProperty("variant", "secondary")
+        self._add_btn.setProperty("variant", "default")
         self._add_btn.setToolTip(
             "Open a tool's page to set up a new queued job.")
         self._add_btn.clicked.connect(self._open_add_menu)
@@ -203,7 +203,7 @@ class JobQueuePage(QWidget):
         # has no QMenu attached, so Qt draws no indicator and the label needs
         # no caret (CLAUDE.md §7.12).
         self._recipes_btn = QPushButton("Recipes", self)
-        self._recipes_btn.setProperty("variant", "secondary")
+        self._recipes_btn.setProperty("variant", "default")
         self._recipes_btn.setToolTip(
             "Queue a saved chain of jobs on a new folder or file. Save a chain "
             "from any of its jobs' ⋯ menu: “Save chain as recipe…”.")

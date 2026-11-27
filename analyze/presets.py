@@ -32,7 +32,7 @@ class AnalyzePresetsMixin:
     def _build_presets_button(self, parent: QWidget) -> QPushButton:
         """The *Presets* button and its menu, for the caller to place."""
         self._presets_btn = QPushButton("Presets", parent)
-        self._presets_btn.setProperty("variant", "secondary")
+        self._presets_btn.setProperty("variant", "default")
         self._presets_btn.setToolTip(
             "Save this form's settings under a name, or fill the form from a saved preset. "
             "A preset never changes the input folder, the wells chosen for a run, or what to do "

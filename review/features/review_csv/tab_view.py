@@ -50,7 +50,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("", tp_cb)
 
     refresh_btn = QPushButton("Refresh", ctrl)
-    refresh_btn.setProperty("variant", "secondary")
+    refresh_btn.setProperty("variant", "default")
     refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))
     ctrl.add_action(refresh_btn)
 

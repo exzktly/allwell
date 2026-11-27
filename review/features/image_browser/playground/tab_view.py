@@ -266,13 +266,13 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     frl = QHBoxLayout(file_row)
     frl.setContentsMargins(0, 2, 0, 2)
     open_btn = QPushButton("Open image…", file_row)
-    open_btn.setProperty("variant", "secondary")
+    open_btn.setProperty("variant", "default")
     open_btn.setToolTip(
         "Load a single image file straight from disk, instead of a frame from "
         "the loaded dataset. Works with no dataset open at all — the intended "
         "way to tune segmentation before running a plate.")
     clear_btn = QPushButton("Use dataset", file_row)
-    clear_btn.setProperty("variant", "secondary")
+    clear_btn.setProperty("variant", "default")
     clear_btn.setToolTip("Go back to the frame selected above.")
     frl.addWidget(open_btn)
     frl.addWidget(clear_btn)

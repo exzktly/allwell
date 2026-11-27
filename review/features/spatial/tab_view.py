@@ -219,7 +219,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # Labelled, not a bare tick. A "✓" button says nothing about what it does;
     # this one forces a fresh compute, and the glyph now says so too.
     recompute_btn = QPushButton("Recompute")
-    recompute_btn.setProperty("variant", "secondary")
+    recompute_btn.setProperty("variant", "default")
     recompute_btn.setIcon(make_icon("refresh-cw", 14))
     recompute_btn.setToolTip(
             "Force a fresh compute.\n"

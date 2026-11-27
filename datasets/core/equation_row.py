@@ -121,7 +121,7 @@ def build_equation_row(
         sl.setSpacing(theme.Spacing.sm)
         swap = QPushButton("⇄  Swap dataset 1 and 2", swap_row)
         swap.setObjectName("EquationSwap")
-        swap.setProperty("variant", "secondary")
+        swap.setProperty("variant", "default")
         swap.clicked.connect(lambda _checked=False: on_swap())
         sl.addWidget(swap)
         if swap_note:

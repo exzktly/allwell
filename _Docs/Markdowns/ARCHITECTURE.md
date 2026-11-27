@@ -1623,6 +1623,8 @@ allwell/
 │   │                              both, alongside domain/well_palette.py, whose 96 rank colours
 │   │                              this module re-exports). Its class values are the blue palette
 │   ├── palettes.py             ← the palettes as data: the grey bundle, role by role (§8)
+│   ├── buttons.py              ← the four kinds of button (primary, default, quiet, destructive),
+│   │                              their builders and sheet rules (§8)
 │   ├── text_roles.py           ← the six text roles (page title, section heading, eyebrow, body,
 │   │                              label/help, number) as QLabel builders, their sheet rules, and
 │   │                              NOT_SET, how an unset value reads (§8)
@@ -14973,9 +14975,9 @@ walks every view. Within a view every control that cannot act is greyed with
   of `anchor_controls`' predicate that fails (`controller.anchor_unavailable_reason`); Clear anchor and Re-run
   wells… with nothing to clear or re-run. Nothing is hidden by a layer choice, and
   `tests/test_nanowell_array_band_layout.py` (UI lane) holds every control's position fixed across layers,
-  colourings, images, positions and Overlays, that every view keeps its selection, filter and viewing controls to their own rows in order at 1500 and 1200 px, and that the breaks are shown on every view. The theme's `secondary` buttons carry
-  their own `:disabled` rule: the `[variant="secondary"]` selector outranks a bare `:disabled`, so without it a
-  greyed secondary button painted as an enabled one, app-wide.
+  colourings, images, positions and Overlays, that every view keeps its selection, filter and viewing controls to their own rows in order at 1500 and 1200 px, and that the breaks are shown on every view. Each of the four button kinds carries
+  its own `:disabled` rule: a `[variant=…]` selector outranks a bare `:disabled`, so without it a greyed button
+  of that kind painted as an enabled one, app-wide.
 - **Moving around and clicking** (`controller.on_click` / `on_motion` / `on_release` / `on_scroll`, connected on
   the page's canvas). A press records where it started; a drag pans the axes at once and, on release, keeps the
   region (`state.region`, for the `(well, positions)` in `region_for`, so another well or frame fits afresh) and
@@ -15084,7 +15086,7 @@ walks every view. Within a view every control that cannot act is greyed with
   runs, so a walk adds nothing to the band's width. Because its keys and card die with the group, choosing a view
   other than the one the current item is on ends the walk (`controller.set_view` calls `_anchor_queue.stop` with the
   view chosen). The page's checkable buttons (*Set anchor*, *Overlays*, *One per well*) take the theme's `toggle`
-  variant: `secondary` overrides the `:checked` fill, so on and off painted the same. Stop, stepping past the last
+  variant: a default button's rule overrides the `:checked` fill, so on and off painted the same. Stop, stepping past the last
   item, or choosing another view restores the starting selection and returns to the view the walk started from
   (`AnchorQueue.return_view`, the QC view) or to the view chosen instead. What it says there is
   `resolve_compute.finished`: what it did (anchored and skipped, or *looked at* for a class with nothing to set) and
@@ -19034,7 +19036,7 @@ whole field) for the run's duration — previously the one Datasets tool that
 locked none of its fields at all, leaving a mid-run pick free to change what a
 subsequent Concatenate press would act on. On success,
 `show_open_in_review` promotes "Open in Review" to `variant="primary"` and
-demotes "▶ Concatenate" to `variant="secondary"` (via `widgets._support.
+demotes "▶ Concatenate" to `variant="default"` (via `widgets._support.
 set_variant`, see §7) — the natural next step is opening the result, not
 re-running the same merge. The status section's header/dashboard title read
 "Concatenate Output"/"Concatenate Progress" rather than "Merge Output"/"Merge
@@ -20442,7 +20444,7 @@ the (now field-locked, but still worth being defensive about) live page —
 the same class of mid-run-field-change bug already fixed on Subset's and
 Validate's own source fields. On success, `show_open_in_review` promotes
 "Open in Review" to `variant="primary"` and demotes "▶ Merge" to
-`variant="secondary"` (`widgets._support.set_variant`, see §7), and
+`variant="default"` (`widgets._support.set_variant`, see §7), and
 `revalidate_fields(ok=True)` swaps the destination field's post-run
 "already holds a finished dataset" validator message for a neutral note
 (`PathField.show_note`) instead of re-showing what reads as a warning about
@@ -22383,6 +22385,21 @@ states a control passes through, `titlebar` and `rail` the shell's regions, and
 two: a reader that wants text quieter than a label takes `text_secondary`, or
 `text_disabled` where what it draws is disabled.
 
+**Every button is one of four kinds** (`ui/buttons.py`): *primary* (the accent
+fill and a dark semibold label — the one action that produces the page's
+result), *default* (the control fill and the button edge), *quiet* (no fill or
+edge until the pointer is on it, secondary ink — toolbars and the commands
+beside a primary one) and *destructive* (the default button with a red label).
+The kind is the `variant` property; `buttons.qss` writes the four rules, each
+with its own hover, pressed and disabled states, and `theme.qss()` includes
+them. `button(text, kind, …)` and the four named builders build one, and
+`set_kind` changes a built button's kind and re-polishes. `ui_helpers.btn_*`
+build through it. `tests/test_button_kinds.py` measures each kind's drawn fill,
+label ink and weight; `tests/test_buttons_have_one_of_four_kinds.py` fails on
+any other variant value set anywhere (a call, a conditional, a table row, a
+helper's default), with the buttons that carry an on/off state on its roster
+until each becomes a switch, checkbox or segmented control.
+
 **Every piece of text is one of six roles** (`ui/text_roles.py`): a page title
 (17 semibold), a section heading (15 semibold), an eyebrow (12 semibold, capitals,
 tracked, secondary ink), body text (13), a label or help (12, secondary ink) and a
@@ -22760,7 +22777,7 @@ explicit repolish. It generalises the precedent
 `review.core.plot_toggles.refresh_fov_btn_state` set (a checked-state
 button variant flipping live the same way) so call sites don't each
 reimplement the unpolish/polish pair by hand; every Datasets tool page uses it
-to swap its Run/Open buttons between `primary`/`secondary` once a run
+to swap its Run/Open buttons between `primary`/`default` once a run
 succeeds (§6b).
 
 ---

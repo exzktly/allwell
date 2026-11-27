@@ -139,7 +139,7 @@ def _button_row(parent: QWidget, lay: QVBoxLayout) -> FlowLayout:
 
 def _button(parent: QWidget, text: str, tip: str, *, checkable: bool = False) -> QPushButton:
     btn = QPushButton(text, parent)
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     btn.setToolTip(tip)
     btn.setCheckable(checkable)
     return btn

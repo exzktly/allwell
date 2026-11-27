@@ -205,7 +205,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         folder_layout.setContentsMargins(0, 0, 0, 0)
         self._pick_folder_btn = QPushButton(
             "Choose a folder of .czi files instead…", folder_row)
-        set_variant(self._pick_folder_btn, "secondary")
+        set_variant(self._pick_folder_btn, "default")
         self._pick_folder_btn.setToolTip(
             "For ZEN's Split Scenes export, which writes one .czi per scene")
         self._pick_folder_btn.clicked.connect(self._pick_source_folder)
@@ -396,13 +396,13 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._run_btn.clicked.connect(self.runRequested.emit)
         layout.addWidget(self._run_btn)
         self._queue_btn = QPushButton("+ Queue", row)
-        set_variant(self._queue_btn, "secondary")
+        set_variant(self._queue_btn, "default")
         self._queue_btn.setToolTip("Add this conversion to the Job Queue "
                                    "instead of running it now")
         self._queue_btn.clicked.connect(self.queueRequested.emit)
         layout.addWidget(self._queue_btn)
         self._open_btn = QPushButton("Open dataset in Analyze", row)
-        set_variant(self._open_btn, "secondary")
+        set_variant(self._open_btn, "default")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(
             lambda: self.openInAnalyzeRequested.emit(self._dest_root))

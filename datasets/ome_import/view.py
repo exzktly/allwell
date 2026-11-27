@@ -205,7 +205,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
         self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setProperty("variant", "default")
         self._queue_btn.setToolTip("Add this conversion to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -233,7 +233,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._build_status_section(outer)
 
         self._open_btn = QPushButton("Open dataset in Analyze", self)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn.setProperty("variant", "default")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(
             lambda: self.openInAnalyzeRequested.emit(self._dest_root))
@@ -333,7 +333,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._suggest_label.setWordWrap(True)
         sl.addWidget(self._suggest_label, 1)
         self._suggest_btn = QPushButton("Apply again", self._suggest_row)
-        self._suggest_btn.setProperty("variant", "secondary")
+        self._suggest_btn.setProperty("variant", "default")
         self._suggest_btn.setToolTip(
             "Fill the grid, FOVs per well, serpentine direction, frame order "
             "and — when the metadata names it — the starting well, from the "
@@ -484,7 +484,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
         self._seed_btn = QPushButton("Generate path from grid", btn_row)
-        self._seed_btn.setProperty("variant", "secondary")
+        self._seed_btn.setProperty("variant", "default")
         self._seed_btn.setToolTip(
             "Fill the plate with the serpentine path of the grid above, as an "
             "editable starting point."
@@ -492,7 +492,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._seed_btn.clicked.connect(self._generate_path)
         bl.addWidget(self._seed_btn)
         self._clear_path_btn = QPushButton("Clear path", btn_row)
-        self._clear_path_btn.setProperty("variant", "secondary")
+        self._clear_path_btn.setProperty("variant", "default")
         self._clear_path_btn.setToolTip(
             "Clear the clicked ordering and return to the live grid preview."
         )

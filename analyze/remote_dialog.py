@@ -247,7 +247,7 @@ class RemoteFormDialog(QDialog):
         self._ssh_alias_edit.setPlaceholderText("user@host or ~/.ssh/config alias")
         ssh_row_layout.addWidget(self._ssh_alias_edit, 1)
         self._test_btn = QPushButton("Test SSH", ssh_row)
-        self._test_btn.setProperty("variant", "secondary")
+        self._test_btn.setProperty("variant", "default")
         self._test_btn.clicked.connect(self._test_ssh)
         ssh_row_layout.addWidget(self._test_btn)
         form.addRow("SSH alias *", ssh_row)
@@ -267,7 +267,7 @@ class RemoteFormDialog(QDialog):
         )
         key_row_layout.addWidget(self._ssh_key_edit, 1)
         self._setup_key_btn = QPushButton("Setup SSH Key…", key_row)
-        self._setup_key_btn.setProperty("variant", "secondary")
+        self._setup_key_btn.setProperty("variant", "default")
         self._setup_key_btn.setToolTip(
             "Generate a passphrase-less Ed25519 key and walk through "
             "copying it to the remote so future runs don't need a password."
@@ -340,7 +340,7 @@ class RemoteFormDialog(QDialog):
         self._profile_combo.activated.connect(self._on_profile_chosen)
         prof_row.addWidget(self._profile_combo, 1)
         self._fetch_prof_btn = QPushButton("Fetch", self._scheduled_box)
-        self._fetch_prof_btn.setProperty("variant", "secondary")
+        self._fetch_prof_btn.setProperty("variant", "default")
         self._fetch_prof_btn.setToolTip(
             "Read jupyterhub_config.py on the remote and list its compute "
             "profiles (no JupyterHub webpage needed)."
@@ -370,7 +370,7 @@ class RemoteFormDialog(QDialog):
         self._compute_launcher_edit.textEdited.connect(self._on_launcher_edited)
         launcher_row.addWidget(self._compute_launcher_edit, 1)
         self._test_sched_btn = QPushButton("Test", self._scheduled_box)
-        self._test_sched_btn.setProperty("variant", "secondary")
+        self._test_sched_btn.setProperty("variant", "default")
         self._test_sched_btn.setToolTip(
             "Send a short job through this command the way a run is sent, and "
             "report the node it got: CPUs, GPUs, and whether Cellpose can use them.")
@@ -1091,7 +1091,7 @@ class SSHKeyWizardDialog(QDialog):
         self._command_edit.setFont(mono)
         cmd_row.addWidget(self._command_edit, 1)
         self._copy_btn = QPushButton("Copy", self)
-        self._copy_btn.setProperty("variant", "secondary")
+        self._copy_btn.setProperty("variant", "default")
         self._copy_btn.clicked.connect(self._on_copy_command)
         cmd_row.addWidget(self._copy_btn)
         layout.addLayout(cmd_row)
@@ -1372,7 +1372,7 @@ class BootstrapLogDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         self._cancel_btn = QPushButton("Cancel", self)
-        self._cancel_btn.setProperty("variant", "danger")
+        self._cancel_btn.setProperty("variant", "destructive")
         self._cancel_btn.clicked.connect(self._on_cancel)
         btn_row.addWidget(self._cancel_btn)
         self._close_btn = QPushButton("Close", self)
@@ -1621,7 +1621,7 @@ class ManageRemotesDialog(QDialog):
         right.addWidget(self._edit_btn)
 
         self._delete_btn = QPushButton("Delete", self)
-        self._delete_btn.setProperty("variant", "danger")
+        self._delete_btn.setProperty("variant", "destructive")
         self._delete_btn.clicked.connect(self._on_delete)
         right.addWidget(self._delete_btn)
 

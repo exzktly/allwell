@@ -19,6 +19,6 @@ def qapp():
 
 def test_set_variant_updates_the_dynamic_property(qapp):
     btn = QPushButton("Go")
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     set_variant(btn, "primary")
     assert btn.property("variant") == "primary"

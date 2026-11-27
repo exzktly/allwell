@@ -122,7 +122,7 @@ def build_optimizer_window(ctx, parent: QWidget) -> QDialog:
     )
     opt_row_layout.addWidget(flow_group(opt_row, "Max points:", opt_steps))
     opt_btn = QPushButton("Optimize ThreshFracOn", opt_row)
-    opt_btn.setProperty("variant", "secondary")
+    opt_btn.setProperty("variant", "default")
     opt_btn.setToolTip(
         "Scan every distinguishable threshold between Min and Max for the "
         "selected channel and apply the one whose separation between the two "

@@ -51,7 +51,7 @@ def make_lasso_button(ctx, parent, canvas_key: str, *, source: str) -> QPushButt
 
     btn = QPushButton("Lasso cells", parent)
     btn.setCheckable(True)
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     btn.setToolTip("Draw round cells on the plot to save them as a set of saved cells. "
                    "Saving changes no number: use the set in the Cell Browser, or exclude "
                    "it under Cell Gating → Saved cells.")

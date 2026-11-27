@@ -84,7 +84,7 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     test.currentIndexChanged.connect(lambda _i: nwc.set_stats_test(ctx, test.currentData() or sc.TEST_KEYS[0]))
     ctx.widgets.register("_nw_stats_test_cb", test)
     flagged = QPushButton("Review flagged crops")
-    flagged.setProperty("variant", "secondary")
+    flagged.setProperty("variant", "default")
     flagged.setToolTip(_FLAGGED_TIP)
     flagged.clicked.connect(lambda _=False: rc.open_flagged_popout(ctx))
     ctx.widgets.register("_nw_stats_flagged_btn", flagged)

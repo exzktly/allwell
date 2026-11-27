@@ -45,7 +45,7 @@ def build_cell_browser_sort_section(ctx, parent_layout) -> None:
     ctx.runtime.cell_browser.sort_rows = []
 
     add_btn = QPushButton("+ Add sort key")
-    add_btn.setProperty("variant", "secondary")
+    add_btn.setProperty("variant", "default")
     add_btn.clicked.connect(lambda _=False: add_sort_row(ctx))
     parent_layout.addWidget(add_btn)
 

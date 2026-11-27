@@ -155,7 +155,7 @@ class AnalyzeBackgroundMapMixin:
         self._bg_map_undo = []
         row = self._row(sec, "Blank pairing")
         self._bg_map_btn = QPushButton("Pair blanks…", row)
-        self._bg_map_btn.setProperty("variant", "secondary")
+        self._bg_map_btn.setProperty("variant", "default")
         self._bg_map_btn.setToolTip(
             "Pair each blank with the wells it corrects, instead of pooling "
             "every Background well into one plate-wide reference. Use this when "
@@ -499,7 +499,7 @@ class AnalyzeBackgroundMapMixin:
         # off the end of the plate when the field named none, which turns a
         # sample well into the reference for the rest of the plate.
         self._bg_map_undo_btn = QPushButton("Undo", win)
-        self._bg_map_undo_btn.setProperty("variant", "secondary")
+        self._bg_map_undo_btn.setProperty("variant", "default")
         self._bg_map_undo_btn.setToolTip(
             "Step back one drag, split or clear (Ctrl+Z).")
         self._bg_map_undo_btn.clicked.connect(self._bg_map_undo_last)
@@ -523,7 +523,7 @@ class AnalyzeBackgroundMapMixin:
         footer.addWidget(split)
 
         clear = QPushButton("Clear pairing", win)
-        clear.setProperty("variant", "secondary")
+        clear.setProperty("variant", "default")
         clear.setToolTip("Drop the map and pool every blank into one reference.")
         clear.clicked.connect(self._bg_map_clear)
         footer.addWidget(clear)

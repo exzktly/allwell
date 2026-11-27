@@ -233,22 +233,22 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("LUT Max", lut_max_edit)
 
     apply_btn = QPushButton("Apply Global Threshold", ctrl)
-    apply_btn.setProperty("variant", "secondary")
+    apply_btn.setProperty("variant", "default")
     apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx))
     ctrl.add_action(apply_btn)
 
     refresh_btn = QPushButton("Refresh", ctrl)
-    refresh_btn.setProperty("variant", "secondary")
+    refresh_btn.setProperty("variant", "default")
     refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx))
     ctrl.add_action(refresh_btn)
 
     overlay_btn = reg.register("_smfish_overlay_btn", QPushButton("Hide Overlays", ctrl))
-    overlay_btn.setProperty("variant", "secondary")
+    overlay_btn.setProperty("variant", "default")
     overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx))
     ctrl.add_action(overlay_btn)
 
     cdf_btn = QPushButton("This Frame CDF", ctrl)
-    cdf_btn.setProperty("variant", "secondary")
+    cdf_btn.setProperty("variant", "default")
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     ctrl.add_action(cdf_btn)
 

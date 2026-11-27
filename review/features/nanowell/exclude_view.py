@@ -38,7 +38,7 @@ class ExcludeControls:
 def build_exclude_controls(ctx, well_cb) -> ExcludeControls:
     """**Exclude**, acting on *well_cb*'s well, and the *Excluded* menu; the page places both on its band."""
     exclude = QPushButton("Exclude")
-    exclude.setProperty("variant", "secondary")
+    exclude.setProperty("variant", "default")
     exclude.setToolTip(_EXCLUDE_TIP)
     exclude.clicked.connect(lambda _=False: nwc.set_well_excluded(ctx, well_cb.currentData() or "", True))
     ctx.widgets.register("_nw_exclude_well_btn", exclude)

@@ -126,7 +126,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
         self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setProperty("variant", "default")
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -137,7 +137,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         self._build_status_section(outer)
 
         self._open_btn = QPushButton("Open merged dataset in Review", self)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn.setProperty("variant", "default")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)

@@ -206,7 +206,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         layout.addWidget(self._build_queue_button(row))
 
         self._stop_btn = QPushButton("■  Stop", row)
-        self._stop_btn.setProperty("variant", "danger")
+        self._stop_btn.setProperty("variant", "destructive")
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         layout.addWidget(self._stop_btn)

@@ -154,7 +154,7 @@ def build_bottom(win) -> None:
     sr_l.addWidget(win._progress_bar)
 
     win._log_btn = QPushButton("Log \u25b4", status_row)
-    win._log_btn.setProperty("variant", "secondary")
+    win._log_btn.setProperty("variant", "default")
     win._log_btn.clicked.connect(lambda _=False: win._toggle_log())
     sr_l.addWidget(win._log_btn)
 
@@ -174,7 +174,7 @@ def build_bottom(win) -> None:
     lh_l.addWidget(hdr_lbl)
     lh_l.addStretch(1)
     clear_btn = QPushButton("Clear", log_hdr)
-    clear_btn.setProperty("variant", "secondary")
+    clear_btn.setProperty("variant", "default")
     clear_btn.clicked.connect(lambda _=False: win._clear_log())
     lh_l.addWidget(clear_btn)
 

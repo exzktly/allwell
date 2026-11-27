@@ -96,7 +96,7 @@ class RecipesPage(QWidget):
         top = QWidget(self)
         tl = FlowLayout(top, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
         self._import_btn = QPushButton("Import…", self)
-        self._import_btn.setProperty("variant", "secondary")
+        self._import_btn.setProperty("variant", "default")
         self._import_btn.setToolTip("Add a recipe exported from All-Well, here or elsewhere.")
         self._import_btn.clicked.connect(self.importRequested)
         tl.addWidget(self._import_btn)
@@ -133,10 +133,10 @@ class RecipesPage(QWidget):
         self._buttons: dict[str, QPushButton] = {}
         for key, text, variant, signal in (
                 ("apply", "▶  Apply to…", "primary", self.applyRequested),
-                ("rename", "Rename…", "secondary", self.renameRequested),
-                ("duplicate", "Duplicate", "secondary", self.duplicateRequested),
-                ("export", "Export…", "secondary", self.exportRequested),
-                ("delete", "Delete…", "danger", self.deleteRequested)):
+                ("rename", "Rename…", "default", self.renameRequested),
+                ("duplicate", "Duplicate", "default", self.duplicateRequested),
+                ("export", "Export…", "default", self.exportRequested),
+                ("delete", "Delete…", "destructive", self.deleteRequested)):
             button = QPushButton(text, actions)
             button.setProperty("variant", variant)
             button.clicked.connect(lambda _checked=False, s=signal: s.emit(self._current))
@@ -181,7 +181,7 @@ class RecipesPage(QWidget):
         self._runs_line.setWordWrap(True)
         dl.addWidget(self._runs_line)
         self._runs_btn = QPushButton("Show runs", self._detail)
-        self._runs_btn.setProperty("variant", "secondary")
+        self._runs_btn.setProperty("variant", "default")
         self._runs_btn.setToolTip("Every time this recipe was applied, with each run's log.")
         self._runs_btn.clicked.connect(lambda: self.showRunsRequested.emit(self._current))
         dl.addWidget(self._runs_btn, 0, Qt.AlignLeft)

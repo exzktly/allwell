@@ -37,7 +37,7 @@ def _menu_button(parent, name: str, tip: str, ctx) -> tuple[QToolButton, QMenu]:
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(tip)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setProperty("hasMenu", True)
     menu = QMenu(button)
     button.setMenu(menu)

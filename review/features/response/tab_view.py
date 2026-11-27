@@ -100,7 +100,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # Self-describing, so it needs no caption: the button names what it splits
     # by, which is what a reader of four curves needs to know.
     series_btn = reg.register("_response_series_btn", QPushButton("Series: None"))
-    series_btn.setProperty("variant", "secondary")
+    series_btn.setProperty("variant", "default")
     series_btn.setToolTip(
         "Split the members into one curve per combination of these variables' "
         "values — colour carries the series, dashes carry the timepoint. "
@@ -112,7 +112,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # the button's own text carries the count, so it needs no caption beside it.
     tp_button = reg.register("_response_tp_button",
                              QPushButton("Timepoints: 0 selected"))
-    tp_button.setProperty("variant", "secondary")
+    tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(lambda _=False: open_timepoint_selector(ctx))
     band.add_scope("", tp_button)
 

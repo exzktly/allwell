@@ -248,7 +248,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
         self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setProperty("variant", "default")
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -259,7 +259,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._build_status_section(outer)
 
         self._open_btn = QPushButton("Open subset in Review", self)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn.setProperty("variant", "default")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
@@ -386,7 +386,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._apply_interrupted_state()
         if not self._running:
             self._run_btn.setText(self._run_label())
-            set_variant(self._run_btn, "danger" if self.in_place() else "primary")
+            set_variant(self._run_btn, "destructive" if self.in_place() else "primary")
         self._refresh_run_enabled()
 
     def typed_schema(self) -> str:
@@ -757,7 +757,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._dest_field.setVisible(not in_place)
         if not self._running:
             self._run_btn.setText(self._run_label())
-            set_variant(self._run_btn, "danger" if in_place else "primary")
+            set_variant(self._run_btn, "destructive" if in_place else "primary")
         self._refresh_run_enabled()
         self._update_status_preview()
 

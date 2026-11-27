@@ -6,8 +6,9 @@ had three ragged rows, and a walk of the Anchor queue added its group in front. 
 ``test_nanowell_array_band.py`` holds the behaviour CI runs.
 
 Also here, because the redesign is what exposed them: ``MplToolbar.add_group``, which puts the zoom under the figure,
-and the stylesheet rule that makes a greyed ``secondary`` button look greyed — the ``[variant="secondary"]`` rule
-outranked the plain ``:disabled`` one, so every greyed secondary button in the app painted exactly as an enabled one.
+and the stylesheet rule that makes a greyed button look greyed — a variant rule outranks a plain ``:disabled`` one,
+so every greyed button of that variant once painted exactly as an enabled one; each of the four kinds in
+``ui/buttons.py`` now carries its own disabled rule.
 """
 
 from __future__ import annotations
@@ -239,12 +240,18 @@ def test_a_greyed_secondary_button_is_painted_greyed(themed, qtbot):
 
     on, off = QPushButton("Clear anchor"), QPushButton("Clear anchor")
     for button in (on, off):
-        button.setProperty("variant", "secondary")
+        button.setProperty("variant", "default")
         qtbot.addWidget(button)
         button.resize(120, 30)
         button.show()
     off.setEnabled(False)
     qtbot.waitExposed(off)
-    middle = QPoint(4, 15)
-    assert off.grab().toImage().pixelColor(middle).name() == theme.Colors.card.lower()
-    assert on.grab().toImage().pixelColor(middle).name() == theme.Colors.control.lower()
+    # A disabled button of any kind keeps the control fill and greys its edge and its label
+    # (ui/buttons.py): read the edge off the grab, and the label's ink off the palette the sheet set.
+    from PySide6.QtGui import QPalette
+
+    edge = QPoint(0, 15)
+    assert off.grab().toImage().pixelColor(edge).name() == theme.Colors.hairline.lower()
+    assert on.grab().toImage().pixelColor(edge).name() == theme.Colors.button_edge.lower()
+    assert off.palette().color(QPalette.ButtonText).name() == theme.Colors.text_disabled.lower()
+    assert on.palette().color(QPalette.ButtonText).name() == theme.Colors.text_primary.lower()

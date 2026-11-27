@@ -150,7 +150,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     disp_l.addWidget(vmax_edit)
 
     transpose_btn = QPushButton("⇄ Transpose", disp)
-    transpose_btn.setProperty("variant", "secondary")
+    transpose_btn.setProperty("variant", "default")
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
     transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx))
     disp_l.addWidget(transpose_btn)

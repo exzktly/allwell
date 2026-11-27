@@ -733,8 +733,10 @@ def qss() -> str:
     # The six text roles and the unset value (ui/text_roles.py), last among the label rules so a role is what
     # a label that carries one looks like. Imported here, not at module scope: that module builds Qt labels,
     # and this one is read by every widget before Qt is needed.
+    from ui import buttons as _button_kinds
     from ui import text_roles as _text_roles
     _roles = _text_roles.qss(c, t)
+    _buttons = _button_kinds.qss(c, t)
     return f"""
 * {{
     font-family: {t.family};
@@ -1373,66 +1375,8 @@ QToolButton[variant="toggle"]:checked:hover {{
    naming it keeps the value live and stops it drifting.
    Runtime changes to the property need unpolish()/polish() to repaint;
    values set once at construction do not. */
-QPushButton[variant="primary"], QToolButton[variant="primary"] {{
-    background-color: {c.accent};
-    border-color: {c.accent};
-    color: {c.on_accent};
-    font-weight: {t.semibold};
-}}
-QPushButton[variant="primary"]:hover, QToolButton[variant="primary"]:hover {{
-    background-color: {c.accent_hover};
-    border-color: {c.accent_hover};
-}}
-QPushButton[variant="primary"]:pressed, QToolButton[variant="primary"]:pressed {{
-    background-color: {c.accent_pressed};
-    border-color: {c.accent_pressed};
-}}
-QPushButton[variant="primary"]:disabled, QToolButton[variant="primary"]:disabled {{
-    background-color: {c.selected};
-    border-color: {c.selected};
-    color: {c.text_disabled};
-}}
-
-QPushButton[variant="secondary"], QToolButton[variant="secondary"] {{
-    background-color: {c.control};
-    border: 1px solid {c.button_edge};
-    color: {c.text_primary};
-}}
-/* The rule above outranks the plain `:disabled` one (an attribute selector is more specific than a
-   pseudo-state alone), so without this a greyed secondary button painted exactly as an enabled one. */
-QPushButton[variant="secondary"]:disabled, QToolButton[variant="secondary"]:disabled {{
-    color: {c.text_disabled};
-    background-color: {c.card};
-    border-color: {c.border_subtle};
-}}
-/* Same specificity trap as `:disabled` above: the variant rule's own background beats the plain
-   `:hover` / `:pressed` rules, so a secondary button (every "+ Queue") gave no sign it had been
-   pressed. */
-QPushButton[variant="secondary"]:hover, QToolButton[variant="secondary"]:hover {{
-    background-color: {c.hover};
-    border-color: {c.field_edge};
-}}
-QPushButton[variant="secondary"]:pressed, QToolButton[variant="secondary"]:pressed {{
-    background-color: {c.active};
-}}
-
-QPushButton[variant="danger"], QToolButton[variant="danger"] {{
-    background-color: transparent;
-    border-color: {c.border_subtle};
-    color: {c.danger};
-}}
-QPushButton[variant="danger"]:hover, QToolButton[variant="danger"]:hover {{
-    background-color: {c.card};
-}}
-QPushButton[variant="danger"]:pressed, QToolButton[variant="danger"]:pressed {{
-    background-color: {c.active};
-}}
-
-QPushButton[variant="muted"], QToolButton[variant="muted"], QLabel[variant="muted"] {{
-    background-color: transparent;
-    border-color: transparent;
-    color: {c.text_secondary};
-}}
+/* The four kinds of button — primary, default, quiet, destructive — from ui.buttons.qss. */
+{_buttons}
 
 /* SEM / SD toggle on the bar + batch-export panels: `sem` is the settled
    state, `sem_warn` flags a spread that cannot be computed as SEM. */

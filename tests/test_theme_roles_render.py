@@ -67,7 +67,7 @@ def test_muted_reads_as_the_one_secondary_ink(styled_app):
     assert ink("Secondary") == ink("Muted") == theme.Colors.text_secondary.upper()
 
 
-@pytest.mark.parametrize("variant", ["primary", "danger", "toggle_accent"])
+@pytest.mark.parametrize("variant", ["primary", "destructive", "toggle_accent"])
 def test_button_variants_differ_from_default(styled_app, variant):
     from PySide6.QtWidgets import QPushButton
 

@@ -136,7 +136,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_browser_count_label", count_lbl)
 
     load_more = QPushButton("Load next", ctrl)
-    load_more.setProperty("variant", "secondary")
+    load_more.setProperty("variant", "default")
     load_more.clicked.connect(lambda _=False: ctl.load_next_page(ctx))
     load_more.setEnabled(False)
     ctrl.add_action(load_more)
@@ -359,7 +359,7 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         hi_e.setPlaceholderText("auto")
         rl.addWidget(hi_e)
         auto_btn = QPushButton("Auto", row)
-        auto_btn.setProperty("variant", "secondary")
+        auto_btn.setProperty("variant", "default")
         rl.addWidget(auto_btn)
 
         # Per-channel display colour: a swatch (opens a colour popover) + a reset

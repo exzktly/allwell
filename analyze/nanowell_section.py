@@ -237,7 +237,7 @@ class AnalyzeNanowellSectionMixin:
 
         row = self._row(sec, "Check")
         self._nanowell_preview_btn = QPushButton("Test detection…", row)
-        self._nanowell_preview_btn.setProperty("variant", "secondary")
+        self._nanowell_preview_btn.setProperty("variant", "default")
         self._nanowell_preview_btn.setToolTip(
             "Run registration and detection on one well at one timepoint and show the montage with every nanowell "
             "labelled, before starting a plate-wide run.")
@@ -274,7 +274,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_registration_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout.addWidget(self._nanowell_registration_edit, 1)
         self._nanowell_registration_btn = QPushButton("Browse…", row)
-        self._nanowell_registration_btn.setProperty("variant", "secondary")
+        self._nanowell_registration_btn.setProperty("variant", "default")
         self._nanowell_registration_btn.clicked.connect(lambda _=False: self._browse_nanowell_registration())
         layout.addWidget(self._nanowell_registration_btn)
         return row.parentWidget()

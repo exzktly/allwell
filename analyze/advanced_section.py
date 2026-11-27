@@ -140,7 +140,7 @@ class AnalyzeAdvancedSectionMixin:
         self._scratch_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         pl.addWidget(self._scratch_edit, 1)
         self._scratch_browse_btn = QPushButton("Browse…", pick)
-        self._scratch_browse_btn.setProperty("variant", "secondary")
+        self._scratch_browse_btn.setProperty("variant", "default")
         self._scratch_browse_btn.clicked.connect(self._browse_scratch)
         pl.addWidget(self._scratch_browse_btn)
         sec.layout().addWidget(pick)

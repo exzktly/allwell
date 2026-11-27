@@ -204,7 +204,7 @@ class ScatterCellViewer(QWidget):
 
         jump = QHBoxLayout()
         self._show_in_seg_btn = QPushButton("Show in Segmentation")
-        self._show_in_seg_btn.setProperty("variant", "secondary")
+        self._show_in_seg_btn.setProperty("variant", "default")
         self._show_in_seg_btn.setToolTip("Open this cell's field in Image Browser → Segmentation, "
                                          "with the cell outlined")
         self._show_in_seg_btn.clicked.connect(self._show_in_segmentation)

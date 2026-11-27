@@ -157,7 +157,7 @@ class AnalyzeRunFooterMixin:
             default_remote_index(self._remote_cb.count()))
         rl.addWidget(self._remote_cb, 1)
         self._manage_remotes_btn = QPushButton("Manage…", remote_widget)
-        self._manage_remotes_btn.setProperty("variant", "secondary")
+        self._manage_remotes_btn.setProperty("variant", "default")
         self._manage_remotes_btn.setToolTip(
             "Add, edit, delete, test, or bootstrap remote-execution hosts.")
         self._manage_remotes_btn.clicked.connect(self.open_manage_remotes)

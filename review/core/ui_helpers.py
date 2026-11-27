@@ -624,18 +624,9 @@ def clear_layout(layout) -> None:
 
 def _btn(parent: QWidget | None, text: str, command: Callable[[], Any] | None,
          variant: str, *, icon: str | None = None) -> QPushButton:
-    b = QPushButton(text, parent)
-    b.setProperty("variant", variant)
-    if icon:
-        try:
-            from widgets import icons as _icons
-            dpr = b.devicePixelRatioF() if hasattr(b, "devicePixelRatioF") else 1.0
-            b.setIcon(_icons.make_icon(icon, 14, dpr=dpr or 1.0))
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    if command is not None:
-        b.clicked.connect(lambda _=False: command())
-    return b
+    """A button of one of the four kinds (``ui.buttons``), for the ``btn_*`` callers that predate it."""
+    from ui.buttons import button
+    return button(text, variant, parent, on_click=command, icon=icon)
 
 
 def btn_primary(parent: QWidget, text: str, command, *, padx: int = 8, pady: int = 2,
@@ -645,15 +636,15 @@ def btn_primary(parent: QWidget, text: str, command, *, padx: int = 8, pady: int
 
 def btn_secondary(parent: QWidget, text: str, command, *, padx: int = 6, pady: int = 2,
                   icon: str | None = None, **_kw) -> QPushButton:
-    return _btn(parent, text, command, "secondary", icon=icon)
+    return _btn(parent, text, command, "default", icon=icon)
 
 
 def btn_card(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> QPushButton:
-    return _btn(parent, text, command, "card")
+    return _btn(parent, text, command, "default")
 
 
 def btn_danger(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> QPushButton:
-    return _btn(parent, text, command, "danger")
+    return _btn(parent, text, command, "destructive")
 
 
 def make_scrollable_canvas(parent: QWidget, **_kw) -> tuple[QScrollArea, QWidget]:
@@ -803,7 +794,7 @@ def make_popover_button(text: str, parent: QWidget):
     btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     # The label carries the ▾ caret (added above if the caller left it off), so
     # hide QToolButton's native menu-indicator — the two would otherwise render
     # as overlapping double arrows.
@@ -838,7 +829,7 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     if tooltip:
         btn.setToolTip(tooltip)
     # The label carries the ▾ caret (added above if the caller left it off), so

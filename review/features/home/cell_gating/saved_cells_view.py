@@ -44,11 +44,11 @@ class SavedCellsPanel(QWidget):
         self.name.editingFinished.connect(self._rename)
         row.addWidget(self.name, 1)
         self.delete = QPushButton("Delete", self)
-        self.delete.setProperty("variant", "secondary")
+        self.delete.setProperty("variant", "default")
         self.delete.clicked.connect(self._delete)
         row.addWidget(self.delete)
         self.highlight = QPushButton("Highlight on Scatter", self)
-        self.highlight.setProperty("variant", "secondary")
+        self.highlight.setProperty("variant", "default")
         self.highlight.setToolTip("Draw this set's cells solid over the faded cloud on the per-cell "
                                   "Scatter (also under the Scatter's Display ▾). Changes no number.")
         self.highlight.clicked.connect(self._highlight)

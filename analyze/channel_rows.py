@@ -57,7 +57,7 @@ class AnalyzeChannelRowsMixin:
         input's own channels to the rows when the run starts
         (``services.run_detect.add_detected_channels``)."""
         add_btn = QPushButton("+ Add channel", sec)
-        add_btn.setProperty("variant", "secondary")
+        add_btn.setProperty("variant", "default")
         add_btn.setFixedWidth(self._ADD_BTN_W)
         add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
         sec.layout().addWidget(add_btn)
@@ -103,7 +103,7 @@ class AnalyzeChannelRowsMixin:
 
         remove_btn = QPushButton("✕", row)
         remove_btn.setFixedWidth(self._REMOVE_BTN_W)   # wide enough that the button padding doesn't clip ✕
-        remove_btn.setProperty("variant", "secondary")
+        remove_btn.setProperty("variant", "default")
         remove_btn.setToolTip("Remove this channel")
         rl.addWidget(remove_btn)
 

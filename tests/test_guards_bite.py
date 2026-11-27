@@ -6066,3 +6066,35 @@ def test_recursive_delete_guard_clears(shape):
     from tests.test_every_recursive_delete_goes_through_the_layer import violations
     found = violations(ast.parse(RECURSIVE_DELETE_CLEAR[shape]), "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── button kinds ────────────────────────────────────────────────────────────
+
+BUTTON_KIND_VIOLATIONS = {
+    "set_property": 'def build(b):\n    b.setProperty("variant", "secondary")\n',
+    # A conditional hands either value to the setter: Subset's Run button picks its kind at run time.
+    "conditional": 'def build(b, in_place):\n    set_variant(b, "danger" if in_place else "primary")\n',
+    # Job Queue's recipe actions are built from a table of rows, the variant in one column.
+    "table": ('def build(p):\n    for key, text, variant in (("a", "Apply", "primary"), ("d", "Delete", "danger")):\n'
+              '        b = QPushButton(text, p)\n        b.setProperty("variant", variant)\n'),
+    "funnel": 'def build(p):\n    return _btn(p, "Clear", None, "muted")\n',
+    # A helper's default: every button it builds gets the kind without any call naming it.
+    "default_kind": ('def _button(text, *, variant="secondary"):\n    b = QPushButton(text)\n'
+                     '    b.setProperty("variant", variant)\n    return b\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(BUTTON_KIND_VIOLATIONS))
+def test_button_kind_guard_catches_a_fifth_kind(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_kind_{shape}.py", BUTTON_KIND_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_buttons_have_one_of_four_kinds",
+                    "test_every_button_is_given_one_of_the_four_kinds", [bad])
+    assert exc is not None and f"bad_kind_{shape}.py" in str(exc)
+
+
+def test_button_kind_guard_clears_the_four(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_kind.py",
+                  'def build(b, x):\n    b.setProperty("variant", "primary")\n'
+                  '    set_variant(b, "destructive" if x else "quiet")\n    set_kind(b, "default")\n')
+    assert _run_scan(monkeypatch, "tests.test_buttons_have_one_of_four_kinds",
+                     "test_every_button_is_given_one_of_the_four_kinds", [good]) is None

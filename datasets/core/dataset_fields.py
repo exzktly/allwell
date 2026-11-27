@@ -70,4 +70,4 @@ def promote_open_button(open_btn, run_btn) -> None:
     """
     open_btn.setVisible(True)
     set_variant(open_btn, "primary")
-    set_variant(run_btn, "secondary")
+    set_variant(run_btn, "default")

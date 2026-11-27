@@ -186,7 +186,7 @@ class AnalyzeLogPaneMixin:
         self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
         band.add_action(self._raw_log_cb)
         clear_btn = QPushButton("Clear", band)
-        clear_btn.setProperty("variant", "secondary")
+        clear_btn.setProperty("variant", "default")
         clear_btn.clicked.connect(self._clear_log)
         band.add_action(clear_btn)
         # No separator under the band — ``#ControlBand`` paints its own

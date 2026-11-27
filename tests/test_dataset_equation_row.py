@@ -87,7 +87,7 @@ def test_every_field_reports_back_to_its_page(qapp, name, field):
     connected only the first field, renders an identical row that has quietly
     stopped responding to the user."""
     page = _pages()[name]()
-    page._run_btn.setProperty("variant", "secondary")
+    page._run_btn.setProperty("variant", "default")
     getattr(page, field).changed.emit()
     assert page._run_btn.property("variant") == "primary", (
         f"{name}.{field} emitted changed and the page did not react")

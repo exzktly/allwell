@@ -59,7 +59,7 @@ def build_details_panel(ctx, parent) -> QWidget:
     button = QToolButton(panel)
     button.setCheckable(True)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setToolTip(_TIP)
     head_label = QLabel("", panel)
     head_label.setWordWrap(True)

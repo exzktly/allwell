@@ -117,18 +117,18 @@ class ValidatePage(LogPanelMixin, QWidget):
         # Datasets tool's run-row ordering (Run, then +Queue, then any
         # secondary actions specific to this tool).
         self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setProperty("variant", "default")
         self._queue_btn.setToolTip("Add this check to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
         bl.addWidget(self._queue_btn)
         self._repair_btn = QPushButton("Apply repairs", self)
-        self._repair_btn.setProperty("variant", "secondary")
+        self._repair_btn.setProperty("variant", "default")
         self._repair_btn.setEnabled(False)
         self._repair_btn.clicked.connect(self.applyRepairsRequested)
         bl.addWidget(self._repair_btn)
         self._complete_btn = QPushButton("Complete this run in Analyze", self)
-        self._complete_btn.setProperty("variant", "secondary")
+        self._complete_btn.setProperty("variant", "default")
         self._complete_btn.setVisible(False)
         self._complete_btn.clicked.connect(
             lambda: self.completeRunRequested.emit(self._dataset_root))

@@ -255,8 +255,8 @@ class _SectionGrid:
         """Label on its own row above the widget — for wide controls (e.g.
         three-segment SegmentedControls) that overflow the 2-column grid."""
         grid, r = self._grids[sec]
-        lbl = QLabel(label)
-        lbl.setProperty("variant", "muted")
+        from ui.text_roles import field_label
+        lbl = field_label(label)
         grid.addWidget(lbl, r, 0, 1, 2)
         grid.addWidget(widget, r + 1, 0, 1, 2)
         self._grids[sec][1] = r + 2

@@ -168,7 +168,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
         _dd.changed.connect(partial(_commit, _i, _dd))
 
     plate_btn = QPushButton("Use plate selection", panel)
-    plate_btn.setProperty("variant", "secondary")
+    plate_btn.setProperty("variant", "default")
     plate_btn.setToolTip(
         "Arm the wells currently selected on the plate. The plate selection "
         "itself is not changed."
@@ -196,7 +196,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     lay.addWidget(plate_btn)
 
     reset_btn = QPushButton(spec.reset_label, panel)
-    reset_btn.setProperty("variant", "secondary")
+    reset_btn.setProperty("variant", "default")
     reset_btn.setToolTip(spec.reset_tooltip)
 
     def _reset() -> None:

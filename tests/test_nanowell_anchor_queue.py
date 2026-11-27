@@ -389,7 +389,7 @@ def test_the_walk_s_keys_skip_go_back_and_stop_only_while_it_runs(qtbot, tmp_pat
 
 
 def test_every_on_off_button_on_the_array_band_shows_when_it_is_on(qtbot, tmp_path):
-    """The UX review measured it: ``variant="secondary"`` overrides the theme's ``:checked`` fill, so *Set anchor*,
+    """The UX review measured it: a default button's variant rule overrides the theme's ``:checked`` fill, so *Set anchor*,
     *Overlays* and *One per well* painted on and off identically (``#1a2230`` both) and nobody could tell whether a
     click would set an anchor. A checkable button there takes the theme's ``toggle`` variant."""
     from PySide6.QtWidgets import QPushButton

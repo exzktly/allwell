@@ -8,9 +8,11 @@ So it is the page's own setting (``NanowellState.display_ranges``, one range per
 settings), not the per-channel store the other viewers share: Review Image writes its automatic window into that
 store whenever it draws, which would change the page's range without anyone touching it.
 
-One setting, offered where the page offers its image channel — beside the crop strip, on the Extremes view and
-beside the Array view's Image — as a button naming the range in force that opens the *min* / *max* / **Auto** row in
-a popover. Blank fields are Auto: each picture takes its own percentile scale, as it did before there was a control.
+One setting, offered in one place: the **Display range** row of the page's Display tab, reading the range in force
+and opening the *min* / *max* / **Auto** page. It was a button beside each place the image channel is offered — the
+crop strip, the pop-out, the Extremes view and the Array view's Image — four buttons for one value, which crowded the
+band (``SURFACES_TRACKER.md`` row S19); every picture still follows it. Blank fields are Auto: each picture takes its
+own percentile scale, as it did before there was a control.
 """
 
 from __future__ import annotations
@@ -18,10 +20,14 @@ from __future__ import annotations
 from PySide6.QtWidgets import QPushButton
 
 from review.features.nanowell import controller as nwc
+from review.core.inspector_panels import CHEVRON
 
-#: The buttons that open the Display range, one per place the image channel is offered (``tab_view``'s
-#: ``_IMAGE_CHANNEL_COMBOS``): refreshed together by :func:`refresh_display_range_buttons`.
-DISPLAY_RANGE_BUTTONS = ("_nw_strip_range_btn", "_nw_extremes_range_btn", "_nw_array_range_btn", "_nw_popout_range_btn")
+#: The row's title, and its page's.
+RANGE_TITLE = "Display range"
+
+#: The button that opens the Display range: the one row of the page's Display tab. A tuple, refreshed by
+#: :func:`refresh_display_range_buttons`, so a second place could join it without a second refresh.
+DISPLAY_RANGE_BUTTONS = ("_nw_display_range_btn",)
 
 RANGE_TIP = ("The brightness window the crops, the pop-out, the Extremes montage and the Array view's full-resolution "
         "image of this channel are drawn with, in the image's own units, kept until you change it. Blank is Auto: "
@@ -40,13 +46,15 @@ def _fmt(value) -> str:
 
 
 def button_text(ctx) -> str:
-    """What a Display range button says: the range in force for the page's image channel, or Auto."""
+    """What the Display range row says: the range in force for the page's image channel, or Auto, and the › of a
+    row that opens a page."""
     chosen = nwc.display_range(ctx)
-    return "Range: auto" if chosen is None else f"Range: {_fmt(chosen[0])}–{_fmt(chosen[1])}"
+    value = "auto" if chosen is None else f"{_fmt(chosen[0])}–{_fmt(chosen[1])}"
+    return f"{RANGE_TITLE}: {value} {CHEVRON}"
 
 
 def build_display_range_button(ctx, name: str) -> QPushButton:
-    """One of the :data:`DISPLAY_RANGE_BUTTONS`; a click opens the *min* / *max* / **Auto** row under it."""
+    """The :data:`DISPLAY_RANGE_BUTTONS` row; a click opens the *min* / *max* / **Auto** page in the inspector."""
     button = QPushButton(button_text(ctx))
     button.setProperty("variant", "secondary")
     button.setToolTip(RANGE_TIP)
@@ -77,8 +85,7 @@ def open_display_range(ctx, anchor) -> None:
         ctx.widgets.register("_nw_range_lo_edit", page.low_edit)
         ctx.widgets.register("_nw_range_hi_edit", page.high_edit)
         ctx.widgets.register("_nw_range_auto_btn", page.auto_button)
-    # The same button again leaves the page; another of the page's Display
-    # range buttons keeps it open and re-reads the range.
+    # The same button again leaves the page.
     same_button = page.property("openedFrom") == anchor.objectName() and bool(anchor.objectName())
     if inspector_service.is_showing(ctx, page) and same_button:
         inspector_service.pop(ctx)
@@ -88,7 +95,7 @@ def open_display_range(ctx, anchor) -> None:
     page.setCaption(f"{nwc.display_key(ctx.state.feature_slice('nanowell')).upper()} — the brightness window "
                     "every picture on this page is drawn in.")
     page.setRange(None if chosen is None else chosen[0], None if chosen is None else chosen[1])
-    inspector_service.push(ctx, "nanowell/display_range", "Display range", page, tab="display", anchor=anchor)
+    inspector_service.push(ctx, "nanowell/display_range", RANGE_TITLE, page, tab="display", anchor=anchor)
 
 
 def refresh_display_range_buttons(ctx) -> None:

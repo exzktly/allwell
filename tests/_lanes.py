@@ -232,6 +232,7 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_dataset_carry.py": "Subset and Merge Plates carry a dataset's nanowell tables (tracker P10b, P10c), driven …",
     "test_nanowell_dataset_tools.py": "Subset, Merge Plates and Concatenate refuse nanowell results they cannot carry, by name; …",
     "test_nanowell_display_range.py": "The Nanowells page's **Display range**: a *min* / *max* / **Auto** brightness window for …",
+    "test_nanowell_values_row.py": "the Nanowells band's Values row and its page, and the Display tab's one Display range row",
     "test_nanowell_edge_points_vectorised.py": "``nanowell_detect._edge_points`` is vectorised over its rays without changing a bit",
     "test_nanowell_site_rows.py": "Extremes and the Distribution window draw their rows of crops through one renderer",
     "test_nanowell_window_slots.py": "a Distribution window drawn around one well's swarm takes that well, not the wells beside it or the column it grazes",

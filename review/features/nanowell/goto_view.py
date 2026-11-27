@@ -1,7 +1,7 @@
 """The Nanowells page band's **Nanowell** box and **Origin** button: go to one nanowell on any view
 (``_goto_controller``).
 
-One control in one place on every view — the first of the viewing row — so the same address goes to the same
+One control in one place on every view — the first of the band's viewing controls — so the same address goes to the same
 nanowell whichever view is open. Greyed, saying why, on the one view with no nanowell to go to (Array QC).
 """
 

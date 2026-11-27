@@ -10,6 +10,8 @@ and 3.0 under the fixed cohort."""
 
 from __future__ import annotations
 
+from review.features.nanowell.values_view import is_offered
+
 import math
 
 import numpy as np
@@ -487,9 +489,9 @@ def test_the_spin_box_sets_the_window_and_the_figure_says_so(page, qtbot):  # no
     assert sorted(v for s in st.model.swarms() if s.label == "t_a" for v in s.values) == [1.5, 1.5, 3.0]
     nwc.set_view(page, "trajectories")
     assert any(t.startswith("Moving average over 2 timepoints:") for t in _texts(page))
-    assert spin.isVisibleTo(spin.window())
+    assert is_offered(page, spin)
     nwc.set_view(page, "array")
-    assert not spin.isVisibleTo(spin.window())
+    assert not is_offered(page, spin)
     nwc.set_view(page, "distribution")
     spin.setValue(1)
     assert st.moving == 0
@@ -564,7 +566,7 @@ def test_the_baseline_s_window_control_is_greyed_until_it_can_reach_the_figure(p
     nwc.nw_on_selection_changed(page)
     spin = page.widgets.get("_nw_baseline_moving_spin")
     assert spin.text() == "1" and st.baseline_moving == 0
-    assert spin.isVisibleTo(spin.window()) and not spin.isEnabled()
+    assert is_offered(page, spin) and not spin.isEnabled()
     assert "Turn on the Moving average first" in spin.toolTip()
     nwc.set_metric(page, "count_fc")
     page.widgets.get("_nw_moving_spin").setValue(2)
@@ -588,7 +590,7 @@ def test_the_baseline_s_window_control_is_greyed_until_it_can_reach_the_figure(p
     nwc.set_metric(page, "n")
     assert not spin.isEnabled() and "Only a fold change has a baseline" in spin.toolTip()
     nwc.set_view(page, "array")
-    assert not spin.isVisibleTo(spin.window())
+    assert not is_offered(page, spin)
 
 
 def test_the_page_s_fold_change_windows_start_after_the_baseline(page, qtbot):  # noqa: F811

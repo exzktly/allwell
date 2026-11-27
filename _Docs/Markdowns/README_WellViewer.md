@@ -6720,18 +6720,24 @@ The **Nanowells** page (under **Assays** on the rail, beside smFISH) draws a dat
 Nanowells): one dot per nanowell, so you see how the nanowells of a well spread, how that spread changes over
 time, and how wells and replicate groups compare. A dataset without nanowell tables shows a page saying so.
 
-The controls across the top of the page are on three rows, and each row means the same thing on every view, so a
-control is found in the same place whichever view is open:
+The controls across the top of the page come in the same order on every view, so a control is found in the same
+place whichever view is open. They run on as one row, wrapping onto a second line where the window is too narrow:
 
 1. **What is drawn** — the central selections: **Metric**, **Channel**, then the **Well** and **Timepoint** on
    the views that show one, and on Array its **Positions**.
-2. **Which nanowells, and how they are normalised** — **Rim focus**, **Fixed cohort** (where it applies), the
-   **Subset**, **Exclude** (on the views with a Well; *Excluded (n)* follows it while a well is excluded), then
-   **Baseline**, and where they apply **Baseline average**, **Moving average** and Distribution's **Responding
-   above**.
+2. **Which nanowells, and how they are normalised** — the **Subset**, **Exclude** (on the views with a Well;
+   *Excluded (n)* follows it while a well is excluded), then **Values**. **Values** reads what is in force — for
+   example *Values: Earliest · rim focus ›* — and opens its page in the Inspector's Data tab (in phone layout, in the
+   Controls sheet), which holds **Baseline**, and where they apply **Baseline average**, **Rim focus**, **Fixed
+   cohort**, **Moving average** and Distribution's **Responding above**. The row is not shown on a view that draws
+   no nanowell's value.
 3. **Viewing** — how the open view shows it: first the **Nanowell** box and **Origin** (on every view; see *Going
    to one nanowell* below), then *Along x*, *Image*, *Layers*, *Compare*, *Show*, … and the view's actions
    (*Set anchor*, *Resolve*, *Re-run…*).
+
+The row ends in **Display**, **Style** and **Share**. **Display** opens the Inspector's Display tab, whose
+**Display range** row sets the brightness window of every picture of the image channel on the page (see *Display
+range* below).
 
 #### Going to one nanowell
 
@@ -6754,7 +6760,7 @@ its well, so the nanowell selected before is let go and the site detail closes; 
 **Position** views, whose figures draw no single nanowell (one row per well, a test's table, each ring's summary).
 
 **Each view shows only the controls it uses.** A control with no role on a view is not on its band: the **QC** and
-**Identity** views draw no nanowell's value, so Metric, Channel, Baseline, Rim focus and Subset (with its editor, if
+**Identity** views draw no nanowell's value, so Metric, Channel, Values and Subset (with its editor, if
 open) are not shown there; QC shows no Group by; and QC, Statistics and Position show no Nanowell box. On a view that does use a control but
 the current settings leave it unused — the Metric on an Array whose layers draw no value — it stays in place, greyed,
 and its tooltip says why.
@@ -6940,7 +6946,7 @@ the sentence names it.
   timepoints along the axis and each well's median joined over time. *Wells*: one timepoint (the latest by
   default), wells and replicate sets along the axis. Growth rate and occupancy have one value per nanowell,
   so they are drawn across wells only.
-- **Baseline** — what a fold change is measured from: the well's *earliest* timepoint, each nanowell's
+- **Baseline** (on the **Values** page) — what a fold change is measured from: the well's *earliest* timepoint, each nanowell's
   *first measurable* one (for a bubble that clears after the first timepoint), or any one timepoint of the dataset,
   listed after those two by its hours — for example the timepoint a treatment was added, so every fold change reads
   against it. Under a named timepoint, a well that was never imaged at it has no fold change (the figure counts its
@@ -7077,6 +7083,9 @@ the sentence names it.
   bands inside them; on *Along x: Time* each panel's title starts with its band. A group whose wells hold
   different values is coloured and banded as `—mixed—`, and one with a well you have not filled as `no value`.
   Batch Export's Nanowells mode draws its figures without them.
+**Fixed cohort**, **Moving average**, **Baseline average**, **Rim focus** and **Responding above**, below, are on the
+**Values** page with **Baseline**, opened from the band's **Values** row:
+
 - **Fixed cohort** (on *Distribution*, *Trajectories* and *Statistics*) — use only the nanowells with a value at every
   timepoint of their well, so a line over time follows one set of nanowells instead of whichever could be
   measured at each timepoint. The others are counted among the exclusions as "outside the fixed cohort", and
@@ -7170,8 +7179,8 @@ the sentence names it.
   default). **Timepoints** chooses which of the well's timepoints the montage shows (all by default),
   **Cells** draws the cells the run counted on every crop (see *Site detail*), **Metrics** shows or hides the
   numbers written on each crop (its fold change and its line of measurements), the box after it chooses the
-  image the crops are cut from — *Phase* or a fluorescence channel — and **Range** its display range (see
-  *Site detail*).
+  image the crops are cut from — *Phase* or a fluorescence channel — and the page's **Display range** (Display ▸
+  Display range) sets how bright they are drawn (see *Site detail*).
 
 **Reading the figure**
 
@@ -7198,7 +7207,7 @@ the sentence names it.
   at no change (1×, or 0 on log₂).
 - Text on this page is drawn at a share of the **Style** font sizes, scaled to the size of a panel, so a
   grid of wells stays legible; raising a size in Style still raises it here.
-- **Show** (Auto / Beeswarm / Violin / Histogram), on the band's third row, chooses how each well's nanowells are
+- **Show** (Auto / Beeswarm / Violin / Histogram), among the band's viewing controls, chooses how each well's nanowells are
   drawn. **Auto** draws dots while a column holds four wells or fewer, and past that one violin per well, with its
   median (or mean, for a metric averaged per well), since a slot shared by many wells is too narrow for readable
   dots. **Beeswarm** always draws dots — a crowded slot draws what fits and writes "+N" under it for the rest —
@@ -7490,7 +7499,7 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   view writes it — *B01 5,0* — with the selected-nanowell panel and the crop captions writing *B01 · nanowell 5,0*.
 - **Array** — one well at one timepoint, built from layers you turn on and off, so one view does what a map,
   a QC picture and a full-resolution montage each did. Its **Well**, **Timepoint** and **Positions** are on the
-  band's first row; its viewing row holds how the picture is drawn — **Image** and **Layers** — then **Set
+  band among the central selections; its viewing controls hold how the picture is drawn — **Image** and **Layers** — then **Set
   anchor**, **Clear anchor** and **Re-run wells…** (*Re-run anchored wells…* on the QC view). The zoom and
   **Overlays** sit under the figure,
   beside its navigation buttons:
@@ -7566,7 +7575,7 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
 
   The controls on the band stay where they are whatever the layers say: a control a layer makes useless is
   greyed rather than hidden, and its tooltip says why — **Metric** and **Baseline** with nothing drawn by the
-  metric; **Image** on *Lattice* positions; the image's channel and **Range** unless Image is *Full resolution*
+  metric; **Image** on *Lattice* positions; the image's channel unless Image is *Full resolution*
   (the run montage is phase only and drawn as the run saved it); **Set anchor** naming what is missing (measured
   positions, the anchor layer and Overlays, an `in/` folder, or a timepoint an anchor can change); **Clear
   anchor** with no anchor set; **Re-run wells…** with no anchor anywhere.
@@ -7607,8 +7616,7 @@ the crop is cut from the lower-resolution montage instead, and the caption under
 timepoint with no crop says why. **Pop out**, above the strip, opens the crops large in a window of their own —
 one panel per timepoint, all of a channel's panels on one brightness scale, so a cell that appears, divides or fades reads as a change
 between panels. The window follows the selection while it is open and leaves the page's plot where it was; close
-it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Range**
-(the display range), **Cells**, **Metrics** (the measurements under each crop — the cell count first and, with size classes set on Home ▸ Cell
+it like any window. Its own row of controls sets the crops where you look at them: the image channel, **Cells**, **Metrics** (the measurements under each crop — the cell count first and, with size classes set on Home ▸ Cell
 Gating, the count in each class and in neither, *4 cells · 2 T cells · 1 DCs · 1 in neither* — ending with the rim's focus — *rim 88% of sharpest* — as a
 percentage of its well's sharpest rims at that timepoint, the same scale as the **Rim focus** threshold, so a crop
 reading below the threshold is the one left out as out of focus; *not judged* where the well had too few rims, *rim
@@ -7620,7 +7628,7 @@ nanowell's timepoints are panels (fewer panels are drawn larger); the menu stays
 tick, so you can tick just the two or three you want from nothing — until one is ticked the pop-out says no timepoint
 is chosen rather than drawing an empty figure (unticking the last one does the same).
 **Channels** adds channels beside the image channel — tick EGFP while the image channel is phase, say — each drawn as
-a row of crops of its own on its own brightness scale (that channel's **Range** when it has one, else its own 1st to
+a row of crops of its own on its own brightness scale (that channel's **Display range** when it has one, else its own 1st to
 99th percentile), and the caption names each channel's scale. **Grid** sets the shape: *Auto* (one channel wraps into
 a near-square grid; several take a row each, the timepoints across), *One row*, *One column* (the timepoints down, a
 column per channel) or *N across* (the timepoints wrap every N panels, each wrapped line keeping its channels
@@ -7648,11 +7656,11 @@ It is one setting for every picture on the page: the strip, the pop-out, the Ext
 Full resolution, and is offered on each and kept with the page's settings. Each caption names the channel. A
 fluorescence crop is never cut from the run montage, which is phase only: a timepoint whose archive holds no image
 of that channel, or whose archive is not beside the dataset, says so in its place.
-**Range**, beside the channel box (and beside it on the Extremes view and the Array view's Image), sets the
-display range the pictures of that channel are drawn with — a *min* and *max* in the image's own intensity units,
+**Display range** — the one row of the page's Display tab (**Display** at the end of the band; in phone layout, the
+Controls sheet's Display tab) — sets the display range the pictures of the page's image channel are drawn with — a *min* and *max* in the image's own intensity units,
 as in Review Image, the Image Table and the Cell Browser — or **Auto**, which leaves each picture stretched from
-the 1st to the 99th percentile of its own pixels. The button names the range in force (*Range: auto*,
-*Range: 200–4000*). Set from any of the three places, it holds for every picture of that channel — the strip,
+the 1st to the 99th percentile of its own pixels. The row names the range in force (*Display range: auto ›*,
+*Display range: 200–4000 ›*) and opens the *min* / *max* / **Auto** page. It holds for every picture of that channel — the strip,
 the pop-out, the Extremes montage and the Array view's *Full resolution* image — through every redraw, view switch
 and selection, until you change it again here; each caption names it. Each channel keeps its own range, so
 switching the channel and back brings yours back. It is the Nanowells page's own and is saved with the page's

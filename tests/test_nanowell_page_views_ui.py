@@ -9,6 +9,8 @@ Numbers are read back from the figures' text artists.
 
 from __future__ import annotations
 
+from review.features.nanowell.values_view import is_offered
+
 import re
 
 import io
@@ -90,7 +92,7 @@ def _visible_scopes(ctx):
              "_nw_tp_cb": "Timepoint", "_nw_control_cb": "vs", "_nw_well_cb": "Well",
              "_nw_extremes_spin": "Extremes", "_nw_qc_wells_seg": "Wells", "_nw_queue_btn": "Resolve",
              "_nw_queue_lbl": "Queue"}
-    return {label for name, label in names.items() if ctx.widgets.get(name).isVisibleTo(ctx.window)}
+    return {label for name, label in names.items() if is_offered(ctx, ctx.widgets.get(name))}
 
 
 # ── the view switch and the controls each view shows ─────────────────────────
@@ -421,7 +423,7 @@ def test_a_control_with_no_role_on_a_view_is_not_shown_there(page, qtbot):
     from review.features.nanowell import tab_view as tv
 
     _loaded(qtbot, page)
-    shown = lambda name: page.widgets.get(name).isVisibleTo(page.window)          # noqa: E731
+    shown = lambda name: is_offered(page, page.widgets.get(name))          # noqa: E731
     from review.core import inspector_service as svc
     page.widgets.get("_nw_subset_edit_btn").click()                               # the editor open
     editor = page.widgets.get("_nw_subset_editor")

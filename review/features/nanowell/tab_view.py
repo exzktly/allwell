@@ -45,7 +45,7 @@ from review.features.nanowell.identity_view import build_identity_controls, refr
 from review.features.nanowell.popout_view import build_popout_view_controls
 from review.features.nanowell.qc_view import build_qc_controls, refresh_qc_controls
 from review.features.nanowell.display_range_view import (
-    RANGE_TIP as _RANGE_TIP,
+    DISPLAY_RANGE_BUTTONS,
     build_display_range_button,
     refresh_display_range_buttons,
 )
@@ -57,6 +57,8 @@ from review.features.nanowell.state import EXTREMES_MAX_N
 from review.features.nanowell.statistics_view import (
     build_statistics_controls, fill_control_combo, refresh_statistics_controls,
 )
+from review.core.inspector_panels import as_display_row, make_popover_button
+from review.features.nanowell.values_view import ValuesLines, build_values_row, refresh_values_row
 from widgets.control_band import ControlBand
 from widgets.delayed_tooltip import DelayedToolTip
 from widgets.labeled_combo import LabeledComboBox
@@ -357,13 +359,15 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     reg.register("_nw_channel_cb", channel_cb)
     grp_channel = band.add_scope("Channel", channel_cb)
 
-    # The band is three rows on every view, so a control is found in the same row whichever view is open:
-    #   1. the central selections — what is drawn: Metric, Channel, Well, Timepoint, and the Array's Positions;
-    #   2. which nanowells count and how their values are normalised: Rim focus, Fixed cohort, Subset, Exclude,
-    #      Baseline and its average, the moving average, Responding above;
-    #   3. viewing — how the open view shows it: its image, layers, comparisons and actions (anchors, Resolve, …).
-    # Row breaks keep the rows apart; a row too wide wraps within itself, and a row with nothing shown on a view
-    # takes no room.
+    # The band is one row of flow on every view, wrapping only where the window is too narrow for it, in one order:
+    #   the central selections — what is drawn: Metric, Channel, Well, Timepoint, and the Array's Positions;
+    #   the narrowings — the Subset, Exclude, and the **Values** row (``values_view``), whose page holds which
+    #   nanowells count and how their values are normalised: Baseline and its average, Rim focus, Fixed cohort, the
+    #   moving average and Responding above;
+    #   viewing — how the open view shows it: its image, layers, comparisons and actions (anchors, Resolve, …);
+    #   then Display · Style · Share. Display holds the one Display range of the page's pictures.
+    # It was three rows, with the second full at a 1,500 px window; moving those six settings to a page and the four
+    # Display range buttons to one Display row lets the band read as one row and leaves the height to the figure.
     # The anchor walk's controls stand in the place of Well and Timepoint, which the walk drives and its label names
     # ("3 of 17 · B04 at 24h"): the walk adds nothing to the band's width.
     queue = build_queue_controls(ctx, band)
@@ -384,16 +388,13 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     grp_where = band.add_scope("", well_part, tp_cb)
     reg.register("_nw_where_group", grp_where)
     positions_seg, grp_positions = _build_positions_control(ctx, band)
-    selection_row_end = band.add_break()
 
     rim_focus = build_rim_focus_controls(ctx)
-    grp_rim = band.add_scope("", rim_focus.box, rim_focus.spin)
 
     cohort_box = QCheckBox("Fixed cohort")
     cohort_box.setToolTip(_COHORT_TIP)
     cohort_box.toggled.connect(lambda on: nwc.set_cohort(ctx, on))
     reg.register("_nw_cohort_box", cohort_box)
-    grp_cohort = band.add_scope("", cohort_box)
 
     # The Subset after the quality filters: it narrows the nanowells rather than choosing what is measured of them.
     start = build_subset_control(ctx, band, timepoint_text)
@@ -403,19 +404,21 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     # Shown only while a well is excluded: trailing, so its coming and going moves nothing else; placed after
     # Exclude once the band is built.
     exclusion.excluded_group = band.add_scope("", exclusion.excluded, trailing=True)
+    # Which nanowells count and how their values are normalised: one row reading what is in force, opening its page
+    # (``values_view``). It follows the Subset and Exclude, the other narrowings.
+    values_btn, add_values_row = build_values_row(ctx, band)
+    grp_values = band.add_scope("", values_btn)
 
     baseline_cb = _combo(_BASELINES, _BASELINE_TIP)
     baseline_cb.currentIndexChanged.connect(
         lambda _i: nwc.set_page_baseline(ctx, baseline_cb.currentData() or "earliest"))
     reg.register("_nw_baseline_cb", baseline_cb)
-    grp_baseline = band.add_scope("Baseline", baseline_cb)
 
     baseline_moving_spin = SpinBox()
     baseline_moving_spin.setRange(1, MAX_WINDOW)     # 1 is off, as on the endpoint's window
     baseline_moving_spin.setToolTip(_BASELINE_MOVING_TIP)
     baseline_moving_spin.valueChanged.connect(lambda value: nwc.set_baseline_moving(ctx, value))
     reg.register("_nw_baseline_moving_spin", baseline_moving_spin)
-    grp_baseline_moving = band.add_scope("Baseline average", baseline_moving_spin)
 
     moving_spin = SpinBox()
     # 1 is off: a window of one timepoint averages nothing. The box holds the bare number and its label says what
@@ -424,8 +427,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     moving_spin.setToolTip(_MOVING_TIP)
     moving_spin.valueChanged.connect(lambda value: nwc.set_moving(ctx, value))
     reg.register("_nw_moving_spin", moving_spin)
-    # Trailing or centred, chosen where the group's label would be: the filter row is full at a 1500 px window,
-    # and a control of its own beside the window — a scope, a menu or a box — wrapped it onto a second line.
+    # Trailing or centred, chosen where the line's caption would be, so the window and its kind read as one setting.
     moving_kind_cb = QComboBox()
     moving_kind_cb.addItem("Moving average", False)
     moving_kind_cb.addItem("Centred average", True)
@@ -433,7 +435,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     moving_kind_cb.currentIndexChanged.connect(
         lambda _i: nwc.set_moving_centred(ctx, bool(moving_kind_cb.currentData())))
     reg.register("_nw_moving_kind_cb", moving_kind_cb)
-    grp_moving = band.add_scope("", moving_kind_cb, moving_spin)
 
     responding_edit = QLineEdit()
     responding_edit.setPlaceholderText("not set")
@@ -441,10 +442,17 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     responding_edit.setFixedWidth(_RESPONDING_W)
     responding_edit.editingFinished.connect(lambda: nwc.set_responding_above(ctx, responding_edit.text()))
     reg.register("_nw_responding_edit", responding_edit)
-    grp_responding = band.add_scope("Responding above", responding_edit)
-    filter_row_end = band.add_break()
+    grp_baseline = add_values_row("Baseline", baseline_cb)
+    grp_baseline_moving = add_values_row("Baseline average", baseline_moving_spin)
+    grp_rim = add_values_row("", rim_focus.box, rim_focus.spin)
+    grp_cohort = add_values_row("", cohort_box)
+    grp_moving = add_values_row("", moving_kind_cb, moving_spin)
+    grp_responding = add_values_row("Responding above", responding_edit)
+    values_lines = ValuesLines(grp_baseline, baseline_cb, grp_baseline_moving, baseline_moving_spin, grp_rim,
+                               rim_focus.box, grp_cohort, cohort_box, grp_moving, moving_spin, moving_kind_cb,
+                               grp_responding, responding_edit)
 
-    # The Nanowell box leads the viewing row on every view, so going to one nanowell is found in one place.
+    # The Nanowell box leads the viewing controls on every view, so going to one nanowell is found in one place.
     goto = build_goto_controls(ctx, band)
     array_controls = _build_array_controls(ctx, band, positions_seg, grp_positions)
     identity = build_identity_controls(ctx, band)
@@ -467,8 +475,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     extremes_numbers.toggled.connect(lambda on: nwc.set_crop_metrics(ctx, on))
     reg.register("_nw_extremes_metrics_box", extremes_numbers)
     grp_extremes = band.add_scope("Largest & smallest", extremes_spin, extremes_tps.button, extremes_cells,
-                                  extremes_numbers, extremes_image,
-                                  build_display_range_button(ctx, "_nw_extremes_range_btn"))
+                                  extremes_numbers, extremes_image)
 
     axis_seg = SegmentedControl()
     for key, label in _AXES:
@@ -494,14 +501,21 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         cells_cb=lambda: export_cell_data_from(
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
     band.add_action(export_btn)
+    # Display: how the page's pictures are drawn. One row, the Display range, for every picture of the image channel
+    # the page draws — the crops, the pop-out, the Extremes montage and the Array view's full-resolution image.
+    display_btn, _display_panel, display_lay = make_popover_button("Display", band, ctx=ctx, root=True)
+    display_btn.setToolTip("How the page's pictures are drawn: the display range of the image channel.")
+    reg.register("_nw_display_btn", display_btn)
+    display_lay.addWidget(as_display_row(build_display_range_button(ctx, DISPLAY_RANGE_BUTTONS[0])))
+    display_lay.addStretch(1)
+    band.add_action(display_btn)
     band.add_action(make_style_button(ctx, band, "nanowell"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
     from review.core.band_fixed_actions import finish_band
     finish_band(band)
-    # *Excluded (n)* names wells: it follows Exclude on the second row, on every view.
-    band.place_trailing(exclusion.excluded_group, grp_baseline)
-    reg.register("_nw_band_breaks", (selection_row_end, filter_row_end))
+    # *Excluded (n)* names wells: it follows Exclude, before the Values row, on every view.
+    band.place_trailing(exclusion.excluded_group, grp_values)
     layout.addWidget(band)
     # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
     guide = build_resolve_guide(ctx, plot_area)
@@ -727,6 +741,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
                 if callable(window_refresh):
                     window_refresh()
             grp_extremes.setVisible(view in RANKED_WELL_VIEWS)
+            refresh_values_row(grp_values, values_lines)
             variables.refresh(view)
         finally:
             for w, b in zip(controls, blocked):
@@ -1026,7 +1041,6 @@ def _crops_header(ctx, parent) -> QWidget:
     row.addWidget(title)
     row.addWidget(_cells_box(ctx, "_nw_strip_cells_box"))
     row.addWidget(_image_channel_combo(ctx, "_nw_strip_image_channel_cb"))
-    row.addWidget(build_display_range_button(ctx, "_nw_strip_range_btn"))
     row.addWidget(_go_to_button(ctx, "_nw_strip_go_to_btn", host))
     row.addWidget(button)
     return host
@@ -1138,7 +1152,6 @@ def _popout_controls(ctx, window) -> QHBoxLayout:
     page's one setting (the strip and the Extremes view show the same), kept in step by ``refresh_controls``."""
     row = QHBoxLayout()
     row.addWidget(_image_channel_combo(ctx, "_nw_popout_image_channel_cb"))
-    row.addWidget(build_display_range_button(ctx, "_nw_popout_range_btn"))
     row.addWidget(_cells_box(ctx, "_nw_popout_cells_box"))
     metrics = QCheckBox("Metrics", window)
     metrics.setToolTip(_POPOUT_METRICS_TIP)
@@ -1274,7 +1287,7 @@ def _show_where(group, well_part, tp_cb, shows_well: bool, shows_tp: bool, *, wa
                 exclude: QWidget | None = None) -> None:
     """The Where item: the well and the timepoint where the view draws them, the item gone when it draws neither or
     while the anchor walk stands in its place. The flow layout sees only the item, so it is asked to measure it
-    again when what it holds changes. *exclude* (the Exclude item, on the band's second row) acts on the Well's well,
+    again when what it holds changes. *exclude* (the Exclude item, among the band's narrowings) acts on the Well's well,
     so it is shown exactly when the Well is."""
     if exclude is not None:
         exclude.setVisible(shows_well and not walking)
@@ -1368,9 +1381,6 @@ def _refresh_array_greying(ctx, st, c: SimpleNamespace, lattice: bool) -> None:
           no_image or ("The run montage is the phase image only: choose Image ▸ Full resolution to draw a channel."
                        if image == "montage" else None)
           or (None if channels else "The run read no fluorescence channel: phase is all there is."))
-    _grey(c.range_btn, _RANGE_TIP,
-          no_image or ("The display range applies to Image ▸ Full resolution; the run montage is drawn as the run "
-                       "saved it." if image == "montage" else None))
     _grey(c.one_btn, _ONE_TIP, None if nwc.array_um_per_px(ctx) is not None else
           "No image is drawn (Image Off, or Lattice positions): there is no image pixel to match.")
     can_set, can_clear, can_rerun = nwc.anchor_controls(ctx)
@@ -1398,7 +1408,7 @@ def _build_positions_control(ctx, band):
 
 
 def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleNamespace:
-    """The Array view's controls. On the band's *Viewing* row: Image and Layers — how the picture is drawn — then
+    """The Array view's controls. Among the band's viewing controls: Image and Layers — how the picture is drawn — then
     Set anchor / Clear anchor / *Re-run wells…*. *Positions* (``positions_seg`` in ``grp_positions``, built by
     :func:`_build_positions_control`) is on the first row with the well and timepoint, and is shown and hidden with
     the rest of the view's controls. Under the figure, beside its navigation buttons
@@ -1410,8 +1420,7 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     image_cb.currentIndexChanged.connect(lambda _i: nwc.set_layer(ctx, "image", image_cb.currentData() or "off"))
     reg.register("_nw_image_cb", image_cb)
     image_channel_cb = _image_channel_combo(ctx, "_nw_array_image_channel_cb")
-    range_btn = build_display_range_button(ctx, "_nw_array_range_btn")
-    grp_image = band.add_scope("Image", image_cb, image_channel_cb, range_btn)
+    grp_image = band.add_scope("Image", image_cb, image_channel_cb)
 
     layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
     overlays_btn = _button("Overlays", _OVERLAYS_TIP, None)
@@ -1469,7 +1478,7 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     return SimpleNamespace(
         image_cb=image_cb, positions_seg=positions_seg, layer_actions=layer_actions, colour_actions=colour_actions,
         groups=[grp_positions, grp_image, grp_layers], grp_anchor=grp_anchor, one_btn=one_btn,
-        image_channel_cb=image_channel_cb, range_btn=range_btn, canvas_tools=(out_btn, zoom_lbl, in_btn, fit_btn,
+        image_channel_cb=image_channel_cb, canvas_tools=(out_btn, zoom_lbl, in_btn, fit_btn,
                                                                               one_btn),
         anchor_btn=anchor_btn, clear_anchor_btn=clear_anchor_btn, rerun_btn=rerun_btn, overlays_btn=overlays_btn,
         notes_btn=notes_btn,

@@ -6,6 +6,8 @@ dropped rows instead of counting them would break the sum of used and excluded."
 
 from __future__ import annotations
 
+from review.features.nanowell.values_view import is_offered
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -75,6 +77,6 @@ def test_the_box_stays_reachable_on_trajectories_when_the_metric_has_one_value_p
     nwc.set_view(page, "trajectories")
     assert any(t.startswith("Fixed cohort:") for t in _texts(page))
     box = page.widgets.get("_nw_cohort_box")
-    assert box.isVisibleTo(box.window())                     # every ancestor up to the page, not its own flag
+    assert is_offered(page, box)                     # every ancestor up to the page, not its own flag
     nwc.set_view(page, "distribution")
-    assert not box.isVisibleTo(box.window())                 # where the metric has one value per nanowell: no time
+    assert not is_offered(page, box)                 # where the metric has one value per nanowell: no time

@@ -142,8 +142,7 @@ def test_the_crop_controls_wrap_rather_than_being_cut(qtbot, page, phone):
     assert detail.minimumSizeHint().width() <= 360, f"the detail pane asks for {detail.minimumSizeHint().width()} px"
     host.resize(360, host.heightForWidth(360) if host.hasHeightForWidth() else host.height())
     host.layout().setGeometry(host.rect())
-    for name in ("_nw_strip_cells_box", "_nw_strip_image_channel_cb", "_nw_strip_range_btn",
-                 "_nw_strip_go_to_btn", "_nw_popout_btn"):
+    for name in ("_nw_strip_cells_box", "_nw_strip_image_channel_cb", "_nw_strip_go_to_btn", "_nw_popout_btn"):
         w = page.widgets.get(name)
         assert w.geometry().right() <= 360 and w.width() >= w.minimumSizeHint().width(), (
             f"{name}: {w.width()} px wide, right edge at {w.geometry().right()}")

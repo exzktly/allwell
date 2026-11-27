@@ -16,6 +16,8 @@ measured places, Array QC's layers).
 
 from __future__ import annotations
 
+from review.features.nanowell.values_view import is_offered
+
 import math
 
 import numpy as np
@@ -38,7 +40,7 @@ _CANVAS_TOOLS = ("_nw_zoom_out_btn", "_nw_zoom_lbl", "_nw_zoom_in_btn", "_nw_fit
 
 def _shown_on_band(ctx) -> list:
     """The band's and the figure toolbar's controls that are shown, in order: what decides where each one sits."""
-    return [name for name in _BAND + _CANVAS_TOOLS if ctx.widgets.get(name).isVisibleTo(ctx.window)]
+    return [name for name in _BAND + _CANVAS_TOOLS if is_offered(ctx, ctx.widgets.get(name))]
 
 
 def _labels(ctx) -> list[str]:

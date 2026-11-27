@@ -7,9 +7,13 @@ is written to be handed to another assistant session that has not seen the
 conversation that produced it, so it states the decisions, the reasons for them,
 the code each part touches, and how each part is proved.
 
-The pull request that closes the last row deletes this file and says so in its
-body. Counts are derived from the rows (§12 gives the command); no total is typed
-anywhere in this file.
+**All of this work is one pull request**, the one this file arrived in: the
+user asked for the menu and organisation changes as a single pull request, with
+the design language as a second one (`DESIGN_LANGUAGE_TRACKER.md`, on its own
+branch). So this tracker lives on that pull request's branch and is worked
+there; the commit that closes the last row deletes it, before the pull request
+merges, and the body says so. Counts are derived from the rows (§12 gives the
+command); no total is typed anywhere in this file.
 
 Read before starting: `CLAUDE.md` (all of it — §2 on test lanes, §3 on where a
 module goes, §6 on PR cadence, §7.5–§7.8 on proving guards and tests, §7.10 on
@@ -396,9 +400,13 @@ it, when changed, changes the state or the spec the plot is drawn from; and
 
 ## 6. How to work this plan
 
-- **One pull request per phase** (§10 gives the order), each on its own branch
-  from `main`, opened last (CLAUDE.md §2 and §6). Phases 1 and later change
-  what users see, so label each of those pull requests `minor`.
+- **One pull request for the whole plan**, already open: commit on its branch
+  and stack every phase there. Because the pull request is open, every push
+  starts a billed CI run (CLAUDE.md §2), so push by round: finish a phase,
+  verify it locally, push it once. Keep the pull request's body describing the
+  branch as it stands, and label it `minor`, since it changes what users see.
+  Merge `origin/main` into the branch at the start of each phase and before
+  each push; never rebase or force-push it.
 - **Update the row in the same commit as the fix**, and move it to `done` only
   with the evidence written in its Evidence cell: the test that pins it and
   what mutation made that test fail.
@@ -416,7 +424,7 @@ it, when changed, changes the state or the spec the plot is drawn from; and
   the UI tests CI never runs) for every phase, because each touches shared
   chrome; `scripts/test.sh --nanowell-features` for phase 5; and
   `scripts/test.sh tests/test_every_page_renders.py -m ""` (about nineteen
-  minutes) before each phase's pull request is opened. Run
+  minutes) before each phase is pushed. Run
   `scripts/test.sh tests/test_app_smoke.py -m ""` too:
   `test_no_tab_builder_raised_while_draining` is what notices a tab whose
   builder now raises.
@@ -460,8 +468,8 @@ it, when changed, changes the state or the spec the plot is drawn from; and
   what `review/core/margin_fit.py` needs, the inspector overlays the page's
   right edge below that width instead of taking a column.
 - **Muscle memory.** Every band changes. The manual and the in-app help
-  (`ui/help_topics.py`) are the mitigation, and the reason these pull requests
-  are labelled `minor`.
+  (`ui/help_topics.py`) are the mitigation, and the reason the pull request
+  is labelled `minor`.
 
 ## 9. Glossary of what replaces what
 
@@ -481,7 +489,13 @@ it, when changed, changes the state or the spec the plot is drawn from; and
 
 ## 10. Order of work
 
-Each phase is one pull request and leaves the application fully working.
+Each phase is one round of commits, pushed together, and leaves the application
+fully working, so the pull request could be merged after any of them if the
+user chose to stop there.
+
+This plan does not wait for the design language. The inspector is built with
+the application's existing buttons, labels and spacing; the design-language
+pull request restyles it along with everything else.
 
 - **Phase 0 — foundations (S01–S04).** The inspector, its two hosts and the
   test scaffolding. Nothing a user sees changes; the inspector exists and no

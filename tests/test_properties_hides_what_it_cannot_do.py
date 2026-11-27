@@ -216,7 +216,7 @@ def test_the_axis_limit_rows_are_still_offered_on_a_line_plot(qtbot, monkeypatch
 
 def test_the_colour_limits_row_is_offered_on_the_nanowells_figure(qtbot, monkeypatch):
     _app, sb = _sidebar(qtbot, monkeypatch, kind="_nw_fig")
-    assert "Colour limits" in _row_labels(sb, "Limits & Scale")
+    assert "Color limits" in _row_labels(sb, "Limits & Scale")
     assert {"c_lim_min", "c_lim_max"} <= set(sb._getters)
 
 

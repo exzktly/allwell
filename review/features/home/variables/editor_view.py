@@ -28,7 +28,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
+    QListWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -301,7 +301,7 @@ def variable_row(name: str, variable_id: str, annotated: int,
     return item, row
 
 
-def row_delete_button(listing, row: int) -> QPushButton | None:
+def row_delete_button(listing, row: int) -> QToolButton | None:
     """The × on rail row *row*, or ``None``.
 
     A named accessor rather than each caller reaching through
@@ -313,7 +313,7 @@ def row_delete_button(listing, row: int) -> QPushButton | None:
     widget = listing.itemWidget(item) if item is not None else None
     if widget is None:
         return None
-    return widget.findChild(QPushButton, "VariableRowDelete")
+    return widget.findChild(QToolButton, "VariableRowDelete")
 
 
 def row_label_text(listing, row: int) -> str:

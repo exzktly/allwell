@@ -1,20 +1,18 @@
-"""Only a ReservedWidthButton can join the per-FOV toggle bank.
+"""Only a switch can join the per-FOV spread bank.
 
-``plot_toggles.refresh_fov_btn_state`` restyles every button on
-``ctx.runtime.fov.btns`` and reserves room for the wider checked label
-("FOV ✓"), so the ✓ never clips inside a popover sized at first show. It used to
-do that only ``if hasattr(btn, "reserve")``: a plain ``QPushButton`` on the bank
-would quietly get no reservation and bring the clipping back, with nothing to
-say so. The bank now has one door, ``plot_toggles.register_fov_button``, which
-refuses anything that is not a ``ReservedWidthButton``, and the restyle calls
-``reserve`` unconditionally.
+``plot_toggles.refresh_fov_btn_state`` sets every member of ``ctx.runtime.fov.btns``
+from the shared state. The setting acts at once, so it is a switch (design language
+§2.5) — the bank once held push buttons that wrote their state into their label
+("FOV" / "FOV ✓"), which is what the design language retires. The bank has one door,
+``plot_toggles.register_fov_button``, which refuses anything that is not a
+``ToggleSwitch``.
 
 * a plain button is refused at registration, with a ``TypeError`` naming it;
 * the two real registrants — the plot toolbar's band controls and the batch
   export panels — go through that door, never ``fov.btns.append`` directly (an
   AST scan, so a third registrant cannot route around it);
-* a button registered through the real band-controls builder has its width
-  reserved for "FOV ✓".
+* the band-controls builder registers a switch whose state follows the shared one
+  and whose label never changes.
 """
 
 from __future__ import annotations
@@ -45,28 +43,30 @@ def test_a_plain_button_is_refused(qtbot):
     ctx = _ctx()
     btn = QPushButton("FOV")
     qtbot.addWidget(btn)
-    with pytest.raises(TypeError, match="ReservedWidthButton"):
+    with pytest.raises(TypeError, match="ToggleSwitch"):
         register_fov_button(ctx, btn)
     assert not ctx.runtime.fov.btns, "the refused button still joined the bank"
 
 
-def test_the_band_controls_button_reserves_room_for_the_checked_label(qtbot):
-    from PySide6.QtWidgets import QPushButton, QWidget
+def test_the_band_controls_switch_follows_the_shared_state(qtbot):
+    from PySide6.QtWidgets import QWidget
 
+    from review.core.plot_toggles import refresh_fov_btn_state
     from review.core.ui_helpers import make_band_controls
-    from widgets.reserved_width_button import ReservedWidthButton
+    from widgets.toggle_switch import ToggleSwitch
 
     ctx = _ctx()
     parent = QWidget()
     qtbot.addWidget(parent)
     make_band_controls(ctx, parent, with_fov=True)
-    (btn,) = ctx.runtime.fov.btns
-    assert isinstance(btn, ReservedWidthButton)
-    probe = QPushButton("FOV ✓")
-    probe.setFont(btn.font())
-    qtbot.addWidget(probe)
-    assert btn.minimumWidth() >= probe.fontMetrics().horizontalAdvance("FOV ✓"), (
-        "the FOV toggle reserved no room for its checked label")
+    (switch,) = ctx.runtime.fov.btns
+    assert isinstance(switch, ToggleSwitch)
+    label = switch.text()
+    for on in (True, False, True):
+        ctx.state.plot.use_fov_replicates = on
+        refresh_fov_btn_state(ctx)
+        assert switch.isChecked() is on
+    assert switch.text() == label, "the switch wrote its state into its label"
 
 
 def _direct_appends(path, tree) -> list[str]:

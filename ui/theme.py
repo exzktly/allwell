@@ -813,7 +813,7 @@ QPushButton#VariableValueChip {{
    under the cursor: it destroys a definition and every well assignment under
    it, so it should not read as the row's primary action while the user is
    picking which variable to look at. */
-QPushButton#VariableRowDelete {{
+QToolButton#VariableRowDelete {{
     background: transparent;
     border: none;
     border-radius: {r.sm}px;
@@ -821,7 +821,7 @@ QPushButton#VariableRowDelete {{
     font-size: {t.small_size}px;
     padding: 0px;
 }}
-QPushButton#VariableRowDelete:hover {{
+QToolButton#VariableRowDelete:hover {{
     background-color: {c.hover};
     color: {c.warn};
 }}

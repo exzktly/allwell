@@ -25,7 +25,7 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QToolButton
 
 from core.safe import swallow
 from review.domain import sample_variables as sv
@@ -198,7 +198,7 @@ def _paint_rail(ctx, listing, vset, wells, keep) -> None:
                                  listing)
         listing.addItem(item)
         listing.setItemWidget(item, row)
-        close = row.findChild(QPushButton, "VariableRowDelete")
+        close = row.findChild(QToolButton, "VariableRowDelete")
         if close is not None:
             # Bound to *this row's* id, not to whatever the rail has selected.
             # A delete that reads the selection can act on a different variable

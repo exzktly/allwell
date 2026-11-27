@@ -322,20 +322,20 @@ def test_a_layer_that_grows_on_the_phone_is_fitted_again(shell_ctx, qtbot, phone
     empty = ctx.widgets.get("_var_empty")
     assert empty.isVisible(), "premise: the layer opens on its empty state"
     button = next(b for b in empty.findChildren(QAbstractButton)
-                  if "Variable" in b.text())
+                  if "add variable" in b.text().lower())
     qtbot.mouseClick(button, Qt.LeftButton)
     try:
         _settle(ctx, qtbot)
         assert ctx.widgets.get("_var_plate").isVisible(), (
-            "premise: + Variable put the plate in the empty state's place")
+            "premise: Add variable put the plate in the empty state's place")
         scroll = _scroll_over(ctx)
         room = scroll.viewport().width()
         assert _min_width(scroll.widget()) <= room, (
-            f"after + Variable the layer needs {_min_width(scroll.widget())} px "
+            f"after Add variable the layer needs {_min_width(scroll.widget())} px "
             f"of {room}:\n  " + "\n  ".join(_too_wide(scroll.widget(), room)))
         assert scroll.horizontalScrollBar().maximum() == 0
     finally:
-        # + Variable puts the cursor in the name field, whose focus-out commits
+        # Add variable puts the cursor in the name field, whose focus-out commits
         # the name and repaints the layer. Let that happen now, while the tab
         # exists: left to the teardown that deletes the window, the focus-out
         # arrives mid-delete and the repaint builds rows into a dead list.

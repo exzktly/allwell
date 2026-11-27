@@ -25,7 +25,7 @@ from tests._minimal_shell import build_page
 PANELS = {
     "Bar Plots": [("Fold change", "data", False), ("Display", "display", True)],
     "Line Graphs": [("Fold change", "data", False), ("Display", "display", True)],
-    "Response Curves": [("Fit", "data", False), ("Fold change", "data", False),
+    "Response Curves": [("Curves", "data", False), ("Fit", "data", False), ("Fold change", "data", False),
                         ("Display", "display", True)],
     "Heat Map": [("Layout", "data", False), ("Display", "display", True)],
     "Distribution": [("Display", "display", True)],

@@ -139,6 +139,11 @@ def refresh_series_control(ctx) -> None:
     button = _widget(ctx, "_response_series_btn")
     if button is not None:
         button.setText(series_button_text(ctx))
+    curves = _widget(ctx, "_response_curves_btn")      # the Data row that reads X and the series
+    if curves is not None:
+        from review.core import inspector_panels
+
+        inspector_panels.refresh(curves)
 
 
 def open_series_selector(ctx) -> None:

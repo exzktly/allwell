@@ -17,6 +17,7 @@ from core.safe import swallow
 from review.core.fold_change_controls_view import (
     install_fold_change_controls,
 )
+from review.core import inspector_panels as _panels
 from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll, make_band_controls,
@@ -58,9 +59,22 @@ def build_response_tab(ctx, parent: QWidget) -> None:
 
     # The x source is **scope**, not an action: it says what the figure is of,
     # like Channel and Property beside it, rather than doing something to it.
-    x_combo = reg.register("_response_x_cb", unlabelled("X"))
+    # X and Series — what the curves run along and what splits them — are one Data row, "Curves: Dose · none ›",
+    # whose page holds both, rather than two band items (the user's decision, tracker §9.1 step 20): the band
+    # keeps Channel, Property, Timepoints and Fold change on one row.
+    from widgets.form_grid import FormGrid
+
+    curves_btn, curves_panel, curves_lay = make_popover_button(
+        "Curves", band, ctx=ctx, tab="data",
+        summary=lambda: f"{x_combo.currentText() or '—'} · {series_button_text(ctx).split(': ', 1)[-1]}")
+    curves_btn.setToolTip("What the curves run along (X) and what splits them into series")
+    reg.register("_response_curves_btn", curves_btn)
+    curves_form = FormGrid(curves_panel)
+    curves_lay.addWidget(curves_form)
+    x_combo = reg.register("_response_x_cb", unlabelled("X", curves_panel))
     x_combo.currentIndexChanged.connect(lambda *_: on_x_variable_changed(ctx))
-    band.add_scope("X", x_combo)
+    x_combo.currentIndexChanged.connect(lambda *_: _panels.refresh(curves_btn))
+    curves_form.add_row("X", x_combo)
 
     # This tab's **own** Channel and Property, as the aggregate Scatter tab has
     # its own: only a tab that owns the pair can offer `Fraction above
@@ -100,7 +114,10 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         "values — color carries the series, dashes carry the timepoint. "
         "Pick more than one to cross them; None draws one curve per timepoint.")
     series_btn.clicked.connect(lambda _=False: open_series_selector(ctx))
-    band.add_scope("", series_btn)
+    series_btn.setParent(curves_panel)
+    curves_form.add_row("Series", series_btn)
+    curves_lay.addStretch(1)
+    band.add_scope("", curves_btn)
 
     # The Bar tab's picker, over this tab's own selection. Self-describing —
     # the button's own text carries the count, so it needs no caption beside it.

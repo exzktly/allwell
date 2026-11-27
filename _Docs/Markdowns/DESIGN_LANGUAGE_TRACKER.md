@@ -593,7 +593,29 @@ Step log (newest last):
     `test_on_threshold_is_a_data_row_whose_page_edits_the_cutoff` presses the row, types into the box and reads the
     cutoff and the row back — the box back on the band fails it ("the box is not on the row's page");
     `test_channel_and_property_combos_fold_their_own_label` pinned the retired painted label and is rewritten as
-    `test_channel_and_property_are_labelled_outside_their_boxes`. Next: each Plotting page's own controls.
+    `test_channel_and_property_are_labelled_outside_their_boxes`. Commit `a8e0e79`.
+23. D14 page steps (commits after `a8e0e79`, each with that page's fast tests green): Distribution's Mode, Bins,
+    Layout, log x, log y and Pool replicates and Heat Map's Aggregation on their Display pages; Response's X and
+    Series one "Curves" data row (`_response_curves_btn`); Scatter's axis pickers (both modes, including the
+    nanowell X / Y / Subset / Baseline) one "Axes" data row (`review/features/scatter/_axes_page.py`, each picker in
+    a `LabelledField` so `sync_controls` still hides it through its parent); Scatter's Points switch a data row
+    (`_plotting_scatter_points_btn`). Rosters updated (`test_band_panels_open_in_the_inspector.py`,
+    `test_a_page_has_the_three_fixed_actions.py`), and one test that read the Subset picker as visible in the
+    window now reads it as shown on its page.
+24. **Measured after step 23 (full app, mini dataset):** at a 1400 px window (band 801 px) only Line Graphs is one
+    row; at 1600 (band 888 px) Line Graphs and Distribution are. Still two rows: Heat Map (Channel 129 + Property
+    193 + Timepoint 119 + Layout › 107 + ON threshold › 125 + the fixed actions 173), Bar Plots (adds Color &
+    split, Fold change, Timepoints and the Reset order action), Response Curves (its Curves row reads 434 px — the
+    summary is too long — and the fit hint "Leave a plateau blank to fit it." is still a band item) and Scatter
+    (the Axes row reads 319 px). **What is left for D14, and why it is structural:** the prototype's set
+    (Channel, Property, Timepoints ›, Fold change ›, Color & split ›, the fixed actions) fits its band only because
+    its labels sit *above* their controls, so an item is as wide as the wider of the two rather than their sum;
+    here they sit beside. Putting band labels above makes a band taller than today's `ControlBand.band_height()`
+    (44 px) on every page, so it needs a new band height, the `band rows` check moved with it, and every page's
+    alignment re-measured — the shared step row D06 deferred to this row. Also owed: shorter summaries for the
+    Curves and Axes rows (or eliding them), the Response fit hint off the band, Bar's Reset order to the Display
+    page, and ON threshold's summary kept short. An unfinished agent attempt at labels-above is in local commit
+    `51e8d3a` (branch `worktree-agent-a79c6ce415759c893`), untested.
 
 ## 10. Rows
 

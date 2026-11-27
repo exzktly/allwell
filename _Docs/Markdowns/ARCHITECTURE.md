@@ -1625,6 +1625,9 @@ allwell/
 │   ├── palettes.py             ← the palettes as data: the grey bundle, role by role (§8)
 │   ├── buttons.py              ← the four kinds of button (primary, default, quiet, destructive),
 │   │                              their builders and sheet rules (§8)
+│   ├── page_chrome.py          ← a form page's head (PageHeader: title, detail, quiet commands) and
+│   │                              foot (ActionRow: the primary action, its neighbours, and why it is
+│   │                              disabled while it is)
 │   ├── text_roles.py           ← the six text roles (page title, section heading, eyebrow, body,
 │   │                              label/help, number) as QLabel builders, their sheet rules, and
 │   │                              NOT_SET, how an unset value reads (§8)
@@ -22405,6 +22408,14 @@ label ink and weight; `tests/test_buttons_have_one_of_four_kinds.py` fails on
 any other variant value set anywhere (a call, a conditional, a table row, a
 helper's default), with the buttons that carry an on/off state on its roster
 until each becomes a switch, checkbox or segmented control.
+
+**A form page has one skeleton** (`ui/page_chrome.py`): a `PageHeader` — the
+page title, an optional detail line in the number role, quiet commands at the
+right — then cards, then an `ActionRow` at the foot: the page's one primary
+action at the right, its neighbours before it, and at the left the reason the
+primary action is disabled. The row follows the primary button's own
+`EnabledChange`, so the reason shows exactly while the action is disabled and
+no page has to remember to clear it (`tests/test_page_chrome.py`).
 
 **Every piece of text is one of six roles** (`ui/text_roles.py`): a page title
 (17 semibold), a section heading (15 semibold), an eyebrow (12 semibold, capitals,

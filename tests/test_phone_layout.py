@@ -458,14 +458,24 @@ def test_compact_mode_bar_widths_follow_labels_enlarged_by_a_restyle(qapp):
     before = bar._segments[2].minimumWidth()
     from PySide6.QtWidgets import QWidget
 
+    from ui import theme
     from ui.phone_shell import rescale_widgets
-    tree = [bar, *bar.findChildren(QWidget)]
-    rescale_widgets(1.0, 2.0, tree)       # the restyle's own pass
-    for seg in bar._segments:
-        seg.layout().activate()
-    widest = max(s.sizeHint().width() for s in bar._segments)
-    assert widest > before                    # the fixture can tell them apart
-    assert [s.minimumWidth() for s in bar._segments] == [widest] * 3
+    # The restyle as ``PhoneShell._restyle`` runs it: the tokens scaled, the application sheet re-applied — a
+    # segment's label takes its size from that sheet — then the rescale pass.
+    before_sheet = qapp.styleSheet()
+    try:
+        theme.apply_ui_scale(2.0)
+        qapp.setStyleSheet(theme.qss())
+        tree = [bar, *bar.findChildren(QWidget)]
+        rescale_widgets(1.0, 2.0, tree)       # the restyle's own pass
+        for seg in bar._segments:
+            seg.layout().activate()
+        widest = max(s.sizeHint().width() for s in bar._segments)
+        assert widest > before                    # the fixture can tell them apart
+        assert [s.minimumWidth() for s in bar._segments] == [widest] * 3
+    finally:
+        theme.apply_ui_scale(1.0)
+        qapp.setStyleSheet(before_sheet)
     bar.setCompact(False)
     bar._aw_rescale()
     assert [s.minimumWidth() for s in bar._segments] == [0] * 3

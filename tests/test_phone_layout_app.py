@@ -126,7 +126,9 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     # Right under the top bar, so ☰ and the mode bar stay in reach, and over
     # the strip, whose page menu and Controls belong to the page it hides.
     assert drawer.geometry().top() == review._top_bar.geometry().bottom() + 1
-    assert drawer.geometry().top() < review._h_pane.geometry().top()
+    # And no lower than the page area: with no hairline under the band (window style W1), the page begins
+    # directly under it, where the drawer does.
+    assert drawer.geometry().top() <= review._h_pane.geometry().top()
 
     # Code that used to put the desktop chrome back on its own: a resize
     # re-parks (and re-shows) the rail toggle, a mode switch re-shows Split.

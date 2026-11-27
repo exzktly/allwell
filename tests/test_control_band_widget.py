@@ -353,7 +353,9 @@ def test_mode_bar_selection_round_trips(styled_app):
 
 
 def test_mode_bar_segments_are_flush(styled_app):
-    """No gutters: the bar is one band, not three chips."""
+    """No gutters between segments: one pill, its segments side by side on a track (window style W1, design
+    language §3.1) — the track the same width all round."""
+    from widgets.mode_bar import _TRACK_INSET
     bar = _mode_bar(styled_app)
     bar.show()
     bar.setFixedWidth(340)
@@ -361,7 +363,7 @@ def test_mode_bar_segments_are_flush(styled_app):
     styled_app.processEvents()
     assert bar.layout().spacing() == 0
     m = bar.layout().contentsMargins()
-    assert (m.left(), m.top(), m.right(), m.bottom()) == (0, 0, 0, 0)
+    assert (m.left(), m.top(), m.right(), m.bottom()) == (_TRACK_INSET,) * 4
     segs = [bar.layout().itemAt(i).widget() for i in range(bar.count())]
     for a, b in zip(segs, segs[1:]):
         assert b.geometry().left() - a.geometry().right() <= 1, "gutter between segments"

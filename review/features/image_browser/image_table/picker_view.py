@@ -13,6 +13,7 @@ from review.features.image_browser.image_table.controller import image_table_act
 from review.features.image_browser.image_table.controller import image_table_clear_active
 from review.features.image_browser.image_table.controller import image_table_refresh_picker
 from review.features.image_browser.image_table.controller import image_table_select_all
+from ui import theme
 
 
 def build_image_table_picker(ctx, parent: QWidget) -> None:
@@ -28,7 +29,7 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     # flush at 0). A left/right gutter here used to make *only* this tab's plate
     # render ~24px narrower — the aspect-locked plate then shrank in both dimensions,
     # so the well picker looked smaller on the Image Table tab than anywhere else.
-    layout.setContentsMargins(0, 0, 0, 8)
+    layout.setContentsMargins(0, 0, 0, theme.Spacing.sm)
     layout.setSpacing(0)
 
     plate = WellPlateSelector(parent)

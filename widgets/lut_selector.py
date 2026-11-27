@@ -161,7 +161,7 @@ class LutSelector(QWidget):
         self._trigger.setObjectName("LutTrigger")
         self._trigger.setCursor(Qt.PointingHandCursor)
         tl = QHBoxLayout(self._trigger)
-        tl.setContentsMargins(theme.Spacing.xs, 2, theme.Spacing.xs, 2)
+        tl.setContentsMargins(theme.Spacing.xs, 0, theme.Spacing.xs, 0)
         tl.setSpacing(theme.Spacing.sm)
         self._trigger_strip = GradientStrip(_cmap_stops(self._lut), reversed=self._reversed)
         self._trigger_strip.setFixedHeight(max(12, round(self.fontMetrics().height() * 0.85)))

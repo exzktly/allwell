@@ -76,6 +76,7 @@ from review.features.home.cell_gating.optimizer_view import (
 )
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 from ui import buttons
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -83,6 +84,8 @@ from ui import buttons
 _GATING_PLOT_MIN_H = 420
 _GATE_BTN_MIN_W = 150
 _RADIO_INDENT = 20
+#: A hint under an option that is itself under a radio: two indents in.
+_NESTED_INDENT = 2 * _RADIO_INDENT
 #: The left inset a section's own lead-in lines take.
 #:
 #: ``build_section_header`` lays its title out inside a block with 8 px of
@@ -165,12 +168,12 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     content = QWidget()
     outer_scroll.setWidget(content)
     root = QVBoxLayout(content)
-    root.setContentsMargins(12, 12, 12, 12)
+    root.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
 
     control_frame = QWidget(parent)
     control_frame.setObjectName("TabCtrl")
     cf_layout = QVBoxLayout(control_frame)
-    cf_layout.setContentsMargins(6, 6, 6, 6)
+    cf_layout.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
 
     _build_inclusion_section(ctx, control_frame, cf_layout)
     build_saved_cells_section(ctx, control_frame, cf_layout)
@@ -294,7 +297,7 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
     hint = QLabel("No gates drawn yet — draw one on the Scatter Plot tab.", parent)
     hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
-    hint.setContentsMargins(_RADIO_INDENT * 2, 0, 0, 0)
+    hint.setContentsMargins(_NESTED_INDENT, 0, 0, 0)
     parent.layout().addWidget(hint)
 
     ctx.widgets.register(_GATE_BUTTON_HANDLE[mode], btn)
@@ -385,7 +388,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
 
     auto_row = QWidget(frame)
     auto_row_layout = FlowLayout(auto_row)
-    auto_row_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 0)
+    auto_row_layout.setContentsMargins(_RADIO_INDENT, theme.Spacing.xs, 0, 0)
     auto_btn = buttons.default("Auto-threshold all channels", auto_row)
     auto_btn.setToolTip(
         "Compute a default ON cutoff per channel via Otsu on "
@@ -448,7 +451,7 @@ def _mount_threshold_table(ctx, frame: QWidget, layout: QVBoxLayout,
     """
     host = ctx.widgets.register(handle, QWidget(frame))
     host_layout = QVBoxLayout(host)
-    host_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 4)
+    host_layout.setContentsMargins(_RADIO_INDENT, theme.Spacing.xs, 0, theme.Spacing.xs)
     layout.addWidget(host)
 
 

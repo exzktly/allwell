@@ -324,7 +324,7 @@ class ConverterDashboard(PlateProgress):
             row_host = QWidget(self._rail_host)
             row = QHBoxLayout(row_host)
             row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(7)
+            row.setSpacing(theme.Spacing.sm)
             row.addWidget(status_dot(self._state_color(state)))
             text = QLabel(f"{label}: {count}", row_host)
             text.setStyleSheet(f"color:{theme.Colors.text_primary};")

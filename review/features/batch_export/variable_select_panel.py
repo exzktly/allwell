@@ -120,7 +120,7 @@ class VariableSelectMixin:
         # with a sentence, rather than leaving dead combos that look live.
         self._vsel_controls = QWidget()
         row = QHBoxLayout(self._vsel_controls)
-        row.setContentsMargins(8, 2, 8, 2)
+        row.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
         row.addWidget(QLabel("Select by variable:"))
         self._vsel_var_cb = QComboBox()
         self._vsel_var_cb.setMinimumWidth(_VSEL_COMBO_MIN_W)
@@ -136,7 +136,7 @@ class VariableSelectMixin:
         # makes a group, and two buttons reading the same word must not do
         # different things.
         btns = QHBoxLayout()
-        btns.setContentsMargins(8, 0, 8, 2)
+        btns.setContentsMargins(theme.Spacing.sm, 0, theme.Spacing.sm, theme.Spacing.xs)
         btns.addStretch(1)
         self._vsel_add_btn = btn_secondary(None, "Add wells", self._vsel_add)
         self._vsel_add_btn.setToolTip(
@@ -153,14 +153,14 @@ class VariableSelectMixin:
 
         self._vsel_empty = QLabel(NO_VARIABLES_TEXT)
         self._vsel_empty.setWordWrap(True)
-        self._vsel_empty.setContentsMargins(8, 2, 8, 2)
+        self._vsel_empty.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
         self._vsel_empty.setStyleSheet(f"color: {theme.Colors.text_secondary};")
         layout.addWidget(self._vsel_empty)
 
         self._vsel_status = QLabel("")
         self._vsel_status.setWordWrap(True)
         self._vsel_status.setTextFormat(Qt.RichText)
-        self._vsel_status.setContentsMargins(8, 0, 8, 2)
+        self._vsel_status.setContentsMargins(theme.Spacing.sm, 0, theme.Spacing.sm, theme.Spacing.xs)
         self._vsel_status.hide()
         layout.addWidget(self._vsel_status)
         self._vsel_var_cb.currentIndexChanged.connect(

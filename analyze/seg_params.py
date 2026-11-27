@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 from util.channel_roles import LABELFREE_METHODS, phase_role_conflicts
 from widgets.text_combo import TextCombo
 from widgets.value_combo import ValueCombo
+from ui import theme
 
 #: The widths of the Segmentation channel and Cytoplasm channel fields, in pixels.
 _SEG_CHANNEL_FIELD_W = 160
@@ -112,7 +113,7 @@ class AnalyzeSegParamsMixin:
             p = QWidget()
             v = QVBoxLayout(p)
             v.setContentsMargins(0, 0, 0, 0)
-            v.setSpacing(2)
+            v.setSpacing(theme.Spacing.xs)
             return p
 
         # StarDist (nuclei): no extra parameters beyond the shared thresholds.
@@ -172,7 +173,7 @@ class AnalyzeSegParamsMixin:
         self._nanowell_count_box = QWidget(lf)
         box = QVBoxLayout(self._nanowell_count_box)
         box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(2)
+        box.setSpacing(theme.Spacing.xs)
         lf.layout().addWidget(self._nanowell_count_box)
         self._nanowell_count_box.hide()
         self._seg_param_stack.addPage("cellpose_labelfree", lf)

@@ -122,7 +122,7 @@ class MergePlatesDashboard(PlateProgress):
         row_w = QWidget(self._rail_host)
         row = QHBoxLayout(row_w)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(7)
+        row.setSpacing(theme.Spacing.sm)
         row.addWidget(status_dot(theme.Colors.success))
         nm = QLabel(f"Merged: {merged}/{total}", row_w)
         nm.setStyleSheet(f"color:{theme.Colors.text_primary};")

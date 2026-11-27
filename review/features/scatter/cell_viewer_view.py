@@ -138,7 +138,7 @@ class ScatterCellViewer(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 10)
+        layout.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.sm)
 
         head = QHBoxLayout()
         self._title_label = QLabel("Cell")

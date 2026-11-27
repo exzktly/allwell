@@ -151,7 +151,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
             "Position, Along x: Wells and the Array map draw one timepoint. Latest and Earliest are each well's.")
         self._refresh_timepoints()
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "", min_width=_FIELD_LABEL_W)
         self._cohort_box = QCheckBox("Fixed cohort")
         self._cohort_box.setToolTip("Distribution and Trajectories: only the nanowells with a value at every "
@@ -189,7 +189,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         layout.addLayout(row)
 
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "Subset:", min_width=_FIELD_LABEL_W)
         self._subset_box = QCheckBox("Use the page's subset")
         self._subset_box.setChecked(True)
@@ -205,7 +205,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         layout.addLayout(row)
 
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "Metrics:", min_width=_FIELD_LABEL_W)
         self._metric_list = QListWidget()
         self._metric_list.setToolTip("One figure per ticked metric. Cell fluorescence and nanowell fluorescence use the channel "
@@ -225,7 +225,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         # One "responding above" cut per ticked metric, and every ticked metric must have one (tracker I9): the
         # summary CSV's fraction responding is computed at it, and there is no default cut to fall back on.
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "Responding above:", min_width=_FIELD_LABEL_W)
         self._threshold_host = QWidget()
         self._threshold_form = QFormLayout(self._threshold_host)
@@ -246,7 +246,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
 
     def _combo_row(self, layout: QVBoxLayout, label: str, choices, tip: str) -> QComboBox:
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, label, min_width=_FIELD_LABEL_W)
         combo = QComboBox()
         for key, text in choices:

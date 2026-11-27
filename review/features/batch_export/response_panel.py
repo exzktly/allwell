@@ -210,7 +210,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
     def _build_variable_rows(self, layout: QVBoxLayout) -> None:
         """The x variable, the series split, and the x axis scale."""
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "X variable:", min_width=_FIELD_LABEL_W)
         self._x_var_cb = QComboBox()
         self._x_var_cb.setMinimumWidth(_VAR_COMBO_MIN_W)
@@ -245,7 +245,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
     def _build_fit_rows(self, layout: QVBoxLayout) -> None:
         """The fit model and its pinned plateaus, shared by every curve."""
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "Fit:", min_width=_FIELD_LABEL_W)
         self._fit_model_cb = QComboBox()
         self._fit_models: list[str] = []

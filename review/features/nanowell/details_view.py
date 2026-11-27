@@ -17,6 +17,7 @@ from ui import text_roles
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from ui import buttons
+from ui import theme
 
 _TIP = "The figure's footer: its counts, what it leaves out or marks, and how to read it."
 
@@ -56,7 +57,7 @@ def build_details_panel(ctx, parent) -> QWidget:
     panel.setObjectName("NanowellDetails")
     outer = QVBoxLayout(panel)
     outer.setContentsMargins(0, 0, 0, 0)
-    outer.setSpacing(2)
+    outer.setSpacing(theme.Spacing.xs)
     head = QHBoxLayout()
     button = buttons.tool_button(panel)
     button.setCheckable(True)

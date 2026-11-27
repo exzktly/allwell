@@ -390,7 +390,7 @@ class AllWellApp(QMainWindow):
         # the native frame, so this is the app-shell strip.
         header = QWidget(objectName="Sidebar")
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(12, 7, 14, 7)
+        hl.setContentsMargins(theme_v2.Spacing.md, theme_v2.Spacing.sm, theme_v2.Spacing.md, theme_v2.Spacing.sm)
         hl.setSpacing(theme_v2.Spacing.sm)
         hl.addWidget(BrandTile(side=24))
         title = QLabel("All-Well")
@@ -635,8 +635,8 @@ class AllWellApp(QMainWindow):
         statusbar = QWidget(objectName="StatusBar")
         self._statusbar = statusbar
         sb_layout = QHBoxLayout(statusbar)
-        sb_layout.setContentsMargins(theme_v2.Spacing.md, 4,
-                                     theme_v2.Spacing.md, 4)
+        sb_layout.setContentsMargins(theme_v2.Spacing.md, theme_v2.Spacing.xs,
+                                     theme_v2.Spacing.md, theme_v2.Spacing.xs)
         sb_layout.setSpacing(theme_v2.Spacing.sm)
         # The embedded Review widget builds its own status strip
         # (status_view.build_bottom) with a "Ready." label + progress bar. That

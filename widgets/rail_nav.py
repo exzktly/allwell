@@ -227,7 +227,7 @@ class RailNav(QFrame):
 
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.setSpacing(1)
+        self._lay.setSpacing(theme.Metrics.hairline)
         # Never taller than its rows need. A nav is a list of links, not a
         # region to fill: nothing here has a reason to grow, and the rows
         # carry no height of their own, so surplus height would be divided
@@ -371,7 +371,7 @@ class RailNav(QFrame):
         holder.deleteLater()
         lay = kind(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(1)
+        lay.setSpacing(theme.Metrics.hairline)
         self._lay = lay
         return lay
 
@@ -516,15 +516,15 @@ if __name__ == "__main__":
     host.setWindowTitle("RailNav — demo")
     host.resize(280, 480)
     lay = QVBoxLayout(host)
-    lay.setContentsMargins(8, 12, 8, 12)
-    lay.setSpacing(8)
+    lay.setContentsMargins(theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md)
+    lay.setSpacing(theme.Spacing.sm)
 
     head = QLabel("SECTION", host)
     head.setStyleSheet(
         f"color: {theme.Colors.text_secondary}; font-size: {theme.Typography.caption_size}px; "
         f"letter-spacing: 0.08em; font-weight: 600;"
     )
-    head.setContentsMargins(9, 0, 0, 0)
+    head.setContentsMargins(theme.Spacing.sm, 0, 0, 0)
     lay.addWidget(head)
 
     nav = RailNav(host)

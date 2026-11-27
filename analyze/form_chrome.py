@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from widgets.separator import build_hline_separator
 from ui import text_roles
+from ui import theme
 
 
 class _WidthWatcher(QObject):
@@ -80,22 +81,22 @@ class AnalyzeFormChromeMixin:
         """
         container = QWidget(parent)
         cl = QVBoxLayout(container)
-        cl.setContentsMargins(0, 4, 0, 4)
-        cl.setSpacing(2)
+        cl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+        cl.setSpacing(theme.Spacing.xs)
 
         header = QWidget(container)
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(0, 0, 12, 0)
-        hl.setSpacing(4)
+        hl.setContentsMargins(0, 0, theme.Spacing.md, 0)
+        hl.setSpacing(theme.Spacing.xs)
         caret = QLabel("▸" if collapsed else "▾" if collapsible else "", header)
         caret.setProperty("textRole", "sectionHeading")
         caret.setFixedWidth(self._CARET_GUTTER_W)
         caret.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        caret.setContentsMargins(0, 6, 4, 2)
+        caret.setContentsMargins(0, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
         hl.addWidget(caret)
         title_lbl = QLabel(title, header)
         title_lbl.setProperty("textRole", "sectionHeading")
-        title_lbl.setContentsMargins(0, 6, 0, 2)
+        title_lbl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
         hl.addWidget(title_lbl)
         if info:
             hl.addWidget(self._info_icon(header, info))
@@ -105,7 +106,7 @@ class AnalyzeFormChromeMixin:
         summary_lbl = QLabel("", header)
         _WidthWatcher(summary_lbl, lambda _title=title: self._refresh_section_summary(_title))
         summary_lbl.setProperty("textRole", "help")
-        summary_lbl.setContentsMargins(6, 6, 0, 2)
+        summary_lbl.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, 0, theme.Spacing.xs)
         summary_lbl.setMinimumWidth(0)
         summary_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         summary_lbl.hide()
@@ -124,8 +125,8 @@ class AnalyzeFormChromeMixin:
 
         body = QWidget(container)
         bl = QVBoxLayout(body)
-        bl.setContentsMargins(12, 4, 12, 8)
-        bl.setSpacing(3)
+        bl.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.sm)
+        bl.setSpacing(theme.Spacing.xs)
         cl.addWidget(body)
 
         if collapsible:
@@ -321,8 +322,8 @@ class AnalyzeFormChromeMixin:
         # desk and on a phone, so phone layout has nothing to do to one.
         row.setObjectName("AnalyzeFormRow")
         rl = QBoxLayout(QBoxLayout.TopToBottom, row)
-        rl.setContentsMargins(0, 2, 0, 2)
-        rl.setSpacing(2)
+        rl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+        rl.setSpacing(theme.Spacing.xs)
 
         lbl = QLabel(label, row)
         lbl.setProperty("textRole", "help")
@@ -336,7 +337,7 @@ class AnalyzeFormChromeMixin:
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         rr = QHBoxLayout(right)
         rr.setContentsMargins(0, 0, 0, 0)
-        rr.setSpacing(4)
+        rr.setSpacing(theme.Spacing.xs)
         rl.addWidget(right)
 
         parent.layout().addWidget(row)
@@ -415,8 +416,8 @@ class AnalyzeFormChromeMixin:
         heading, so a group inside a section never reads as a section."""
         head = QWidget(sec)
         hl = QHBoxLayout(head)
-        hl.setContentsMargins(0, 8, 0, 2)
-        hl.setSpacing(4)
+        hl.setContentsMargins(0, theme.Spacing.sm, 0, theme.Spacing.xs)
+        hl.setSpacing(theme.Spacing.xs)
         lbl = QLabel(text, head)
         lbl.setObjectName("FormSubheading")
         hl.addWidget(lbl)

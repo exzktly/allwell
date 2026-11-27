@@ -39,6 +39,7 @@ from services.run_detect import (
 from services.run_spec import RunSpec, RunSpecError
 from widgets.flow_layout import FlowLayout
 from ui import buttons
+from ui import theme
 
 
 class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
@@ -196,7 +197,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         """
         row = QWidget(parent)
         layout = FlowLayout(row, margin=0)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)
 
         self._run_btn = buttons.primary("▶  Run Pipeline", row)
         self._run_btn.clicked.connect(self._run)

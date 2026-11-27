@@ -30,6 +30,7 @@ from services.remote_config import default_remote_index, load_remotes
 from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
 from ui import buttons
+from ui import theme
 
 
 class AnalyzeRunFooterMixin:
@@ -136,8 +137,8 @@ class AnalyzeRunFooterMixin:
         # without restarting the GUI.
         remote_widget = QWidget(footer)
         rl = QHBoxLayout(remote_widget)
-        rl.setContentsMargins(12, 8, 12, 0)
-        rl.setSpacing(8)
+        rl.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, 0)
+        rl.setSpacing(theme.Spacing.sm)
         rl.addWidget(QLabel("Run on", remote_widget))
         self._remote_cb = QComboBox(remote_widget)
         self._remote_cb.addItem("Local", userData=None)
@@ -176,7 +177,7 @@ class AnalyzeRunFooterMixin:
         # first in full; a click goes to its section (``analyze.run_problems``).
         self._run_problems_lbl = QLabel("", footer)
         self._run_problems_lbl.setWordWrap(True)
-        self._run_problems_lbl.setContentsMargins(12, 0, 12, 8)
+        self._run_problems_lbl.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.sm)
         self._run_problems_lbl.setCursor(Qt.PointingHandCursor)
         self._run_problems_lbl.mousePressEvent = lambda _ev: self._go_to_run_problem()
         layout.addWidget(self._run_problems_lbl)

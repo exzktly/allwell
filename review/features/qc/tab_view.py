@@ -133,8 +133,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     """
     row = QWidget(parent)
     outer = QVBoxLayout(row)
-    outer.setContentsMargins(8, 2, 8, 2)
-    outer.setSpacing(4)
+    outer.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
+    outer.setSpacing(theme.Spacing.xs)
 
     params = get_qc_params(ctx)
 
@@ -182,8 +182,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     grid = QWidget(row)
     gl = QGridLayout(grid)
     gl.setContentsMargins(_GRID_INDENT, 0, 0, 0)
-    gl.setHorizontalSpacing(10)
-    gl.setVerticalSpacing(3)
+    gl.setHorizontalSpacing(theme.Spacing.sm)
+    gl.setVerticalSpacing(theme.Spacing.xs)
     gl.setColumnMinimumWidth(0, _QUANTITY_LBL_W)
     gl.setColumnStretch(3, 1)
     for col, cap in ((1, "min"), (2, "max")):
@@ -253,8 +253,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # was flagged rather than discovered afterwards.
     fq = QWidget(row)
     fq_layout = QVBoxLayout(fq)
-    fq_layout.setContentsMargins(0, 6, 0, 0)
-    fq_layout.setSpacing(2)
+    fq_layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    fq_layout.setSpacing(theme.Spacing.xs)
     fq_head = QWidget(fq)
     fq_head_layout = QHBoxLayout(fq_head)
     fq_head_layout.setContentsMargins(0, 0, 0, 0)
@@ -303,8 +303,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # the Playground is where a user finds theirs.
     foc = QWidget(row)
     foc_layout = QVBoxLayout(foc)
-    foc_layout.setContentsMargins(0, 6, 0, 0)
-    foc_layout.setSpacing(2)
+    foc_layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    foc_layout.setSpacing(theme.Spacing.xs)
     foc_head = QWidget(foc)
     # A flow row: the checkbox, its cut and the curve button together are wider
     # than a phone, and a horizontal row would hold the whole page that wide.
@@ -383,8 +383,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # debris gate's enable box for the same reason.
     brd = QWidget(row)
     brd_layout = QVBoxLayout(brd)
-    brd_layout.setContentsMargins(0, 6, 0, 0)
-    brd_layout.setSpacing(2)
+    brd_layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    brd_layout.setSpacing(theme.Spacing.xs)
     brd_cb = QCheckBox("Exclude cells touching the image border", brd)
     brd_cb.setChecked(bool(params.exclude_border_cells))
     brd_cb.setToolTip(_BORDER_TOOLTIP)

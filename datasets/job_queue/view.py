@@ -229,7 +229,7 @@ class JobQueuePage(QWidget):
         wrap = QWidget(self)
         col = QVBoxLayout(wrap)
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(2)
+        col.setSpacing(theme.Spacing.xs)
         self._summary = QLabel("", self)
         self._summary.setProperty("textRole", "help")
         col.addWidget(self._summary)

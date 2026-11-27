@@ -221,7 +221,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     stage_row = QWidget(view_panel)
     stage_lay = QHBoxLayout(stage_row)
     stage_lay.setContentsMargins(0, 0, 0, 0)
-    stage_lay.setSpacing(6)
+    stage_lay.setSpacing(theme.Spacing.xs)
     stage_lay.addWidget(QLabel("Stage:", stage_row))
     source_seg = _SegmentedControl(stage_row)
     rt.source_seg = source_seg
@@ -302,7 +302,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     lut_range_row = QWidget(lut_panel)
     lut_range_lay = QHBoxLayout(lut_range_row)
     lut_range_lay.setContentsMargins(0, 0, 0, 0)
-    lut_range_lay.setSpacing(6)
+    lut_range_lay.setSpacing(theme.Spacing.xs)
     lut_range_lay.addWidget(reg.register("_review_lut_chan_lbl", QLabel(
         f"{ctx.state.channel.active_image_channel.upper()} LUT min:", lut_range_row,
     )))
@@ -330,7 +330,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     thr_row = QWidget()
     thr_lay = QHBoxLayout(thr_row)
     thr_lay.setContentsMargins(0, 0, 0, 0)
-    thr_lay.setSpacing(6)
+    thr_lay.setSpacing(theme.Spacing.xs)
     # Registered because the caption follows the cutoff the selected Property
     # uses — ``refresh_thresh_frac_quick_edit`` rewrites it alongside the value.
     _thr_lbl = reg.register("_review_thresh_frac_lbl", QLabel("ON threshold", thr_row))
@@ -365,7 +365,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         row = QWidget(colors_panel)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(6)
+        rl.setSpacing(theme.Spacing.xs)
         rl.addWidget(QLabel(label_text, row))
         sw = _QPushButton("", row)
         sw.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)

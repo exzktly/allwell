@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 from review.domain import plot_members as _members
 from review.domain import variable_pairing as _vp
 from review.features.barplot.renderer import redraw_bars
+from ui import theme
 
 #: The variable combo's "off" entry.
 OFF_LABEL = "—"
@@ -90,8 +91,8 @@ def build_relative_to_row(ctx, parent: QWidget, layout) -> QWidget:
     """Build the row into *layout*. ``_aw_refresh`` re-reads variables and state."""
     box = QWidget(parent)
     outer = QVBoxLayout(box)
-    outer.setContentsMargins(0, 6, 0, 0)
-    outer.setSpacing(2)
+    outer.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    outer.setSpacing(theme.Spacing.xs)
     outer.addWidget(QLabel("Then relative to", box))
 
     line = QWidget(box)

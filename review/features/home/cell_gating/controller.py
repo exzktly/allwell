@@ -84,6 +84,7 @@ from review.features.home.cell_gating.fov_view import refresh_fov_selection_widg
 from review.data.fov_selection import available_fovs, normalise_selection, selected_fovs
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 from widgets.squeeze_label import SqueezeWrapLabel
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -1794,8 +1795,8 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
     table = QWidget(host)
     grid = QGridLayout(table)
     grid.setContentsMargins(0, 0, 0, 0)
-    grid.setHorizontalSpacing(16)
-    grid.setVerticalSpacing(4)
+    grid.setHorizontalSpacing(theme.Spacing.lg)
+    grid.setVerticalSpacing(theme.Spacing.xs)
     grid.setColumnStretch(len(headers) + 1, 1)
 
     # The column header names its layer and the measurement it is made against —

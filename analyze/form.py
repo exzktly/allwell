@@ -54,6 +54,7 @@ from widgets.flow_layout import FlowLayout, sync_flow_height
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
 from ui import buttons
+from ui import theme
 
 
 #: The nanowell section, or a stand-in that is nothing, by the build's profile (``analyze.nanowell_hook``).
@@ -116,7 +117,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # form past Metrics.rail_w. Presets wraps under the first button instead (test_labelfree_phase.py).
         pin_row = QWidget(sec)
         prl = FlowLayout(pin_row)
-        prl.setContentsMargins(0, 0, 0, 4)
+        prl.setContentsMargins(0, 0, 0, theme.Spacing.xs)
         prl.addWidget(self._open_pinfo_btn)
         # Named presets: the user's own saved settings, offered on every dataset (analyze/presets.py).
         prl.addWidget(self._build_presets_button(pin_row))
@@ -130,8 +131,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
 
         in_pick = QWidget(sec)
         ipl = QHBoxLayout(in_pick)
-        ipl.setContentsMargins(0, 0, 0, 4)
-        ipl.setSpacing(4)
+        ipl.setContentsMargins(0, 0, 0, theme.Spacing.xs)
+        ipl.setSpacing(theme.Spacing.xs)
         self._input_edit = QLineEdit(in_pick)
         self._input_edit.setReadOnly(True)
         self._input_edit.setPlaceholderText("(not set)")
@@ -151,7 +152,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._output_row = QWidget(sec)
         orl = QHBoxLayout(self._output_row)
         orl.setContentsMargins(0, 0, 0, 0)
-        orl.setSpacing(4)
+        orl.setSpacing(theme.Spacing.xs)
         out_cap = QLabel("Output to", self._output_row)
         out_cap.setProperty("textRole", "help")
         orl.addWidget(out_cap, 0, Qt.AlignTop)
@@ -190,7 +191,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._fluor_frame = QWidget(sec)
         self._fluor_frame_layout = QVBoxLayout(self._fluor_frame)
         self._fluor_frame_layout.setContentsMargins(0, 0, 0, 0)
-        self._fluor_frame_layout.setSpacing(2)
+        self._fluor_frame_layout.setSpacing(theme.Spacing.xs)
         sec.layout().addWidget(self._fluor_frame)
         self._fluor_add_row("GFP")
         self._build_channel_list_controls(sec)

@@ -25,6 +25,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLineEdit, QPushButton, QW
 from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
 from ui import buttons
+from ui import theme
 
 #: A channel's roles, ``(value, label)``.
 CHANNEL_ROLES = (
@@ -89,7 +90,7 @@ class AnalyzeChannelRowsMixin:
         row = QWidget(self._fluor_frame)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(4)
+        rl.setSpacing(theme.Spacing.xs)
 
         edit = QLineEdit(default_token, row)
         edit.setPlaceholderText("channel name")

@@ -175,7 +175,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         scroll.setFixedWidth(theme.Metrics.rail_w)
         form_host = QWidget()
         self._form_layout = QVBoxLayout(form_host)
-        self._form_layout.setContentsMargins(0, 8, 0, 8)
+        self._form_layout.setContentsMargins(0, theme.Spacing.sm, 0, theme.Spacing.sm)
         self._form_layout.setSpacing(0)
         scroll.setWidget(form_host)
         self._left_sidebar = scroll  # shell left-rail toggle hides/shows this

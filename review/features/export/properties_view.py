@@ -497,7 +497,7 @@ class ExportStyleSidebar(QWidget):
             self._gate_list_box = QWidget()
             self._gate_list_layout = QVBoxLayout(self._gate_list_box)
             self._gate_list_layout.setContentsMargins(0, 0, 0, 0)
-            self._gate_list_layout.setSpacing(2)
+            self._gate_list_layout.setSpacing(theme.Spacing.xs)
             kit.add_full(s_gates, self._gate_list_box)
             self._rebuild_gate_list()
             # Keep the gate-count label + name list live when a gate is drawn on

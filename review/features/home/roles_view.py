@@ -41,7 +41,7 @@ def build_role_strip(role: DeclarationRole, parent: QWidget) -> QWidget:
     host.setObjectName("HomeRoleStrip")
     column = QVBoxLayout(host)
     column.setContentsMargins(0, theme.Spacing.sm, 0, theme.Spacing.sm)
-    column.setSpacing(2)
+    column.setSpacing(theme.Spacing.xs)
 
     what = QLabel(role.role, host)
     what.setObjectName("HomeRoleText")

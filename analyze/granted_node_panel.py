@@ -39,6 +39,7 @@ from services.remote_hold import (
 )
 from services.remote_upload import DatasetCache
 from ui import buttons
+from ui import theme
 
 #: How often the selected host's node is read while the panel is on screen, in milliseconds.
 POLL_MS = 10_000
@@ -75,7 +76,7 @@ class GrantedNodePanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(theme.Spacing.xs)
         title = QLabel("Granted node", self)
         title.setProperty("textRole", "sectionHeading")
         layout.addWidget(title)
@@ -84,7 +85,7 @@ class GrantedNodePanel(QWidget):
         self._readout.setWordWrap(True)
         layout.addWidget(self._readout)
         row = QHBoxLayout()
-        row.setSpacing(6)
+        row.setSpacing(theme.Spacing.xs)
         self._request_btn = buttons.primary("Request a node", self)
         self._request_btn.clicked.connect(self._on_request)
         self._release_btn = buttons.default("Release", self)

@@ -33,6 +33,7 @@ from services.remote_cache_gc import IN_USE_WINDOW_S
 from services.remote_config import STORAGE_EXPIRY_DAYS_RANGE, RemoteHost, write_remote
 from widgets.spin_box import SpinBox
 from ui import buttons
+from ui import theme
 
 _DAY = 86400
 COLUMNS = ("Project", "Kind", "Folder", "Size", "Created", "Last used", "Expires", "Local output")
@@ -148,8 +149,8 @@ class RemoteStorageDialog(QDialog):
         self.resize(1000, 560)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.md)
+        layout.setSpacing(theme.Spacing.sm)
 
         top = QHBoxLayout()
         self._summary = QLabel(f"{host.ssh_alias}:{host.remote_staging_dir}", self)

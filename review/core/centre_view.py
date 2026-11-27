@@ -162,7 +162,7 @@ def build_centre(win, parent: QWidget) -> None:
     win._ctx.widgets.register("_tab_frames", tab_frames)
     for _t in _PLOT_SUBTABS:
         _f = QWidget()
-        QVBoxLayout(_f).setContentsMargins(12, 0, 12, 12)
+        QVBoxLayout(_f).setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.md)
         tab_frames[_t] = _f
 
     # Group definitions: ordered list of (title, builder, eager_flag).

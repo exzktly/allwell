@@ -25,6 +25,7 @@ from analyze.storage_options import build_storage_rows
 from util.state_dir import default_scratch_label
 from widgets.wrap_checkbox import WrapCheckBox
 from ui import buttons
+from ui import theme
 
 SCRATCH_HELP = (
     "Where per-well working files (zip extraction and intermediate images) are "
@@ -133,8 +134,8 @@ class AnalyzeAdvancedSectionMixin:
         self._subheading(sec, "Scratch folder", info=help_text)
         pick = QWidget(sec)
         pl = QHBoxLayout(pick)
-        pl.setContentsMargins(0, 0, 0, 4)
-        pl.setSpacing(4)
+        pl.setContentsMargins(0, 0, 0, theme.Spacing.xs)
+        pl.setSpacing(theme.Spacing.xs)
         self._scratch_edit = QLineEdit(pick)
         self._scratch_edit.setPlaceholderText(f"(defaults to {default_scratch_label()})")
         self._scratch_edit.setMinimumWidth(0)

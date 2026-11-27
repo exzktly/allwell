@@ -577,7 +577,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
     def _build_group_editor(self, layout: QVBoxLayout) -> None:
         # Row 1: title + the two ways to *create* groups (Add / Quick Setup).
         hdr1 = QHBoxLayout()
-        hdr1.setContentsMargins(8, 4, 8, 4)
+        hdr1.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
         title = QLabel("EXPORT GROUPS")
         f = title.font()
         f.setBold(True)
@@ -605,7 +605,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         # right so it isn't fat-fingered next to Add. Groups autosave to the
         # dataset's persistence.json, so there is no manual Save/Load route.
         hdr2 = QHBoxLayout()
-        hdr2.setContentsMargins(8, 2, 8, 2)
+        hdr2.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
         hdr2.addWidget(btn_secondary(None, "Sync from app", self._sync_from_app))
         hdr2.addStretch(1)
         hdr2.addWidget(btn_secondary(None, "Clear All", self._grp_clear_all))
@@ -616,7 +616,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         hint = QLabel("Left-drag wells onto the plate map to add them to the "
                       "selected group, or add every well holding a sample-variable value.")
         hint.setWordWrap(True)
-        hint.setContentsMargins(6, 2, 6, 2)
+        hint.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
         layout.addWidget(hint)
         self._build_variable_select_row(layout)
 
@@ -660,7 +660,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self._grp_scroll.setWidgetResizable(True)
         self._grp_inner = QWidget()
         self._grp_inner_layout = QVBoxLayout(self._grp_inner)
-        self._grp_inner_layout.setContentsMargins(4, 2, 4, 2)
+        self._grp_inner_layout.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
         self._grp_inner_layout.addStretch(1)
         self._grp_scroll.setWidget(self._grp_inner)
         layout.addWidget(self._grp_scroll, 1)
@@ -725,7 +725,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         """
         channels = self._all_export_channels()
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         lbl = QLabel("Channel:")
         f = lbl.font(); f.setBold(True); lbl.setFont(f)
         lbl.setMinimumWidth(_FIELD_LABEL_W)
@@ -783,7 +783,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         if not self._INCLUDES_FOLD_CHANGE:
             return
         fc_row = QHBoxLayout()
-        fc_row.setContentsMargins(12, 2, 12, 2)
+        fc_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._build_fold_change_widgets(fc_row)
         fc_row.addStretch(1)
         layout.addLayout(fc_row)
@@ -1133,7 +1133,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
 
     def _build_export_profile_row(self, layout: QVBoxLayout) -> None:
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         lbl = QLabel("Style Preset:")
         f = lbl.font(); f.setBold(True); lbl.setFont(f)
         lbl.setMinimumWidth(_FIELD_LABEL_W)
@@ -1206,7 +1206,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
     ) -> None:
         """Common OUTPUT header + Write to + Folder + Format + Profile rows."""
         hdr = QHBoxLayout()
-        hdr.setContentsMargins(12, 4, 12, 4)
+        hdr.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(hdr, title)
         hdr.addStretch(1)
         layout.addLayout(hdr)
@@ -1214,7 +1214,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self._build_write_to_row(layout)
 
         out_row = QHBoxLayout()
-        out_row.setContentsMargins(12, 6, 12, 6)
+        out_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(out_row, "Folder:", min_width=_FIELD_LABEL_W)
         self._out_dir_edit = QLineEdit(self._out_dir_value)
         self._out_dir_edit.setMinimumWidth(_OUT_DIR_EDIT_MIN_W)
@@ -1225,7 +1225,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         layout.addLayout(out_row)
 
         fmt_row = QHBoxLayout()
-        fmt_row.setContentsMargins(12, 2, 12, 2)
+        fmt_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(fmt_row, "Format:", min_width=_FIELD_LABEL_W)
         self._fmt_cb = QComboBox()
         self._fmt_cb.addItems(["png", "svg", "eps", "pdf"])
@@ -1266,7 +1266,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         leaving it to be discovered afterwards.
         """
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "Write to:", min_width=_FIELD_LABEL_W)
         self._to_files_cb = QCheckBox("Image files")
         self._to_files_cb.setChecked(True)
@@ -1394,7 +1394,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         axis and see the last one win.
         """
         hdr = QHBoxLayout()
-        hdr.setContentsMargins(12, 6, 12, 2)
+        hdr.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(hdr, "AXES")
         # Not "blank = auto", which is what this said and is not what happens:
         # an unfilled field falls through to whatever the app-wide Export Style
@@ -1412,7 +1412,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         # numbers and a word once they are filled, because the ``min`` / ``max``
         # placeholders disappear exactly when the block gets hard to scan.
         head = QHBoxLayout()
-        head.setContentsMargins(12, 0, 12, 0)
+        head.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, 0)
         spacer = QLabel("")
         spacer.setFixedWidth(self._axes_label_w())
         head.addWidget(spacer)
@@ -1433,7 +1433,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             self._build_panel_rows(layout)
             return
         x_row = QHBoxLayout()
-        x_row.setContentsMargins(12, 2, 12, 2)
+        x_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         # ``setFixedWidth``, not a minimum: a minimum let the widest row's
         # label push its own fields right, so a five-row grid meant to be
         # scanned down a column started its fields at three different x
@@ -1493,7 +1493,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         single = len(self._PANELS) == 1
         for panel in self._PANELS:
             row = QHBoxLayout()
-            row.setContentsMargins(12, 2, 12, 2)
+            row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
             # A single-panel mode has nothing to select between, so the
             # checkbox would be one that can only be wrong: unticking it asks
             # for a figure with no panels. Its label still names the row, so
@@ -1699,7 +1699,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         of files for it to sit beside.
         """
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 6)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(row, "Also write:", min_width=_FIELD_LABEL_W)
         self._cell_rows_cb = QCheckBox("Raw per-cell CSV")
         self._cell_rows_cb.setToolTip(
@@ -2090,7 +2090,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         ctx = self._ctx
 
         eb_row = QHBoxLayout()
-        eb_row.setContentsMargins(12, 2, 12, 2)
+        eb_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(eb_row, "Error band:", min_width=_FIELD_LABEL_W)
         initial_sem = bool(ctx.state.plot.use_sem)
         sem_btn = buttons.default(spread_label(initial_sem))
@@ -2110,7 +2110,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             ctx.runtime.sem.btn = sem_btn
 
         fov_row = QHBoxLayout()
-        fov_row.setContentsMargins(12, 2, 12, 6)
+        fov_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(fov_row, "Per-FOV points:", min_width=_FIELD_LABEL_W)
         fov_btn = ReservedWidthButton("FOV")
         fov_btn.setProperty("variant", "toggle")
@@ -2124,7 +2124,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         """The derived "Each export group produces:" block, above Run."""
         self._summary_lbl = QLabel("")
         self._summary_lbl.setWordWrap(True)
-        self._summary_lbl.setContentsMargins(12, 4, 12, 4)
+        self._summary_lbl.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         layout.addWidget(self._summary_lbl)
         self._wire_run_summary()
 
@@ -2132,7 +2132,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self, layout: QVBoxLayout, *, button_text: str = "▶  Run Batch Export",
     ) -> None:
         run_row = QHBoxLayout()
-        run_row.setContentsMargins(12, 8, 12, 8)
+        run_row.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)
         self._run_btn = buttons.primary(button_text)
         self._run_btn.clicked.connect(self._run_batch)
         run_row.addWidget(self._run_btn)
@@ -2328,7 +2328,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
     def _build_timepoints_section(self, layout: QVBoxLayout) -> None:
         """TIMEPOINTS header + multi-select list (shared by Bar/Scatter)."""
         tp_hdr = QHBoxLayout()
-        tp_hdr.setContentsMargins(12, 0, 12, 2)
+        tp_hdr.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         self._add_bold_label(tp_hdr, "TIMEPOINTS")
         tp_hdr.addStretch(1)
         tp_hdr.addWidget(btn_secondary(None, "All", self._tp_select_all))
@@ -2470,7 +2470,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
 
         if not self._groups:
             empty = QLabel("No export groups.  Click + Add or use Quick Setup.")
-            empty.setContentsMargins(8, 8, 8, 8)
+            empty.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
             self._grp_inner_layout.insertWidget(0, empty)
             self._refresh_map()
             return
@@ -2491,7 +2491,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                 f"QFrame {{ border: 2px solid {color}; background: {theme.Colors.control}; }}"
             )
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(6, 4, 6, 4)
+        card_layout.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
 
         hdr = QHBoxLayout()
         dot = QLabel("\u25cf")

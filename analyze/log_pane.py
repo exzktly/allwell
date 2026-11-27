@@ -198,7 +198,7 @@ class AnalyzeLogPaneMixin:
         self._last_run_card = QLabel("", parent)
         self._last_run_card.setProperty("textRole", "help")
         self._last_run_card.setWordWrap(True)
-        self._last_run_card.setContentsMargins(12, 6, 12, 6)
+        self._last_run_card.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._last_run_card.setVisible(False)
         rl.addWidget(self._last_run_card)
         self._refresh_last_run_summary()

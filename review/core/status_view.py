@@ -128,7 +128,7 @@ def build_bottom(win) -> None:
     # Status row
     status_row = QWidget(bottom)
     sr_l = QHBoxLayout(status_row)
-    sr_l.setContentsMargins(4, 2, 4, 2)
+    sr_l.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
     outer.addWidget(status_row)
 
     win._status_lbl = QLabel("Ready.", status_row)
@@ -162,12 +162,12 @@ def build_bottom(win) -> None:
     win._log_frame = QWidget(bottom)
     win._log_frame.setFixedHeight(_LOG_FRAME_H)
     lf_l = QVBoxLayout(win._log_frame)
-    lf_l.setContentsMargins(6, 4, 6, 2)
+    lf_l.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
     outer.addWidget(win._log_frame)
 
     log_hdr = QWidget(win._log_frame)
     lh_l = QHBoxLayout(log_hdr)
-    lh_l.setContentsMargins(0, 0, 0, 2)
+    lh_l.setContentsMargins(0, 0, 0, theme.Spacing.xs)
     lf_l.addWidget(log_hdr)
     hdr_lbl = QLabel("LOG", log_hdr)
     hdr_lbl.setProperty("textRole", "eyebrow")

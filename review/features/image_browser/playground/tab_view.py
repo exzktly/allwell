@@ -112,7 +112,8 @@ class _StackWhenNarrow(QObject):
         lay.setStretchFactor(self._canvas, 1)
         # The dock's hairline faces the preview: its left edge beside it, its top below it.
         dock.setProperty("stacked", narrow)
-        dock.layout().setContentsMargins(0 if narrow else 1, 1 if narrow else 0, 0, 0)
+        line = theme.Metrics.hairline
+        dock.layout().setContentsMargins(0 if narrow else line, line if narrow else 0, 0, 0)
         dock.style().unpolish(dock)
         dock.style().polish(dock)
 
@@ -146,8 +147,8 @@ def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
     """
     row = QWidget(parent)
     rl = QHBoxLayout(row)
-    rl.setContentsMargins(0, 1, 0, 1)
-    rl.setSpacing(6)
+    rl.setContentsMargins(0, theme.Metrics.hairline, 0, theme.Metrics.hairline)
+    rl.setSpacing(theme.Spacing.xs)
     lbl = QLabel(label_text, row)
     lbl.setProperty("textRole", "help")
     # A floor, not a pin: the labels line up in a column at the desk, and a
@@ -214,7 +215,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     dock_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     dock_outer = QVBoxLayout(dock)
     # One pixel on the left so the dock's hairline is not painted over.
-    dock_outer.setContentsMargins(1, 0, 0, 0)
+    dock_outer.setContentsMargins(theme.Metrics.hairline, 0, 0, 0)
     dock_outer.setSpacing(0)
     dock_outer.addWidget(dock_scroll)
     controls = QWidget()
@@ -222,8 +223,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     controls.setAttribute(Qt.WA_StyledBackground, True)
     dock_scroll.setWidget(controls)
     cl = QVBoxLayout(controls)
-    cl.setContentsMargins(10, 10, 10, 10)
-    cl.setSpacing(4)
+    cl.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    cl.setSpacing(theme.Spacing.xs)
 
     def _section(title: str) -> None:
         lbl = QLabel(title, controls)
@@ -265,7 +266,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # backwards for a tool whose job is choosing the settings to analyse it with.
     file_row = QWidget(controls)
     frl = QHBoxLayout(file_row)
-    frl.setContentsMargins(0, 2, 0, 2)
+    frl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     open_btn = buttons.default("Open image…", file_row)
     open_btn.setToolTip(
         "Load a single image file straight from disk, instead of a frame from "
@@ -326,7 +327,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(stage_lbl)
     stage_row = QWidget(controls)
     srl = QHBoxLayout(stage_row)
-    srl.setContentsMargins(0, 1, 0, 1)
+    srl.setContentsMargins(0, theme.Metrics.hairline, 0, theme.Metrics.hairline)
     cl.addWidget(stage_row)
     source_seg = SegmentedControl(stage_row)
     for _lbl, _data in (("Raw", "raw"), ("Flat-field only", "flatfield"),
@@ -416,7 +417,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     seg_btn_row = QWidget(controls)
     sbl = QHBoxLayout(seg_btn_row)
-    sbl.setContentsMargins(0, 2, 0, 2)
+    sbl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     seg_btn = buttons.default("Segment", seg_btn_row)
     seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
     hint = QLabel("Tuned here, then run the plate: type the same two values into "
@@ -444,7 +445,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # clipped. The sweep and its Stop pair naturally, so they share this one.
     sweep_row = QWidget(controls)
     swl = QHBoxLayout(sweep_row)
-    swl.setContentsMargins(0, 2, 0, 2)
+    swl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     sweep_btn = buttons.default("Threshold curve…", sweep_row)
     sweep_btn.setToolTip(
         "Segment the displayed frame at a range of probability thresholds and "
@@ -611,7 +612,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # A wrapping row: three checkboxes side by side are wider than the dock on a
     # phone, and a plain row held the dock's content wider than its viewport.
     toggles = ButtonRow(controls)
-    toggles.layout().setContentsMargins(0, 2, 0, 2)
+    toggles.layout().setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     binary_cb = QCheckBox("Binary", toggles)
     binary_cb.setToolTip(
         "Fill the cells the mask found, on black, instead of showing the image.")
@@ -661,7 +662,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # Zoom buttons
     zoom_row = QWidget(controls)
     zl = QHBoxLayout(zoom_row)
-    zl.setContentsMargins(0, 2, 0, 2)
+    zl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     zl.addWidget(QLabel("Zoom", zoom_row))
 
     def _zoom(delta: float) -> None:

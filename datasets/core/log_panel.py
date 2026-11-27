@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 from ui import buttons
+from ui import theme
 
 # The cap every one of these logs already carried, matching Analyze's own raw
 # log — a long run must not grow the document unbounded.
@@ -69,7 +70,7 @@ class LogPanelMixin:
         """
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
+        hl.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         hl.addWidget(QLabel(title, hdr))
         hl.addStretch(1)
 
@@ -110,7 +111,7 @@ class LogPanelMixin:
         if log_header:
             self._log_hdr = QWidget(self)
             log_hl = QHBoxLayout(self._log_hdr)
-            log_hl.setContentsMargins(12, 6, 12, 6)
+            log_hl.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
             log_hl.addWidget(QLabel(log_header, self._log_hdr))
             log_hl.addStretch(1)
             self._clear_log_btn = buttons.default("Clear log", self._log_hdr)

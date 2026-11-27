@@ -207,7 +207,7 @@ class PlateProgress(QWidget):
         # header, a plate and a group list into a fixed-width column, so either
         # scale step changes how much of the list fits, and that is a design
         # decision rather than a lint fix.
-        root.setSpacing(6)
+        root.setSpacing(theme.Spacing.xs)
 
         # header: title + status + collapse toggle
         hdr = QHBoxLayout(); hdr.setSpacing(theme.Spacing.sm)

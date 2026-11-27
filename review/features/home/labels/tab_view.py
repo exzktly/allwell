@@ -451,7 +451,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     ctx.widgets.register(PAGE_KEY, parent)
     head = ctx.widgets.register(HEAD_KEY, QWidget(parent))
     hl = QHBoxLayout(head)
-    hl.setContentsMargins(0, 8, 0, 6)
+    hl.setContentsMargins(0, theme.Spacing.sm, 0, theme.Spacing.xs)
     hl.setSpacing(theme.Spacing.sm)
     help_lbl = QLabel(
         "Custom names used in legends + axis labels. Type into a cell to "

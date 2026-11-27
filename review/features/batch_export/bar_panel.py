@@ -136,7 +136,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # These mirror the on-tab toggles; defaults preserve the legacy
         # batch behaviour (one figure per (group, tp), rsets pooled).
         opts_row = QHBoxLayout()
-        opts_row.setContentsMargins(12, 4, 12, 4)
+        opts_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._multi_tp_cb = QCheckBox("Single figure spans selected timepoints")
         self._multi_tp_cb.setChecked(False)
         opts_row.addWidget(self._multi_tp_cb)
@@ -144,7 +144,7 @@ class BarBatchExportPanel(BatchExportPanel):
         layout.addLayout(opts_row)
 
         layout_row = QHBoxLayout()
-        layout_row.setContentsMargins(12, 0, 12, 4)
+        layout_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         layout_row.addWidget(QLabel("When spanning timepoints \u2014 cluster by:"))
         self._group_mode_cb = QComboBox()
         self._group_mode_cb.addItem("Well")
@@ -154,7 +154,7 @@ class BarBatchExportPanel(BatchExportPanel):
         layout.addLayout(layout_row)
 
         pool_row = QHBoxLayout()
-        pool_row.setContentsMargins(12, 0, 12, 4)
+        pool_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         self._pool_reps_cb = QCheckBox("Pool replicate-set wells into one bar")
         self._pool_reps_cb.setChecked(True)
         pool_row.addWidget(self._pool_reps_cb)
@@ -163,7 +163,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
         # ── Display mode (bars / beeswarm / violin / histogram) ────────
         mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(12, 4, 12, 0)
+        mode_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, 0)
         mode_row.addWidget(QLabel("Mean panel display:"))
         self._display_mode_grp = QButtonGroup(self)
         self._mode_bar_rb = QRadioButton("Bars")
@@ -182,7 +182,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
         # ── Violin smoothing slider (5–200, default 100; matches on-tab) ─
         smooth_row = QHBoxLayout()
-        smooth_row.setContentsMargins(12, 0, 12, 4)
+        smooth_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         smooth_row.addWidget(QLabel("Violin smoothing:"))
         self._violin_smooth_slider = QSlider(Qt.Horizontal)
         self._violin_smooth_slider.setRange(5, 200)
@@ -199,7 +199,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
         # ── Histogram bins (the tab's range and default) ───────────────
         bins_row = QHBoxLayout()
-        bins_row.setContentsMargins(12, 0, 12, 4)
+        bins_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         bins_row.addWidget(QLabel("Histogram bins:"))
         self._hist_bins_spin = SpinBox()
         self._hist_bins_spin.setRange(BINS_MIN, BINS_MAX)

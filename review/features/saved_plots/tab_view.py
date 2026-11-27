@@ -36,6 +36,7 @@ from review.core.ui_helpers import clear_layout
 from review.features.saved_plots import controller as C
 from review.features.saved_plots.state import get_store
 from ui import buttons
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -217,8 +218,8 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     list_host = QWidget()
     col = QVBoxLayout(list_host)
-    col.setContentsMargins(10, 10, 10, 10)
-    col.setSpacing(12)
+    col.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    col.setSpacing(theme.Spacing.md)
     col.setAlignment(Qt.AlignTop)
     scroll.setWidget(list_host)
     stack.addWidget(scroll)  # index 1
@@ -544,8 +545,8 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     card.setAttribute(Qt.WA_StyledBackground, True)
     card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
     v = QVBoxLayout(card)
-    v.setContentsMargins(12, 12, 12, 12)
-    v.setSpacing(8)
+    v.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+    v.setSpacing(theme.Spacing.sm)
 
     # Header: title + tab badge + timestamp
     header = QHBoxLayout()

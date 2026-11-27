@@ -17,6 +17,7 @@ from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell.state import POPOUT_LAYOUTS
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 from ui import buttons
+from ui import theme
 
 _RANGE_TIP = ("The window's range of the metric, both ends inclusive. Type a number and press Enter. A window of "
               "several boxes (drawn with Shift held) edits its newest box here.")
@@ -48,7 +49,7 @@ def build_window_strip(ctx, parent) -> QWidget:
     # caption travels with its field, so a wrap never strands "Low" from its box.
     column = QVBoxLayout(strip)
     column.setContentsMargins(0, 0, 0, 0)
-    column.setSpacing(2)
+    column.setSpacing(theme.Spacing.xs)
     label = QLabel("", strip)
     label.setWordWrap(True)
     column.addWidget(label)
@@ -76,7 +77,7 @@ def build_window_strip(ctx, parent) -> QWidget:
         pair = QWidget(controls_host)
         inner = QHBoxLayout(pair)
         inner.setContentsMargins(0, 0, 0, 0)
-        inner.setSpacing(4)
+        inner.setSpacing(theme.Spacing.xs)
         inner.addWidget(QLabel(caption, pair))
         inner.addWidget(field)
         field.setParent(pair)

@@ -28,6 +28,7 @@ from review.features.home.groups.controller import (
 )
 from review.features.home.groups.panel_view import build_replicate_panel
 from widgets.spin_box import SpinBox
+from ui import theme as _theme
 
 
 #: Registry keys of the parts of this layer its phone form rearranges.
@@ -78,7 +79,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
 
     hdr = QWidget(parent)
     hdr_l = QHBoxLayout(hdr)
-    hdr_l.setContentsMargins(0, 8, 0, 4)
+    hdr_l.setContentsMargins(0, _theme.Spacing.sm, 0, _theme.Spacing.xs)
     layout.addWidget(hdr)
     hdr_l.addStretch(1)
     # Named for its scope: an unqualified "Clear All" on a page that also holds
@@ -93,7 +94,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # lay out exactly as the flat row did — no margins, the row's own spacing.
     hdr2r = ctx.widgets.register(QUICK_ROW_KEY, QWidget(parent))
     hdr2r_l = QHBoxLayout(hdr2r)
-    hdr2r_l.setContentsMargins(0, 4, 0, 4)
+    hdr2r_l.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.xs)
     layout.addWidget(hdr2r)
 
     pair_cb = QComboBox(hdr2r)
@@ -130,12 +131,11 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # Active-group banner — until the user clicks a group below, plate
     # clicks have no effect. Make that state legible so the user isn't
     # left wondering why nothing happens.
-    from ui import theme as _theme
     active_row = ctx.widgets.register(ACTIVE_ROW_KEY, QWidget(parent))
     active_row.setObjectName("ActiveGroupBanner")
     active_l = QHBoxLayout(active_row)
-    active_l.setContentsMargins(0, 6, 0, 6)
-    active_l.setSpacing(6)
+    active_l.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.xs)
+    active_l.setSpacing(_theme.Spacing.xs)
     active_caption = QLabel("ACTIVE GROUP", active_row)
     active_caption.setStyleSheet(
         f"color: {_theme.Colors.text_secondary}; "
@@ -185,7 +185,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     )
     hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
-    hint.setContentsMargins(0, 6, 0, 8)
+    hint.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.sm)
     layout.addWidget(hint)
 
 
@@ -300,7 +300,7 @@ def _build_from_variables_row(ctx, parent: QWidget, layout) -> None:
     """
     row = QWidget(parent)
     row_l = QHBoxLayout(row)
-    row_l.setContentsMargins(0, 4, 0, 4)
+    row_l.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.xs)
     layout.addWidget(row)
     row_l.addStretch(1)
     button = ctx.widgets.register(

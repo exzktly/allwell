@@ -44,6 +44,8 @@ _GROUP_GAP = 18          # px gap between facet groups (the non-uniform spacing)
 #: controller builds around a cell's image (``controller._render_cell``'s
 #: caller), and what phone layout's fit (``_phone_fit``) spends per column.
 CELL_MARGIN_PX = 2
+#: The gap between a tile's image and its caption, inside the figure's own grid.
+CELL_GAP_PX = 2
 
 # Scoped label styling — muted per-value labels, a subtle strip behind the
 # outer/group labels so they read as facet bands. Font sizes come from state

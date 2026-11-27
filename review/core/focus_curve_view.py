@@ -50,7 +50,7 @@ def show_focus_distribution(ctx, dist) -> None:
         popup.setWindowTitle("Focus distribution")
         popup.resize(820, 460)
         layout = QVBoxLayout(popup)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
         fig = Figure(figsize=(7.8, 4.4), dpi=100)
         canvas = make_canvas(fig)
         layout.addWidget(canvas)

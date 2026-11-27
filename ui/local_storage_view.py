@@ -29,6 +29,7 @@ from core.worker_bridge import run_off_thread
 from ui import text_roles
 from util.state_dir import gui_state_dir
 from ui import buttons as ui_buttons
+from ui import theme
 
 #: Indent of an area's description under its checkbox, matching the reset
 #: dialog's (``review/core/reset_scopes_view.py``).
@@ -171,7 +172,7 @@ class StorageDialog(QDialog):
                 warn = QLabel(f"⚠ {area.confirm.split('. ')[0]}.", row)
                 text_roles.set_role(warn, text_roles.HELP, tone=text_roles.ATTENTION)
                 warn.setWordWrap(True)
-                warn.setContentsMargins(_DETAIL_INDENT, 2, 0, 0)
+                warn.setContentsMargins(_DETAIL_INDENT, theme.Spacing.xs, 0, 0)
                 rl.addWidget(warn)
             self._rows.addWidget(row)
             self._boxes[area.key] = box

@@ -51,7 +51,7 @@ class SelectionChip(QFrame):
         self._icon_name = icon
 
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(theme.Spacing.sm, 2, theme.Spacing.sm, 2)
+        lay.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
         lay.setSpacing(theme.Spacing.xs)
 
         self._glyph = QLabel(self)
@@ -145,8 +145,8 @@ if __name__ == "__main__":
     host.setWindowTitle("SelectionChip — demo")
     host.resize(420, 240)
     lay = QVBoxLayout(host)
-    lay.setContentsMargins(24, 24, 24, 24)
-    lay.setSpacing(12)
+    lay.setContentsMargins(theme.Spacing.xl, theme.Spacing.xl, theme.Spacing.xl, theme.Spacing.xl)
+    lay.setSpacing(theme.Spacing.md)
 
     lay.addWidget(QLabel("accent variant (plate-head):"))
     row1 = QHBoxLayout()

@@ -31,7 +31,7 @@ class PageHeader(QWidget):
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(theme.Spacing.sm)
         words = QVBoxLayout()
-        words.setSpacing(theme.Spacing.xs // 2)
+        words.setSpacing(0)
         self._title = text_roles.page_title(title, self)
         words.addWidget(self._title)
         self._detail = text_roles.number(detail, self)

@@ -1007,8 +1007,8 @@ def stats_refresh_group_list(ctx) -> None:
     layout = container.layout()
     if layout is None:
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
+        layout.setSpacing(theme.Spacing.xs)
     _clear_layout(layout)
     if not ctx.state.stats.groups:
         lbl = QLabel("No groups.  Click + Add group to create one.")
@@ -1030,7 +1030,7 @@ def stats_refresh_group_list(ctx) -> None:
         if is_sel:
             card.setProperty("state", "selected")
         hl = QHBoxLayout(card)
-        hl.setContentsMargins(6, 4, 6, 4)
+        hl.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
         dot = QLabel("●")
         dot.setStyleSheet(f"color: {color};")
         hl.addWidget(dot)

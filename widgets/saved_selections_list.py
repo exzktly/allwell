@@ -344,7 +344,7 @@ class _SelectionRow(QFrame):
         box = QWidget(self._chips_host)
         bv = QVBoxLayout(box)
         bv.setContentsMargins(0, 0, 0, 0)
-        bv.setSpacing(2)
+        bv.setSpacing(theme.Spacing.xs)
         if not self._composable:
             self._build_readonly(bv, box)
         else:
@@ -394,7 +394,7 @@ class _SelectionRow(QFrame):
         w = QWidget(parent)
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(3)
+        h.setSpacing(theme.Spacing.xs)
         if label:
             lab = QLabel(label, w)
             lab.setObjectName("RepLabel")
@@ -424,7 +424,7 @@ class _SelectionRow(QFrame):
         self._compose_btn = addw
         roww = QWidget(parent)
         hl = QHBoxLayout(roww)
-        hl.setContentsMargins(0, 2, 0, 0)
+        hl.setContentsMargins(0, theme.Spacing.xs, 0, 0)
         hl.addWidget(addw)
         hl.addStretch(1)
         bv.addWidget(roww)
@@ -635,7 +635,7 @@ class SavedSelectionsList(QWidget):
         self._vbox = QVBoxLayout(self._body)
         self._vbox.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs,
                                       theme.Spacing.xs, theme.Spacing.xs)
-        self._vbox.setSpacing(2)
+        self._vbox.setSpacing(theme.Spacing.xs)
         self._vbox.addStretch(1)
         self._scroll.setWidget(self._body)
         v.addWidget(self._scroll, 1)

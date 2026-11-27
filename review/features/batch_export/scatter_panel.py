@@ -217,7 +217,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self._init_timepoint_dropdown()
 
         mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(12, 0, 12, 4)
+        mode_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         self._scatter_split_tp_cb = QCheckBox(
             "Separate file per selected timepoint (otherwise combine all selected timepoints per group)"
         )
@@ -259,7 +259,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         the tab's own ``render_scatter_points`` / ``draw_gates`` (single source
         of truth), so a batch figure looks like the tab."""
         row = QHBoxLayout()
-        row.setContentsMargins(12, 0, 12, 4)
+        row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         if self._scatter_mode == "cells":
             self._sc_density_cb = QCheckBox("Color by density")
             self._sc_xlog_cb = QCheckBox("X log"); self._sc_xlog_cb.setChecked(True)
@@ -315,7 +315,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         Returns ``(channel_combo, property_combo)``.
         """
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
+        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         lbl = QLabel(f"{axis_label}:")
         f = lbl.font(); f.setBold(True); lbl.setFont(f)
         row.addWidget(lbl)

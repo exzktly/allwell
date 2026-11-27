@@ -104,7 +104,7 @@ class ImportLooseDashboard(PlateProgress):
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w)
             row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(7)
+            row.setSpacing(theme.Spacing.sm)
             row.addWidget(status_dot(self._state_color(state)))
             nm = QLabel(f"{label}: {n}", row_w)
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")

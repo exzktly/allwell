@@ -38,7 +38,7 @@ def build_cell_browser_sort_section(ctx, parent_layout) -> None:
     host = QWidget()
     rows_lay = QVBoxLayout(host)
     rows_lay.setContentsMargins(0, 0, 0, 0)
-    rows_lay.setSpacing(4)
+    rows_lay.setSpacing(theme.Spacing.xs)
     rows_lay.addStretch(1)   # add_sort_row inserts before this trailing stretch
     scroll.setWidget(host)
     parent_layout.addWidget(scroll)
@@ -57,7 +57,7 @@ def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
     row = QWidget()
     rl = QHBoxLayout(row)
     rl.setContentsMargins(0, 0, 0, 0)
-    rl.setSpacing(3)
+    rl.setSpacing(theme.Spacing.xs)
 
     combo = QComboBox(row)
     for col, label in sort_field_options(ctx):

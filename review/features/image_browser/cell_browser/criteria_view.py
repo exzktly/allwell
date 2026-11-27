@@ -59,8 +59,8 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     if lay is None:
         lay = QVBoxLayout(parent)
         parent.setLayout(lay)
-    lay.setContentsMargins(8, 8, 8, 8)
-    lay.setSpacing(6)
+    lay.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    lay.setSpacing(theme.Spacing.xs)
 
     from review.core.ui_helpers import build_section_header
     lay.addWidget(build_section_header(parent, "Cell filters"))
@@ -93,7 +93,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     ctx.runtime.cell_browser.gate_choices = None
     gate_pick_row = QWidget(parent)
     gpl = QHBoxLayout(gate_pick_row)
-    gpl.setContentsMargins(16, 0, 0, 0)
+    gpl.setContentsMargins(theme.Spacing.lg, 0, 0, 0)
     gate_pick_btn = buttons.default("Gate", gate_pick_row)
     gate_pick_btn.setToolTip("Choose which scatter gate(s) define the cells.")
     gate_pick_btn.clicked.connect(lambda _=False: _open_gate_select(ctx))
@@ -127,7 +127,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     rows_host = QWidget()
     rows_lay = QVBoxLayout(rows_host)
     rows_lay.setContentsMargins(0, 0, 0, 0)
-    rows_lay.setSpacing(4)
+    rows_lay.setSpacing(theme.Spacing.xs)
     rows_lay.addStretch(1)
     rows_scroll.setWidget(rows_host)
     lay.addWidget(rows_scroll)
@@ -350,7 +350,7 @@ def _add_row(ctx, column: str = "") -> None:
     row = QWidget()
     rl = QHBoxLayout(row)
     rl.setContentsMargins(0, 0, 0, 0)
-    rl.setSpacing(3)
+    rl.setSpacing(theme.Spacing.xs)
     combo = QComboBox(row)
     for col, label in enumerate_properties(ctx):
         combo.addItem(label, userData=col)

@@ -72,6 +72,7 @@ from core.safe import swallow
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 from ui import buttons
+from ui import theme
 
 #: Every position on a 96-well plate, for the editor's fallback when no input
 #: folder has been picked yet. Offering the whole plate is better than offering
@@ -177,8 +178,8 @@ class AnalyzeBackgroundMapMixin:
         # Aligned with the button, at the form's left edge (``_BG_MAP_NOTE_INDENT_PX``).
         under = QWidget(sec)
         under_layout = QHBoxLayout(under)
-        under_layout.setContentsMargins(_BG_MAP_NOTE_INDENT_PX, 0, 0, 2)
-        under_layout.setSpacing(4)
+        under_layout.setContentsMargins(_BG_MAP_NOTE_INDENT_PX, 0, 0, theme.Spacing.xs)
+        under_layout.setSpacing(theme.Spacing.xs)
         self._bg_map_summary = QLabel("No blank well named yet")
         self._bg_map_summary.setProperty("textRole", "help")
         self._bg_map_summary.setWordWrap(True)
@@ -998,7 +999,7 @@ class AnalyzeBackgroundMapMixin:
         """
         row = QWidget(self._bg_map_rows_host)
         line = QHBoxLayout(row)
-        line.setContentsMargins(2, 1, 2, 1)
+        line.setContentsMargins(theme.Spacing.xs, theme.Metrics.hairline, theme.Spacing.xs, theme.Metrics.hairline)
 
         swatch = QLabel(row)
         swatch.setFixedSize(_SWATCH_PX, _SWATCH_PX)

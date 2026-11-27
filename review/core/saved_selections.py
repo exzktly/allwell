@@ -68,7 +68,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
         name_row = QWidget(section)
         nr = QHBoxLayout(name_row)
         nr.setContentsMargins(0, 0, 0, 0)
-        nr.setSpacing(6)
+        nr.setSpacing(theme.Spacing.xs)
         name_edit = QLineEdit(name_row)
         name_edit.setPlaceholderText("Name current selection…")
         nr.addWidget(name_edit, 1)
@@ -108,7 +108,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
     list_widget = QWidget(scroll)
     list_layout = QVBoxLayout(list_widget)
     list_layout.setContentsMargins(0, 0, 0, 0)
-    list_layout.setSpacing(4)
+    list_layout.setSpacing(theme.Spacing.xs)
     scroll.setWidget(list_widget)
     section.addWidget(scroll)
 
@@ -393,7 +393,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
             row = QWidget(list_widget)
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(4)
+            rl.setSpacing(theme.Spacing.xs)
             wells = [w for w in (group.get("wells") or []) if w in valid]
             load_btn = buttons.default(
                 f"{group.get('name', 'Selection')} ({len(wells)})",

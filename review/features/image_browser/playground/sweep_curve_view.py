@@ -60,7 +60,7 @@ def show_threshold_curve(ctx, curve, *, on_pick=None, picked=None) -> None:
         popup.setWindowTitle("Threshold curve")
         popup.resize(820, 460)
         layout = QVBoxLayout(popup)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
         fig = Figure(figsize=(7.8, 4.4), dpi=100)
         canvas = make_canvas(fig)
         layout.addWidget(canvas)

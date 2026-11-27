@@ -29,6 +29,7 @@ from review.features.stats.controller import stats_grp_clear_all
 from review.features.stats.controller import stats_resync_from_sample_defs
 from review.core.channel_state_controller import refresh_stats_property_combo
 from core.safe import swallowed
+from ui import theme
 
 
 
@@ -418,7 +419,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
 
     res_frame = reg.register("_stats_res_frame", QWidget(page))
     rl = QVBoxLayout(res_frame)
-    rl.setContentsMargins(0, 6, 0, 6)
+    rl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     result_text = reg.register("_stats_result_text", QTextEdit(res_frame))
     result_text.setReadOnly(True)
     result_text.setLineWrapMode(QTextEdit.WidgetWidth)

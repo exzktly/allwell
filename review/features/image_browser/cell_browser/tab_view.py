@@ -112,7 +112,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     _src_row = QWidget(disp_panel)
     _src_lay = QHBoxLayout(_src_row)
     _src_lay.setContentsMargins(0, 0, 0, 0)
-    _src_lay.setSpacing(6)
+    _src_lay.setSpacing(theme.Spacing.xs)
     _src_lay.addWidget(QLabel("Source:", _src_row))
     source_seg = _SegmentedControl(_src_row)
     for _lbl, _data in (("Raw", "raw"), ("Corrected", "corrected")):
@@ -161,8 +161,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     grid_host = QWidget()
     grid = QGridLayout(grid_host)
-    grid.setContentsMargins(10, 10, 10, 10)
-    grid.setSpacing(6)
+    grid.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    grid.setSpacing(theme.Spacing.xs)
     grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     scroll.setWidget(grid_host)
     from review.core.ui_helpers import EmptyReason, wrap_with_empty_state
@@ -343,7 +343,7 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         row = QWidget(panel)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(4)
+        rl.setSpacing(theme.Spacing.xs)
         name = QLabel(tok.upper(), row)
         name.setFixedWidth(theme.Metrics.short_field_w)
         rl.addWidget(name)

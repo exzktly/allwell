@@ -70,7 +70,7 @@ def make_cell_thumb(ctx, rgb, desc) -> QWidget:
         container = QWidget()
         col = QVBoxLayout(container)
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(2)
+        col.setSpacing(theme.Spacing.xs)
         col.addWidget(thumb, 0, Qt.AlignHCenter)
         cap = QLabel(f"{spot} spot" + ("" if spot == 1 else "s"), container)
         cap.setProperty("textRole", "help")

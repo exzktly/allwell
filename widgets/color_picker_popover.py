@@ -261,7 +261,7 @@ class ColorPickerPopover(Popover):
         self._recents_row.colorPicked.connect(self._on_recent_picked)
         rl = QVBoxLayout()
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(2)
+        rl.setSpacing(theme.Spacing.xs)
         cap = QLabel("RECENTS")
         cap.setProperty("textRole", "label")
         rl.addWidget(cap)

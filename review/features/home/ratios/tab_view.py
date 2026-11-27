@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from review.domain.ratio_models import RatioMetric
 from widgets.spin_box import DoubleSpinBox
 from ui import buttons
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -47,8 +48,8 @@ class RatioMetricsPanel(QWidget):
         self._app = app
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(6)
+        layout.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+        layout.setSpacing(theme.Spacing.xs)
 
         intro = QLabel(
             "Define ratio metrics computed at read time as "
@@ -99,7 +100,7 @@ class RatioMetricsPanel(QWidget):
         layout.addWidget(self._table)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
+        btn_row.setSpacing(theme.Spacing.xs)
         add_btn = buttons.default("+ Add ratio", self)
         add_btn.clicked.connect(self._on_add)
         btn_row.addWidget(add_btn)

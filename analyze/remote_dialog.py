@@ -219,8 +219,8 @@ class RemoteFormDialog(QDialog):
         self.resize(520, 380)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.md)
+        layout.setSpacing(theme.Spacing.sm)
 
         title = QLabel("Edit remote host" if self._editing else "Add a new remote host", self)
         title.setProperty("textRole", "sectionHeading")
@@ -228,7 +228,7 @@ class RemoteFormDialog(QDialog):
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignRight)
-        form.setSpacing(8)
+        form.setSpacing(theme.Spacing.sm)
 
         self._name_edit = QLineEdit(host.name, self)
         self._name_edit.setReadOnly(self._editing)
@@ -242,7 +242,7 @@ class RemoteFormDialog(QDialog):
         ssh_row = QWidget(self)
         ssh_row_layout = QHBoxLayout(ssh_row)
         ssh_row_layout.setContentsMargins(0, 0, 0, 0)
-        ssh_row_layout.setSpacing(6)
+        ssh_row_layout.setSpacing(theme.Spacing.xs)
         self._ssh_alias_edit = QLineEdit(host.ssh_alias, ssh_row)
         self._ssh_alias_edit.setPlaceholderText("user@host or ~/.ssh/config alias")
         ssh_row_layout.addWidget(self._ssh_alias_edit, 1)
@@ -259,7 +259,7 @@ class RemoteFormDialog(QDialog):
         key_row = QWidget(self)
         key_row_layout = QHBoxLayout(key_row)
         key_row_layout.setContentsMargins(0, 0, 0, 0)
-        key_row_layout.setSpacing(6)
+        key_row_layout.setSpacing(theme.Spacing.xs)
         self._ssh_key_edit = QLineEdit(host.ssh_key_path, key_row)
         self._ssh_key_edit.setPlaceholderText(
             "Empty = use ~/.ssh/config (recommended) or click Setup…"
@@ -283,7 +283,7 @@ class RemoteFormDialog(QDialog):
         # ── Main (non-advanced) controls ────────────────────────────────
         main_form = QFormLayout()
         main_form.setLabelAlignment(Qt.AlignRight)
-        main_form.setSpacing(8)
+        main_form.setSpacing(theme.Spacing.sm)
 
         # StarDist's switch only: Cellpose uses a GPU whenever the node it runs
         # on has one (pipeline.parallelism says why), and bootstrap ticks this
@@ -318,7 +318,7 @@ class RemoteFormDialog(QDialog):
         self._scheduled_box = QWidget(self)
         sched_layout = QVBoxLayout(self._scheduled_box)
         sched_layout.setContentsMargins(0, 0, 0, 0)
-        sched_layout.setSpacing(6)
+        sched_layout.setSpacing(theme.Spacing.xs)
 
         # Compute-profile picker: the discrete options the cluster's
         # JupyterHub web UI would show (its spawner profile_list /
@@ -327,7 +327,7 @@ class RemoteFormDialog(QDialog):
         # fills in the whole scheduler command; each item carries its launcher
         # as item data. The command stays editable so the user can verify it.
         prof_row = QHBoxLayout()
-        prof_row.setSpacing(6)
+        prof_row.setSpacing(theme.Spacing.xs)
         prof_row.addWidget(QLabel("Compute profile", self._scheduled_box))
         self._profile_combo = QComboBox(self._scheduled_box)
         self._profile_combo.setToolTip(
@@ -354,7 +354,7 @@ class RemoteFormDialog(QDialog):
         sched_layout.addWidget(self._profile_status_lbl)
 
         launcher_row = QHBoxLayout()
-        launcher_row.setSpacing(6)
+        launcher_row.setSpacing(theme.Spacing.xs)
         launcher_row.addWidget(QLabel("Scheduler command", self._scheduled_box))
         self._compute_launcher_edit = QLineEdit(host.compute_launcher, self._scheduled_box)
         self._compute_launcher_edit.setPlaceholderText(
@@ -389,7 +389,7 @@ class RemoteFormDialog(QDialog):
         # Optional override for where jupyterhub_config.py lives on the remote
         # (blank → probe conventional locations like /etc/jupyterhub/...).
         jhub_row = QHBoxLayout()
-        jhub_row.setSpacing(6)
+        jhub_row.setSpacing(theme.Spacing.xs)
         jhub_row.addWidget(QLabel("JupyterHub config", self._scheduled_box))
         self._jhub_path_edit = QLineEdit(host.jupyterhub_config_path, self._scheduled_box)
         self._jhub_path_edit.setPlaceholderText(
@@ -402,7 +402,7 @@ class RemoteFormDialog(QDialog):
         # up and cancels it (RemoteHost.queue_wait_timeout_min). It does not
         # touch ssh's keepalive, which is fixed (remote_config.keepalive_options).
         wait_row = QHBoxLayout()
-        wait_row.setSpacing(6)
+        wait_row.setSpacing(theme.Spacing.xs)
         wait_row.addWidget(QLabel("Max queue wait (min, 0 = no limit)", self._scheduled_box))
         self._queue_wait_spin = SpinBox(self._scheduled_box)
         self._queue_wait_spin.setRange(0, 1440)  # up to 24h; 0 = unlimited
@@ -425,7 +425,7 @@ class RemoteFormDialog(QDialog):
         # The scheduler command's own --time is a different thing: it is one run's.
         sched_layout.addWidget(QLabel("Granted node (Request a node in Manage Remotes)", self._scheduled_box))
         limit_row = QHBoxLayout()
-        limit_row.setSpacing(6)
+        limit_row.setSpacing(theme.Spacing.xs)
         limit_row.addWidget(QLabel("Time limit (hours)", self._scheduled_box))
         self._granted_limit_spin = SpinBox(self._scheduled_box)
         self._granted_limit_spin.setRange(*GRANTED_TIME_LIMIT_H_RANGE)
@@ -509,8 +509,8 @@ class RemoteFormDialog(QDialog):
         self._advanced_frame = QFrame(self)
         adv_form = QFormLayout(self._advanced_frame)
         adv_form.setLabelAlignment(Qt.AlignRight)
-        adv_form.setSpacing(8)
-        adv_form.setContentsMargins(20, 4, 0, 4)
+        adv_form.setSpacing(theme.Spacing.sm)
+        adv_form.setContentsMargins(theme.Spacing.lg, theme.Spacing.xs, 0, theme.Spacing.xs)
 
         hint = QLabel(
             "Leave blank to use the bootstrap defaults. Change only if "
@@ -1028,8 +1028,8 @@ class SSHKeyWizardDialog(QDialog):
         self.installed_key_path: Path | None = None
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.md)
+        layout.setSpacing(theme.Spacing.sm)
 
         title = QLabel(f"Set up passwordless SSH for {ssh_alias}", self)
         title.setProperty("textRole", "sectionHeading")
@@ -1339,8 +1339,8 @@ class BootstrapLogDialog(QDialog):
         self._dropped_reported = 0
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.md)
+        layout.setSpacing(theme.Spacing.sm)
 
         self._title_lbl = QLabel(f"Bootstrapping {alias}…", self)
         self._title_lbl.setProperty("textRole", "sectionHeading")
@@ -1576,12 +1576,12 @@ class ManageRemotesDialog(QDialog):
         self.resize(640, 420)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.md)
+        layout.setSpacing(theme.Spacing.md)
 
         # ── List ────────────────────────────────────────────────────────
         left = QVBoxLayout()
-        left.setSpacing(8)
+        left.setSpacing(theme.Spacing.sm)
         title = QLabel("Configured Remotes", self)
         title.setProperty("textRole", "sectionHeading")
         left.addWidget(title)
@@ -1602,7 +1602,7 @@ class ManageRemotesDialog(QDialog):
 
         # ── Buttons ─────────────────────────────────────────────────────
         right = QVBoxLayout()
-        right.setSpacing(6)
+        right.setSpacing(theme.Spacing.xs)
         self._add_btn = buttons.primary("Add…", self)
         self._add_btn.clicked.connect(self._on_add)
         right.addWidget(self._add_btn)

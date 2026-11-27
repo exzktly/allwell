@@ -20,6 +20,7 @@ from review.domain import nanowell_rim_focus as rfc
 from widgets.capped_label import CappedLabel
 from widgets.spin_box import SpinBox
 from ui import text_roles
+from ui import theme
 
 TOOLTIP = (
     "Drop the cells of a nanowell at any timepoint where its own rim was out of focus — its tile was soft while "
@@ -56,8 +57,8 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     ``nanowell_focus_status``). Wiring is the panel's: it applies every control through one ``_apply``."""
     row = QWidget(parent)
     layout = QVBoxLayout(row)
-    layout.setContentsMargins(0, 6, 0, 0)
-    layout.setSpacing(2)
+    layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    layout.setSpacing(theme.Spacing.xs)
     # The switch on its own line and its percentage on the next, indented under the switch's text: on one line the
     # row asked for about 510 px, and the Cell Gating panel is often narrower, so the layout squeezed every part of
     # it — the checkbox's text, the sentence and the number in the box.

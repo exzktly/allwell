@@ -119,7 +119,7 @@ class _TableControls(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         # The page's own spacing, so the three rows sit as they did in it.
-        lay.setSpacing(6)
+        lay.setSpacing(theme.Spacing.xs)
 
     def set_actions(self, actions: QWidget) -> None:
         self._actions = actions
@@ -165,8 +165,8 @@ def _build_properties_dock(ctx, dock) -> None:
     panel = QFrame(dock)
     panel.setObjectName("Panel")
     pl = QVBoxLayout(panel)
-    pl.setContentsMargins(12, 10, 12, 12)
-    pl.setSpacing(8)
+    pl.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.md)
+    pl.setSpacing(theme.Spacing.sm)
 
     hdr = QHBoxLayout()
     title = QLabel("Properties", panel)
@@ -182,8 +182,8 @@ def _build_properties_dock(ctx, dock) -> None:
     grid.setColumnMinimumWidth(0, 104)
     grid.setColumnStretch(0, 0)
     grid.setColumnStretch(1, 1)
-    grid.setHorizontalSpacing(8)
-    grid.setVerticalSpacing(5)
+    grid.setHorizontalSpacing(theme.Spacing.sm)
+    grid.setVerticalSpacing(theme.Spacing.xs)
     its = ctx.state.image_table
     r = [0]
 
@@ -380,8 +380,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     inner = QWidget()
     il = QVBoxLayout(inner)
-    il.setContentsMargins(12, 12, 12, 12)
-    il.setSpacing(6)
+    il.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+    il.setSpacing(theme.Spacing.xs)
     scroll.setWidget(inner)
     body_layout.addWidget(scroll, 1)
     _build_properties_dock(ctx, props_dock)
@@ -641,7 +641,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     render_host = QWidget(inner)
     render_grid = QGridLayout(render_host)
     render_grid.setContentsMargins(0, 0, 0, 0)
-    render_grid.setSpacing(2)
+    render_grid.setSpacing(theme.Spacing.xs)
     reg.register("_image_table_render_grid", render_grid)
     # Align the render host to the top-left of its slot (the trailing stretch
     # below already keeps it at its sizeHint; each cell is sized to its actual

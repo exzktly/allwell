@@ -204,7 +204,7 @@ class JobRow(QWidget):
 
         body = QVBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
-        body.setSpacing(1)
+        body.setSpacing(theme.Metrics.hairline)
         outer.addLayout(body, 1)
 
         top = QHBoxLayout()

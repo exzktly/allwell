@@ -399,6 +399,7 @@ def build_centre(win, parent: QWidget) -> None:
         # Hidden with the same rule and for the same reason as Group by: two
         # combos whose only option is the status quo are two controls that do
         # nothing.
+        from review.core import inspector_panels as _panels
         from review.core.inspector_panels import make_popover_button
 
         from review.core.group_by_controller import (
@@ -466,11 +467,23 @@ def build_centre(win, parent: QWidget) -> None:
         # rather than handing it back, so it is fished out and registered here —
         # two of three captions switching and the third not would be worse than
         # either consistent choice.
+        # A row of the inspector's Data tab, not a field on the band (the user's decision, tracker §9.1 step 20):
+        # the band reads "ON threshold: 1500 ›" and the page it opens holds the box. The caption on that page is the
+        # one ``refresh_thresh_frac_quick_edit`` rewrites; the row's title follows it.
+        _thr_btn, _thr_panel, _thr_lay = make_popover_button(
+            "ON threshold", band, ctx=win._ctx, tab="data",
+            summary=lambda: f"{win._plotting_thresh_frac_stepper.value():g}")
+        _thr_btn.setToolTip(win._plotting_thresh_frac_stepper.toolTip())
+        win._ctx.widgets.register("_plotting_thresh_frac_btn", _thr_btn)
+        _thr_cap = win._ctx.widgets.register("_plotting_thresh_frac_lbl", QLabel("ON threshold", _thr_panel))
+        _thr_cap.setProperty("textRole", "label")
+        _thr_lay.addWidget(_thr_cap)
+        win._plotting_thresh_frac_stepper.setParent(_thr_panel)
+        _thr_lay.addWidget(win._plotting_thresh_frac_stepper)
+        _thr_lay.addStretch(1)
+        win._plotting_thresh_frac_stepper.valueChanged.connect(lambda _v: _panels.refresh(_thr_btn))
         win._plotting_thresh_frac_grp = win._ctx.widgets.register("_plotting_thresh_frac_grp", band.add_scope(
-            "ON threshold", win._plotting_thresh_frac_stepper, trailing=True))
-        _thr_cap = win._plotting_thresh_frac_grp.findChild(QLabel)
-        if _thr_cap is not None:
-            win._ctx.widgets.register("_plotting_thresh_frac_lbl", _thr_cap)
+            "", _thr_btn, trailing=True))
 
         # "+ Add panel" button retired — the underlying per-renderer
         # multi-subplot story was never wired (the _add_panel handler

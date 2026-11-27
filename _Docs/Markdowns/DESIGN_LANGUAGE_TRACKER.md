@@ -585,7 +585,15 @@ Step log (newest last):
 21. D14 shared step 1: the Plotting band's two sentences — the Group-by note (`_plotting_grouping_note`) and the
     "Observations: cells — no nanowell view" line (`_plotting_observations_static`) — are in a help line under the
     band (`_plotting_notes`, built in `centre_view`; `observation_band` falls back to the band only where a harness
-    builds no notes line). 64 tests of those controls green. Next: ON threshold as a Data row.
+    builds no notes line). 64 tests of those controls green. Commit `e8a01c1`.
+22. D14 shared step 2: ON threshold is a Data row on the Plotting band (`_plotting_thresh_frac_btn`, "ON
+    threshold: 50 ›", `make_popover_button(tab="data")`); its page holds the caption (`_plotting_thresh_frac_lbl`,
+    still rewritten to "ON spots" for a count Property) and the box. `channel_state_controller` refreshes the row
+    after it sets the value with signals blocked. `tests/test_thresh_frac_quick_edit.py` (slow file, 20 passed):
+    `test_on_threshold_is_a_data_row_whose_page_edits_the_cutoff` presses the row, types into the box and reads the
+    cutoff and the row back — the box back on the band fails it ("the box is not on the row's page");
+    `test_channel_and_property_combos_fold_their_own_label` pinned the retired painted label and is rewritten as
+    `test_channel_and_property_are_labelled_outside_their_boxes`. Next: each Plotting page's own controls.
 
 ## 10. Rows
 

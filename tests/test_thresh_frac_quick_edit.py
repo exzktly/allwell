@@ -449,17 +449,12 @@ def test_view_toggle_drives_the_scatter_mode(loaded_app):
     assert pages.currentName() == "cells"
 
 
-def test_channel_and_property_combos_fold_their_own_label(loaded_app):
-    """The band's Channel / Property combos paint their own "Channel: …" /
-    "Property: …" prefix (``widgets.labeled_combo.LabeledComboBox``) rather
-    than sitting beside a separate ``QLabel`` — the compact, one-widget-per-
-    control layout every other Review tab's control band already uses.
+def test_channel_and_property_are_labelled_outside_their_boxes(loaded_app):
+    """The band's Channel / Property boxes draw only their value; the band sets each one's label beside it, as on
+    every other band (design language §5: a field's label is outside the control; tracker row D14).
 
-    Regression: before this, ``ControlBand.add_scope("Channel", combo)``
-    wrapped the combo with a ``QLabel`` in a ``ControlBandGroup`` container,
-    so the row read as two widgets ("Channel" caption + dropdown) instead of
-    one self-describing dropdown.
-    """
+    Rewritten from the opposite rule — the box painting "Channel: …" inside itself — which the design language
+    retired."""
     from PySide6.QtWidgets import QLabel
     from widgets.labeled_combo import LabeledComboBox
 
@@ -467,19 +462,12 @@ def test_channel_and_property_combos_fold_their_own_label(loaded_app):
 
     chan_cb = loaded_app._plotting_channel_cb
     metric_cb = loaded_app._plotting_metric_cb
-    assert isinstance(chan_cb, LabeledComboBox)
-    assert isinstance(metric_cb, LabeledComboBox)
-    assert chan_cb.label() == "Channel"
-    assert metric_cb.label() == "Property"
-
-    # Added straight into the band's scope host, not wrapped in a
-    # ControlBandGroup + caption QLabel.
-    assert chan_cb.objectName() != "ControlBandGroup"
-    assert metric_cb.objectName() != "ControlBandGroup"
+    for box, name in ((chan_cb, "Channel"), (metric_cb, "Property")):
+        assert isinstance(box, LabeledComboBox) and box.label() == name
+        assert not box.labelShown(), f"{name} paints its label inside the box"
     scope_host = loaded_app._plotting_band.scope_host
     caption_texts = {lbl.text() for lbl in scope_host.findChildren(QLabel)}
-    assert "Channel" not in caption_texts
-    assert "Property" not in caption_texts
+    assert {"Channel", "Property"} <= caption_texts
 
 
 def test_a_channel_without_counts_keeps_the_intensity_cutoff(monkeypatch):
@@ -534,3 +522,31 @@ def test_a_threshold_change_in_phone_layout_keeps_the_stepper_wide_enough(qapp):
 
     stepper.setTouchMode(False)
     assert stepper.maximumWidth() == theme.Metrics.stepper_w
+
+
+def test_on_threshold_is_a_data_row_whose_page_edits_the_cutoff(loaded_app, qtbot):
+    """ON threshold is a row of the inspector's Data tab on the Plotting band ("ON threshold: 50 ›"), not a field
+    on it (the user's decision, tracker §9.1 step 20). Pressed for real: the page holds the box, a value typed there
+    reaches the active channel's cutoff, and the row reads it back."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+    from review.core import inspector_panels
+    from review.core import inspector_service as svc
+
+    app = loaded_app
+    assert app._notebook.setCurrentByName("Plotting")
+    QApplication.processEvents()
+    row = app._ctx.widgets.get("_plotting_thresh_frac_btn")
+    stepper = app._plotting_thresh_frac_stepper
+    panel = inspector_panels.panel_of(row)
+    assert panel is not None and panel.tab == "data" and not panel.root
+    assert panel.content.isAncestorOf(stepper), "the box is not on the row's page"
+    qtbot.mouseClick(row, Qt.LeftButton)
+    QApplication.processEvents()
+    insp = svc.inspector(app._ctx)
+    assert insp.isAncestorOf(stepper) and stepper.isVisibleTo(insp) and insp.currentWidget() is panel.content
+    stepper.setValue(321.0)
+    QApplication.processEvents()
+    assert get_thresh_frac_on(app._ctx) == 321.0
+    assert "321" in row.text() and row.text().endswith("›")
+    svc.close(app._ctx)

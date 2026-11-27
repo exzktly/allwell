@@ -1379,7 +1379,10 @@ class PhoneShell(QObject):
         self._strip = QWidget()
         self._strip.setObjectName("PhoneStrip")
         self._strip.setAttribute(Qt.WA_StyledBackground, True)
-        QHBoxLayout(self._strip).addStretch(1)
+        # No stretch item: a spacer is an item of the layout, so it cost the strip a touch gap of its own on each
+        # side, and upright "Response Curves ▾" was 14 px short of its name. The page button takes the room left over
+        # instead (``_place_page_controls``).
+        QHBoxLayout(self._strip)
 
         # ⋯: text size, reload, help, the app log, and the way back to the
         # desk — one flat menu, no submenus.
@@ -1487,7 +1490,7 @@ class PhoneShell(QObject):
             for i, b in enumerate(self.strip_buttons()):
                 band_lay.insertWidget(at + i, b, 0, Qt.AlignVCenter)
         else:
-            strip_lay.insertWidget(0, self.page_button)
+            strip_lay.insertWidget(0, self.page_button, 1)
             strip_lay.addWidget(self.wells_button)
             strip_lay.addWidget(self.controls_button)
             strip_lay.addWidget(self.share_button)

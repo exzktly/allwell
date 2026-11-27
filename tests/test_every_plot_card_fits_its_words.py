@@ -116,3 +116,41 @@ def test_a_title_a_little_too_wide_is_only_made_smaller():
     fig.canvas.draw()
     assert figure_fit.fit_text_inside(ax._left_title, fig, fig.canvas.get_renderer())
     assert "\n" not in ax._left_title.get_text() and ax._left_title.get_fontsize() < 14
+
+
+def test_crowded_cell_values_are_made_smaller_together():
+    from review.core import figure_fit
+
+    fig = _agg(1.5, 1.5)
+    ax = fig.add_axes((0.1, 0.1, 0.8, 0.8))
+    for i in range(4):
+        for j in range(4):
+            ax.text(i / 4 + 0.125, j / 4 + 0.125, "1.00", fontsize=14, ha="center", va="center", transform=ax.transAxes)
+    fig.canvas.draw()
+    assert figure_fit.keep_values_apart(fig, fig.canvas.get_renderer())
+    sizes = {t.get_fontsize() for t in ax.texts}
+    assert len(sizes) == 1 and sizes.pop() < 14
+
+
+def test_a_key_with_nowhere_clear_stays_where_its_renderer_put_it():
+    from review.core import figure_fit
+
+    fig = _agg(1.2, 1.2)
+    ax = fig.add_axes((0, 0, 1, 1))
+    ax.plot([0, 1], [0, 1], label="A long key entry that covers everything")
+    # A label under every place a key can go, and two under the last place tried: nowhere is clear, and the last
+    # place is worse than where the key started.
+    for x, y in ((0.15, 0.93), (0.85, 0.93), (0.15, 0.07), (0.85, 0.07), (0.85, 0.5), (0.15, 0.5), (0.5, 0.93),
+                 (0.4, 0.07), (0.6, 0.07)):
+        ax.text(x, y, "label", transform=ax.transAxes, ha="center", va="center")
+    legend = ax.legend(loc="upper left")
+    fig.canvas.draw()
+    before = legend._loc
+    figure_fit.keep_keys_off_labels(fig, fig.canvas.get_renderer())
+    r = fig.canvas.get_renderer()
+    box = legend.get_window_extent(r)
+    covered = sum(figure_fit._overlaps(box, t.get_window_extent(r)) for t in ax.texts)
+    legend._loc = before
+    fig.canvas.draw()
+    box0 = legend.get_window_extent(r)
+    assert covered <= sum(figure_fit._overlaps(box0, t.get_window_extent(r)) for t in ax.texts)

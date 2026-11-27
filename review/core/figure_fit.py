@@ -57,7 +57,7 @@ def _thin_side(axis, side: str, lo: float, hi: float, renderer) -> bool:
 
 
 #: The most redraws in a row :func:`keep_ticks_apart` asks for before it lets a figure be.
-_MAX_ROUNDS = 3
+_MAX_ROUNDS = 5
 
 
 def keep_ticks_apart(canvas) -> None:
@@ -189,17 +189,25 @@ def keep_keys_off_labels(fig, renderer) -> bool:
         own = {id(x) for x in legend.get_texts()} | {id(legend.get_title())}
         others = [t.get_window_extent(renderer) for t in texts if id(t) not in own]
 
-        def clear() -> bool:
+        def cost() -> int:
             box = legend.get_window_extent(renderer)
-            return not _off(box, fig) and not any(_overlaps(box, o) for o in others)
+            return sum(_overlaps(box, o) for o in others) + (10 if _off(box, fig) else 0)
 
-        if clear():
+        original = legend._loc
+        best_loc, best = original, cost()
+        if best == 0:
             continue
+        # The place covering fewest labels, and the one it had when none is better: a key moved to the last place
+        # tried, clear or not, covered more on Line Graphs than where its renderer put it.
         for place in _LEGEND_PLACES:
             legend.set_loc(place)
-            if clear():
-                changed = True
+            now = cost()
+            if now < best:
+                best_loc, best = legend._loc, now
+            if now == 0:
                 break
+        legend._loc = best_loc
+        changed = changed or best_loc != original
     return changed
 
 
@@ -229,14 +237,42 @@ def keep_rows_apart(fig, renderer) -> bool:
     return False
 
 
+def keep_values_apart(fig, renderer) -> bool:
+    """Make the values written in one panel's cells smaller together, down to :data:`_SMALLEST` of their size, while
+    they run into each other — a correlation matrix's numbers in a phone's small cells. Each keeps the size its
+    renderer gave it as the size it is fitted from."""
+    changed = False
+    for ax in fig.axes:
+        texts = [t for t in ax.texts if t.get_visible() and t.get_text().strip() and not hasattr(t, "_aw_source")]
+        if len(texts) < 4:
+            continue
+        for t in texts:
+            if getattr(t, "_aw_crowd_out", None) != t.get_fontsize():
+                t._aw_crowd_src = t.get_fontsize()
+            t.set_fontsize(t._aw_crowd_src)
+        for share in (1.0, 0.85, 0.7, _SMALLEST):
+            for t in texts:
+                t.set_fontsize(t._aw_crowd_src * share)
+            boxes = [t.get_window_extent(renderer) for t in texts]
+            if not any(_overlaps(a, b) for i, a in enumerate(boxes) for b in boxes[i + 1:]):
+                break
+        for t in texts:
+            changed = changed or getattr(t, "_aw_crowd_out", t._aw_crowd_src) != t.get_fontsize()
+            t._aw_crowd_out = t.get_fontsize()
+    return changed
+
+
 def fit_words(fig, renderer) -> bool:
     """Every text on the figure kept on it, keys moved off labels, rows opened apart. Returns whether anything
     changed."""
     changed = False
+    # A panel's cell values are fitted together by ``keep_values_apart``, not one at a time.
+    values = {id(t) for ax in fig.axes if len(ax.texts) >= 4 for t in ax.texts}
     for t in figure_texts(fig):
-        if hasattr(t, "_aw_source"):                       # a text that fits itself as it draws (Nanowells)
+        if hasattr(t, "_aw_source") or id(t) in values:    # fits itself as it draws (Nanowells), or a cell value
             continue
         changed = fit_text_inside(t, fig, renderer) or changed
+    changed = keep_values_apart(fig, renderer) or changed
     changed = keep_rows_apart(fig, renderer) or changed
     changed = keep_keys_off_labels(fig, renderer) or changed
     return changed

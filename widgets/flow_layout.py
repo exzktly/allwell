@@ -191,7 +191,16 @@ class FlowLayout(QLayout):
         # Watches every managed widget for show/hide; see _FlowItemVisibility
         # for why the visible set has to invalidate this layout explicitly.
         self._vis_watcher = _FlowItemVisibility(self)
+        #: Items share a line's bottom edge instead of its centre (:meth:`setAlignBottom`).
+        self._align_bottom = False
         self.setContentsMargins(QMargins(margin, margin, margin, margin))
+
+    def setAlignBottom(self, bottom: bool) -> None:  # noqa: N802 — Qt naming
+        """Put every item of a line on the line's bottom edge rather than its centre: for a row whose items carry
+        a label *above* their control (a control band), so the controls share one baseline whether or not an item
+        has a label."""
+        self._align_bottom = bool(bottom)
+        self.invalidate()
 
     # ── item bookkeeping ────────────────────────────────────────────────────
     def __del__(self) -> None:  # pragma: no cover - defensive cleanup
@@ -377,8 +386,9 @@ class FlowLayout(QLayout):
             if test_only:
                 return
             for it, r in line:
-                # Centre each item within the line's height.
-                cy = r.y() + (line_height - r.height()) // 2
+                # Centre each item within the line's height, or sit it on the line's bottom edge.
+                slack = line_height - r.height()
+                cy = r.y() + (slack if self._align_bottom else slack // 2)
                 it.setGeometry(QRect(QPoint(r.x(), cy), r.size()))
 
         for item in self._items:

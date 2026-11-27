@@ -118,7 +118,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see ``update_bar_tp_selection_display``), so it needs
     # no separate caption or count label beside it.
-    tp_button = reg.register("_bar_tp_button", buttons.default("Timepoints: 0 selected"))
+    tp_button = reg.register("_bar_tp_button", buttons.default("Timepoints: none"))
     tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(
         lambda _=False: open_bar_timepoint_selector(ctx)
@@ -290,10 +290,12 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     bar_ctrl.add_action(_disp_btn)
 
     # A command, enabled while there is a dragged order to reset (``_drag_reorder``).
-    reset_order_btn = reg.register("_bar_reset_order_btn", buttons.quiet("Reset order", bar_ctrl))
+    # On the Display page with the other ways the bars are laid out, not the band (tracker §9.1 step 27): the band
+    # keeps what is plotted on one row.
+    reset_order_btn = reg.register("_bar_reset_order_btn", buttons.quiet("Reset order", _disp_panel))
     reset_order_btn.setEnabled(ctx.state.plot.bar_order is not None)
     reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
-    bar_ctrl.add_action(reset_order_btn)
+    _disp_lay.addWidget(reset_order_btn)
 
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
         ctx, bar_ctrl,

@@ -3,7 +3,7 @@
 Reported: the Controls sheet was "a mess". Its controls flowed left to right at
 their own widths, so rows wrapped wherever a label happened to end and there
 was no edge to read down; some controls carried their label inside their text
-("Channel: GFP", "Timepoints: 1/3 selected"), the threshold had a small grey
+("Channel: GFP", "Timepoints: 1 of 3"), the threshold had a small grey
 label beside it, others had none; a hint floated between controls; data
 choices, display options and commands were interleaved. ``ControlBand.setForm``
 lays the same widgets out as one column: Data rows of label + control, then
@@ -38,7 +38,7 @@ def _band(qtbot):
     combo.addItems(["GFP", "mCherry"])
     prop = LabeledComboBox("Property")
     prop.addItems(["Mean Intensity", "Area"])
-    tp = QPushButton("Timepoints: 1/3 selected")
+    tp = QPushButton("Timepoints: 1 of 3")
     hint = QLabel("Plots draw one member per selected well.")
     hint.setObjectName("Muted")
     tp.setFixedWidth(150)          # pinned, like a touch stepper
@@ -90,7 +90,7 @@ def _row_label(row) -> str:
 
 
 def test_split_labelled_text():
-    assert split_labelled_text("Timepoints: 1/3 selected") == ("Timepoints", "1/3 selected")
+    assert split_labelled_text("Timepoints: 1 of 3") == ("Timepoints", "1 of 3")
     assert split_labelled_text("Series: None") == ("Series", "None")
     assert split_labelled_text("Display ▾") is None
     assert split_labelled_text("Reset order") is None
@@ -122,14 +122,14 @@ def test_every_scope_control_is_a_row_with_its_label_in_one_column(qtbot):
     # The label left the control: the combo paints only its value, the
     # button's own text is untouched (pages rewrite it) but painted as value.
     assert w["prop"]._painted_text() == "Mean Intensity"
-    assert w["tp"].text() == "Timepoints: 1/3 selected"
+    assert w["tp"].text() == "Timepoints: 1 of 3"
     # The hint is a caption at the top of Data, not a row of its own.
     assert form.hints() == [w["hint"]] and w["hint"].wordWrap()
 
 
 def test_a_labelled_button_is_painted_as_its_value_only(qtbot):
     """Assert what reaches the screen: the Timepoints button in the form draws
-    exactly what a button reading "1/3 selected" draws — and keeps doing so
+    exactly what a button reading "1 of 3" draws — and keeps doing so
     after the page rewrites its text."""
     band, _parts, w = _band(qtbot)
     band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
@@ -147,11 +147,11 @@ def test_a_labelled_button_is_painted_as_its_value_only(qtbot):
         _settle()
         return twin.grab().toImage()
 
-    assert tp.grab().toImage() == twin_of("1/3 selected")
-    assert tp.grab().toImage() != twin_of("Timepoints: 1/3 selected")
-    tp.setText("Timepoints: 2/3 selected")
+    assert tp.grab().toImage() == twin_of("1 of 3")
+    assert tp.grab().toImage() != twin_of("Timepoints: 1 of 3")
+    tp.setText("Timepoints: 2 of 3")
     _settle()
-    assert tp.grab().toImage() == twin_of("2/3 selected")
+    assert tp.grab().toImage() == twin_of("2 of 3")
 
 
 def test_the_form_is_the_data_tab_panel_rows_are_rows_and_a_tab_s_root_is_not_in_it(qtbot):

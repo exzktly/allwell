@@ -881,17 +881,17 @@ def multiselect_button_text(prefix: str, selections: dict) -> str:
     """Self-describing text for a checkbox-menu multi-select button.
 
     Folds *prefix* and the selection count into one string
-    ("Timepoints: 2/5 selected") for a band control whose button IS the
-    label — used in place of a button + separate "(2/5 selected)" QLabel
+    ("Timepoints: 2 of 5", the Nanowells page's own spelling) for a band control whose button IS the
+    label — used in place of a button + separate "(2 of 5)" QLabel
     pair, the pattern ``LabeledComboBox`` uses for a plain combo.
     """
     total = len(selections)
     count = sum(1 for v in selections.values() if v)
     if not total:
-        return f"{prefix}: 0 selected"
+        return f"{prefix}: none"
     if count == total:
-        return f"{prefix}: All {count} selected"
-    return f"{prefix}: {count}/{total} selected"
+        return f"{prefix}: all {count}"
+    return f"{prefix}: {count} of {total}"
 
 
 def apply_plot_card_decorators(ctx, card, tab_name: str, *, part: str = "") -> None:

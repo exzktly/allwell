@@ -30,24 +30,24 @@ import pytest
 def test_multiselect_button_text_all_selected():
     from review.core.ui_helpers import multiselect_button_text
     assert multiselect_button_text("Timepoints", {"1": True, "2": True}) == \
-        "Timepoints: All 2 selected"
+        "Timepoints: all 2"
 
 
 def test_multiselect_button_text_partial():
     from review.core.ui_helpers import multiselect_button_text
     assert multiselect_button_text("Timepoints", {"1": True, "2": False, "3": True}) == \
-        "Timepoints: 2/3 selected"
+        "Timepoints: 2 of 3"
 
 
 def test_multiselect_button_text_empty():
     from review.core.ui_helpers import multiselect_button_text
-    assert multiselect_button_text("Timepoints", {}) == "Timepoints: 0 selected"
+    assert multiselect_button_text("Timepoints", {}) == "Timepoints: none"
 
 
 def test_multiselect_button_text_none_selected():
     from review.core.ui_helpers import multiselect_button_text
     assert multiselect_button_text("Timepoints", {"1": False, "2": False}) == \
-        "Timepoints: 0/2 selected"
+        "Timepoints: 0 of 2"
 
 
 # ── structural: every tab's Timepoint control folds its label ───────────────

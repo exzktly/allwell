@@ -42,7 +42,7 @@ No All-Well coupling — a plain reusable widget.
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ui import theme
 from widgets import form_registry
@@ -160,6 +160,18 @@ class ControlBand(QWidget):
     ROW_H = 28
 
     @classmethod
+    def caption_height(cls) -> int:
+        """The height a scope item's label takes above its control (design language §5: a field's label is outside
+        the control, above it): the label role's line, at least."""
+        return theme.Typography.small_size + theme.Spacing.xs
+
+    @classmethod
+    def line_height(cls) -> int:
+        """One line of the band: a label above a control row. Every line is this tall whether or not its items
+        have labels, so a band is one height on every page."""
+        return cls.caption_height() + theme.Spacing.xs + cls.ROW_H
+
+    @classmethod
     def band_height(cls) -> int:
         """The height of a band showing one row — the same on every page.
 
@@ -167,7 +179,7 @@ class ControlBand(QWidget):
         the content below starts at the same y as it does on a page that has
         controls (:mod:`widgets.page_body`).
         """
-        return cls.ROW_H + 2 * theme.Spacing.sm
+        return cls.line_height() + 2 * theme.Spacing.sm
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -199,11 +211,14 @@ class ControlBand(QWidget):
         self._scope = FlowLayout(self._scope_host)
         self._scope.setContentsMargins(0, 0, 0, 0)
         self._scope.setSpacing(s.sm)
+        # Labels sit above their controls, so the controls of a line share its bottom edge — a button with no label
+        # beside a labelled box sits level with the box, not with its label.
+        self._scope.setAlignBottom(True)
         sync_flow_height(self._scope_host)
 
         self._actions = QHBoxLayout()
         self._actions.setSpacing(s.sm)
-        self._actions.setAlignment(Qt.AlignTop)
+        self._actions.setAlignment(Qt.AlignBottom)
 
         # The scope host takes the slack, which is what pins the actions right.
         #: Scope items pinned to the end of the row — see ``add_scope``.
@@ -244,10 +259,17 @@ class ControlBand(QWidget):
         _fit_checkboxes(widgets)
         _compact_segments(widgets)
         if label:
-            cap = QLabel(label, self._scope_host)
-            cap.setProperty("textRole", "help")
-            item = flow_group(self._scope_host, cap, *widgets)
+            # The label above its control(s), in the label role (design language §5); the controls in a row under it.
+            item = QWidget(self._scope_host)
             item.setObjectName("ControlBandGroup")
+            column = QVBoxLayout(item)
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(theme.Spacing.xs)
+            cap = QLabel(label, item)
+            cap.setProperty("textRole", "label")
+            cap.setMinimumHeight(self.caption_height())
+            column.addWidget(cap)
+            column.addWidget(widgets[0] if len(widgets) == 1 else flow_group(item, *widgets))
         elif len(widgets) == 1:
             item = widgets[0]
             item.setParent(self._scope_host)
@@ -536,7 +558,7 @@ class ControlBand(QWidget):
         if self._form is not None:
             return self._form_height(width)
         scope = self._scope.heightForWidth(self._scope_width_for(width))
-        return max(scope, self._action_height(), self.ROW_H) + self._chrome_height()
+        return max(scope, self._action_height(), self.line_height()) + self._chrome_height()
 
     def minimumSizeHint(self):  # Qt naming
         """One row of controls — never shorter than the action zone.
@@ -552,7 +574,7 @@ class ControlBand(QWidget):
             return hint
         row = self._scope.heightForWidth(1_000_000)   # unwrapped: a single row
         hint.setHeight(
-            max(row, self._action_height(), self.ROW_H) + self._chrome_height()
+            max(row, self._action_height(), self.line_height()) + self._chrome_height()
         )
         return hint
 

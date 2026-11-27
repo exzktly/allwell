@@ -37,7 +37,7 @@ from review.features.response.controller import (
     redraw_response, refresh_response_metric_combo, response_channel,
     set_compare_series, set_fit_bound, set_fit_model, update_timepoint_button,
 )
-from ui import buttons
+from ui import buttons, theme
 
 #: The figure. One axes, wide rather than tall — a dose–response is read across.
 _FIG_W, _FIG_H, _DPI = 7.2, 4.6, 100
@@ -47,7 +47,7 @@ def _curves_summary(ctx) -> str:
     """What the Curves row reads: the X variable and the series split ("Dose · none")."""
     x_combo = ctx.widgets.get_or_none("_response_x_cb")
     x_text = (x_combo.currentText() if x_combo is not None else "") or "—"
-    return f"{x_text} · {series_button_text(ctx).split(': ', 1)[-1]}"
+    return f"{_panels.short(x_text, 12)} · {_panels.short(series_button_text(ctx).split(': ', 1)[-1], 12)}"
 
 
 def build_response_tab(ctx, parent: QWidget) -> None:
@@ -103,6 +103,8 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         "measures its own channel rather than the band's")
     metric_combo.currentIndexChanged.connect(
         lambda *_: on_response_metric_changed(ctx))
+    # A ceiling, so a long property ("Fraction above threshold") elides rather than widening the band past one row.
+    metric_combo.setMaximumWidth(theme.Metrics.form_label_w + theme.Spacing.xl)
     band.add_scope("Property", metric_combo)
 
     # Scope, beside X and for the same reason: it says what the figure is *of*.
@@ -129,7 +131,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # The Bar tab's picker, over this tab's own selection. Self-describing —
     # the button's own text carries the count, so it needs no caption beside it.
     tp_button = reg.register("_response_tp_button",
-                             buttons.default("Timepoints: 0 selected"))
+                             buttons.default("Timepoints: none"))
     tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(lambda _=False: open_timepoint_selector(ctx))
     band.add_scope("", tp_button)

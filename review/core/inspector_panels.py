@@ -108,6 +108,12 @@ def clean_title(text: str) -> str:
     return str(text).replace("▾", "").replace(CHEVRON, "").strip()
 
 
+def short(text: str, limit: int = 16) -> str:
+    """*text* cut to *limit* characters with an ellipsis, for a row's summary: the row on the band is a reminder,
+    its page the detail."""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def make_popover_button(text: str, parent: QWidget, *, ctx=None, tab: str = "display",
                         root: bool = False, summary: Callable[[], str] | None = None,
                         large: bool = False):

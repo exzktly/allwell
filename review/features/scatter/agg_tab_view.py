@@ -99,7 +99,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see update_tp_selection_display), so it needs no
     # separate caption or count label beside it.
-    agg_tp_button = reg.register("_scatter_agg_tp_button", buttons.default("Timepoints: 0 selected"))
+    agg_tp_button = reg.register("_scatter_agg_tp_button", buttons.default("Timepoints: none"))
     agg_tp_button.setProperty("variant", "default")
     agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
     ctrl.add_scope("", agg_tp_button)

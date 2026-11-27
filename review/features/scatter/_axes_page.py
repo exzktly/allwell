@@ -38,11 +38,13 @@ class AxesPage:
         self._layout.addStretch(1)
 
     def summary(self) -> str:
-        """Each axis's shown pickers' values, X first: "X GFP Mean · Y RFP Mean"."""
-        parts: dict[str, list[str]] = {"X": [], "Y": []}
+        """What each axis plots, X first, kept short enough for the band: "X GFP · Y RFP" — the channel (or, under
+        Nanowells, the metric); the properties are on the page."""
+        parts: dict[str, str] = {}
         for field in self._fields:
-            control = field.control()
-            axis = field.label().text()[:1]
-            if axis in parts and isinstance(control, QComboBox) and not field.isHidden() and control.currentText():
-                parts[axis].append(control.currentText())
-        return " · ".join(f"{axis} {' '.join(values)}" for axis, values in parts.items() if values) or "—"
+            control, label = field.control(), field.label().text()
+            if label not in ("X channel", "Y channel", "X", "Y") or field.isHidden():
+                continue
+            if isinstance(control, QComboBox) and control.currentText():
+                parts.setdefault(label[:1], inspector_panels.short(control.currentText()))
+        return " · ".join(f"{axis} {parts[axis]}" for axis in ("X", "Y") if axis in parts) or "—"

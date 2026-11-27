@@ -94,7 +94,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see update_scatter_tp_selection_display), so it needs
     # no separate caption or count label beside it.
-    tp_button = reg.register("_scatter_tp_button", buttons.default("Timepoints: 0 selected", ctrl))
+    tp_button = reg.register("_scatter_tp_button", buttons.default("Timepoints: none", ctrl))
     tp_button.setProperty("variant", "default")
     tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
     ctrl.add_scope("", tp_button)

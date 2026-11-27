@@ -304,7 +304,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("ColorSwatchRow")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     form = QFormLayout()
@@ -318,7 +318,7 @@ if __name__ == "__main__":
     lay.addLayout(form)
 
     echo = QLabel("(pick a swatch)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     lay.addWidget(echo)
     traces.colorPicked.connect(lambda c: echo.setText(f"trace → {c.name()}"))
     custom.colorPicked.connect(lambda c: echo.setText(f"custom → {c.name()}"))

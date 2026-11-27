@@ -164,7 +164,7 @@ def test_an_incomplete_rule_says_what_is_missing_and_leaves_the_metrics_undefine
     _type(w["size_label_0"], "T cells")
     _type(w["size_max_0"], "250")
     status = w["size_classes_status"]
-    assert status.text().startswith("Class 2 needs a label.") and status.objectName() == "Notice"
+    assert status.text().startswith("Class 2 needs a label.") and status.property("textTone") == "attention"
     assert not get_qc_params(ctx).size_classes.active()
     _wait_current(qtbot, ctx, st)
     assert np.isnan(_site(st, "t_c", 0)["size_1"])

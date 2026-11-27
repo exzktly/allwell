@@ -543,8 +543,8 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     A8: takes ``ctx``; the combos stash per-tab handles on the ctx and write the
     shared fold-change state, so it unwraps the handle once at this boundary.
     """
-    title = QLabel("Fold change:", parent)
-    f = title.font(); f.setBold(True); title.setFont(f)
+    title = QLabel("Fold change", parent)
+    title.setProperty("textRole", "label")
     layout.addWidget(title)
 
     layout.addWidget(QLabel("Control", parent))

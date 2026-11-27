@@ -64,7 +64,7 @@ def test_the_blank_well_rows_appear_only_when_a_correction_reads_them(tab, qtbot
 
     tab._background_cb.setValue("empty_well")
     assert not any(r.isHidden() for r in rows)
-    assert not needed.isHidden() and needed.objectName() == "Error"
+    assert not needed.isHidden() and needed.property("textTone") == "failure"
 
     tab._background_well_edit.setText("H12")
     assert needed.isHidden()
@@ -138,12 +138,12 @@ def test_the_method_block_is_as_tall_as_the_chosen_page(tab, qtbot, method):
 
 def test_a_segmentation_problem_is_drawn_as_an_error(tab):
     lbl = tab._segmentation_hint_lbl
-    assert lbl.objectName() == "Muted" and lbl.text().startswith("Best default")
+    assert (lbl.property("textRole") == "help" and not lbl.property("textTone")) and lbl.text().startswith("Best default")
     _method(tab, "stardist_seeded_watershed_cell")      # no cytoplasm channel yet
-    assert lbl.objectName() == "Error"
+    assert lbl.property("textTone") == "failure"
     assert lbl.text() == "Watershed mode requires a cytoplasm channel."
     tab._cytoplasm_edit.setText("GFP")
-    assert lbl.objectName() == "Muted"
+    assert (lbl.property("textRole") == "help" and not lbl.property("textTone"))
 
 
 def test_an_empty_status_line_takes_no_room(tab, tmp_path):
@@ -152,7 +152,7 @@ def test_an_empty_status_line_takes_no_room(tab, tmp_path):
     (tmp_path / "in").mkdir()
     tab._input_edit.setText(str(tmp_path / "in"))
     assert not tab._layout_lbl.isHidden()
-    assert tab._layout_lbl.objectName() == "Error"
+    assert tab._layout_lbl.property("textTone") == "failure"
     assert "empty" in tab._layout_lbl.text()
 
 
@@ -237,7 +237,7 @@ def test_run_lists_the_problems_under_it_and_opens_the_first_one(tab, qtbot):
     body.setVisible(False)                                 # folded again
     assert tab._validate_run_request() is None             # no dialog: the
     lbl = tab._run_problems_lbl                            # autouse guard would raise
-    assert not lbl.isHidden() and lbl.objectName() == "Error"
+    assert not lbl.isHidden() and lbl.property("textTone") == "failure"
     assert lbl.text().startswith("No input folder selected.")
     assert "(+2 more)" in lbl.text()
     tab._input_edit.setText("/somewhere")                 # fix the first
@@ -248,10 +248,10 @@ def test_run_lists_the_problems_under_it_and_opens_the_first_one(tab, qtbot):
 def test_the_live_list_is_quiet_until_run_is_pressed(tab, qtbot):
     _numbers_and_schema_wrong(tab)
     tab._live_run_check()
-    assert tab._run_problems_lbl.objectName() == "Muted"
+    assert (tab._run_problems_lbl.property("textRole") == "help" and not tab._run_problems_lbl.property("textTone"))
     tab._validate_run_request()
     tab._live_run_check()
-    assert tab._run_problems_lbl.objectName() == "Error"   # stays red while fixing
+    assert tab._run_problems_lbl.property("textTone") == "failure"   # stays red while fixing
     tab._input_edit.setText("/somewhere")
     tab._schema_picker.setSchema("experiment:channel:well:fov:timepoint")
     tab._tf_threads_edit.setText("0")

@@ -182,7 +182,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("ChipGroup")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     lay.addWidget(QLabel("Single-select (channel):"))
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     lay.addWidget(multi)
 
     echo = QLabel("(interact above)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     lay.addWidget(echo)
     chan.currentChanged.connect(lambda i: echo.setText(f"channel → {chan.chipText(i)} ({chan.currentData()})"))
     multi.chipToggled.connect(lambda i, on: echo.setText(f"overlays → {[multi.chipText(j) for j in multi.checkedIndices()]}"))

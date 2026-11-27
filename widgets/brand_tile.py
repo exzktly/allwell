@@ -106,7 +106,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("BrandTile")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     row = QHBoxLayout()
@@ -116,7 +116,7 @@ if __name__ == "__main__":
     # titlebar-style row
     tile = BrandTile()
     word = QLabel("All-Well")
-    word.setObjectName("Title")
+    word.setProperty("textRole", "pageTitle")
     row.addSpacing(theme.Spacing.lg)
     row.addWidget(tile)
     row.addWidget(word)

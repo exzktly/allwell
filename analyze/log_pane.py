@@ -196,7 +196,7 @@ class AnalyzeLogPaneMixin:
         # so the pane isn't blank when nothing's running. Hidden during a run
         # and when there's no previous run to describe.
         self._last_run_card = QLabel("", parent)
-        self._last_run_card.setObjectName("Muted")
+        self._last_run_card.setProperty("textRole", "help")
         self._last_run_card.setWordWrap(True)
         self._last_run_card.setContentsMargins(12, 6, 12, 6)
         self._last_run_card.setVisible(False)

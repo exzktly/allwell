@@ -60,7 +60,7 @@ class RunsPage(QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Runs", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
         blurb = QLabel(
@@ -69,7 +69,7 @@ class RunsPage(QWidget):
             "conversion chose, what each step wrote, and any pause, retry or "
             "restart. A run stays here after its jobs are cleared from the queue.",
             self)
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -85,7 +85,7 @@ class RunsPage(QWidget):
         outer.addWidget(row)
 
         self._empty = QLabel("No recipe has been applied yet.", self)
-        self._empty.setObjectName("Muted")
+        self._empty.setProperty("textRole", "help")
         outer.addWidget(self._empty)
         self._runs = QListWidget(self)
         self._runs.setObjectName("RecipeRuns")

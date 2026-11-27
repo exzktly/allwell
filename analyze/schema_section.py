@@ -27,6 +27,7 @@ from PySide6.QtWidgets import QLabel, QWidget
 
 from widgets.schema_picker import SchemaPicker
 from widgets.wrap_checkbox import WrapCheckBox
+from ui import text_roles
 
 #: Stand-in tokens for the "e.g. ..." line, one per schema field. The channel
 #: slot is filled from the form's own channel tokens instead.
@@ -99,15 +100,15 @@ class AnalyzeSchemaSectionMixin:
         sec.layout().addWidget(self._auto_detect_cb)
 
         self._schema_err_lbl = QLabel("", sec)
-        self._schema_err_lbl.setObjectName("Error")
+        text_roles.set_role(self._schema_err_lbl, text_roles.HELP, tone=text_roles.FAILURE)
         self._schema_err_lbl.setWordWrap(True)
         sec.layout().addWidget(self._schema_err_lbl)
 
         self._schema_preview_lbl = QLabel("", sec)
-        self._schema_preview_lbl.setObjectName("Muted")
+        self._schema_preview_lbl.setProperty("textRole", "help")
         # Monospaced, so the example filenames' indented second line lines up
         # under the first (QSS ``QLabel[mono="true"]``).
-        self._schema_preview_lbl.setProperty("mono", True)
+        self._schema_preview_lbl.setProperty("textRole", "number")
         self._schema_preview_lbl.setWordWrap(True)
         sec.layout().addWidget(self._schema_preview_lbl)
 

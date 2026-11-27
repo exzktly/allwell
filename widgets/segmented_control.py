@@ -281,7 +281,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("SegmentedControl")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     scope = SegmentedControl()
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     lay.addWidget(err)
 
     echo = QLabel("currentChanged → (interact above)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     lay.addWidget(echo)
     scope.currentChanged.connect(lambda i: echo.setText(f"scope → {i} ({scope.segmentText(i)})"))
     view.currentChanged.connect(lambda i: echo.setText(f"view → {i} (data={view.currentData()})"))

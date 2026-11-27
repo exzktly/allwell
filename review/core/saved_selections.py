@@ -95,7 +95,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
             ctx.widgets.register("_plot_groups_add_btn", add_btn)
 
     empty_label = QLabel("No saved selections yet.", section)
-    empty_label.setObjectName("Muted")
+    empty_label.setProperty("textRole", "help")
     empty_label.setWordWrap(True)
     section.addWidget(empty_label)
 

@@ -137,12 +137,13 @@ class SchemaPicker(QWidget):
             # the same muted grey the one worth reading was styled exactly like
             # the example-filename boilerplate beneath it.
             self._detect_lbl = QLabel("", self)
-            self._detect_lbl.setObjectName("Muted")
+            self._detect_lbl.setProperty("textRole", "help")
             self._detect_lbl.setWordWrap(True)
             outer.addWidget(self._detect_lbl)
 
             self._detect_note_lbl = QLabel("", self)
-            self._detect_note_lbl.setObjectName("Notice")
+            self._detect_note_lbl.setProperty("textRole", "help")
+            self._detect_note_lbl.setProperty("textTone", "attention")
             self._detect_note_lbl.setWordWrap(True)
             self._detect_note_lbl.setVisible(False)
             outer.addWidget(self._detect_note_lbl)
@@ -212,7 +213,7 @@ class SchemaPicker(QWidget):
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(_PLAIN_LABEL_GAP)
         lbl = QLabel(label, row)
-        lbl.setObjectName("Muted")
+        lbl.setProperty("textRole", "help")
         # Fixed, so all seven rows put their control at one left edge. Sized to
         # the natural width of each label, the rows step in and out by tens of
         # pixels and the block reads as three separate groups.

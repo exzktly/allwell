@@ -504,7 +504,7 @@ if __name__ == "__main__":
     outer.setSpacing(theme.Spacing.md)
 
     title = QLabel("Stepper")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -518,7 +518,7 @@ if __name__ == "__main__":
     outer.addLayout(form)
 
     echo = QLabel("(interact above)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     s_int.valueChanged.connect(lambda v: echo.setText(f"line width → {v}"))
     s_frac.valueChanged.connect(lambda v: echo.setText(f"threshold → {v}"))

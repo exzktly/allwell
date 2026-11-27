@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from core import local_storage as ls
 from core.worker_bridge import run_off_thread
+from ui import text_roles
 from util.state_dir import gui_state_dir
 
 #: Indent of an area's description under its checkbox, matching the reset
@@ -87,7 +88,7 @@ class StorageDialog(QDialog):
         layout.addLayout(self._rows)
 
         self._status = QLabel("", self)
-        self._status.setObjectName("Muted")
+        self._status.setProperty("textRole", "help")
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
 
@@ -162,14 +163,14 @@ class StorageDialog(QDialog):
             box.toggled.connect(lambda _on: self._sync_clear())
             rl.addWidget(box)
             detail = QLabel(area.detail, row)
-            detail.setObjectName("Muted")
+            detail.setProperty("textRole", "help")
             detail.setWordWrap(True)
             detail.setContentsMargins(_DETAIL_INDENT, 0, 0, 0)
             rl.addWidget(detail)
             if area.confirm:
                 # The warning's first sentence; the whole of it is asked on Clear.
                 warn = QLabel(f"⚠ {area.confirm.split('. ')[0]}.", row)
-                warn.setObjectName("Warn")
+                text_roles.set_role(warn, text_roles.HELP, tone=text_roles.ATTENTION)
                 warn.setWordWrap(True)
                 warn.setContentsMargins(_DETAIL_INDENT, 2, 0, 0)
                 rl.addWidget(warn)

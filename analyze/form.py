@@ -124,7 +124,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         sec.layout().addWidget(pin_row)
 
         in_lbl = QLabel("Input folder", sec)
-        in_lbl.setObjectName("Muted")
+        in_lbl.setProperty("textRole", "help")
         in_lbl.setWordWrap(True)
         sec.layout().addWidget(in_lbl)
 
@@ -154,7 +154,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         orl.setContentsMargins(0, 0, 0, 0)
         orl.setSpacing(4)
         out_cap = QLabel("Output to", self._output_row)
-        out_cap.setObjectName("Muted")
+        out_cap.setProperty("textRole", "help")
         orl.addWidget(out_cap, 0, Qt.AlignTop)
         self._output_lbl = QLabel("—", self._output_row)
         self._output_lbl.setWordWrap(True)
@@ -166,7 +166,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._layout_lbl = QLabel("", sec)
         self._layout_lbl.setWordWrap(True)
         sec.layout().addWidget(self._layout_lbl)
-        self._set_status(self._layout_lbl, "", quiet="")
+        self._set_status(self._layout_lbl, "", quiet=False)
 
 
         self._input_edit.textChanged.connect(lambda _: (self.forget_carried_run_problems(), self._refresh_output()))
@@ -221,7 +221,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # turns into the segmentation error, in the error style, while the
         # method cannot run.
         self._segmentation_hint_lbl = QLabel("", sec)
-        self._segmentation_hint_lbl.setObjectName("Muted")
+        self._segmentation_hint_lbl.setProperty("textRole", "help")
         self._segmentation_hint_lbl.setWordWrap(True)
         sec.layout().addWidget(self._segmentation_hint_lbl)
         self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())

@@ -60,7 +60,7 @@ def _muted(text: str, parent) -> QLabel:
     different weight and punctuation from the ones beside them in the same row.
     """
     lbl = QLabel(text, parent)
-    lbl.setObjectName("Muted")
+    lbl.setProperty("textRole", "help")
     return lbl
 
 

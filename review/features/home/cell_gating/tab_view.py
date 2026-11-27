@@ -238,7 +238,7 @@ def _lead_in(parent: QWidget, text: str) -> QLabel:
     put a structural line below the muted hints it outranks.
     """
     lbl = QLabel(text, parent)
-    lbl.setObjectName("Secondary")
+    lbl.setProperty("textRole", "label")
     lbl.setWordWrap(True)
     lbl.setContentsMargins(_LEAD_IN_INDENT, 0, 0, 0)
     return lbl
@@ -292,7 +292,7 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
     # sit fully enabled over an empty menu whose only entry read "No gates drawn
     # yet".
     hint = QLabel("No gates drawn yet — draw one on the Scatter Plot tab.", parent)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
     hint.setContentsMargins(_RADIO_INDENT * 2, 0, 0, 0)
     parent.layout().addWidget(hint)
@@ -459,7 +459,7 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     layout.addWidget(build_hline_separator(frame))
 
     summary = ctx.widgets.register("_cell_gating_gate_summary", QLabel("", frame))
-    summary.setObjectName("Muted")
+    summary.setProperty("textRole", "help")
     summary.setWordWrap(True)
     layout.addWidget(summary)
 
@@ -467,7 +467,7 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     # it cannot say which gate, and a layer that was never applied is reported
     # as "not applied" rather than as a zero it did not measure.
     funnel = ctx.widgets.register("_cell_gating_funnel_label", QLabel("", frame))
-    funnel.setObjectName("Muted")
+    funnel.setProperty("textRole", "help")
     funnel.setWordWrap(True)
     funnel.setToolTip(
         "Each inclusion layer applied on top of the ones above it, in the order "
@@ -509,7 +509,7 @@ def _build_cdf_section(ctx, parent: QWidget, root: QVBoxLayout,
     toolbar = reg.register("_cell_gating_toolbar", MplToolbar(canvas, parent))
 
     status = reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     status.setWordWrap(True)
 
     root.addWidget(build_hline_separator(parent))

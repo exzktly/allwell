@@ -971,7 +971,7 @@ def _detail_header(ctx, parent) -> QHBoxLayout:
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
     title = QLabel("Selected nanowell", parent)
-    title.setObjectName("Caption")
+    title.setProperty("textRole", "label")
     close = QPushButton("✕", parent)
     close.setObjectName("Ghost")
     close.setFixedWidth(theme.Metrics.icon_btn_w)
@@ -996,7 +996,7 @@ def _crops_header(ctx, parent) -> QWidget:
     row = FlowLayout(host, h_spacing=8)
     sync_flow_height(host)
     title = QLabel("Crops over time", host)
-    title.setObjectName("Caption")
+    title.setProperty("textRole", "label")
     button = QPushButton("Pop out", host)
     button.setProperty("variant", "default")
     button.setToolTip("Open the first selected nanowell's crops at every timepoint, large, in a window of their own "
@@ -1244,7 +1244,7 @@ def _well_part(band, well_cb) -> QWidget:
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(theme.Spacing.xs)
     caption = QLabel("Well", part)
-    caption.setObjectName("Muted")
+    caption.setProperty("textRole", "help")
     row.addWidget(caption)
     row.addWidget(well_cb)
     return part

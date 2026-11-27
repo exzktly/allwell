@@ -1769,7 +1769,8 @@ class WellPlateSelector(QWidget):
         self._btn_invert = QPushButton("Invert")
         self._btn_invert.setToolTip("Invert the current selection")
         self._btn_clear = QPushButton("Clear")
-        self._btn_clear.setObjectName("Danger")
+        # Quiet: clearing a selection loses nothing that cannot be selected again (ui/buttons.py's kinds).
+        self._btn_clear.setProperty("variant", "quiet")
         self._btn_clear.setToolTip("Clear the selection")
         for b in (self._btn_all, self._btn_invert, self._btn_clear):
             b.setCursor(Qt.PointingHandCursor)
@@ -1998,7 +1999,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("WellPlateSelector")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     plate = WellPlateSelector()
@@ -2032,7 +2033,7 @@ if __name__ == "__main__":
     lay.addLayout(opts)
 
     echo = QLabel()
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     echo.setWordWrap(True)
 
     def _show(ids):

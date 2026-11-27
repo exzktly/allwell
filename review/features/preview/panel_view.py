@@ -132,7 +132,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     zoom_out_btn = btn_card(ctrl, "−", lambda: review_image_zoom_step(ctx, -1))
     zoom_out_btn.setToolTip("Zoom out (scroll wheel works on the image too)")
     zoom_lbl = reg.register("_review_image_zoom_lbl", QLabel("100%"))
-    zoom_lbl.setObjectName("Muted")
+    zoom_lbl.setProperty("textRole", "help")
     zoom_lbl.setToolTip("Current zoom, relative to fit-to-window (100% = Fit)")
     zoom_in_btn = btn_card(ctrl, "+", lambda: review_image_zoom_step(ctx, +1))
     zoom_in_btn.setToolTip("Zoom in (scroll wheel works on the image too)")
@@ -292,7 +292,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # quick-edit on the control row above — ThreshFracOn for an intensity
     # Property, ThreshCountOn for a spot count.
     status = reg.register("_review_image_status", QLabel("", inner))
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     il.addWidget(status)
 
     # ── LUT ▾ popover — display brightness (min/max) ────────────────────
@@ -334,7 +334,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # Registered because the caption follows the cutoff the selected Property
     # uses — ``refresh_thresh_frac_quick_edit`` rewrites it alongside the value.
     _thr_lbl = reg.register("_review_thresh_frac_lbl", QLabel("ON threshold", thr_row))
-    _thr_lbl.setObjectName("Muted")   # the band's own captions read this way
+    _thr_lbl.setProperty("textRole", "help")   # the band's own captions read this way
     thr_lay.addWidget(_thr_lbl)
     thresh_stepper = reg.register(
         "_review_thresh_frac_stepper",

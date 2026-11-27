@@ -35,7 +35,7 @@ def qapp():
 
 def _title_label(header: QWidget) -> QLabel:
     titles = [w for w in header.findChildren(QLabel)
-              if w.property("role") == "section"]
+              if w.property("textRole") == "sectionHeading"]
     assert len(titles) == 1, f"expected one section title, found {len(titles)}"
     return titles[0]
 

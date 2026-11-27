@@ -105,7 +105,7 @@ def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_war
     _run_worker_to_completion(ctrl)
 
     assert ctrl._last_result[0] is True  # the run actually succeeded
-    assert page._dest_field._hint.objectName() == "Muted"
+    assert (page._dest_field._hint.property("textRole") == "help" and not page._dest_field._hint.property("textTone"))
     assert "Already holds a finished dataset" not in page._dest_field._hint.text()
     assert "now holds the merged dataset" in page._dest_field._hint.text()
     # The run gate itself is unaffected by the note -- Concatenate is still

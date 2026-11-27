@@ -49,7 +49,7 @@ def build_role_strip(role: DeclarationRole, parent: QWidget) -> QWidget:
     column.addWidget(what)
 
     where = QLabel(role.cross_link, host)
-    where.setObjectName("Muted")
+    where.setProperty("textRole", "help")
     where.setWordWrap(True)
     column.addWidget(where)
     return host

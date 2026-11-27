@@ -1784,7 +1784,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
 
     if not row_specs:
         lbl = QLabel("No channels loaded", host)
-        lbl.setObjectName("Muted")
+        lbl.setProperty("textRole", "help")
         inner_layout.addWidget(lbl)
         return
 
@@ -1803,11 +1803,11 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
     # used to be a three-line paragraph at the top of the tab, far from either
     # field it qualifies.
     head = QLabel("Channel", table)
-    head.setObjectName("Muted")
+    head.setProperty("textRole", "help")
     grid.addWidget(head, 0, 0)
     for col, (text, tip) in enumerate(headers, start=1):
         head = QLabel(text, table)
-        head.setObjectName("Muted")
+        head.setProperty("textRole", "help")
         head.setToolTip(tip)
         # Wrapped, so a column header gives way to the page's width instead of
         # fixing the table (and so the tab) wider than a narrow viewport.
@@ -1875,7 +1875,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
                 grid.addWidget(count_edits[channel], r, 2)
             else:
                 absent = QLabel("\u2014", table)
-                absent.setObjectName("Muted")
+                absent.setProperty("textRole", "help")
                 absent.setToolTip(
                     "This channel has no smFISH count column, so there is no "
                     "count cutoff to set.")

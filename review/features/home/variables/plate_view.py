@@ -91,7 +91,7 @@ def build_plate_column(ctx, parent: QWidget, reg) -> QWidget:
     _build_groups(ctx, host, column, reg)
 
     policy = QLabel(POLICY_NOTE, host)
-    policy.setObjectName("Muted")
+    policy.setProperty("textRole", "help")
     policy.setWordWrap(True)
     column.addWidget(policy)
     column.addStretch(1)
@@ -259,7 +259,7 @@ def _build_fill_row(ctx, host: QWidget, column, reg) -> None:
     column.addWidget(host_row)
 
     scope = reg.register("_var_fill_scope", QLabel("", host))
-    scope.setObjectName("Muted")
+    scope.setProperty("textRole", "help")
     scope.setWordWrap(True)
     column.addWidget(scope)
 
@@ -299,7 +299,7 @@ def _build_overlay_row(ctx, host: QWidget, column, reg) -> None:
     column.addLayout(row)
 
     legend = reg.register("_var_overlay_legend", QLabel("", host))
-    legend.setObjectName("Muted")
+    legend.setProperty("textRole", "help")
     legend.setWordWrap(True)
     column.addWidget(legend)
 

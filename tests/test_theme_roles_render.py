@@ -34,7 +34,7 @@ def _bg(widget):
     return widget.palette().color(widget.backgroundRole()).name()
 
 
-@pytest.mark.parametrize("object_name", ["Muted", "MutedCaption", "Accent"])
+@pytest.mark.parametrize("object_name", ["Accent"])
 def test_label_roles_differ_from_plain_body_text(styled_app, object_name):
     from PySide6.QtWidgets import QLabel
 
@@ -47,24 +47,6 @@ def test_label_roles_differ_from_plain_body_text(styled_app, object_name):
         f"QLabel#{object_name} resolves to the same colour as an unnamed label; "
         "the rule exists but does not change anything."
     )
-
-
-def test_muted_reads_as_the_one_secondary_ink(styled_app):
-    """Two text tiers on a label: primary, and one quieter ink. ``Muted`` once drew a third, dimmer tier that
-    measured 2.5 : 1 and below on a card; the design language has one secondary ink
-    (``tests/test_theme_contrast.py``), and ``Muted`` draws it until its sites take a text role."""
-    from PySide6.QtWidgets import QLabel
-
-    from ui import theme
-
-    def ink(name):
-        lbl = QLabel("x")
-        lbl.setObjectName(name)
-        lbl.ensurePolished()
-        return lbl.palette().color(lbl.foregroundRole()).name().upper()
-
-    assert ink("") == theme.Colors.text_primary.upper()
-    assert ink("Secondary") == ink("Muted") == theme.Colors.text_secondary.upper()
 
 
 @pytest.mark.parametrize("variant", ["primary", "destructive", "toggle_accent"])

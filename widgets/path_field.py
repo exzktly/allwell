@@ -88,7 +88,7 @@ class PathField(QWidget):
         col.setSpacing(theme.Spacing.xs)
 
         label = QLabel(title, self)
-        label.setObjectName("Muted")
+        label.setProperty("textRole", "help")
         label.setWordWrap(True)
         col.addWidget(label)
 
@@ -110,7 +110,10 @@ class PathField(QWidget):
         col.addWidget(row)
 
         self._hint = QLabel("", self)
-        self._hint.setObjectName("Danger")
+        # Help text in the failure tone (``ui/text_roles.py``'s properties; a widget sets them rather than
+        # importing the app's module): a refusal under the field, or a neutral note in its place.
+        self._hint.setProperty("textRole", "help")
+        self._hint.setProperty("textTone", "failure")
         self._hint.setWordWrap(True)
         self._hint.setVisible(False)
         col.addWidget(self._hint)
@@ -206,11 +209,11 @@ class PathField(QWidget):
         or the host explicitly re-checking) always wins over a stale note.
         A pending path shows its note instead (:meth:`set_pending`)."""
         if self._pending_note:
-            self._set_hint_style("Muted")
+            self._set_hint_tone("")
             self._hint.setText(self._pending_note)
             self._hint.setVisible(True)
             return
-        self._set_hint_style("Danger")
+        self._set_hint_tone("failure")
         message = self._validity_message()
         self._hint.setText(message)
         self._hint.setVisible(bool(message))
@@ -225,7 +228,7 @@ class PathField(QWidget):
         warning reads as "something went wrong" rather than "this destination
         is now spoken for; pick a new one to run again."
         """
-        self._set_hint_style("Muted")
+        self._set_hint_tone("")
         self._hint.setText(text)
         self._hint.setVisible(bool(text))
 
@@ -239,14 +242,15 @@ class PathField(QWidget):
         without somewhere to say it, the page's Run button goes dark with no
         reason attached.
         """
-        self._set_hint_style("Danger")
+        self._set_hint_tone("failure")
         self._hint.setText(text)
         self._hint.setVisible(bool(text))
 
-    def _set_hint_style(self, object_name: str) -> None:
-        if self._hint.objectName() == object_name:
+    def _set_hint_tone(self, tone: str) -> None:
+        """The hint's tone: ``"failure"`` for a refusal, ``""`` for a neutral note."""
+        if self._hint.property("textTone") == tone:
             return
-        self._hint.setObjectName(object_name)
+        self._hint.setProperty("textTone", tone)
         style = self._hint.style()
         style.unpolish(self._hint)
         style.polish(self._hint)

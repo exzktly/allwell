@@ -169,7 +169,7 @@ def _build_properties_dock(ctx, dock) -> None:
 
     hdr = QHBoxLayout()
     title = QLabel("Properties", panel)
-    title.setObjectName("Heading")
+    title.setProperty("textRole", "sectionHeading")
     hdr.addWidget(title)
     hdr.addStretch(1)
     close = IconButton("x", panel, tooltip="Close")
@@ -188,7 +188,7 @@ def _build_properties_dock(ctx, dock) -> None:
 
     def _cap(text: str) -> None:
         cap = QLabel(text, panel)
-        cap.setObjectName("Muted")
+        cap.setProperty("textRole", "help")
         grid.addWidget(cap, r[0], 0, 1, 2)
         r[0] += 1
 
@@ -480,7 +480,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Gating tab / plot tabs); the stepper edits that channel.
     _on_thr_lbl = reg.register(
         "_image_table_thresh_frac_lbl", QLabel("ON threshold", action_row))
-    _on_thr_lbl.setObjectName("Muted")
+    _on_thr_lbl.setProperty("textRole", "help")
     tr.addWidget(_on_thr_lbl)
     thresh_chan_cb = reg.register("_image_table_thresh_chan_cb", QComboBox(action_row))
     thresh_chan_cb.setToolTip("Which channel the ON threshold applies to.")
@@ -605,8 +605,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         tooltip="Show / hide the table Properties (spacing & label fonts)"))
 
     # ── Rendered image table (drawn BELOW the action strip) ────────────────
-    render_lbl = QLabel("Image Table:", inner)
-    render_lbl.setProperty("role", "section")
+    render_lbl = QLabel("Image table", inner)
+    render_lbl.setProperty("textRole", "sectionHeading")
     il.addWidget(render_lbl)
 
     # EmptyState placeholder shown until the controller populates the grid.
@@ -631,7 +631,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Progress of a Generate that takes a while: the images being read, then
     # drawn. Hidden until a Generate has run for a moment (``_load_progress``).
     load_label = reg.register("_image_table_load_label", QLabel("", inner))
-    load_label.setObjectName("Muted")
+    load_label.setProperty("textRole", "help")
     load_label.setVisible(False)
     il.addWidget(load_label)
     load_bar = reg.register("_image_table_load_bar", QProgressBar(inner))

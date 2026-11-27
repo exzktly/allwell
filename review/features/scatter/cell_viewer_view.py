@@ -142,9 +142,7 @@ class ScatterCellViewer(QWidget):
 
         head = QHBoxLayout()
         self._title_label = QLabel("Cell")
-        tfont = self._title_label.font()
-        tfont.setBold(True)
-        self._title_label.setFont(tfont)
+        self._title_label.setProperty("textRole", "sectionHeading")
         head.addWidget(self._title_label, 1)
         close_btn = QPushButton("✕")
         close_btn.setObjectName("Ghost")
@@ -179,7 +177,7 @@ class ScatterCellViewer(QWidget):
         layout.addWidget(self._img_label, 1)
 
         self._window_note = QLabel("")
-        self._window_note.setObjectName("Muted")
+        self._window_note.setProperty("textRole", "help")
         self._window_note.setWordWrap(True)
         layout.addWidget(self._window_note)
 

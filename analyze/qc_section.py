@@ -33,6 +33,7 @@ from PySide6.QtWidgets import QCheckBox, QLabel, QWidget
 
 from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
+from ui import text_roles
 
 #: Flat-field choices, ``(pipeline value, label)``. The value is the
 #: ``--flatfield`` argument and what ``pipeline_info.json`` records; the label is
@@ -159,7 +160,7 @@ class AnalyzeQCSectionMixin:
         fft_hint = QLabel("Small-structure cutoff (px): 0 = high-pass only "
                           "(no denoise); >1 attenuates features smaller than "
                           "this for a true band-pass.", sec)
-        fft_hint.setObjectName("Muted")
+        fft_hint.setProperty("textRole", "help")
         fft_hint.setWordWrap(True)
         sec.layout().addWidget(fft_hint)
         self._fft_small_rows = (fft_nir_row.parentWidget(),
@@ -178,7 +179,7 @@ class AnalyzeQCSectionMixin:
                            "background). Sigma-clip threshold: smaller rejects "
                            "bright object pixels more aggressively on crowded "
                            "fields. Defaults 3.0 / 3.0.", sec)
-        mesh_hint.setObjectName("Muted")
+        mesh_hint.setProperty("textRole", "help")
         mesh_hint.setWordWrap(True)
         sec.layout().addWidget(mesh_hint)
         self._mesh_param_rows = (mesh_ratio_row.parentWidget(),
@@ -199,7 +200,7 @@ class AnalyzeQCSectionMixin:
         # in a dialog about a field the user may never have looked at.
         self._background_well_needed_lbl = QLabel(
             "Required — name the blank well(s) this correction reads.", sec)
-        self._background_well_needed_lbl.setObjectName("Error")
+        text_roles.set_role(self._background_well_needed_lbl, text_roles.HELP, tone=text_roles.FAILURE)
         self._background_well_needed_lbl.setWordWrap(True)
         sec.layout().addWidget(self._background_well_needed_lbl)
         self._build_background_map_row(sec)
@@ -398,7 +399,7 @@ class AnalyzeQCSectionMixin:
             "Recorded with the dataset, not applied here — Review's Cell Gating "
             "tab excludes the cells and can undo it. Find your number in "
             "Review ▸ Image Browser ▸ Playground.", sec)
-        focus_hint.setObjectName("Muted")
+        focus_hint.setProperty("textRole", "help")
         focus_hint.setWordWrap(True)
         sec.layout().addWidget(focus_hint)
 
@@ -418,7 +419,7 @@ class AnalyzeQCSectionMixin:
             "The threshold you typed is not being recorded, because the "
             "measurement above is switched off. Tick it to keep the number "
             "with the dataset.", sec)
-        self._focus_dropped_hint.setObjectName("Notice")
+        text_roles.set_role(self._focus_dropped_hint, text_roles.HELP, tone=text_roles.ATTENTION)
         self._focus_dropped_hint.setWordWrap(True)
         self._focus_dropped_hint.setVisible(False)
         sec.layout().addWidget(self._focus_dropped_hint)

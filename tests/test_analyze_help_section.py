@@ -74,7 +74,7 @@ def _expand_every_section(qapp, tab) -> None:
     """Open the collapsed sections — a hidden widget cannot take focus, so the
     focus branch is untestable while its section's body is folded."""
     carets = [w for w in tab.findChildren(QLabel)
-              if w.objectName() == "SectionTitle" and w.text() == "▸"]
+              if w.property("textRole") == "sectionHeading" and w.text() == "▸"]
     for caret in carets:
         QTest.mouseClick(caret.parentWidget(), Qt.LeftButton)
     _settle(qapp)

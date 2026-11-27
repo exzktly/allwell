@@ -122,7 +122,7 @@ class _LutRow(QWidget):
         strip.setMinimumWidth(_STRIP_MIN_W)
         strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lbl = QLabel(name, self)
-        lbl.setObjectName("Mono")
+        lbl.setProperty("textRole", "number")
         lbl.setMinimumWidth(max(80, self.fontMetrics().horizontalAdvance("twilight_shifted")))
         lay.addWidget(strip, 1)
         lay.addWidget(lbl, 0)
@@ -170,7 +170,7 @@ class LutSelector(QWidget):
         self._trigger_strip.setMinimumWidth(_TRIGGER_STRIP_MIN_W)
         self._trigger_strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._trigger_name = QLabel(self._lut, self._trigger)
-        self._trigger_name.setObjectName("Mono")
+        self._trigger_name.setProperty("textRole", "number")
         # Protect the name from shrinking below its text so it's always readable.
         self._trigger_name.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         tl.addWidget(self._trigger_strip, 1)
@@ -259,7 +259,7 @@ class LutSelector(QWidget):
         iv.setSpacing(theme.Spacing.xs)
         for cat, names in _CATEGORIES.items():
             hdr = QLabel(cat.upper())
-            hdr.setObjectName("Caption")
+            hdr.setProperty("textRole", "label")
             hdr.setProperty("lutCategory", True)
             iv.addWidget(hdr)
             self._cat_headers.append(hdr)
@@ -314,7 +314,7 @@ class LutSelector(QWidget):
             text-align: left;
         }}
         QPushButton#LutTrigger:hover {{ border-color: {c.border_strong}; }}
-        QPushButton#LutTrigger QLabel#Mono {{
+        QPushButton#LutTrigger QLabel[textRole="number"] {{
             color: {c.text_secondary};
             font-family: {t.family_mono};
             font-size: {t.small_size}px;
@@ -335,8 +335,8 @@ class LutSelector(QWidget):
         }}
         #LutRow {{ background: transparent; border-radius: {r.xs}px; }}
         #LutRow:hover {{ background-color: {c.hover}; }}
-        #LutRow QLabel#Mono {{ color: {c.text_secondary}; font-family: {t.family_mono}; font-size: {t.small_size}px; }}
-        QLabel#Caption[lutCategory="true"] {{ color: {c.text_secondary}; padding-top: {theme.Spacing.xs}px; }}
+        #LutRow QLabel[textRole="number"] {{ color: {c.text_secondary}; font-family: {t.family_mono}; font-size: {t.small_size}px; }}
+        QLabel[textRole="label"][lutCategory="true"] {{ color: {c.text_secondary}; padding-top: {theme.Spacing.xs}px; }}
         """
 
 
@@ -354,7 +354,7 @@ if __name__ == "__main__":
     outer.setContentsMargins(pad, pad, pad, pad)
     outer.setSpacing(theme.Spacing.md)
     title = QLabel("LutSelector")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -366,7 +366,7 @@ if __name__ == "__main__":
     outer.addLayout(form)
 
     echo = QLabel("(pick a LUT / toggle reverse)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     lut.lutChanged.connect(lambda n, rv: echo.setText(f"GFP LUT → {n}{' (reversed)' if rv else ''}"))
     lut2.lutChanged.connect(lambda n, rv: echo.setText(f"RFP LUT → {n}{' (reversed)' if rv else ''}"))

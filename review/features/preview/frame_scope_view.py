@@ -55,7 +55,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     ctx.widgets.register(spec.button_key, btn)
 
     hint = QLabel(spec.hint, panel)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     lay.addWidget(hint)
 
     # Each dropdown names its own field — "2 of 3 timepoints", "No wells" — so a

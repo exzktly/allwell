@@ -73,7 +73,7 @@ def build_fov_selection_row(ctx, parent: QWidget, *, indent: int,
     outer.addWidget(row)
 
     status = QLabel("", box)
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     status.setWordWrap(True)
     status.setVisible(False)
     outer.addWidget(status)

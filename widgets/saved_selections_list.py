@@ -379,7 +379,7 @@ class _SelectionRow(QFrame):
 
         if not self._wells:
             lbl = QLabel("(no wells)", parent)
-            lbl.setObjectName("Caption")
+            lbl.setProperty("textRole", "label")
             lbl.setWordWrap(True)
             bv.addWidget(lbl)
             return
@@ -410,7 +410,7 @@ class _SelectionRow(QFrame):
         # the "+ wells…" picker. No replicate sub-lists / solo strips.
         if not self._wells:
             lbl = QLabel("(no wells — use “+ wells…”)", parent)
-            lbl.setObjectName("Caption")
+            lbl.setProperty("textRole", "label")
             bv.addWidget(lbl)
         else:
             bv.addWidget(self._chip_strip("wells:", self._wells,
@@ -841,7 +841,7 @@ class SavedSelectionsList(QWidget):
                 "No groups yet.\nUse “+ Add” above or “From selection” below "
                 "to create one."
             )
-            hint.setObjectName("Muted")
+            hint.setProperty("textRole", "help")
             hint.setAlignment(Qt.AlignCenter)
             hint.setWordWrap(True)
             self._vbox.insertWidget(self._vbox.count() - 1, hint)
@@ -1046,7 +1046,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("SavedSelectionsList (editable + composable)")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     lst = SavedSelectionsList()
@@ -1077,7 +1077,7 @@ if __name__ == "__main__":
     lay.addLayout(row)
 
     echo = QLabel("(expand a row → edit chips / replicates / + wells…)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     echo.setWordWrap(True)
     lay.addWidget(echo)
     lst.entryActivated.connect(lambda i: echo.setText(f"activated → {i}"))

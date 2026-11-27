@@ -305,7 +305,7 @@ if __name__ == "__main__":
     pad = theme.Spacing.lg
     outer.setContentsMargins(pad, pad, pad, pad)
     title = QLabel("Inline icon set")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     grid_host = QWidget()
@@ -318,7 +318,7 @@ if __name__ == "__main__":
         glyph.setPixmap(make_pixmap(name, "text_primary", 20, dpr))
         glyph.setAlignment(Qt.AlignCenter)
         cap = QLabel(name)
-        cap.setObjectName("Caption")
+        cap.setProperty("textRole", "label")
         cap.setAlignment(Qt.AlignCenter)
         cell.addWidget(glyph)
         cell.addWidget(cap)

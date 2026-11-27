@@ -180,7 +180,7 @@ class AnalyzeBackgroundMapMixin:
         under_layout.setContentsMargins(_BG_MAP_NOTE_INDENT_PX, 0, 0, 2)
         under_layout.setSpacing(4)
         self._bg_map_summary = QLabel("No blank well named yet")
-        self._bg_map_summary.setObjectName("Muted")
+        self._bg_map_summary.setProperty("textRole", "help")
         self._bg_map_summary.setWordWrap(True)
         self._bg_map_summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         under_layout.addWidget(self._bg_map_summary, 1)
@@ -476,7 +476,7 @@ class AnalyzeBackgroundMapMixin:
         outer.addWidget(self._bg_map_uncovered)
 
         self._bg_map_status = QLabel("")
-        self._bg_map_status.setObjectName("Muted")
+        self._bg_map_status.setProperty("textRole", "help")
         self._bg_map_status.setWordWrap(True)
         outer.addWidget(self._bg_map_status)
 

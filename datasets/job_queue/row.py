@@ -194,7 +194,7 @@ class JobRow(QWidget):
         # rows with no positions. Only pending rows carry one — a number on a
         # row with a final outcome no longer means "queue position".
         self._ordinal = QLabel(self)
-        self._ordinal.setObjectName("Muted")
+        self._ordinal.setProperty("textRole", "help")
         self._ordinal.setFixedWidth(_ORDINAL_W)
         self._ordinal.setAlignment(Qt.AlignRight | Qt.AlignTop)
         outer.addWidget(self._ordinal, 0, Qt.AlignTop)
@@ -248,7 +248,7 @@ class JobRow(QWidget):
         # tooltip — a hard clip mid-character says nothing about there being
         # more, and 240px was wrong at every window size but one.
         self._detail = QLabel(self)
-        self._detail.setObjectName("Muted")
+        self._detail.setProperty("textRole", "help")
         self._detail.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         body.addWidget(self._detail)
 

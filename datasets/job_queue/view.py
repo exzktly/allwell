@@ -37,6 +37,7 @@ from services.job_queue import JobSpec, JobState, downstream_ids, lineage
 from datasets.job_queue.row import JobRow
 from widgets import menu_exec
 from widgets.owned_action import owned_action
+from ui import text_roles
 
 # The order the "+ Add job" menu offers the tools in — Analyze first because
 # it is the run everything else exists to prepare for or tidy up after, then
@@ -112,7 +113,7 @@ class JobQueuePage(QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Job Queue", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -128,7 +129,7 @@ class JobQueuePage(QWidget):
             "from there. Stop discards whatever is in flight.",
             self,
         )
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -145,7 +146,7 @@ class JobQueuePage(QWidget):
             "next one to work on its output — “New job using this output” — "
             "before it has run.", self,
         )
-        self._empty_hint.setObjectName("Muted")
+        self._empty_hint.setProperty("textRole", "help")
         self._empty_hint.setWordWrap(True)
         outer.addWidget(self._empty_hint)
 
@@ -234,13 +235,13 @@ class JobQueuePage(QWidget):
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(2)
         self._summary = QLabel("", self)
-        self._summary.setObjectName("Muted")
+        self._summary.setProperty("textRole", "help")
         col.addWidget(self._summary)
         # What loading the queue had to repair. Silent before this: a queue
         # that came back from a crash with a job marked interrupted said so
         # nowhere the user could see.
         self._notes = QLabel("", self)
-        self._notes.setObjectName("Warn")
+        text_roles.set_role(self._notes, text_roles.HELP, tone=text_roles.ATTENTION)
         self._notes.setWordWrap(True)
         self._notes.setVisible(False)
         col.addWidget(self._notes)

@@ -213,7 +213,7 @@ class _SectionGrid:
             # reads the field, not only this one — the rest of the panel is per
             # plot, so this one says so (``style_facets.SHARED``).
             note = QLabel("Shared — a change here reaches every plot that uses it.")
-            note.setObjectName("Muted")
+            note.setProperty("textRole", "help")
             note.setWordWrap(True)
             grid.addWidget(note, 0, 0, 1, 2)
             self._grids[sec][1] = 1
@@ -421,7 +421,7 @@ class ExportStyleSidebar(QWidget):
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(sp.xs, 0, 0, 0)
         title = QLabel("Properties", hdr)
-        title.setObjectName("Heading")
+        title.setProperty("textRole", "sectionHeading")
         hl.addWidget(title)
         hl.addStretch(1)
         from widgets.icon_button import IconButton as _IconButton
@@ -458,7 +458,7 @@ class ExportStyleSidebar(QWidget):
             )
             dens_tog.toggled.connect(lambda _c: self._on_density_toggled())
             _dens_preview = QLabel("On" if dens_tog.isChecked() else "Off")
-            _dens_preview.setObjectName("Muted")
+            _dens_preview.setProperty("textRole", "help")
             s_density.setValueWidget(_dens_preview)
             dens_tog.toggled.connect(
                 lambda on, _l=_dens_preview: _l.setText("On" if on else "Off")
@@ -491,7 +491,7 @@ class ExportStyleSidebar(QWidget):
             clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())
             kit.add_full(s_gates, clear_btn)
             self._gate_count_label = QLabel(self._gate_count_text())
-            self._gate_count_label.setObjectName("Muted")
+            self._gate_count_label.setProperty("textRole", "help")
             kit.add_full(s_gates, self._gate_count_label)
             # Editable per-gate name list (auto-named Gate N on draw; rename here).
             self._gate_list_box = QWidget()
@@ -598,7 +598,7 @@ class ExportStyleSidebar(QWidget):
                 # select and the control showing whatever it showed before.
                 self._color_seg_default = _color_default
                 _color_preview = QLabel(_SEGMENT_LABELS[_color_init])
-                _color_preview.setObjectName("Muted")
+                _color_preview.setProperty("textRole", "help")
                 self._color_seg_preview = _color_preview
                 s_colors.setValueWidget(_color_preview)
 
@@ -714,7 +714,7 @@ class ExportStyleSidebar(QWidget):
 
         # Axes preview: shows the current axis target on the section header.
         _axes_preview = QLabel(self._current_axis)
-        _axes_preview.setObjectName("Muted")
+        _axes_preview.setProperty("textRole", "help")
         s_axes.setValueWidget(_axes_preview)
         axis_cb.currentTextChanged.connect(lambda t, _l=_axes_preview: _l.setText(t))
 
@@ -734,7 +734,7 @@ class ExportStyleSidebar(QWidget):
             return
         s_stats = kit.section("Statistics", facet="error_bars", expanded=False)
         self._stats_preview = QLabel("")
-        self._stats_preview.setObjectName("Muted")
+        self._stats_preview.setProperty("textRole", "help")
         s_stats.setValueWidget(self._stats_preview)
 
         _stats_state = {"err": None, "across": None, "show": None}
@@ -901,7 +901,7 @@ class ExportStyleSidebar(QWidget):
             leg_show.setChecked(bool(self._prefs["legend_show"]))
             kit.add_row(s_leg, "", leg_show, "legend_show")
             _leg_preview = QLabel("On" if leg_show.isChecked() else "Off")
-            _leg_preview.setObjectName("Muted")
+            _leg_preview.setProperty("textRole", "help")
             s_leg.setValueWidget(_leg_preview)
             leg_show.toggled.connect(lambda on, _l=_leg_preview: _l.setText("On" if on else "Off"))
             leg_sz = _Stepper(minimum=6, maximum=24, single_step=1,
@@ -1024,7 +1024,7 @@ class ExportStyleSidebar(QWidget):
             return
         s_time = kit.section("Time", facet="time_axis", expanded=False)
         _time_preview = QLabel("")
-        _time_preview.setObjectName("Muted")
+        _time_preview.setProperty("textRole", "help")
         s_time.setValueWidget(_time_preview)
 
         def _time_preview_text() -> str:
@@ -1256,7 +1256,7 @@ class ExportStyleSidebar(QWidget):
         g_style.setCurrentText(str(self._prefs["grid_style"]))
         kit.add_row(s_grid, "Line style", g_style, "grid_style")
         _grid_preview = QLabel("On" if g_show.isChecked() else "Off")
-        _grid_preview.setObjectName("Muted")
+        _grid_preview.setProperty("textRole", "help")
         s_grid.setValueWidget(_grid_preview)
         g_show.toggled.connect(lambda on, _l=_grid_preview: _l.setText("On" if on else "Off"))
 
@@ -1393,7 +1393,7 @@ class ExportStyleSidebar(QWidget):
                 return ", ".join(tags) if tags else "linear"
 
             _lim_preview = QLabel(_lim_preview_text())
-            _lim_preview.setObjectName("Muted")
+            _lim_preview.setProperty("textRole", "help")
             s_lim.setValueWidget(_lim_preview)
             for _w in (xlog_cb, ylog_cb):
                 _w.toggled.connect(
@@ -1427,7 +1427,7 @@ class ExportStyleSidebar(QWidget):
         # switches that move nothing there (``_refresh_layout_engine``).
         self._layout_engine_toggles = (tight_cb, cons_cb)
         self._layout_phone_note = QLabel("Phone layout fits each plot itself; these apply on the desktop layout.")
-        self._layout_phone_note.setObjectName("Muted")
+        self._layout_phone_note.setProperty("textRole", "help")
         self._layout_phone_note.setWordWrap(True)
         kit.add_full(s_layout, self._layout_phone_note)
 
@@ -1500,7 +1500,7 @@ class ExportStyleSidebar(QWidget):
         # How many settings this plot is not offered, each named with its
         # reason on hover (``_refresh_not_offered_note``).
         self._not_offered_label = QLabel("", footer)
-        self._not_offered_label.setObjectName("Muted")
+        self._not_offered_label.setProperty("textRole", "help")
         self._not_offered_label.setWordWrap(True)
         self._not_offered_label.setVisible(False)
         fl.addWidget(self._not_offered_label)
@@ -2240,7 +2240,7 @@ class ExportStyleSidebar(QWidget):
         plot = self._app._app_state.plot
         s_bars = section("Bars", facet="bar_geometry", expanded=False)
         preview = QLabel("")
-        preview.setObjectName("Muted")
+        preview.setProperty("textRole", "help")
         s_bars.setValueWidget(preview)
 
         width = float(getattr(plot, "bar_width", 0.0) or 0.0)
@@ -2318,7 +2318,7 @@ class ExportStyleSidebar(QWidget):
         plot = self._app._app_state.plot
         s_swarm = section("Beeswarm", facet="beeswarm", expanded=False)
         preview = QLabel("")
-        preview.setObjectName("Muted")
+        preview.setProperty("textRole", "help")
         s_swarm.setValueWidget(preview)
 
         spacing = float(getattr(plot, "swarm_spacing", 0.0) or 0.0)
@@ -2520,7 +2520,7 @@ class ExportStyleSidebar(QWidget):
             axes_text = gate_axes_label(gate.get("x_col"), gate.get("y_col"))
             if axes_text:
                 axes_lbl = QLabel(axes_text)
-                axes_lbl.setObjectName("Muted")
+                axes_lbl.setProperty("textRole", "help")
                 axes_lbl.setWordWrap(True)
                 axes_lbl.setToolTip(
                     "The x and y metrics this gate was drawn on. It filters "

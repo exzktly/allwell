@@ -34,6 +34,7 @@ from ui import theme
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 from widgets.owned_action import owned_action
 from widgets.spin_box import DoubleSpinBox
+from ui import text_roles
 
 #: The combo's entries: the Starting cells presets as the band names them, then the editor.
 _PRESET_LABELS = {"any": "All nanowells", "occupied": "Starting cells ≥1 (occupied)",
@@ -541,7 +542,7 @@ class SubsetEditor(QFrame):
         foot.addWidget(self.apply_btn)          # beside Add condition and Clear: the row's four edits read together
         lay.addWidget(foot_host)
         self.status = QLabel("")
-        self.status.setObjectName("InfoHint")
+        self.status.setProperty("textRole", "help")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
         lay.addStretch(1)
@@ -800,11 +801,7 @@ class SubsetEditor(QFrame):
 
     def _say(self, text: str, *, warn: bool = False) -> None:
         self.status.setText(text)
-        name = "Warn" if warn else "InfoHint"
-        if self.status.objectName() != name:
-            self.status.setObjectName(name)
-            self.status.style().unpolish(self.status)
-            self.status.style().polish(self.status)
+        text_roles.set_role(self.status, text_roles.HELP, tone=text_roles.ATTENTION if warn else None)
 
 
 def _fill_combo(combo, names: list, listed: list) -> None:

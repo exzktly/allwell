@@ -230,7 +230,7 @@ if __name__ == "__main__":
     lay.setContentsMargins(pad, pad, pad, pad)
     lay.setSpacing(theme.Spacing.md)
     title = QLabel("Popover — click a button; click outside or Esc to dismiss")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     title.setWordWrap(True)
     lay.addWidget(title)
 
@@ -240,7 +240,7 @@ if __name__ == "__main__":
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(theme.Spacing.sm)
         h = QLabel(text)
-        h.setObjectName("Heading")
+        h.setProperty("textRole", "sectionHeading")
         v.addWidget(h)
         v.addWidget(QLabel("Some popover content."))
         v.addWidget(QPushButton("An action"))
@@ -263,7 +263,7 @@ if __name__ == "__main__":
     lay.addWidget(grid_host, 1)
 
     echo = QLabel("(open one)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     lay.addWidget(echo)
     # one shared popover wired to opened/closed for the echo line
     side_b = QPushButton("opened/closed signal demo")

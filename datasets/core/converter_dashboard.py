@@ -137,7 +137,7 @@ class ConverterDashboard(PlateProgress):
         row.setSpacing(theme.Spacing.sm)
 
         self._pick_note = QLabel("", self._pick_row)
-        self._pick_note.setObjectName("Muted")
+        self._pick_note.setProperty("textRole", "help")
         self._pick_note.setWordWrap(True)
         row.addWidget(self._pick_note, 1)
 

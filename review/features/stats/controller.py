@@ -1011,7 +1011,7 @@ def stats_refresh_group_list(ctx) -> None:
     _clear_layout(layout)
     if not ctx.state.stats.groups:
         lbl = QLabel("No groups.  Click + Add group to create one.")
-        lbl.setObjectName("Muted")
+        lbl.setProperty("textRole", "help")
         layout.addWidget(lbl)
         # Floors reset, not left behind. They are derived from the cards a pass
         # builds, so a pass that builds none has no basis for either — and the
@@ -1043,7 +1043,7 @@ def stats_refresh_group_list(ctx) -> None:
         # The part of the card that gives when the column is narrower than the
         # card (``group_card_view``); the rest of the card keeps its size.
         meta = ElidingLabel(f"  ({', '.join(parts)})")
-        meta.setObjectName("Muted")
+        meta.setProperty("textRole", "help")
         hl.addWidget(meta)
         # A bounded gap, not ``addStretch(1)``. On the rail, where this list was
         # 330px wide, a stretch put the rename and delete buttons at the right

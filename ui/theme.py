@@ -366,7 +366,6 @@ class Colors:
     drop_shadow_md  = "rgba(0, 0, 0, 0.35)"        # --sh-2 floating overlay shadow
     inner_line_dk   = "rgba(0, 0, 0, 0.40)"        # --sh-1 hairline drop
     success_glow    = "rgba(74, 222, 128, 0.12)"   # halo around the "saved" dot
-    notice_wash     = "rgba(245, 158, 11, 0.10)"   # Notice panel fill (--warn at 10%)
     # Laid over a figure that is being recomputed, under a "Computing…" message.
     # A figure can be the dark plot theme or publication white, and a busy one
     # (the nanowell array is hundreds of coloured marks); text drawn straight on
@@ -981,17 +980,12 @@ QFrame#VRule {{
 }}
 
 /* ── Labels ──────────────────────────────────────────────────────────── */
+/* A label's look comes from its text role (ui/text_roles.py, included at the
+   end of this sheet); the named rules below are the ones not yet expressed as
+   a role. */
 QLabel {{
     background: transparent;
     color: {c.text_primary};
-}}
-QLabel#Title {{
-    font-size: {t.h2_size}px;
-    font-weight: {t.semibold};
-}}
-QLabel#Heading {{
-    font-size: {t.h3_size}px;
-    font-weight: {t.semibold};
 }}
 /* A group heading inside an Analyze form section ("Output", "Performance"):
    body size, semibold, so it reads below a section title and above a row label. */
@@ -999,59 +993,8 @@ QLabel#FormSubheading {{
     font-weight: {t.semibold};
     color: {c.text_primary};
 }}
-/* Section titles from ui_helpers.build_section_header (role="section") — a
-   labelled band above each divided section, e.g. on the Cell Gating / Stats
-   tabs. Without this they render as plain body text and read as no header. */
-QLabel[role="section"] {{
-    font-size: {t.h3_size}px;
-    font-weight: {t.semibold};
-    color: {c.accent};
-}}
-QLabel#Caption, QLabel[caption="true"] {{
-    font-size: {t.caption_size}px;
-    font-weight: {t.medium};
-    color: {c.text_secondary};
-}}
-QLabel#Secondary, QLabel[secondary="true"] {{
-    color: {c.text_secondary};
-}}
-QLabel#Mono, QLabel[mono="true"] {{
-    font-family: {t.family_mono};
-    font-size: {t.small_size}px;
-}}
-QLabel#Muted, QLabel[muted="true"] {{
-    color: {c.text_secondary};
-    font-size: {t.caption_size}px;
-}}
 QLabel#Accent, QLabel[accent="true"] {{
     color: {c.accent};
-}}
-/* The ⓘ hover-for-more marker (widgets/info_icon.py). Muted so it reads as an
-   affordance beside a control rather than as content of its own, and slightly
-   larger than caption text so the glyph stays legible at that weight. */
-QLabel#InfoHint {{
-    color: {c.text_secondary};
-    font-size: {t.small_size}px;
-}}
-/* Text roles that were named at their call sites but styled nowhere. */
-QLabel#MutedCaption {{
-    color: {c.text_secondary};
-    font-size: {t.caption_size}px;
-    font-weight: {t.medium};
-}}
-/* Section headings on the Analyze form, its remote-run dialog, the Playground
-   panel and the heat-map sidebar. Sized ABOVE body text: a heading set smaller
-   than the fields under it (these were caption-sized, 2px below body) reads as
-   a label belonging to the row beneath rather than as the title of a group. The
-   eyebrow treatment that went with the small size — muted grey, wide tracking —
-   goes with it, since wide letter-spacing on primary-coloured text at this size
-   reads as stretched rather than deliberate.
-   Review's own section headers are a different selector (``role="section"``,
-   see core/ui_helpers.build_section_header) and are unaffected. */
-QLabel#SectionTitle, QLabel#SidebarHeader {{
-    font-size: {t.h3_size}px;
-    font-weight: {t.semibold};
-    color: {c.text_primary};
 }}
 QLabel#PlotCardTitle {{
     font-size: {t.h3_size}px;
@@ -1204,7 +1147,6 @@ QWidget#ActiveGroupBanner {{
     background-color: {c.card};
     border-radius: {r.sm}px;
 }}
-QLabel#Danger  {{ color: {c.danger}; }}
 /* A refusal, a validation failure, a scan that declined. Same colour as
    Danger because the palette has one "this did not work" tone and two names
    for it would be two tones within a release; the names differ in what they
@@ -1212,7 +1154,6 @@ QLabel#Danger  {{ color: {c.danger}; }}
    WILL do, Error reports what something DID. Unstyled until now, which meant
    the schema-validation labels in the Analyze form and the Zip Loose Folder
    page rendered their errors in ordinary body colour. */
-QLabel#Error   {{ color: {c.danger}; }}
 /* A result the user must not skim past, that is NOT a failure: a detection
    that could not guess, or a shortfall in what a guess covers. Two choices,
    both deliberate.
@@ -1229,14 +1170,6 @@ QLabel#Error   {{ color: {c.danger}; }}
    carrying the whole signal for a state the user must not miss. The wash and
    the left rule change the block's SHAPE, which survives greyscale, colour
    vision deficiency, and the edge of vision. */
-QLabel#Notice  {{
-    color: {c.warn};
-    background: {c.notice_wash};
-    border-left: 2px solid {c.warn};
-    padding: 6px 8px;
-}}
-QLabel#Success {{ color: {c.success}; }}
-QLabel#Warn    {{ color: {c.warn}; }}
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 QPushButton, QToolButton {{

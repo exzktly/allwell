@@ -152,7 +152,7 @@ class RemoteStorageDialog(QDialog):
 
         top = QHBoxLayout()
         self._summary = QLabel(f"{host.ssh_alias}:{host.remote_staging_dir}", self)
-        self._summary.setObjectName("Muted")
+        self._summary.setProperty("textRole", "help")
         self._summary.setWordWrap(True)
         top.addWidget(self._summary, 1)
         self._refresh_btn = QPushButton("Refresh", self)
@@ -223,7 +223,7 @@ class RemoteStorageDialog(QDialog):
         layout.addLayout(rule)
 
         self._status = QLabel("", self)
-        self._status.setObjectName("Muted")
+        self._status.setProperty("textRole", "help")
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
 

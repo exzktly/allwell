@@ -6110,6 +6110,18 @@ DESIGN_GUARD_CASES = {
     "text_role_font": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
                        'def build(lbl):\n    lbl.setStyleSheet("font-weight: 600;")\n',
                        'def build(lbl):\n    lbl.setStyleSheet("color: red;")\n'),
+    "text_role_variable": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                           'def show(lbl, bad):\n    tone = "Muted"\n    if bad:\n        tone = "Danger"\n'
+                           '    lbl.setObjectName(tone)\n',
+                           'def show(lbl, name):\n    lbl.setObjectName(name)\n'),
+    "text_role_default": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                          'def status(lbl, text, *, quiet="Muted"):\n    lbl.setObjectName(quiet)\n',
+                          'def status(lbl, text, *, quiet=True):\n    lbl.setProperty("textRole", "help")\n'),
+    "text_role_helper": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                         'class F:\n    def note(self):\n        self._style("Muted")\n'
+                         '    def _style(self, name):\n        if name:\n            self._hint.setObjectName(name)\n',
+                         'class F:\n    def note(self):\n        self._style("help")\n'
+                         '    def _style(self, role):\n        self._hint.setProperty("textRole", role)\n'),
     "text_role_property": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
                            'def build(lbl):\n    lbl.setProperty("muted", True)\n',
                            'def build(lbl):\n    lbl.setProperty("textRole", "label")\n'),

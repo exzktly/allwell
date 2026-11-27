@@ -225,7 +225,7 @@ def test_saving_the_same_conditions_under_a_second_name_says_so_on_the_page(page
     editor.name_edit.setText("beta")
     editor.save_btn.click()
     assert list(st.saved_subsets) == ["alpha"]
-    assert editor.status.objectName() == "Warn" and "already saved as “alpha”" in editor.status.text()
+    assert editor.status.property("textTone") == "attention" and "already saved as “alpha”" in editor.status.text()
 
 
 def test_a_name_typed_for_a_draft_survives_apply(page):  # noqa: F811

@@ -31,7 +31,7 @@ class SavedCellsPanel(QWidget):
             hint="Sets of cells saved with Lasso cells on Spatial or Multivariate. Saving a "
                  "set changes no number; use it as the Cell Browser's source, or exclude it here."))
         self.empty = QLabel("No saved cells yet — draw a lasso on Spatial or Multivariate.", self)
-        self.empty.setObjectName("Muted")
+        self.empty.setProperty("textRole", "help")
         self.empty.setWordWrap(True)
         lay.addWidget(self.empty)
         self.list = QListWidget(self)
@@ -56,7 +56,7 @@ class SavedCellsPanel(QWidget):
         lay.addLayout(row)
         ex = QHBoxLayout()
         ex_lbl = QLabel("Exclude from analysis", self)
-        ex_lbl.setObjectName("Muted")
+        ex_lbl.setProperty("textRole", "help")
         ex.addWidget(ex_lbl)
         self.exclude = QComboBox(self)
         self.exclude.setToolTip("The one saved set whose cells are left out of every plot, "

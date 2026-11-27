@@ -49,7 +49,7 @@ def qapp():
 
 def _expand_every_collapsible_section(tab) -> None:
     carets = [l for l in tab.findChildren(QLabel)
-              if l.objectName() == "SectionTitle" and l.text() == "▸"]
+              if l.property("textRole") == "sectionHeading" and l.text() == "▸"]
     assert carets, "no collapsed sections found — did the section markup change?"
     for caret in carets:
         QTest.mouseClick(caret.parentWidget(), Qt.LeftButton)

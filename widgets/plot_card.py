@@ -1097,7 +1097,7 @@ if __name__ == "__main__":
     lay.setContentsMargins(pad, pad, pad, pad)
     lay.setSpacing(theme.Spacing.md)
     title = QLabel("PlotCard")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     if PlotCard is None:
@@ -1143,7 +1143,7 @@ if __name__ == "__main__":
             "publication" if card.plotTheme() == "screen" else "screen"), _plot()))
         lay.addWidget(btn)
         echo = QLabel("(left header: view-switcher · header: Publication↔Screen toggle + 'preview only' chip + stats chip → popover · controls row beneath the header)")
-        echo.setObjectName("Secondary")
+        echo.setProperty("textRole", "label")
         echo.setWordWrap(True)
         lay.addWidget(echo)
         card.statsChanged.connect(lambda s, e: echo.setText(f"stats → {s} · {e}"))

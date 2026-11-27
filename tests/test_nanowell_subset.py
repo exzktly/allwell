@@ -261,7 +261,7 @@ def test_a_range_typed_upside_down_is_said_and_changes_nothing(page):
     assert not editor.apply_btn.isEnabled()                          # not a subset: nothing to apply
     editor.apply_btn.click()
     assert st.subset == before
-    assert editor.status.objectName() == "Warn" and "lower bound (5) is above the upper (1)" in editor.status.text()
+    assert editor.status.property("textTone") == "attention" and "lower bound (5) is above the upper (1)" in editor.status.text()
 
 
 def test_removing_and_clearing_conditions_brings_every_nanowell_back(page):
@@ -302,7 +302,7 @@ def test_an_imaging_field_condition_is_built_from_the_tiles_the_run_recorded(pag
     assert row.tiles_btn.isVisibleTo(page.window) and not row.a_spin.isVisibleTo(page.window)
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset() and not editor.apply_btn.isEnabled()   # no tile ticked yet: nothing to apply
-    assert editor.status.objectName() == "Warn"
+    assert editor.status.property("textTone") == "attention"
     tiles = [a for a in row.tiles_menu.actions() if a.isCheckable()]
     assert [a.text() for a in tiles] == ["F0"]
     tiles[0].setChecked(True)

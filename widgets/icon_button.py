@@ -135,7 +135,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("IconButton")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     lay.addWidget(QLabel("Plot toolbar group (pan/zoom are checkable + exclusive):"))
@@ -155,7 +155,7 @@ if __name__ == "__main__":
         bar.addWidget(b)
     bar.addStretch(1)
     coords = QLabel("x = —   ·   y = —")
-    coords.setObjectName("Mono")
+    coords.setProperty("textRole", "number")
     bar.addWidget(coords)
     lay.addLayout(bar)
 

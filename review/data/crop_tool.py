@@ -160,7 +160,7 @@ class CropTool:
 
     def make_status_label(self, parent: QWidget) -> QLabel:
         lbl = QLabel(self._idle_status, parent)
-        lbl.setObjectName("Muted")
+        lbl.setProperty("textRole", "help")
         self._status_label = lbl
         return lbl
 

@@ -272,7 +272,7 @@ if __name__ == "__main__":
     s2.addWidget(QLabel("Cutoff fraction"))
     s2.addWidget(QLineEdit("0.50"))
     vlabel = QLabel("0.50")
-    vlabel.setObjectName("Mono")
+    vlabel.setProperty("textRole", "number")
     s2.setValueWidget(vlabel)
 
     s3 = CollapsibleSection("Annotations", expanded=False)

@@ -50,6 +50,7 @@ from datasets.import_loose.dashboard import ImportLooseDashboard
 from datasets.import_loose.import_loose_compute import (
     detection_for_grouping, scan_folder,
 )
+from ui import text_roles
 
 
 #: A marker this tool never writes. The shared destination rule exempts a folder
@@ -127,7 +128,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Zip Loose Folder", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -142,7 +143,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             self,
         )
         blurb.setTextFormat(Qt.RichText)
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -157,7 +158,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # between a folder picker and a checkbox, with nothing saying they
         # describe *filenames* or what a "position" is.
         schema_heading = QLabel("How are the filenames laid out?", self)
-        schema_heading.setObjectName("Heading")
+        schema_heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(schema_heading)
 
         schema_hint = QLabel(
@@ -166,7 +167,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             "position 1 is the experiment and position 3 is the well.",
             self,
         )
-        schema_hint.setObjectName("Muted")
+        schema_hint.setProperty("textRole", "help")
         schema_hint.setTextFormat(Qt.RichText)
         schema_hint.setWordWrap(True)
         outer.addWidget(schema_hint)
@@ -183,13 +184,13 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         outer.addWidget(self._schema_picker)
 
         self._schema_err = QLabel("", self)
-        self._schema_err.setObjectName("Error")
+        text_roles.set_role(self._schema_err, text_roles.HELP, tone=text_roles.FAILURE)
         self._schema_err.setWordWrap(True)
         self._schema_err.setVisible(False)
         outer.addWidget(self._schema_err)
 
         self._readout = QLabel("", self)
-        self._readout.setObjectName("Muted")
+        self._readout.setProperty("textRole", "help")
         self._readout.setWordWrap(True)
         outer.addWidget(self._readout)
 
@@ -202,7 +203,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             "This deletes the original loose TIFs once each well is safely "
             "zipped. This can't be undone.", self,
         )
-        self._in_place_warning.setObjectName("Danger")
+        text_roles.set_role(self._in_place_warning, text_roles.HELP, tone=text_roles.FAILURE)
         self._in_place_warning.setWordWrap(True)
         self._in_place_warning.setVisible(False)
         outer.addWidget(self._in_place_warning)

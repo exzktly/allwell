@@ -153,7 +153,7 @@ class _AspectImage(QLabel):
             # figure that drew nothing. The object name is being set long after
             # the widget was polished, so the style has to be re-run by hand or
             # the message arrives in the body colour rather than the muted one.
-            self.setObjectName("Muted")
+            self.setProperty("textRole", "help")
             self.setText("(image unavailable)")
             style = self.style()
             style.unpolish(self)
@@ -555,7 +555,7 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     header.addWidget(title)
     header.addStretch(1)
     badge = QLabel(rec.tab, card)
-    badge.setObjectName("Muted")
+    badge.setProperty("textRole", "help")
     header.addWidget(badge)
     v.addLayout(header)
 
@@ -568,13 +568,13 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     else:
         from .state import undrawn_note
         missing = QLabel(undrawn_note(rec) or "(image unavailable)", card)
-        missing.setObjectName("Muted")
+        missing.setProperty("textRole", "help")
         missing.setAlignment(Qt.AlignCenter)
         missing.setWordWrap(True)
         v.addWidget(missing)
 
     ts = QLabel(rec.created_at.replace("T", "  "), card)
-    ts.setObjectName("Muted")
+    ts.setProperty("textRole", "help")
     v.addWidget(ts)
 
     # Parameter summary — collapsed by default, folds out on request.
@@ -582,7 +582,7 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
         from widgets.collapsible_section import CollapsibleSection
         details = CollapsibleSection("Parameters", expanded=False)
         summary = QLabel(rec.summary, card)
-        summary.setObjectName("Muted")
+        summary.setProperty("textRole", "help")
         summary.setWordWrap(True)
         summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         details.addWidget(summary)

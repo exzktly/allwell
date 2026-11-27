@@ -224,7 +224,7 @@ class ControlBand(QWidget):
         _fit_checkboxes(widgets)
         if label:
             cap = QLabel(label, self._scope_host)
-            cap.setObjectName("Muted")
+            cap.setProperty("textRole", "help")
             item = flow_group(self._scope_host, cap, *widgets)
             item.setObjectName("ControlBandGroup")
         elif len(widgets) == 1:

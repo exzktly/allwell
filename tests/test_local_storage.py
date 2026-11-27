@@ -546,13 +546,13 @@ def test_the_scratch_row_is_unticked_and_carries_its_warning(populated, home, qt
     qtbot.waitUntil(lambda: "scratch" in dialog._boxes and not dialog._working, timeout=10_000)
     assert "scratch" not in dialog.selected_keys()
     row = dialog._boxes["scratch"].parentWidget()
-    warnings = [w.text() for w in row.findChildren(QLabel) if w.objectName() == "Warn"]
+    warnings = [w.text() for w in row.findChildren(QLabel) if w.property("textTone") == "attention"]
     assert warnings == ["⚠ Clearing the Analyze run scratch deletes the extracted images "
                         "and per-field checkpoints that suspended and interrupted runs "
                         "resume from."]
     # No other row warns.
     others = [w for k, b in dialog._boxes.items() if k != "scratch"
-              for w in b.parentWidget().findChildren(QLabel) if w.objectName() == "Warn"]
+              for w in b.parentWidget().findChildren(QLabel) if w.property("textTone") == "attention"]
     assert others == []
 
 

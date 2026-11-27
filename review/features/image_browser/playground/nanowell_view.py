@@ -160,7 +160,7 @@ def _build_popup(ctx) -> QDialog:
     rl = QVBoxLayout(right)
     rl.setContentsMargins(0, 0, 0, 0)
     heading = QLabel("Analyze → Nanowells", right)
-    heading.setObjectName("SectionTitle")
+    heading.setProperty("textRole", "sectionHeading")
     rl.addWidget(heading)
     table = QTableWidget(0, 3, right)
     table.setHorizontalHeaderLabels(["Field", "Enter", "Why"])
@@ -234,7 +234,7 @@ def build_nanowell_section(ctx, controls: QWidget, layout, row, *, archive_dir, 
 
     note = QLabel("Find the nanowell array in one well and get the settings to type into Analyze → Nanowells.",
                   controls)
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     note.setWordWrap(True)
     layout.addWidget(note)
     buttons = QWidget(controls)

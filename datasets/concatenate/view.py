@@ -51,6 +51,7 @@ from util.zip_append import pending_journals
 from datasets.core.raw_dataset import unusable_reason
 from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
+from ui import text_roles
 
 # Wide enough for "1d 6h 30m"; the gap is a short duration, not a path.
 _GAP_FIELD_W = 140
@@ -135,7 +136,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Concatenate Datasets", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -150,7 +151,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             "dataset 1 in place, which copies nothing.",
             self,
         )
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -222,7 +223,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._mode_in_place.setEnabled(False)
         self._mode_in_place.toggled.connect(lambda _checked: self._on_mode_changed())
         self._mode_hint = QLabel("", box_widget)
-        self._mode_hint.setObjectName("Muted")
+        self._mode_hint.setProperty("textRole", "help")
         self._mode_hint.setWordWrap(True)
         for widget in (self._mode_new, self._mode_in_place, self._mode_hint):
             box.addWidget(widget)
@@ -233,7 +234,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         undo.setContentsMargins(0, 0, 0, 0)
         undo.setSpacing(theme.Spacing.sm)
         self._undo_note = QLabel("", self._undo_row)
-        self._undo_note.setObjectName("Warn")
+        text_roles.set_role(self._undo_note, text_roles.HELP, tone=text_roles.ATTENTION)
         self._undo_note.setWordWrap(True)
         self._undo_btn = QPushButton("Undo the unfinished addition…", self._undo_row)
         self._undo_btn.setObjectName("ConcatUndoAppend")
@@ -272,11 +273,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         row.addStretch(1)
         box.addLayout(row)
         self._gap_hint = QLabel("", self._gap_box)
-        self._gap_hint.setObjectName("Muted")
+        self._gap_hint.setProperty("textRole", "help")
         self._gap_hint.setWordWrap(True)
         box.addWidget(self._gap_hint)
         self._gap_labels = QLabel("", self._gap_box)
-        self._gap_labels.setObjectName("Muted")
+        self._gap_labels.setProperty("textRole", "help")
         self._gap_labels.setWordWrap(True)
         box.addWidget(self._gap_labels)
         self._gap_box.setVisible(False)
@@ -555,7 +556,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             # which is what an untouched field already means in a queued spec.
             self._gap_preview = GapPreview()
             self._gap_box.setVisible(True)
-            self._gap_hint.setObjectName("Muted")
+            self._gap_hint.setProperty("textRole", "help")
             self._gap_hint.setText(_GAP_WHEN_IT_RUNS)
             self._gap_hint.style().unpolish(self._gap_hint)
             self._gap_hint.style().polish(self._gap_hint)
@@ -582,13 +583,13 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._gap_preview = preview
         self._gap_box.setVisible(True)
         if preview.error:
-            self._gap_hint.setObjectName("Error")
+            text_roles.set_role(self._gap_hint, text_roles.HELP, tone=text_roles.FAILURE)
             self._gap_hint.setText(preview.error)
         elif preview.warning:
-            self._gap_hint.setObjectName("Warn")
+            text_roles.set_role(self._gap_hint, text_roles.HELP, tone=text_roles.ATTENTION)
             self._gap_hint.setText(preview.warning)
         else:
-            self._gap_hint.setObjectName("Muted")
+            self._gap_hint.setProperty("textRole", "help")
             self._gap_hint.setText(preview.note)
         self._gap_hint.style().unpolish(self._gap_hint)
         self._gap_hint.style().polish(self._gap_hint)

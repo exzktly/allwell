@@ -148,7 +148,7 @@ def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
     rl.setContentsMargins(0, 1, 0, 1)
     rl.setSpacing(6)
     lbl = QLabel(label_text, row)
-    lbl.setObjectName("Muted")
+    lbl.setProperty("textRole", "help")
     # A floor, not a pin: the labels line up in a column at the desk, and a
     # label whose text is wider than the column at phone layout's larger text
     # takes the width it needs. Pinned, "Overlap (NMS)" and "Pixel size (µm)"
@@ -226,7 +226,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     def _section(title: str) -> None:
         lbl = QLabel(title, controls)
-        lbl.setObjectName("SectionTitle")
+        lbl.setProperty("textRole", "sectionHeading")
         cl.addWidget(lbl)
         cl.addWidget(build_hline_separator(controls))
 
@@ -323,7 +323,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # dock leaves, so side by side the segments were squeezed into each other.
     from widgets.segmented_control import SegmentedControl
     stage_lbl = QLabel("Correct up to", controls)
-    stage_lbl.setObjectName("Muted")
+    stage_lbl.setProperty("textRole", "help")
     cl.addWidget(stage_lbl)
     stage_row = QWidget(controls)
     srl = QHBoxLayout(stage_row)
@@ -348,7 +348,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     app._playground_source_seg = source_seg
     stage_note = QLabel("decides which controls below run — Raw runs none",
                         controls)
-    stage_note.setObjectName("Muted")
+    stage_note.setProperty("textRole", "help")
     stage_note.setWordWrap(True)
     cl.addWidget(stage_note)
 
@@ -376,7 +376,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # triggers.
     run_note = QLabel("Correction re-runs as you change these. Segmentation runs "
                       "only when you press Segment.", controls)
-    run_note.setObjectName("Muted")
+    run_note.setProperty("textRole", "help")
     run_note.setWordWrap(True)
     cl.addWidget(run_note)
 
@@ -423,7 +423,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     hint = QLabel("Tuned here, then run the plate: type the same two values into "
                   "Analyze → Channel Tokens → Nucleus probability / Overlap.",
                   controls)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
 
     def _on_segment() -> None:
@@ -698,7 +698,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # into a bug report.
     _section("What you're looking at")
     status = QLabel("Select a frame to begin.", controls)
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     status.setWordWrap(True)
     status.setTextInteractionFlags(Qt.TextSelectableByMouse)
     cl.addWidget(status)

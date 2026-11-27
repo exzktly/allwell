@@ -213,11 +213,11 @@ class PlateProgress(QWidget):
         hdr = QHBoxLayout(); hdr.setSpacing(theme.Spacing.sm)
         self._title_label = QLabel(title, self)
         hdr.addWidget(self._title_label)
-        self._status = QLabel("", self); self._status.setObjectName("Muted")
+        self._status = QLabel("", self); self._status.setProperty("textRole", "help")
         hdr.addWidget(self._status)
         self._header = hdr                       # `add_header_widget` inserts at the right end
         hdr.addStretch(1)
-        self._eta = QLabel("", self); self._eta.setObjectName("Muted")
+        self._eta = QLabel("", self); self._eta.setProperty("textRole", "help")
         hdr.addWidget(self._eta)
         self._toggle = QToolButton(self)
         self._toggle.setText("▾"); self._toggle.setAutoRaise(True)

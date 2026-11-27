@@ -62,7 +62,7 @@ def test_a_disk_check_refusal_survives_the_live_check(tmp_path, monkeypatch, qtb
     assert label.isVisibleTo(tab) and label.text().startswith("PACKED:"), (
         f"the reason Run was refused was erased by the continuous check (label now {label.text()!r}), so "
         "the button reads as one that does nothing")
-    assert label.objectName() == "Error", "the carried refusal lost the error colour"
+    assert label.property("textTone") == "failure", "the carried refusal lost the error colour"
 
 
 def test_a_refusal_validate_adds_beside_the_roster_survives_too(tmp_path, monkeypatch, qtbot):

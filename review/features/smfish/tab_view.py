@@ -258,7 +258,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # instead of it. The label still carries this tab's own states (the smFISH
     # channel missing, an image that failed to load, Apply-to-All progress).
     status_label = reg.register("_smfish_status_label", QLabel("", parent))
-    status_label.setObjectName("Muted")
+    status_label.setProperty("textRole", "help")
     root.addWidget(status_label)
 
     # Matplotlib image

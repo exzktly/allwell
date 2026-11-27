@@ -18,6 +18,7 @@ from review.core.analyze_handoff import dataset_root, open_in_analyze
 from review.core.lazy import lazy
 from review.core.record_sync import resync_run_check
 from core.safe import swallow
+from ui import text_roles
 from review.core.selection_controller import (
     groups_centre_refresh, update_active_group_label,
 )
@@ -527,7 +528,8 @@ def _paint_plate(ctx) -> None:
         layout.addWidget(swatch, index, 0)
         layout.addWidget(QLabel(legend_label(state, ended_early=ended_early), host), index, 1)
         value = QLabel(str(count), host)
-        value.setObjectName("Muted" if not count else "")
+        if not count:
+            text_roles.set_role(value, text_roles.HELP)
         layout.addWidget(value, index, 2)
     # The marker gets a legend row of its own, and only when the plate carries
     # one. The plate's own invariant is that no well can be left without a row
@@ -570,7 +572,7 @@ def _paint_plate(ctx) -> None:
     elif gating_pending:
         # The markers are owed, not absent: say so where they would be counted.
         pending = QLabel("Wells needing a look — counted once cell gating finishes", host)
-        pending.setObjectName("Muted")
+        pending.setProperty("textRole", "help")
         layout.addWidget(pending, len(hc.plate_legend(ctx)) + 1, 0, 1, 3)
 
     totals = ((ctx.state.dataset.pipeline_info or {}).get("run_check") or {}
@@ -618,12 +620,15 @@ def _tile_widget(parent: QWidget, tile) -> QWidget:
     label.setObjectName("HomeTileLabel")
     column.addWidget(label)
     value = QLabel(format_value(tile.value), card)
-    value.setObjectName("HomeTileValue" if tile.available else "Muted")
+    if tile.available:
+        value.setObjectName("HomeTileValue")
+    else:
+        text_roles.set_role(value, text_roles.HELP)
     if not tile.available:
         value.setToolTip(tile.value.reason)
     column.addWidget(value)
     sub = QLabel(tile.sub, card)
-    sub.setObjectName("Muted")
+    sub.setProperty("textRole", "help")
     sub.setWordWrap(True)
     column.addWidget(sub)
     return card
@@ -816,7 +821,7 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
         label = QLabel(str(row.get("label") or ""), host)
         line.addWidget(label)
         value = QLabel(str(row.get("value") or ""), host)
-        value.setObjectName("Muted")
+        value.setProperty("textRole", "help")
         value.setWordWrap(True)
         line.addWidget(value, 1)
         if row.get("wells") and row.get("anchor") and on_anchor is not None:
@@ -861,7 +866,7 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
     effect = str(row.get("effect") or "")
     if effect:
         chip = QLabel(effect, host)
-        chip.setObjectName("Muted")
+        chip.setProperty("textRole", "help")
         line.addWidget(chip)
     line.addStretch(1)
     count = int(row.get("count") or 0)
@@ -873,7 +878,8 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
         # reserved for a figure the page could not obtain at all.
         text = "None yet"
     value = QLabel(text, host)
-    value.setObjectName("" if count else "Muted")
+    if not count:
+        text_roles.set_role(value, text_roles.HELP)
     line.addWidget(value)
     return host
 

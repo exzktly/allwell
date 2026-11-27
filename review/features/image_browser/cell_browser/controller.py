@@ -73,7 +73,7 @@ def make_cell_thumb(ctx, rgb, desc) -> QWidget:
         col.setSpacing(2)
         col.addWidget(thumb, 0, Qt.AlignHCenter)
         cap = QLabel(f"{spot} spot" + ("" if spot == 1 else "s"), container)
-        cap.setObjectName("Muted")
+        cap.setProperty("textRole", "help")
         cap.setAlignment(Qt.AlignCenter)
         col.addWidget(cap, 0, Qt.AlignHCenter)
         return container

@@ -56,6 +56,7 @@ from widgets.plate_order_editor import PlateOrderEditor
 from widgets.well_plate_selector import WellPlateSelector
 from widgets.stage_path_view import StagePathView
 from widgets.plate_progress import apply_outcome, fraction_or_none
+from ui import text_roles
 from datasets.ome_import.ome_import_compute import (
     ConversionParams,
     OmeImportError,
@@ -156,7 +157,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Convert OME-TIFF", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -168,7 +169,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "process it.",
             self,
         )
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -186,11 +187,11 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # Two labels, not one: what the file holds and what to aim for is
         # neutral context, while the pass/fail line below it changes tone.
         self._readout = QLabel("", self)
-        self._readout.setObjectName("Muted")
+        self._readout.setProperty("textRole", "help")
         self._readout.setWordWrap(True)
         outer.addWidget(self._readout)
         self._verdict = QLabel("", self)
-        self._verdict.setObjectName("Muted")
+        self._verdict.setProperty("textRole", "help")
         self._verdict.setWordWrap(True)
         self._verdict.setVisible(False)
         outer.addWidget(self._verdict)
@@ -243,7 +244,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
     def _sub_heading(self, text: str, outer: QVBoxLayout) -> QLabel:
         """A section title inside the form, matching the Import Loose page."""
         label = QLabel(text, self)
-        label.setObjectName("Heading")
+        label.setProperty("textRole", "sectionHeading")
         outer.addWidget(label)
         return label
 
@@ -329,7 +330,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(theme.Spacing.sm)
         self._suggest_label = QLabel("", self._suggest_row)
-        self._suggest_label.setObjectName("Muted")
+        self._suggest_label.setProperty("textRole", "help")
         self._suggest_label.setWordWrap(True)
         sl.addWidget(self._suggest_label, 1)
         self._suggest_btn = QPushButton("Apply again", self._suggest_row)
@@ -350,7 +351,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._grid_note = QLabel(
             "Ignored while the acquisition path is hand-drawn — press "
             "Clear path to go back to the grid.", self)
-        self._grid_note.setObjectName("Muted")
+        self._grid_note.setProperty("textRole", "help")
         self._grid_note.setWordWrap(True)
         self._grid_note.setVisible(False)
         outer.addWidget(self._grid_note)
@@ -358,7 +359,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._file_order_note = QLabel(
             "This order came from the file. Change Origin to move it to another "
             "well, or click the plate to draw your own.", self)
-        self._file_order_note.setObjectName("Muted")
+        self._file_order_note.setProperty("textRole", "help")
         self._file_order_note.setWordWrap(True)
         self._file_order_note.setVisible(False)
         outer.addWidget(self._file_order_note)
@@ -416,7 +417,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "(even non-rectangular) ordering.",
             self,
         )
-        caption.setObjectName("Muted")
+        caption.setProperty("textRole", "help")
         caption.setWordWrap(True)
         outer.addWidget(caption)
 
@@ -441,7 +442,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "Stage path — one dot per image, joined in acquisition order, "
             "anchored at the well the scan starts in. The tight clusters are "
             "the fields of view within one well.", self)
-        self._path_caption.setObjectName("Muted")
+        self._path_caption.setProperty("textRole", "help")
         self._path_caption.setWordWrap(True)
         self._path_caption.setVisible(False)
         outer.addWidget(self._path_caption)
@@ -466,7 +467,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(theme.Spacing.sm)
         mirror_label = QLabel("Mirror the stage coordinates:", self)
-        mirror_label.setObjectName("Muted")
+        mirror_label.setProperty("textRole", "help")
         ml.addWidget(mirror_label)
         self._flip_x_cb = QCheckBox("Left ↔ right (reflect X about the Y axis)",
                                     self)
@@ -524,7 +525,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "leave empty to convert all of it. The wells shown are the ones "
             "the mapping above resolves to. Converting the rest later into "
             "the same folder tops it up rather than starting again.", self)
-        caption.setObjectName("Muted")
+        caption.setProperty("textRole", "help")
         caption.setWordWrap(True)
         outer.addWidget(caption)
 
@@ -574,7 +575,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "there; the OME channel names are always written into the filenames.",
             self,
         )
-        self._channels_caption.setObjectName("Muted")
+        self._channels_caption.setProperty("textRole", "help")
         self._channels_caption.setWordWrap(True)
         self._channels_caption.setVisible(False)
         outer.addWidget(self._channels_caption)
@@ -849,7 +850,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         single = False
         head = ""
         verdict = ""
-        tone = "Muted"
+        tone = None
         can = False
         layout = self._read_layout(src) if src else None
         if hasattr(self, "_channels_host"):
@@ -870,12 +871,12 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             if src and self._dest_field.path() else None
         )
         if src and layout is None:
-            verdict, tone = "⚠ Could not read this file as an OME-TIFF.", "Danger"
+            verdict, tone = "⚠ Could not read this file as an OME-TIFF.", text_roles.FAILURE
         elif problems:
             # Malformed boxes are answered before the file is consulted: a plan
             # built on values the page had to guess at describes a run nobody
             # asked for.
-            verdict, tone = "⚠ " + "  ".join(problems), "Warn"
+            verdict, tone = "⚠ " + "  ".join(problems), text_roles.ATTENTION
         elif src and layout is not None:
             single = layout.single_image
             params = fields.to_params()
@@ -900,12 +901,12 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
                 verdict = "✓ " + "  ".join(
                     part for part in (plan.summary(), plan.timepoint_warning)
                     if part)
-                tone = "Muted"
+                tone = None
                 can = bool(self._dest_field.path()) and not dest_problem
             except OmeImportError as exc:
                 if exc.source_timepoint_tokens:      # a ticked timepoint the source lacks is then marked missing
                     self._timepoint_pick.set_source_tokens(exc.source_timepoint_tokens)
-                verdict, tone = f"⚠ {exc}", "Danger"
+                verdict, tone = f"⚠ {exc}", text_roles.FAILURE
         self._order_label.setVisible(single)
         self._frame_order_cb.setVisible(single)
         self._readout.setText(head)
@@ -1168,20 +1169,17 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             and not self._plate.is_dirty()
         )
 
-    def _set_verdict(self, text: str, tone: str) -> None:
-        """Show the pass/fail line in its own tone (``Muted``/``Warn``/``Danger``).
+    def _set_verdict(self, text: str, tone: str | None) -> None:
+        """Show the pass/fail line as help text in its own tone: none, ``ATTENTION`` or ``FAILURE``.
 
         A refusal and a green ✓ used to be the same muted grey, differing by one
-        glyph, while every sibling page paints a blocked run in `#Danger`. The
-        object name is swapped rather than a stylesheet written, so the colours
-        stay in the QSS where the rest of the app's are (CLAUDE.md §5).
+        glyph, while every sibling page paints a blocked run red. The tone is a
+        property the application sheet reads (``ui/text_roles.py``), so the
+        colours stay in the QSS where the rest of the app's are (CLAUDE.md §5).
         """
         self._verdict.setText(text)
         self._verdict.setVisible(bool(text))
-        if self._verdict.objectName() != tone:
-            self._verdict.setObjectName(tone)
-            self._verdict.style().unpolish(self._verdict)
-            self._verdict.style().polish(self._verdict)
+        text_roles.set_role(self._verdict, text_roles.HELP, tone=tone)
 
     def _apply_order_source(self, hand_drawn: bool) -> None:
         """Grey out the grid controls when a clicked path is what will be used.

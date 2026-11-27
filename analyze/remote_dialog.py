@@ -223,7 +223,7 @@ class RemoteFormDialog(QDialog):
         layout.setSpacing(10)
 
         title = QLabel("Edit remote host" if self._editing else "Add a new remote host", self)
-        title.setObjectName("SectionTitle")
+        title.setProperty("textRole", "sectionHeading")
         layout.addWidget(title)
 
         form = QFormLayout()
@@ -277,7 +277,7 @@ class RemoteFormDialog(QDialog):
         form.addRow("SSH key (optional)", key_row)
 
         self._test_result_lbl = QLabel("", self)
-        self._test_result_lbl.setObjectName("Muted")
+        self._test_result_lbl.setProperty("textRole", "help")
         self._test_result_lbl.setWordWrap(True)
         layout.addLayout(form)
         layout.addWidget(self._test_result_lbl)
@@ -352,7 +352,7 @@ class RemoteFormDialog(QDialog):
         # Persistent feedback so the user can tell whether the picked profile
         # is the saved one, a pending pick, or a hand-edited command.
         self._profile_status_lbl = QLabel("", self._scheduled_box)
-        self._profile_status_lbl.setObjectName("Muted")
+        self._profile_status_lbl.setProperty("textRole", "help")
         self._profile_status_lbl.setWordWrap(True)
         sched_layout.addWidget(self._profile_status_lbl)
 
@@ -455,7 +455,7 @@ class RemoteFormDialog(QDialog):
         granted_hint = QLabel(
             "A released node is powered down by the cluster on its own schedule (on AWS ParallelCluster, after its "
             "scale-down idle time). A granted node is billed while idle.", self._scheduled_box)
-        granted_hint.setObjectName("Muted")
+        granted_hint.setProperty("textRole", "help")
         granted_hint.setWordWrap(True)
         sched_layout.addWidget(granted_hint)
         main_form.addRow(self._scheduled_box)
@@ -521,7 +521,7 @@ class RemoteFormDialog(QDialog):
             "your remote installs miniforge to a non-standard location.",
             self._advanced_frame,
         )
-        hint.setObjectName("Muted")
+        hint.setProperty("textRole", "help")
         hint.setWordWrap(True)
         adv_form.addRow(hint)
 
@@ -1036,7 +1036,7 @@ class SSHKeyWizardDialog(QDialog):
         layout.setSpacing(10)
 
         title = QLabel(f"Set up passwordless SSH for {ssh_alias}", self)
-        title.setObjectName("SectionTitle")
+        title.setProperty("textRole", "sectionHeading")
         layout.addWidget(title)
 
         intro = QLabel(
@@ -1048,23 +1048,23 @@ class SSHKeyWizardDialog(QDialog):
             "verifies the result.",
             self,
         )
-        intro.setObjectName("Muted")
+        intro.setProperty("textRole", "help")
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
         # Step 1: generate key ────────────────────────────────────────────
         step1_title = QLabel("Step 1 — Generate the key locally", self)
-        step1_title.setObjectName("SectionTitle")
+        step1_title.setProperty("textRole", "sectionHeading")
         layout.addWidget(step1_title)
         self._key_path_lbl = QLabel(f"Key path: {self._key_path}", self)
-        self._key_path_lbl.setObjectName("Muted")
+        self._key_path_lbl.setProperty("textRole", "help")
         layout.addWidget(self._key_path_lbl)
         self._generate_btn = QPushButton("Generate key", self)
         self._generate_btn.setProperty("variant", "primary")
         self._generate_btn.clicked.connect(self._on_generate)
         layout.addWidget(self._generate_btn)
         self._generate_status_lbl = QLabel("", self)
-        self._generate_status_lbl.setObjectName("Muted")
+        self._generate_status_lbl.setProperty("textRole", "help")
         self._generate_status_lbl.setWordWrap(True)
         layout.addWidget(self._generate_status_lbl)
 
@@ -1072,14 +1072,14 @@ class SSHKeyWizardDialog(QDialog):
         step2_title = QLabel(
             "Step 2 — Copy the public key to the remote", self,
         )
-        step2_title.setObjectName("SectionTitle")
+        step2_title.setProperty("textRole", "sectionHeading")
         layout.addWidget(step2_title)
         step2_hint = QLabel(
             "Open your terminal and run this command. You'll be asked "
             "for the remote password once; AllWell never sees it.",
             self,
         )
-        step2_hint.setObjectName("Muted")
+        step2_hint.setProperty("textRole", "help")
         step2_hint.setWordWrap(True)
         layout.addWidget(step2_hint)
 
@@ -1098,7 +1098,7 @@ class SSHKeyWizardDialog(QDialog):
 
         # Step 3: verify ──────────────────────────────────────────────────
         step3_title = QLabel("Step 3 — Verify", self)
-        step3_title.setObjectName("SectionTitle")
+        step3_title.setProperty("textRole", "sectionHeading")
         layout.addWidget(step3_title)
         self._verify_btn = QPushButton("I ran the command — verify now", self)
         self._verify_btn.setProperty("variant", "primary")
@@ -1350,14 +1350,14 @@ class BootstrapLogDialog(QDialog):
         layout.setSpacing(8)
 
         self._title_lbl = QLabel(f"Bootstrapping {alias}…", self)
-        self._title_lbl.setObjectName("SectionTitle")
+        self._title_lbl.setProperty("textRole", "sectionHeading")
         layout.addWidget(self._title_lbl)
 
         hint = QLabel(
             "First-time pip install of TensorFlow + StarDist can take "
             "10–30 minutes depending on the remote's CPU and disk.", self,
         )
-        hint.setObjectName("Muted")
+        hint.setProperty("textRole", "help")
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
@@ -1591,7 +1591,7 @@ class ManageRemotesDialog(QDialog):
         left = QVBoxLayout()
         left.setSpacing(8)
         title = QLabel("Configured Remotes", self)
-        title.setObjectName("SectionTitle")
+        title.setProperty("textRole", "sectionHeading")
         left.addWidget(title)
 
         self._list = QListWidget(self)
@@ -1600,7 +1600,7 @@ class ManageRemotesDialog(QDialog):
         self._empty_hint = QLabel(
             "No remotes configured yet. Click Add to create one.", self,
         )
-        self._empty_hint.setObjectName("Muted")
+        self._empty_hint.setProperty("textRole", "help")
         self._empty_hint.setWordWrap(True)
         left.addWidget(self._empty_hint)
         # The node this host keeps granted between runs (Request a node / Release / Test the node).

@@ -84,10 +84,10 @@ def test_the_prefilled_interval_is_shown_and_typing_over_it_changes_the_merge(qa
 def test_records_prefill_the_field_and_a_different_entry_warns(qapp, tmp_path):
     ctrl, page, _dest = _page(tmp_path, ["0h", "24h"], ["0h"], records=True)
     assert page._gap_edit.text() == "30h"                # recorded, not the 24h interval
-    assert page._gap_hint.objectName() == "Muted"
+    assert (page._gap_hint.property("textRole") == "help" and not page._gap_hint.property("textTone"))
 
     page._gap_edit.setText("36h")
-    assert page._gap_hint.objectName() == "Warn"
+    assert page._gap_hint.property("textTone") == "attention"
     assert "36h" in page._gap_hint.text() and "30h" in page._gap_hint.text()
     assert page._run_btn.isEnabled() is True             # a warning, not a refusal
     ctrl.shutdown()
@@ -98,7 +98,7 @@ def test_an_unreadable_gap_disables_the_run_and_says_why(qapp, tmp_path, text):
     ctrl, page, _dest = _page(tmp_path, ["0h", "24h"], ["0h"])
     page._gap_edit.setText(text)
     assert page._run_btn.isEnabled() is False
-    assert page._gap_hint.objectName() == "Error"
+    assert page._gap_hint.property("textTone") == "failure"
     assert page._gap_hint.text()
     ctrl.shutdown()
 

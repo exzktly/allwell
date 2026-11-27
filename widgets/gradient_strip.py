@@ -167,7 +167,7 @@ if __name__ == "__main__":
     outer.setContentsMargins(pad, pad, pad, pad)
     outer.setSpacing(theme.Spacing.md)
     title = QLabel("GradientStrip")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -198,7 +198,7 @@ if __name__ == "__main__":
     outer.addWidget(rev)
 
     echo = QLabel("colorAt(0.5) of the first strip: " + g_pairs.colorAt(0.5).name())
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     outer.addStretch(1)
 

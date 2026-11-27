@@ -381,7 +381,7 @@ def build_centre(win, parent: QWidget) -> None:
         from PySide6.QtWidgets import QLabel as _QLabel
         win._plotting_grouping_note = win._ctx.widgets.register(
             "_plotting_grouping_note", _QLabel(""))
-        win._plotting_grouping_note.setObjectName("Muted")
+        win._plotting_grouping_note.setProperty("textRole", "help")
         win._plotting_grouping_note.setStyleSheet(
             f"color: {_C.text_secondary}; font-size: {_T.caption_size}px;")
         win._plotting_grouping_grp = band.add_scope(

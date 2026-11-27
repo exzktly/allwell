@@ -376,7 +376,7 @@ def test_the_distribution_s_footer_is_in_its_details_field_not_the_figure(page, 
     n_alerts = len(footer.alerts) + len(footer.warnings)
     assert summary.text() == (f"{footer.counts} · ⚠ {n_alerts} alert{'s' if n_alerts != 1 else ''} · "
                               f"{len(footer.notes)} notes")
-    assert summary.objectName() == "Warn" and body.isHidden() and not button.isChecked()
+    assert summary.property("textTone") == "attention" and body.isHidden() and not button.isChecked()
     button.click()                                                                          # open it
     lines = body.text().split("\n")
     assert not body.isHidden()

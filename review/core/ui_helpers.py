@@ -486,7 +486,7 @@ def build_section_header(
     title_row = QHBoxLayout()
     title_row.setContentsMargins(0, 0, 0, 0)
     lbl = SectionTitleLabel(title, hdr)
-    lbl.setProperty("role", "section")
+    lbl.setProperty("textRole", "sectionHeading")
     # The title takes the stretch so the buttons sit at the right edge; being the
     # stretchy item, it also absorbs the shrink and wraps only once the row is
     # genuinely too narrow for one line.
@@ -497,7 +497,7 @@ def build_section_header(
 
     if hint:
         hint_lbl = QLabel(hint, hdr)
-        hint_lbl.setObjectName("Muted")
+        hint_lbl.setProperty("textRole", "help")
         # Word-wrap so a long hint doesn't report its full text width as the
         # header's minimum — which forced the whole (non-h-scrolling) Cell Gating
         # pane wider than a narrow window and clipped its controls.
@@ -1012,7 +1012,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     h.setSpacing(8)
 
     eb_lbl = QLabel("Error Band", w)
-    eb_lbl.setObjectName("Muted")
+    eb_lbl.setProperty("textRole", "help")
     h.addWidget(eb_lbl)
     initial = bool(ctx.state.plot.use_sem)
     sem_btn = QPushButton(spread_label(initial), w)
@@ -1027,7 +1027,7 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
 
     if with_fov:
         sp_lbl = QLabel("Spread", w)
-        sp_lbl.setObjectName("Muted")
+        sp_lbl.setProperty("textRole", "help")
         h.addWidget(sp_lbl)
         fov_btn = ReservedWidthButton("FOV", w)
         fov_btn.setProperty("variant", "toggle")

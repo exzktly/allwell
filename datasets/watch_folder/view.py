@@ -72,7 +72,7 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Watch Folder", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -83,7 +83,7 @@ class WatchFolderPage(LogPanelMixin, QWidget):
             "the microscope stops writing it.",
             self,
         )
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 

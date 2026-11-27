@@ -211,7 +211,7 @@ def _build_fit_popover(ctx, band):
     layout.addWidget(combo)
 
     hint = QLabel("Leave a plateau blank to fit it.", panel)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
     layout.addWidget(hint)
 

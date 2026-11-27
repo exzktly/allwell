@@ -80,7 +80,7 @@ class RecipesPage(QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Recipes", self)  # the Recipes tab of Automation
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -89,7 +89,7 @@ class RecipesPage(QWidget):
             "Analyze, say — that you apply to each new acquisition. Applying one "
             "adds its jobs to the Job Queue. Save a recipe from any queued job's "
             "⋯ menu: “Save chain as recipe…”.", self)
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -105,7 +105,7 @@ class RecipesPage(QWidget):
         self._empty = QLabel(
             "No recipes yet. Set a chain up in the Job Queue, then choose "
             "“Save chain as recipe…” from one of its jobs' ⋯ menu.", self)
-        self._empty.setObjectName("Muted")
+        self._empty.setProperty("textRole", "help")
         self._empty.setWordWrap(True)
         outer.addWidget(self._empty)
 
@@ -120,11 +120,11 @@ class RecipesPage(QWidget):
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(theme.Spacing.sm)
         self._name = QLabel("", self._detail)
-        self._name.setObjectName("SectionTitle")
+        self._name.setProperty("textRole", "sectionHeading")
         self._name.setWordWrap(True)
         dl.addWidget(self._name)
         self._origin = QLabel("", self._detail)
-        self._origin.setObjectName("Muted")
+        self._origin.setProperty("textRole", "help")
         self._origin.setWordWrap(True)
         dl.addWidget(self._origin)
 
@@ -145,7 +145,7 @@ class RecipesPage(QWidget):
         dl.addWidget(actions)
 
         steps_title = QLabel("Steps", self._detail)
-        steps_title.setObjectName("SectionTitle")
+        steps_title.setProperty("textRole", "sectionHeading")
         dl.addWidget(steps_title)
         self._steps = QLabel("", self._detail)
         self._steps.setObjectName("RecipeSteps")
@@ -154,7 +154,7 @@ class RecipesPage(QWidget):
         self._steps.setTextInteractionFlags(Qt.TextSelectableByMouse)
         dl.addWidget(self._steps)
         self._notes = QLabel("", self._detail)
-        self._notes.setObjectName("Muted")
+        self._notes.setProperty("textRole", "help")
         self._notes.setWordWrap(True)
         dl.addWidget(self._notes)
 
@@ -171,13 +171,13 @@ class RecipesPage(QWidget):
         dl.addWidget(self._open_result)
         self._open_result_note = QLabel(
             "This recipe has no Analyze step, so there is no result to open.", self._detail)
-        self._open_result_note.setObjectName("Muted")
+        self._open_result_note.setProperty("textRole", "help")
         self._open_result_note.setWordWrap(True)
         dl.addWidget(self._open_result_note)
 
         dl.addWidget(_hrule(self._detail))
         self._runs_line = QLabel("", self._detail)
-        self._runs_line.setObjectName("Muted")
+        self._runs_line.setProperty("textRole", "help")
         self._runs_line.setWordWrap(True)
         dl.addWidget(self._runs_line)
         self._runs_btn = QPushButton("Show runs", self._detail)

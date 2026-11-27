@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from widgets.separator import build_hline_separator
+from ui import text_roles
 
 
 class _WidthWatcher(QObject):
@@ -87,13 +88,13 @@ class AnalyzeFormChromeMixin:
         hl.setContentsMargins(0, 0, 12, 0)
         hl.setSpacing(4)
         caret = QLabel("▸" if collapsed else "▾" if collapsible else "", header)
-        caret.setObjectName("SectionTitle")
+        caret.setProperty("textRole", "sectionHeading")
         caret.setFixedWidth(self._CARET_GUTTER_W)
         caret.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         caret.setContentsMargins(0, 6, 4, 2)
         hl.addWidget(caret)
         title_lbl = QLabel(title, header)
-        title_lbl.setObjectName("SectionTitle")
+        title_lbl.setProperty("textRole", "sectionHeading")
         title_lbl.setContentsMargins(0, 6, 0, 2)
         hl.addWidget(title_lbl)
         if info:
@@ -103,7 +104,7 @@ class AnalyzeFormChromeMixin:
             hl.addWidget(switch)
         summary_lbl = QLabel("", header)
         _WidthWatcher(summary_lbl, lambda _title=title: self._refresh_section_summary(_title))
-        summary_lbl.setObjectName("Muted")
+        summary_lbl.setProperty("textRole", "help")
         summary_lbl.setContentsMargins(6, 6, 0, 2)
         summary_lbl.setMinimumWidth(0)
         summary_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
@@ -324,7 +325,7 @@ class AnalyzeFormChromeMixin:
         rl.setSpacing(2)
 
         lbl = QLabel(label, row)
-        lbl.setObjectName("Muted")
+        lbl.setProperty("textRole", "help")
         lbl.setWordWrap(True)
         if tooltip:
             row.setToolTip(tooltip)
@@ -393,22 +394,20 @@ class AnalyzeFormChromeMixin:
 
     @staticmethod
     def _set_status(label: QLabel, text: str, *, error: bool = False,
-                    quiet: str = "Muted") -> None:
+                    quiet: bool = True) -> None:
         """Show *text* on a form status *label*, styled for what it says.
 
         An empty label is hidden, not left blank: a blank label still takes its
         line and margins, which is how the Folders section came to carry two
-        unexplained gaps. A label carrying a problem takes the ``Error`` style
-        and anything else the *quiet* one, because a refusal set in the same
-        muted grey as the help paragraph beside it reads as more help.
+        unexplained gaps. A label carrying a problem is help text in the
+        failure tone, and anything else help text (*quiet*) or body text,
+        because a refusal set in the same grey as the help paragraph beside it
+        reads as more help (``ui/text_roles.py``).
         """
         label.setText(text)
         label.setVisible(bool(text))
-        name = "Error" if error else quiet
-        if label.objectName() != name:
-            label.setObjectName(name)
-            label.style().unpolish(label)
-            label.style().polish(label)
+        role = text_roles.HELP if (quiet or error) else text_roles.BODY
+        text_roles.set_role(label, role, tone=text_roles.FAILURE if error else None)
 
     def _subheading(self, sec: QWidget, text: str, *, info: str = "") -> QWidget:
         """A heading inside a section, above the rows it groups ("Output",
@@ -433,7 +432,7 @@ class AnalyzeFormChromeMixin:
         ``0`` means. It sits after the field rather than in the label, so the
         label stays a name and does not wrap mid-parenthesis at the rail width."""
         note = QLabel(text, cell)
-        note.setObjectName("Muted")
+        note.setProperty("textRole", "help")
         cell.layout().addWidget(note)
         return note
 

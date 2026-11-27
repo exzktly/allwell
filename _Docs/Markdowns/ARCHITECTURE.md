@@ -22423,7 +22423,16 @@ tracked, secondary ink), body text (13), a label or help (12, secondary ink) and
 number (12, monospace). Each builder returns a `QLabel` carrying a `textRole`
 property; `text_roles.qss` writes one rule per role, and `theme.qss()` includes
 it last among the label rules. An unset value reads `NOT_SET` — *not set* — in
-the disabled ink, through `show_value`. `tests/test_text_roles.py` measures each
+the disabled ink, through `show_value`. A line whose meaning has a colour — a
+field's refusal, an import's verdict, a QC line that turns into an alert —
+carries a tone beside its role: `set_role(label, role, tone=ATTENTION|FAILURE)`
+draws it amber or red and re-polishes, so a status line that is sometimes a hint
+and sometimes an alert switches without a notice card. No label carries a text
+object name of its own any more (`Muted`, `Title`, `Heading`, `SectionTitle`,
+`Secondary`, `Caption`, `InfoHint`, `Mono`, `Notice`, `Error`, `Danger`, `Warn`,
+`role="section"` — their rules are gone from the sheet);
+`tests/test_text_has_a_role.py` holds that, including a name carried into
+`setObjectName` by a variable, a default or a helper's parameter. `tests/test_text_roles.py` measures each
 role's polished font and ink in every palette.
 
 Every palette is measured against the design language's floors by

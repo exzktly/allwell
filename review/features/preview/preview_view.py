@@ -52,14 +52,14 @@ def build_preview_picker(win, parent: QWidget) -> None:
 
     win._preview_sel_lbl = win._ctx.widgets.register(
         "_preview_sel_lbl", QLabel("No well selected", parent))
-    win._preview_sel_lbl.setObjectName("Muted")
+    win._preview_sel_lbl.setProperty("textRole", "help")
     win._preview_sel_lbl.setAlignment(Qt.AlignLeft)
     layout.addWidget(win._preview_sel_lbl)
 
     layout.addStretch(1)
 
     help_lbl = QLabel("Click one well to load its images", parent)
-    help_lbl.setObjectName("Muted")
+    help_lbl.setProperty("textRole", "help")
     help_lbl.setWordWrap(True)
     layout.addWidget(help_lbl)
 

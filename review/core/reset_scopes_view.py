@@ -85,7 +85,7 @@ class ResetAnalysisDialog(QDialog):
             box.setChecked(True)
             row_layout.addWidget(box)
             detail = QLabel(scope.detail, row)
-            detail.setObjectName("Muted")
+            detail.setProperty("textRole", "help")
             detail.setWordWrap(True)
             detail.setContentsMargins(20, 0, 0, 0)
             row_layout.addWidget(detail)

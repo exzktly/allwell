@@ -30,7 +30,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     layout = body.layout()
 
     well_lbl = reg.register("_review_well_lbl", QLabel("(select one well)"))
-    well_lbl.setObjectName("Muted")
+    well_lbl.setProperty("textRole", "help")
     ctrl.add_scope("Well", well_lbl)
 
     fov_cb = reg.register("_review_fov_cb", LabeledComboBox("FOV"))
@@ -80,7 +80,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     msg_lbl = reg.register("_review_csv_msg_lbl", QLabel(
         "Select a single well to inspect CSV rows.", parent,
     ))
-    msg_lbl.setObjectName("Muted")
+    msg_lbl.setProperty("textRole", "help")
     layout.addWidget(msg_lbl)
 
     # Stamp a live refresh callback on the review runtime scratch so cross-feature

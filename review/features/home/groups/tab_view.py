@@ -171,7 +171,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # ``selections_model.relabelled_groups_clause`` returns "" otherwise, and a
     # line that is always on screen is one nobody reads on the day it matters.
     relabel = ctx.widgets.register("_rep_relabel_note", QLabel("", parent))
-    relabel.setObjectName("Muted")
+    relabel.setProperty("textRole", "help")
     relabel.setWordWrap(True)
     relabel.setVisible(False)
     layout.addWidget(relabel)
@@ -183,7 +183,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
         "structure.",
         parent,
     )
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
     hint.setContentsMargins(0, 6, 0, 8)
     layout.addWidget(hint)

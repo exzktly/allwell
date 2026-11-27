@@ -42,6 +42,13 @@ NUMBER = "number"
 
 ROLES = (PAGE_TITLE, SECTION_HEADING, EYEBROW, BODY, LABEL, HELP, NUMBER)
 
+#: A line of text whose meaning has a colour (§2.2 rule 3): amber when it needs attention, red when something
+#: failed. For a status line that is sometimes a hint and sometimes an alert — a field's validation, an import's
+#: verdict — where a notice card would be out of scale. Information has no tone.
+ATTENTION = "attention"
+FAILURE = "failure"
+TONES = (ATTENTION, FAILURE)
+
 
 def _label(text: str, role: str, parent: QWidget | None) -> QLabel:
     label = QLabel(text, parent)
@@ -87,6 +94,20 @@ def number(text: str, parent: QWidget | None = None) -> QLabel:
     return _label(text, NUMBER, parent)
 
 
+def set_role(label: QLabel, role: str, *, tone: str | None = None) -> None:
+    """Give a built *label* a text *role*, and *tone* (:data:`ATTENTION`, :data:`FAILURE`) or none; re-polishes,
+    since a dynamic property is read only on a polish. For a label whose role or tone changes after it is shown."""
+    if role not in ROLES:
+        raise ValueError(f"{role!r} is not a text role; the roles are {ROLES}")
+    if tone is not None and tone not in TONES:
+        raise ValueError(f"{tone!r} is not a tone; the tones are {TONES}")
+    label.setProperty("textRole", role)
+    label.setProperty("textTone", tone or "")
+    label.style().unpolish(label)
+    label.style().polish(label)
+    label.update()
+
+
 def show_value(label: QLabel, value) -> None:
     """Write *value* into *label*, or :data:`NOT_SET` in the disabled ink when there is none (``None`` or an
     empty string). Re-polishes, since a dynamic property is only read again on a polish."""
@@ -121,6 +142,8 @@ QLabel[textRole="{LABEL}"], QLabel[textRole="{HELP}"] {{
 QLabel[textRole="{NUMBER}"] {{
     {mono} font-size: {t.small_size}px; font-weight: {t.regular}; color: {c.text_primary};
 }}
+QLabel[textTone="{ATTENTION}"] {{ color: {c.warn}; }}
+QLabel[textTone="{FAILURE}"] {{ color: {c.danger}; }}
 QLabel[unset="true"] {{
     color: {c.text_disabled};
 }}

@@ -108,14 +108,14 @@ def build_variable_pairing_row(ctx, scope: str, parent: QWidget) -> QWidget:
     outer.addWidget(row)
 
     result = QLabel("", box)
-    result.setObjectName("Muted")
+    result.setProperty("textRole", "help")
     result.setWordWrap(True)
     result.setVisible(False)
     outer.addWidget(result)
 
     empty = QLabel("Pair by variable: define a sample variable on "
                    "Home → Variables to pair by condition.", box)
-    empty.setObjectName("Muted")
+    empty.setProperty("textRole", "help")
     empty.setWordWrap(True)
     outer.addWidget(empty)
 

@@ -501,7 +501,7 @@ def build_ui(win) -> None:
     win._top_bar = top
     top_layout.addWidget(build_page_tabs_host(win, top), 1)
     win._dir_label = QLabel("No data loaded")
-    win._dir_label.setObjectName("Muted")
+    win._dir_label.setProperty("textRole", "help")
     win._dir_label.hide()
     top_layout.addWidget(win._dir_label)
     # The rail's collapse toggle is not in this band — it floats on the rail's

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import QGridLayout, QLabel, QLineEdit, QVBoxLayout, QWidg
 from review.domain.size_classes import N_CLASSES, SizeClassRule, clipped_by_gate, diameter_text
 from ui import theme
 from widgets.capped_label import CappedLabel
+from ui import text_roles
 
 from .nanowell_focus_view import is_nanowell_dataset
 
@@ -71,7 +72,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
     gl.setColumnStretch(4, 1)
     for col, cap in ((0, "label"), (1, "min px"), (2, "max px")):
         head = QLabel(cap, grid)
-        head.setObjectName("Muted")
+        head.setProperty("textRole", "help")
         gl.addWidget(head, 0, col)
     widgets: dict = {"size_classes_row": row, "size_classes_title": title}
     rule = params.size_classes if isinstance(params.size_classes, SizeClassRule) else SizeClassRule()
@@ -88,7 +89,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
             edit.setPlaceholderText("none")
             edit.setToolTip(TOOLTIP)
         diameter = QLabel("", grid)
-        diameter.setObjectName("Muted")
+        diameter.setProperty("textRole", "help")
         gl.addWidget(label, k + 1, 0)
         gl.addWidget(low, k + 1, 1)
         gl.addWidget(high, k + 1, 2)
@@ -97,7 +98,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
                         f"size_diameter_{k}": diameter})
     layout.addWidget(grid)
     status = CappedLabel("", row)
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     status.setWordWrap(True)
     status.setMaximumWidth(text_width)
     status.setIndent(indent)
@@ -206,6 +207,6 @@ def refresh(ctx, w: dict, params) -> None:
     if status is not None:
         text, problem = status_text(rule, params, pixels, nanowell=nanowell)
         status.setText(text)
-        status.setObjectName("Notice" if problem else "Muted")
+        text_roles.set_role(status, text_roles.HELP, tone=text_roles.ATTENTION if problem else None)
         status.style().unpolish(status)
         status.style().polish(status)

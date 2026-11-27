@@ -458,7 +458,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
         "edit one well; click row/column headers or Shift-click cells to "
         "select multiple, then use Add Prefix / Add Suffix.",
     )
-    help_lbl.setObjectName("Muted")
+    help_lbl.setProperty("textRole", "help")
     help_lbl.setWordWrap(True)
     hl.addWidget(help_lbl, 1)
 

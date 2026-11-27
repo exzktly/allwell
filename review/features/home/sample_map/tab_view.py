@@ -66,7 +66,7 @@ def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     # here, so a user painting a fifth group has no way of knowing from this tab
     # that a variable has been grouping the plots all along.
     note = reg.register("_sample_map_grouping_note", QLabel("", body))
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     note.setWordWrap(True)
     note.setVisible(False)
     column.addWidget(note)

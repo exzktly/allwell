@@ -114,7 +114,7 @@ def _card(parent: QWidget, title: str = "") -> tuple[QFrame, QVBoxLayout]:
 
 def _muted(parent: QWidget, text: str) -> QLabel:
     label = QLabel(text, parent)
-    label.setObjectName("Muted")
+    label.setProperty("textRole", "help")
     label.setWordWrap(True)
     return label
 
@@ -675,7 +675,7 @@ def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
         # The record exists and its image does not. Saying so on the tile keeps
         # a missing file distinguishable from a plot that drew nothing, which is
         # the whole point of the record carrying a filename at all.
-        picture.setObjectName("Muted")
+        picture.setProperty("textRole", "help")
         # A plot copied from another dataset has no picture by design, which
         # is a different fact from a file that went missing.
         picture.setText("(not drawn here yet)" if entry.get("copied_from")
@@ -685,7 +685,7 @@ def build_saved_plot_tile(ctx, parent: QWidget, entry: dict) -> QWidget:
     column.addWidget(picture)
 
     caption = QLabel(tile)
-    caption.setObjectName("Muted")
+    caption.setProperty("textRole", "help")
     caption.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
     caption.setAttribute(Qt.WA_TransparentForMouseEvents, True)
     # Elided rather than wrapped: the tile is a fixed height, so a two-line title

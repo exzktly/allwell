@@ -31,6 +31,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 
 from ui import theme
 from widgets.path_field import PathField, folder_picker
+from ui import text_roles
 
 #: Width of the ``+`` / ``=`` column between the fields. Narrow enough that the
 #: three fields keep the width, wide enough that the glyph is not clipped.
@@ -91,7 +92,7 @@ def build_equation_row(
 
     def _operator(text: str) -> QLabel:
         lbl = QLabel(text, row)
-        lbl.setObjectName("Heading")
+        lbl.setProperty("textRole", "sectionHeading")
         lbl.setContentsMargins(0, theme.Spacing.lg, 0, 0)
         lbl.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         lbl.setFixedWidth(_EQUATION_OP_W)
@@ -105,7 +106,7 @@ def build_equation_row(
     outer.addWidget(row)
 
     cross_hint = QLabel("", parent)
-    cross_hint.setObjectName("Danger")
+    text_roles.set_role(cross_hint, text_roles.HELP, tone=text_roles.FAILURE)
     cross_hint.setWordWrap(True)
     cross_hint.setVisible(False)
     outer.addWidget(cross_hint)
@@ -126,7 +127,7 @@ def build_equation_row(
         sl.addWidget(swap)
         if swap_note:
             note = QLabel(swap_note, swap_row)
-            note.setObjectName("Muted")
+            note.setProperty("textRole", "help")
             sl.addWidget(note)
         sl.addStretch(1)
         outer.addWidget(swap_row)

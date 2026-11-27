@@ -596,7 +596,7 @@ def test_a_malformed_count_blocks_the_run_and_names_the_field(qapp, tmp_path):
         assert not page._run_btn.isEnabled(), (field, text)
         assert not page._queue_btn.isEnabled(), (field, text)
         assert expected in page._verdict.text(), (field, text)
-        assert page._verdict.objectName() == "Warn"
+        assert page._verdict.property("textTone") == "attention"
         getattr(page, field).setText("")
 
 
@@ -611,12 +611,12 @@ def test_a_refused_plan_is_red_and_a_good_one_is_not(qapp, tmp_path):
     page._rows_edit.setText("1")
     page._cols_edit.setText("4")
     page.refresh_readout()
-    assert page._verdict.objectName() == "Muted"
+    assert (page._verdict.property("textRole") == "help" and not page._verdict.property("textTone"))
     assert page._verdict.text().startswith("✓")
 
     page._cols_edit.setText("3")        # 4 frames don't divide into 3 wells
     page.refresh_readout()
-    assert page._verdict.objectName() == "Danger"
+    assert page._verdict.property("textTone") == "failure"
     assert page._verdict.text().startswith("⚠")
 
 

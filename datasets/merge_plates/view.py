@@ -46,6 +46,7 @@ from datasets.merge_plates.merge_plates_compute import (
 )
 from datasets.core.dataset_fields import is_dataset, is_free_destination
 from datasets.core.dataset_fields import promote_open_button
+from ui import text_roles
 
 # Well-token field for the remap origin (e.g. `A01`).
 _ORIGIN_EDIT_W = 60
@@ -98,7 +99,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Merge Plates", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -109,7 +110,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
             "remap dataset 2's wells onto free positions first if they overlap.",
             self,
         )
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -181,7 +182,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         outer.addWidget(row)
 
         self._remap_hint = QLabel("", self)
-        self._remap_hint.setObjectName("Danger")
+        text_roles.set_role(self._remap_hint, text_roles.HELP, tone=text_roles.FAILURE)
         self._remap_hint.setWordWrap(True)
         self._remap_hint.setVisible(False)
         outer.addWidget(self._remap_hint)

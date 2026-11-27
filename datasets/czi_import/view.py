@@ -63,6 +63,7 @@ from pipeline.czi_set import CZI_SUFFIXES, CziSet, siblings_of
 from ui import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
+from ui import text_roles
 
 
 #: Widths of the small numeric boxes. Named rather than written at the call
@@ -172,7 +173,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Convert CZI", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -189,7 +190,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             self,
         )
         blurb.setTextFormat(Qt.RichText)
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -234,7 +235,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
     def _sub_heading(self, text: str, outer: QVBoxLayout) -> QLabel:
         label = QLabel(text, self)
-        label.setObjectName("Heading")
+        label.setProperty("textRole", "sectionHeading")
         outer.addWidget(label)
         return label
 
@@ -278,7 +279,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "The acquisition order is laid over this block of the plate: the "
             "first stage position becomes the origin well, and the scan snakes "
             "or rasters from there.", self._grid_host)
-        grid_hint.setObjectName("Muted")
+        grid_hint.setProperty("textRole", "help")
         grid_hint.setWordWrap(True)
         grid_outer.addWidget(grid_hint)
 
@@ -358,7 +359,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         outer.addWidget(options)
 
         self._readout = QLabel("", self)
-        self._readout.setObjectName("Muted")
+        self._readout.setProperty("textRole", "help")
         self._readout.setWordWrap(True)
         outer.addWidget(self._readout)
 
@@ -374,7 +375,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "dataset there; the CZI's channel names are always what goes into "
             "the filenames.", self,
         )
-        self._channels_caption.setObjectName("Muted")
+        self._channels_caption.setProperty("textRole", "help")
         self._channels_caption.setWordWrap(True)
         self._channels_caption.setVisible(False)
         outer.addWidget(self._channels_caption)
@@ -892,7 +893,7 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
     def _set_verdict(self, text: str, tone: str) -> None:
         self._verdict.setText(text)
-        self._verdict.setObjectName("Error" if tone == "error" else "Muted")
+        text_roles.set_role(self._verdict, text_roles.HELP, tone=text_roles.FAILURE if tone == "error" else None)
         self._verdict.setVisible(bool(text))
         # Re-polish: an object name set after the widget is shown does not
         # repaint on its own, so the second verdict would wear the first's tone.

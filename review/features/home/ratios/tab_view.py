@@ -63,7 +63,7 @@ class RatioMetricsPanel(QWidget):
             self,
         )
         intro.setWordWrap(True)
-        intro.setObjectName("Muted")
+        intro.setProperty("textRole", "help")
         intro.setAlignment(Qt.AlignLeft)
         layout.addWidget(intro)
 

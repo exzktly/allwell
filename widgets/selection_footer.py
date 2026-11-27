@@ -40,7 +40,7 @@ class SelectionFooter(QWidget):
         lay.setSpacing(theme.Spacing.sm)
 
         self._count = QLabel("No wells selected", self)
-        self._count.setObjectName("Muted")
+        self._count.setProperty("textRole", "help")
         self._count.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._count.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         lay.addWidget(self._count, 1)

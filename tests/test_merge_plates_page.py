@@ -107,7 +107,7 @@ def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_war
     _run_worker_to_completion(ctrl)
 
     assert ctrl._last_result[0] is True
-    assert page._dest_field._hint.objectName() == "Muted"
+    assert (page._dest_field._hint.property("textRole") == "help" and not page._dest_field._hint.property("textTone"))
     assert "Already holds a finished dataset" not in page._dest_field._hint.text()
     assert "now holds the merged plate" in page._dest_field._hint.text()
     assert not page._dest_field.is_valid()

@@ -45,6 +45,7 @@ from core.safe import swallowed
 from ui import theme
 from widgets.capped_label import CappedLabel
 from widgets.flow_layout import FlowLayout, flow_group
+from ui import text_roles
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
 # written inline at a call site).
@@ -149,7 +150,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     head_layout.addWidget(enable_cb)
     head_layout.addSpacing(12)
     status = QLabel("", head)
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     head_layout.addWidget(status)
     head_layout.addStretch(1)
     outer.addWidget(head)
@@ -187,7 +188,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     gl.setColumnStretch(3, 1)
     for col, cap in ((1, "min"), (2, "max")):
         head_lbl = QLabel(cap, grid)
-        head_lbl.setObjectName("Muted")
+        head_lbl.setProperty("textRole", "help")
         gl.addWidget(head_lbl, 0, col)
 
     def _field(value, tip: str) -> QLineEdit:
@@ -201,7 +202,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         """The column a quantity has no bound for. An em-dash, not a gap: a
         bound that does not exist should not look like one left blank."""
         lbl = QLabel("—", grid)
-        lbl.setObjectName("Muted")
+        lbl.setProperty("textRole", "help")
         return lbl
 
     min_area_edit = _field(params.min_area, _area_tip)
@@ -272,7 +273,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # either way — which left the panel saying nothing at all about what
     # ticking it did.
     fq_effect = CappedLabel("", fq)
-    fq_effect.setObjectName("Muted")
+    fq_effect.setProperty("textRole", "help")
     fq_effect.setWordWrap(True)
     fq_effect.setMaximumWidth(_FQ_TEXT_W)
     fq_layout.addWidget(fq_effect)
@@ -314,7 +315,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     foc_cb.setToolTip(_FOCUS_TOOLTIP)
     foc_head_layout.addWidget(foc_cb)
     foc_below = QLabel("below", foc_head)
-    foc_below.setObjectName("Muted")
+    foc_below.setProperty("textRole", "help")
     # The cut sits ON the checkbox's own row rather than under it: it is the
     # checkbox's operand, and every other number on this panel that qualifies
     # a rule sits beside the rule. A row of its own read as a fifth debris
@@ -357,7 +358,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     foc_status.setMaximumWidth(_FQ_TEXT_W)
     foc_layout.addWidget(foc_status)
     foc_effect = CappedLabel("", foc)
-    foc_effect.setObjectName("Muted")
+    foc_effect.setProperty("textRole", "help")
     foc_effect.setWordWrap(True)
     foc_effect.setMaximumWidth(_FQ_TEXT_W)
     foc_layout.addWidget(foc_effect)
@@ -389,7 +390,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     brd_cb.setToolTip(_BORDER_TOOLTIP)
     brd_layout.addWidget(brd_cb)
     brd_status = CappedLabel("", brd)
-    brd_status.setObjectName("Muted")
+    brd_status.setProperty("textRole", "help")
     brd_status.setWordWrap(True)
     brd_status.setMaximumWidth(_FQ_TEXT_W)
     brd_status.setIndent(_FQ_TEXT_INDENT)
@@ -678,7 +679,7 @@ def _refresh_field_quality_status(ctx, w) -> None:
     # heading of the radio group beneath it. The registers stay three because
     # they are three statements; the styling is a separate decision and this
     # is the one the render supports.
-    label.setObjectName("Notice" if register == REGISTER_PROBLEM else "Muted")
+    text_roles.set_role(label, text_roles.HELP, tone=text_roles.ATTENTION if register == REGISTER_PROBLEM else None)
     label.style().unpolish(label)
     label.style().polish(label)
     effect = w.get("field_quality_effect")
@@ -750,7 +751,7 @@ def _refresh_focus_status(ctx, w) -> None:
         return
     text, register = focus_status(ctx)
     label.setText(text)
-    label.setObjectName("Notice" if register == REGISTER_PROBLEM else "Muted")
+    text_roles.set_role(label, text_roles.HELP, tone=text_roles.ATTENTION if register == REGISTER_PROBLEM else None)
     label.style().unpolish(label)
     label.style().polish(label)
     effect = w.get("focus_effect")
@@ -787,7 +788,7 @@ def _refresh_border_status(ctx, w) -> None:
         return
     text, is_problem = border_status(ctx)
     label.setText(text)
-    label.setObjectName("Notice" if is_problem else "Muted")
+    text_roles.set_role(label, text_roles.HELP, tone=text_roles.ATTENTION if is_problem else None)
     label.style().unpolish(label)
     label.style().polish(label)
 

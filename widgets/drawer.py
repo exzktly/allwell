@@ -311,7 +311,7 @@ if __name__ == "__main__":
     pad = theme.Spacing.lg
     hv.setContentsMargins(pad, pad, pad, pad)
     title = QLabel("Drawer — click 'Open Analyze' (Esc / click-outside to dismiss)")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     title.setWordWrap(True)
     hv.addWidget(title)
     open_btn = QPushButton("Open Analyze")
@@ -325,7 +325,7 @@ if __name__ == "__main__":
     cv.setContentsMargins(0, 0, 0, 0)
     cv.setSpacing(theme.Spacing.md)
     h2 = QLabel("Analyze")
-    h2.setObjectName("Title")
+    h2.setProperty("textRole", "pageTitle")
     cv.addWidget(h2)
     cv.addWidget(QLabel("Pipeline input directory:"))
     cv.addWidget(QLineEdit())

@@ -178,7 +178,7 @@ def _build_value_list(ctx, body: QWidget, column, reg) -> None:
     column.addLayout(buttons)
 
     note = reg.register("_var_note", QLabel("", body))
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     note.setWordWrap(True)
     column.addWidget(note)
 

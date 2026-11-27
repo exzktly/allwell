@@ -148,7 +148,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("SearchInput")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     s1 = SearchInput(placeholder="Search properties…")
@@ -157,7 +157,7 @@ if __name__ == "__main__":
     lay.addWidget(s2)
 
     echo = QLabel("(type above)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     lay.addWidget(echo)
     s1.textChanged.connect(lambda v: echo.setText(f"query → {v!r}"))
     lay.addStretch(1)

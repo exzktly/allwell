@@ -131,7 +131,7 @@ class AnalyzeSegParamsMixin:
         area_cell = self._row(ws, "Min nucleus area")
         self._min_nucleus_area_edit = self._entry(area_cell, "50", width=60)
         _px = QLabel("pixels", area_cell)
-        _px.setObjectName("Muted")
+        _px.setProperty("textRole", "help")
         area_cell.layout().addWidget(_px)
         area_cell.layout().addStretch(1)
         self._min_nucleus_area_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
@@ -161,7 +161,7 @@ class AnalyzeSegParamsMixin:
         lf = _page()
         lf_lbl = QLabel("Segments the channel marked 'Phase' above with Cellpose-SAM (cpsam), which reads "
                         "brightfield and phase contrast.", lf)
-        lf_lbl.setObjectName("Muted")
+        lf_lbl.setProperty("textRole", "help")
         lf_lbl.setWordWrap(True)
         lf.layout().addWidget(lf_lbl)
         self._labelfree_note = lf_lbl
@@ -381,7 +381,7 @@ class AnalyzeSegParamsMixin:
                       "own threshold. Lower finds more (dimmer) nuclei; higher "
                       "overlap keeps more touching nuclei apart. Tune against a "
                       "real frame in Review → Image Browser → Playground.", sec)
-        hint.setObjectName("Muted")
+        hint.setProperty("textRole", "help")
         hint.setWordWrap(True)
         sec.layout().addWidget(hint)
 
@@ -508,7 +508,7 @@ class AnalyzeSegParamsMixin:
             "channels listed above. A name that is not listed above is a separate channel, used only to find the cells.")
         row.layout().addWidget(self._nuclear_token_edit)
         self._seg_channel_note = QLabel("", section)
-        self._seg_channel_note.setObjectName("Muted")
+        self._seg_channel_note.setProperty("textRole", "help")
         self._seg_channel_note.setWordWrap(True)
         section.layout().addWidget(self._seg_channel_note)
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_seg_channel_options())

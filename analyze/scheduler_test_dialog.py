@@ -49,14 +49,14 @@ class SchedulerTestDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self._status_lbl = QLabel("Sending the test job…", self)
-        self._status_lbl.setObjectName("SectionTitle")
+        self._status_lbl.setProperty("textRole", "sectionHeading")
         layout.addWidget(self._status_lbl)
         hint = QLabel(
             "The job goes through the same launch as a run — the scheduler "
             "command, the conda environment, the node — and only looks at "
             "where it landed. A node that has to start can take several "
             "minutes.", self)
-        hint.setObjectName("Muted")
+        hint.setProperty("textRole", "help")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self._log = QPlainTextEdit(self)

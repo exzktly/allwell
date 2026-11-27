@@ -88,8 +88,8 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     layout.setSpacing(6)
 
     hdr = QHBoxLayout(); hdr.setSpacing(8)
-    title = QLabel("Pipeline Info", parent)
-    title.setStyleSheet("font-weight:600;")
+    title = QLabel("Pipeline info", parent)
+    title.setProperty("textRole", "sectionHeading")
     hdr.addWidget(title)
     hdr.addStretch(1)
     from widgets.icon_button import IconButton as _IconButton

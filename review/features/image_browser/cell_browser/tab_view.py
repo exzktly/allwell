@@ -131,7 +131,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_browser_pagesize_edit", pagesize_edit)
 
     count_lbl = QLabel("Showing 0 / 0 cells")
-    count_lbl.setObjectName("Muted")
+    count_lbl.setProperty("textRole", "help")
     ctrl.add_scope("", count_lbl)
     reg.register("_cell_browser_count_label", count_lbl)
 

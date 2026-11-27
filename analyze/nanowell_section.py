@@ -245,7 +245,7 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addWidget(self._nanowell_preview_btn)
         row.layout().addStretch(1)
         self._nanowell_status = QLabel("", sec)
-        self._nanowell_status.setObjectName("Muted")
+        self._nanowell_status.setProperty("textRole", "help")
         self._nanowell_status.setWordWrap(True)
         sec.layout().addWidget(self._nanowell_status)
         self._nanowell_field_rows.append(row.parentWidget())
@@ -363,7 +363,7 @@ class AnalyzeNanowellSectionMixin:
                 self._nanowell_field_rows.append(self._nanowell_edit_row(box, key, label, attr, tip))
         # Where the size came from, when it was carried over from the pixel diameter above (_carry_cellpose_diameter).
         self._nanowell_size_note = QLabel("", box)
-        self._nanowell_size_note.setObjectName("Muted")
+        self._nanowell_size_note.setProperty("textRole", "help")
         self._nanowell_size_note.setWordWrap(True)
         self._nanowell_size_note.setVisible(False)
         box.layout().addWidget(self._nanowell_size_note)

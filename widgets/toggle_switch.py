@@ -181,7 +181,7 @@ if __name__ == "__main__":
     outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                              theme.Spacing.lg, theme.Spacing.lg)
     title = QLabel("ToggleSwitch")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     outer.addLayout(form)
 
     echo = QLabel("toggled → (interact above)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     on.toggled.connect(lambda v: echo.setText(f"'On by default' toggled → {v}"))
     off.toggled.connect(lambda v: echo.setText(f"'Off by default' toggled → {v}"))

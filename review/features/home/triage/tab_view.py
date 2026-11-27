@@ -48,7 +48,7 @@ def build_triage_subtab(ctx, parent: QWidget) -> None:
     layout.setSpacing(theme.Spacing.sm)
 
     summary = QLabel(parent)
-    summary.setObjectName("Muted")
+    summary.setProperty("textRole", "help")
     summary.setWordWrap(True)
     layout.addWidget(summary)
 

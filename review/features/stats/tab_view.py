@@ -137,7 +137,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # section the user has to open to find out whether they need it open.
     section = CollapsibleSection("Comparison groups", expanded=True)
     count_lbl = QLabel("", section)
-    count_lbl.setObjectName("Muted")
+    count_lbl.setProperty("textRole", "help")
     section.setValueWidget(count_lbl)
     ctx.widgets.register("_stats_group_count_lbl", count_lbl)
     outer.addWidget(section)
@@ -202,7 +202,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # the time. The hint sits inside the editor, where the only map is this one.
     hint = QLabel("Select a group below, then drag wells on the map to "
                   "assign them to it.", side)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
     col.addWidget(hint)
 
@@ -394,7 +394,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # "Replicates: …" caption wraps into a tall stack even with the whole row
     # free. Left un-wrapped it keeps one line and the flow places it whole.
     fov_indicator = reg.register("_stats_fov_indicator", QLabel(""))
-    fov_indicator.setObjectName("MutedCaption")
+    fov_indicator.setProperty("textRole", "label")
     stats_ctrl.add_scope("", fov_indicator)
 
     stats_ctrl.add_action(btn_primary(stats_ctrl, "Run test", ctx.runtime.stats.run))

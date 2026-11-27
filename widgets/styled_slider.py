@@ -175,7 +175,7 @@ if __name__ == "__main__":
     outer.setSpacing(theme.Spacing.md)
 
     title = QLabel("StyledSlider")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -193,7 +193,7 @@ if __name__ == "__main__":
     s3.setEnabled(False)
 
     val_lbl = QLabel("40")
-    val_lbl.setObjectName("Mono")
+    val_lbl.setProperty("textRole", "number")
     row = QHBoxLayout()
     row.addWidget(s1, 1)
     row.addWidget(val_lbl)

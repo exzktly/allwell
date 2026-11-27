@@ -172,14 +172,14 @@ class SavedCellsPage(QWidget):
         self.sets_empty = QLabel(
             "No saved cells yet. Draw round cells with Lasso cells on a Spatial map or a "
             "Multivariate projection to save them here.", self)
-        self.sets_empty.setObjectName("Muted")
+        self.sets_empty.setProperty("textRole", "help")
         self.sets_empty.setWordWrap(True)
         lay.addWidget(self.sets_empty)
         self.sets = _table(self, _SET_COLUMNS)
         self.sets.itemSelectionChanged.connect(self._sync_set_buttons)
         lay.addWidget(self.sets)
         self.set_detail = QLabel("", self)
-        self.set_detail.setObjectName("Muted")
+        self.set_detail.setProperty("textRole", "help")
         self.set_detail.setWordWrap(True)
         lay.addWidget(self.set_detail)
         row = _button_row(self, lay)
@@ -257,7 +257,7 @@ class SavedCellsPage(QWidget):
                  "wells it was drawn on, of the cells every other layer keeps."))
         self.gates_empty = QLabel(
             "No gates yet. Draw one on the Scatter Plot's per-cell view with Draw gate.", self)
-        self.gates_empty.setObjectName("Muted")
+        self.gates_empty.setProperty("textRole", "help")
         self.gates_empty.setWordWrap(True)
         lay.addWidget(self.gates_empty)
         self.gates = _table(self, _GATE_COLUMNS)
@@ -275,7 +275,7 @@ class SavedCellsPage(QWidget):
         self.manage.clicked.connect(lambda: ctl.open_cell_gating(self.ctx))
         row.addWidget(self.manage)
         self.intensity = QLabel("", self)
-        self.intensity.setObjectName("Muted")
+        self.intensity.setProperty("textRole", "help")
         self.intensity.setWordWrap(True)
         lay.addWidget(self.intensity)
 
@@ -297,7 +297,7 @@ class SavedCellsPage(QWidget):
         lay.addWidget(self.subsets_header)
         self.subsets_empty = QLabel(
             "No saved subsets yet. Build one with Subset on the Nanowells page and save it there.", self)
-        self.subsets_empty.setObjectName("Muted")
+        self.subsets_empty.setProperty("textRole", "help")
         self.subsets_empty.setWordWrap(True)
         lay.addWidget(self.subsets_empty)
         self.subsets = _table(self, _SUBSET_COLUMNS)

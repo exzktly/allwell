@@ -394,7 +394,7 @@ class AllWellApp(QMainWindow):
         hl.setSpacing(theme_v2.Spacing.sm)
         hl.addWidget(BrandTile(side=24))
         title = QLabel("All-Well")
-        title.setObjectName("Title")
+        title.setProperty("textRole", "pageTitle")
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
@@ -1824,7 +1824,7 @@ class AllWellApp(QMainWindow):
             bl.setContentsMargins(0, 0, 0, 0)
             bl.setSpacing(theme_v2.Spacing.sm)
             head = QLabel("Application log")
-            head.setObjectName("Heading")
+            head.setProperty("textRole", "sectionHeading")
             bl.addWidget(head)
             # Where the crash record lives. It sits in a hidden folder, and the
             # one time anybody needs it is after the app has died — so the path

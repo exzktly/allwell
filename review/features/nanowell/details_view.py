@@ -12,6 +12,7 @@ room for the panels; it remembers being opened for the session.
 """
 
 from __future__ import annotations
+from ui import text_roles
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QVBoxLayout, QWidget
@@ -67,7 +68,7 @@ def build_details_panel(ctx, parent) -> QWidget:
     head.addWidget(button, 0, Qt.AlignTop)
     head.addWidget(head_label, 1)
     text = QLabel("", panel)
-    text.setObjectName("InfoHint")
+    text.setProperty("textRole", "help")
     text.setWordWrap(True)
     text.setTextInteractionFlags(Qt.TextSelectableByMouse)
     text.hide()
@@ -83,11 +84,9 @@ def build_details_panel(ctx, parent) -> QWidget:
             return
         button.setText(f"Details {'▾' if button.isChecked() else '▸'}")
         head_label.setText(summary(footer))
-        name = "Warn" if footer.alerts or footer.warnings else ""                  # the theme's warning ink (``QLabel#Warn``)
-        if head_label.objectName() != name:
-            head_label.setObjectName(name)
-            head_label.style().unpolish(head_label)
-            head_label.style().polish(head_label)
+        # The attention ink when the footer carries an alert or a warning (``ui/text_roles.py``).
+        text_roles.set_role(head_label, text_roles.BODY,
+                            tone=text_roles.ATTENTION if footer.alerts or footer.warnings else None)
         text.setText(body(footer))
         text.setVisible(button.isChecked() and bool(footer.alerts or footer.notes or footer.warnings))
 

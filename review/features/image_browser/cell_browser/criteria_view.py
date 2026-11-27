@@ -73,7 +73,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     srl = QHBoxLayout(src_row)
     srl.setContentsMargins(0, 0, 0, 0)
     src_lbl = QLabel("Source", src_row)
-    src_lbl.setObjectName("Muted")
+    src_lbl.setProperty("textRole", "help")
     srl.addWidget(src_lbl)
     source_cb = _SourceCombo(ctx, src_row)
     source_cb.setToolTip(
@@ -100,7 +100,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     gate_pick_btn.clicked.connect(lambda _=False: _open_gate_select(ctx))
     gpl.addWidget(gate_pick_btn)
     gate_pick_lbl = QLabel("(all)", gate_pick_row)
-    gate_pick_lbl.setObjectName("Muted")
+    gate_pick_lbl.setProperty("textRole", "help")
     gpl.addWidget(gate_pick_lbl)
     gpl.addStretch(1)
     lay.addWidget(gate_pick_row)
@@ -112,7 +112,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     gate_hint = QLabel(
         "Cells inside the selected gate, from the wells the gate was drawn on. "
         "Timepoints / FOVs below narrow further (optional).", parent)
-    gate_hint.setObjectName("Muted")
+    gate_hint.setProperty("textRole", "help")
     gate_hint.setWordWrap(True)
     lay.addWidget(gate_hint)
     ctx.runtime.cell_browser.gate_hint = gate_hint
@@ -148,7 +148,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     # "+ Add criterion" button with nothing on screen explaining it.
     criteria_off_hint = QLabel(
         "Criteria apply only when Source is Criteria.", parent)
-    criteria_off_hint.setObjectName("Muted")
+    criteria_off_hint.setProperty("textRole", "help")
     criteria_off_hint.setWordWrap(True)
     criteria_off_hint.setVisible(False)
     lay.addWidget(criteria_off_hint)
@@ -167,7 +167,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
         ctx, tp_btn, ctx.runtime.cell_browser.tp_selections, ctx.runtime.cell_browser.tp_label))
     trl.addWidget(tp_btn)
     tp_lbl = QLabel("(all)", tp_row)
-    tp_lbl.setObjectName("Muted")
+    tp_lbl.setProperty("textRole", "help")
     trl.addWidget(tp_lbl)
     trl.addStretch(1)
     lay.addWidget(tp_row)
@@ -183,7 +183,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
         ctx, fov_btn, ctx.runtime.cell_browser.fov_selections, ctx.runtime.cell_browser.fov_label))
     frl.addWidget(fov_btn)
     fov_lbl = QLabel("(all)", fov_row)
-    fov_lbl.setObjectName("Muted")
+    fov_lbl.setProperty("textRole", "help")
     frl.addWidget(fov_lbl)
     frl.addStretch(1)
     lay.addWidget(fov_row)

@@ -25,7 +25,7 @@ def info_icon(parent: QWidget, info: str) -> QLabel:
     ?-cursor, which is the route that works for someone who cannot hold a hover.
     """
     lbl = QLabel("ⓘ", parent)
-    lbl.setObjectName("InfoHint")
+    lbl.setProperty("textRole", "help")
     lbl.setToolTip(info)
     lbl.setWhatsThis(info)
     form_registry.declare(lbl, "hint")

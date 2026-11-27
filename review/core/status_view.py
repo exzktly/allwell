@@ -131,7 +131,7 @@ def build_bottom(win) -> None:
     outer.addWidget(status_row)
 
     win._status_lbl = QLabel("Ready.", status_row)
-    win._status_lbl.setObjectName("Muted")
+    win._status_lbl.setProperty("textRole", "help")
     sr_l.addWidget(win._status_lbl, 1)
     # The focused cell, named wherever the user is (focus_view).
     from review.core.focus_view import build_focus_chip
@@ -170,7 +170,7 @@ def build_bottom(win) -> None:
     lh_l.setContentsMargins(0, 0, 0, 2)
     lf_l.addWidget(log_hdr)
     hdr_lbl = QLabel("LOG", log_hdr)
-    hdr_lbl.setProperty("role", "section")
+    hdr_lbl.setProperty("textRole", "eyebrow")
     lh_l.addWidget(hdr_lbl)
     lh_l.addStretch(1)
     clear_btn = QPushButton("Clear", log_hdr)

@@ -195,7 +195,7 @@ def build_optimizer_window(ctx, parent: QWidget) -> QDialog:
 
     opt_result_label = reg.register("_cell_gating_opt_result_label", QLabel(
         "Choose two wells and a threshold range, then optimize.", win))
-    opt_result_label.setObjectName("Muted")
+    opt_result_label.setProperty("textRole", "help")
     opt_result_label.setWordWrap(True)
     opt_layout.addWidget(opt_result_label)
     opt_layout.addStretch(1)

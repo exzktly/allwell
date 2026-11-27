@@ -58,6 +58,7 @@ from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
 from datasets.core.raw_dataset import is_raw_dataset, raw_paths, unusable_reason
 from datasets.subset.raw_compute import RawSchemaError, resolve_raw_source
+from ui import text_roles
 from util.schema import DEFAULT_SEP
 
 
@@ -163,7 +164,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Subset / Split Dataset", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -173,7 +174,7 @@ class SubsetPage(LogPanelMixin, QWidget):
             "Timepoints keep their original hours; nothing is relabelled.",
             self,
         )
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
@@ -193,7 +194,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         # Shown only while the source is a queued job's output whose wells
         # cannot be known before it runs.
         self._wells_hint = QLabel(_WELLS_UNKNOWN, self)
-        self._wells_hint.setObjectName("Muted")
+        self._wells_hint.setProperty("textRole", "help")
         self._wells_hint.setWordWrap(True)
         self._wells_hint.setVisible(False)
         outer.addWidget(self._wells_hint)
@@ -212,7 +213,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         # checkbox row under a heading, with nothing said about why, read as
         # broken rather than "pick a source first".
         self._tp_hint = QLabel(_TP_PICK_SOURCE, self)
-        self._tp_hint.setObjectName("Muted")
+        self._tp_hint.setProperty("textRole", "help")
         outer.addWidget(self._tp_hint)
         self._tp_host = QWidget(self)
         self._tp_flow = FlowLayout(self._tp_host)
@@ -220,7 +221,7 @@ class SubsetPage(LogPanelMixin, QWidget):
 
         outer.addWidget(QLabel("FOVs", self))
         self._fov_hint = QLabel(_FOV_PICK_SOURCE, self)
-        self._fov_hint.setObjectName("Muted")
+        self._fov_hint.setProperty("textRole", "help")
         outer.addWidget(self._fov_hint)
         self._fov_host = QWidget(self)
         self._fov_flow = FlowLayout(self._fov_host)
@@ -230,7 +231,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._ch_heading = QLabel("Channels", self)
         outer.addWidget(self._ch_heading)
         self._ch_hint = QLabel("This dataset's filename schema has no channel field.", self)
-        self._ch_hint.setObjectName("Muted")
+        self._ch_hint.setProperty("textRole", "help")
         outer.addWidget(self._ch_hint)
         self._ch_host = QWidget(self)
         self._ch_flow = FlowLayout(self._ch_host)
@@ -295,19 +296,19 @@ class SubsetPage(LogPanelMixin, QWidget):
         row.addWidget(self._sep_edit)
         box.addLayout(row)
         self._schema_note = QLabel("", self._raw_box)
-        self._schema_note.setObjectName("Muted")
+        self._schema_note.setProperty("textRole", "help")
         self._schema_note.setWordWrap(True)
         box.addWidget(self._schema_note)
         self._in_place_cb = QCheckBox("Edit in place — remove what is unticked from this dataset", self._raw_box)
         self._in_place_cb.toggled.connect(self._on_in_place_toggled)
         box.addWidget(self._in_place_cb)
         self._in_place_warning = QLabel(_IN_PLACE_WARNING, self._raw_box)
-        self._in_place_warning.setObjectName("Warn")
+        text_roles.set_role(self._in_place_warning, text_roles.HELP, tone=text_roles.ATTENTION)
         self._in_place_warning.setWordWrap(True)
         self._in_place_warning.setVisible(False)
         box.addWidget(self._in_place_warning)
         self._interrupted_note = QLabel("", self._raw_box)
-        self._interrupted_note.setObjectName("Warn")
+        text_roles.set_role(self._interrupted_note, text_roles.HELP, tone=text_roles.ATTENTION)
         self._interrupted_note.setWordWrap(True)
         self._interrupted_note.setVisible(False)
         box.addWidget(self._interrupted_note)
@@ -722,11 +723,11 @@ class SubsetPage(LogPanelMixin, QWidget):
                 source = resolve_raw_source(raw_paths(src), typed_schema=self._schema_edit.text().strip(),
                                             typed_sep=self.typed_separator())
         except RawSchemaError as exc:
-            self._schema_note.setObjectName("Error")
+            text_roles.set_role(self._schema_note, text_roles.HELP, tone=text_roles.FAILURE)
             self._schema_note.setText(f"{exc} Only wells can be chosen until the schema is settled.")
             self._schema_note.style().polish(self._schema_note)
             return {}
-        self._schema_note.setObjectName("Muted")
+        self._schema_note.setProperty("textRole", "help")
         self._schema_note.setText(source.describe())
         self._schema_note.style().polish(self._schema_note)
         return source.info

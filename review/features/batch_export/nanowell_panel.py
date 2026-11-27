@@ -197,7 +197,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
                                     "starting cells, metric, position and imaging-field conditions — as the page "
                                     "does. Off: every nanowell. Build the subset on the page.")
         self._subset_label = QLabel("")
-        self._subset_label.setObjectName("InfoHint")
+        self._subset_label.setProperty("textRole", "help")
         self._subset_label.setWordWrap(True)
         self._subset_box.toggled.connect(lambda _on: self._seed_subset())
         row.addWidget(self._subset_box)

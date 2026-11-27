@@ -78,7 +78,7 @@ class ValidatePage(LogPanelMixin, QWidget):
         outer.setSpacing(theme.Spacing.md)
 
         heading = QLabel("Validate & Repair Dataset", self)
-        heading.setObjectName("Heading")
+        heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
 
@@ -88,7 +88,7 @@ class ValidatePage(LogPanelMixin, QWidget):
             "measurement data or images.",
             self,
         )
-        blurb.setObjectName("Muted")
+        blurb.setProperty("textRole", "help")
         blurb.setWordWrap(True)
         blurb.setToolTip(
             "A crash or partial run can leave pipeline_info.json advertising "

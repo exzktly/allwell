@@ -28,7 +28,12 @@ Read before starting: `CLAUDE.md` (all of it), `_Docs/Markdowns/SURFACES_TRACKER
 (the companion plan for the inspector, which several rows here depend on; it is
 on the other pull request's branch until that merges),
 ARCHITECTURE.md §8 (the theme, the UI scale) and the *Phone layout* section, and
-open `_Docs/design/design_language_mockup.html` in a browser. Line numbers below
+open `_Docs/design/design_language_prototype.html` in a browser: it is the working
+example the user confirmed, and it opens on the choices they made (window style
+W1, grey palette, the proposed well colours, the spelling "Color"); its panel
+names the published rule behind each choice on the page being viewed.
+`_Docs/design/design_language_mockup.html` is the earlier audit and static
+redraws, kept for the audit; where the two differ, the prototype is right. Line numbers below
 were read on the tree this plan was written against; re-find each by its symbol.
 
 ---
@@ -96,7 +101,7 @@ Settled; do not reopen. If one cannot be met, stop and report.
    |---|---|---|---|
    | Page title | 17 semibold | primary | one per page, top left |
    | Section heading | 15 semibold, sentence case | primary | a card's title |
-   | Eyebrow | 11 semibold, capitals, tracked | secondary | a group inside a card or the inspector; rail and tool-list groups |
+   | Eyebrow | 12 semibold, capitals, tracked | secondary | a group inside a card or the inspector; rail and tool-list groups |
    | Body / value | 13 regular | primary | text, and the value in a field |
    | Label / help | 12 regular | secondary | a field's label (outside the control, no colon) and help text |
    | Number | 12 monospace, tabular | primary | counts, readouts, paths |
@@ -105,13 +110,25 @@ Settled; do not reopen. If one cannot be met, stop and report.
    (control fill and edge), *quiet* (no fill; toolbars and secondary commands),
    *destructive* (red label; a confirming alert follows). A disabled button says
    why, in help text beside it, when the reason is not obvious.
-5. **Choosing a control**: a checkbox in a form; a switch (`widgets/toggle_switch.py`)
-   in an inspector row; a segmented control (`widgets/segmented_control.py`) for
-   two to four exclusive choices; a combo box for more. No button carries its
-   state in its label, and no toggle looks like a command.
+5. **Choosing a control.** A **switch** (`widgets/toggle_switch.py`) only where
+   the change takes effect at once and only in an inspector row; a **checkbox**
+   wherever the page has a button that applies it (Run, Export, Create), because
+   nothing happens until that button is pressed. A switch's label names what is
+   true when it is on ("Show significance", not "Significance"); a checkbox's
+   label is positive and says what will happen. A **segmented control**
+   (`widgets/segmented_control.py`) for two to about five closely related
+   choices, labelled with nouns; a pop-up (combo box) for more. Views of a page
+   are **tabs**, never a segmented control. No button carries its state in its
+   label, and no toggle looks like a command. Sources: Nielsen Norman Group,
+   *Toggle-Switch Guidelines* (a switch "should take immediate effect"); Apple
+   HIG, *Toggles* ("In general, don't replace a checkbox with a switch") and
+   *Segmented controls*.
 6. **One notice component**, three severities (information, attention,
    failure): a coloured left rule and dot, a bold lead, plain text, at most one
-   button. Amber is never used for plain information.
+   button. Amber is never used for plain information, and never for "in
+   progress": a running job is the accent colour, done is green, each with its
+   word beside the dot (Apple HIG, *Color*: "Avoid using the same color to mean
+   different things"; "Avoid relying solely on color").
 7. **Page skeleton.** Tabs; a one-row band of the page's most-used Data
    controls, each with its label above it, ending in the fixed Display · Style ·
    Share buttons; then the content in cards; conditions that apply shown as
@@ -141,17 +158,67 @@ Settled; do not reopen. If one cannot be met, stop and report.
    | selected fill, selected text | `#22415E`, `#D6E6F8` | text 8.3 on the fill |
    | radius | 4 controls, 6 cards, 10 overlays | — |
    | spacing | 4, 8, 12, 16, 24 | — |
-   | type sizes | 11, 12, 13, 15, 17 | — |
+   | type sizes | 12, 13, 15, 17 (and a large numeral for Home's stat tiles) | — |
 
    The seven surface tokens collapse to three roles and the five text tokens to
    three; "muted" and "faint" both become secondary.
 
-## 3. Questions still open — ask before the rows that depend on them
+## 3. Decisions from the working example
 
-| Question | Blocks |
-|---|---|
-| **"Colour" or "Color"** in what users read. Both appear. | D13 |
-| **Whether to change the 96 well colours.** 19 fail contrast on the plot and the first eight fail a colour-blind separation check, but the colours are written into every dataset's sample definitions (`domain/well_palette.py`, `domain/plot_groups.py`), so a change needs a migration. Not assumed by any other row. | D30 |
+The user was given a working example with each choice numbered and answered
+*"W1, p1 default with p2 offered, c2, s2"*.
+
+1. **Window style W1, "Panels".** The sidebar and the top bar sit directly on a
+   window background darker than the canvas (`#0B0D0F` grey, `#06090F` blue),
+   with no dividing lines between them. The page and the inspector are separate
+   panels in the canvas colour with 12-pixel corners and an 8-pixel gap between
+   them and the window's edge. The mode switch is a pill in the top bar; sidebar
+   items have 7-pixel corners and the selected one is the selected fill with no
+   accent bar. The user rejected the first version's hairlines between flat
+   regions. Row D20.
+2. **The window keeps the application's name, and the dataset's name stays the
+   button at the head of the sidebar** that opens the recent datasets and the
+   dataset tools. A version that moved the dataset into the window title was
+   shown and the user asked for it to be undone. The button may carry a second
+   line (wells and timepoints).
+3. **Grey is the default palette and blue is offered** (decision 8 of §2).
+4. **The well colours change** to a palette that passes contrast and
+   colour-blind separation. Only the **first eight** were designed and shown:
+   `#338ced`, `#e76624`, `#00a888`, `#d28e05`, `#e24d8b`, `#0aac23`, `#9887ef`,
+   `#eb6263`, which pass on both plot backgrounds (worst adjacent colour-blind
+   separation 10.1). The other 88 of the 96 are not designed. Row D30 designs
+   them, validates all 96, and migrates saved datasets, whose colours are
+   written into their sample definitions; it reports to the user before it
+   changes any saved file.
+5. **Spelling: "Color"**, in everything a user reads in the application. This
+   file, the code's identifiers and the other documents keep whatever spelling
+   they have; the rule is about the interface. Row D13.
+6. **The rules were revised against the published guidance** and the user chose
+   among options drawn in that revision, which is taken as confirming it:
+   - Close and Back are symbols with tooltips, always visible, not the words
+     (Apple HIG, *Toolbars*; Nielsen Norman Group on bottom sheets).
+   - Four text sizes, not five (§2.3, §2.9).
+   - An ellipsis only on a command that opens another window or needs more
+     input before it acts ("Rename…", "Browse…"; not "Remove").
+   - A chip does a job or is not a chip: a pressable **filter** chip with a
+     selected look, a removable **input** chip with an ✕, and anything that only
+     reports is plain text (Material's chip types).
+   - An alert only for an uncommon action that cannot be undone. Its title is a
+     full question in sentence style with its punctuation; its buttons are
+     "Cancel" and a verb, never OK, Yes or No; the destructive button is red
+     text and is not the default (Apple HIG, *Alerts*). A destructive menu item
+     is red and set apart by a divider. The toolkit orders an alert's buttons
+     for the system it is running on.
+   - A band holds only what fits one row *with the sidebar and the inspector
+     both open*; on Nanowells that is Metric, Channel and Subset.
+   - Sentence-style capitals stand, on Microsoft's Windows guidance
+     ("Capitalize the start of every string of text in your app"); Apple's
+     title-style for buttons was considered and not taken.
+
+**Still open — ask before the row that depends on it:** where the well plate
+lives. Apple's guidance is to "avoid putting critical information or actions at
+the bottom of a sidebar", which is where it is today. Nothing in this plan moves
+it; the menu-and-organisation plan leaves it in the sidebar.
 
 ## 4. How "done" is judged
 
@@ -250,14 +317,15 @@ that place, and it is a separate pull request, so the two meet through `main`:
 
 For a session that cannot open the mock-up.
 
-- **Nanowells › Distribution.** Tabs. One band row: Metric, Channel, Subset
-  (ending in ›, opening its inspector page), Along x (segmented: Time, Wells),
-  Show (segmented: Auto, Beeswarm, Violin, Histogram), then Display · Style ·
-  Share at the right. Below, a card titled "Cell count by nanowell" holding the
-  plot, with three chips at its top right ("22 of 24 values used", an amber "2
-  alerts", "3 notes") and one line of help at its foot. Beside it the inspector's
-  Data tab: eyebrow *Cohort* (Rim focus with its number and a switch; Fixed
-  cohort switch), eyebrow *Baseline* (Baseline combo; Average over), eyebrow
+- **Nanowells › Distribution.** Tabs for the eight views. One band row: Metric,
+  Channel, Subset (ending in ›, opening its inspector page), then Display ·
+  Style · Share at the right. Below, a card titled "Cell count by nanowell"
+  holding the plot, with "22 of 24 values used" as plain text at its top right
+  beside two filter chips ("2 alerts" with an amber dot, "3 notes"), and one
+  line of help at its foot. Beside it the inspector: eyebrow *Plot* (Along x,
+  segmented: Time, Wells; Show, segmented: Auto, Beeswarm, Violin, Histogram),
+  eyebrow *Cohort* ("Use rim focus" with its number and a switch; "Fix cohort"
+  switch), eyebrow *Baseline* (Baseline pop-up; Average over), eyebrow
   *Smoothing* (Moving average; Responding above, reading "not set"). Today the
   same sixteen controls are four unlabelled band rows.
 - **Batch Export.** A page title with a quiet "Sync from app" and the primary
@@ -265,7 +333,8 @@ For a session that cannot open the mock-up.
   group", a line of help, an information notice when there are none. *Output*
   and *Plot*, each a form grid: Write to (three checkboxes), Folder (field and
   "Browse…"), Format, Style preset, Also write; Channel, Property, Error band
-  (segmented: SEM, SD, Off), Per-FOV points (switch).
+  (segmented: SEM, SD, Off), Points (a checkbox, "Draw one point per field of
+  view": a checkbox because nothing happens until Export).
 - **Home › Overview.** Title and path with a quiet "Reload". One attention
   notice with one button. A row of stat tiles (label, large number, help).
   Cards for the plate legend and the run parameters as label/value rows, an
@@ -343,7 +412,7 @@ For a session that cannot open the mock-up.
 - **Phase 5 — pages with a band (D14–D21),** after the menu-and-organisation
   pull request has merged (§5.3).
 - **Phase 6 — dialogs and phone (D28, D29).**
-- **Phase 7 — close (D31–D33).** D30 only if the user decides on it.
+- **Phase 7 — the well colours, then close (D30, D31–D33).**
 
 ## 10. Rows
 
@@ -357,7 +426,7 @@ awk -F'|' '/^\| D[0-9]+ /{gsub(/ /,"",$4); n[$4]++} END{for(s in n) print s, n[s
 | ID | Item | State | Where | Evidence |
 |---|---|---|---|---|
 | D01 | The render harness applies the shipped theme before building the application, as `allwell.main` does; the phone snapshot fixture too. Check every other test that builds `AllWellApp` or `ReviewApp` and asserts a colour | todo | `tests/_page_render_case.py`, `tests/phone_snapshot.py`, `tests/conftest.py` | `tests/test_the_render_harness_shows_the_shipped_theme.py`, failing before the fix with the baseline's colour in its message; phone baseline regenerated |
-| D02 | Tokens of §2.8 for every theme: three surface roles, three text roles, three edges, selected pair, label-on-accent, radii, spacing without 32, type sizes without 14. Audit every reader of each changed token first; old names kept as aliases | todo | `ui/theme.py` | A render of five pages before and after; `tests/test_theme_contrast.py` green; a rendered plot checked |
+| D02 | Tokens of §2.8 for every theme: three surface roles, three text roles, three edges, selected pair, label-on-accent, radii, spacing without 32, type sizes 12, 13, 15 and 17 only. Audit every reader of each changed token first; old names kept as aliases | todo | `ui/theme.py` | A render of five pages before and after; `tests/test_theme_contrast.py` green; a rendered plot checked |
 | D03 | The contrast test | todo | `tests/test_theme_contrast.py` | Run against `origin/main`'s tokens it fails naming muted, faint, placeholder, the primary label and the field edge |
 | D04 | Text roles and `NOT_SET` | todo | `ui/text_roles.py` (new), the theme's sheet | A test that each role's label draws at its size, weight and ink (assert the computed font and palette, not that a property was set) |
 | D05 | Four button kinds; the sheet's base button weight; the four one-off variants (`toggle`, `toggle_muted`, `toggle_accent`, `sem`, `muted`) mapped or retired | todo | `ui/buttons.py` (new), `ui/theme.py`, `review/core/ui_helpers.py` | A rendered button of each kind measured for weight and fill; `test_buttons_have_one_of_four_kinds` roster created |
@@ -368,14 +437,14 @@ awk -F'|' '/^\| D[0-9]+ /{gsub(/ /,"",$4); n[$4]++} END{for(s in n) print s, n[s
 | D10 | Sweep: text roles replace the retired object names and inline font settings | todo | app-wide; 207 `Muted` sites and the rest | `test_text_has_a_role` roster empty or reasoned |
 | D11 | Sweep: every button through `ui/buttons.py`; one primary per page decided and written in a table in the pull request | todo | app-wide | `test_buttons_have_one_of_four_kinds` roster; `one_primary` on every page |
 | D12 | Sweep: spacing and margins from tokens; one-off style sheets moved into the theme or removed | todo | app-wide | `test_spacing_comes_from_tokens`, `test_no_style_sheet_outside_the_theme` rosters |
-| D13 | Sweep: wording — sentence case, no colons, "…", glyphs to icons, state-in-label toggles to switches or segmented controls, unset values to `NOT_SET`, one spelling of colour | todo | app-wide | The three wording guards at zero; each converted toggle pressed through its real control and reaching the same state as before |
+| D13 | Sweep: wording — sentence case, no colons, "…", glyphs to icons, state-in-label toggles to switches or segmented controls, unset values to `NOT_SET`, "Color" as the one spelling in what users read, an ellipsis only where §3.6 allows one, Close and Back as symbols, switches and checkboxes sorted by §2.5 | todo | app-wide | The three wording guards at zero; each converted toggle pressed through its real control and reaching the same state as before |
 | D14 | Plotting pages: Bar Plots, Line Graphs, Response Curves, Heat Map, Scatter, Distribution | todo | `review/features/{barplot,lineplot,response,heatmap,scatter,distribution}/tab_view.py` | §4 for each page |
 | D15 | Statistics (results as a formatted table, not preformatted text), Multivariate, Spatial | todo | `review/features/{stats,multivariate,spatial}/` | §4 |
 | D16 | Nanowells: all eight views, to the redraw of §6 | todo | `review/features/nanowell/` | §4; `scripts/test.sh --nanowell-features` |
 | D17 | smFISH | todo | `review/features/smfish/` | §4 |
 | D18 | Image Browser: Image Table (the builder shelf and action strip), Segmentation, Cell Browser, Playground | todo | `review/features/image_browser/`, `review/features/preview/`, `review/features/playground/` | §4 |
 | D19 | Review CSV, Saved Cells, Saved Plots | todo | their feature packages | §4 |
-| D20 | The shell: header (five icons with tooltips, after `SURFACES_TRACKER.md` S23), mode switch in the selected look, rail, status bar | todo | `allwell.py`, `widgets/mode_bar.py`, `widgets/rail_nav.py`, `review/core/app_shell_view.py` | §4; the mode switch no longer the only solid accent |
+| D20 | The shell, in window style W1 (§3.1): the window background and the two panels, no dividing lines; the header (five commands as words, after `SURFACES_TRACKER.md` S23) with the application's name; the mode switch as a pill in the selected look; the sidebar with the dataset button at its head; the status bar | todo | `allwell.py`, `widgets/mode_bar.py`, `widgets/rail_nav.py`, `review/core/app_shell_view.py` | §4; the mode switch no longer the only solid accent |
 | D21 | The rail's plate footer, saved selections and per-page rail frames | todo | `review/core/sidebar_view.py`, `widgets/saved_selections_list.py` | §4 |
 | D22 | Analyze: the form as cards with a form grid in a wider column; cautions as notices; the foot row; the Run card; the log behind a button until a run starts | todo | `analyze/` (`form_chrome.py`, `form.py`, `run_footer.py`, `tab.py`, the section modules), `widgets/run_dashboard.py`, `widgets/plate_progress.py` | §4, idle **and** during a run (drive a run with the test fixtures; the audit only saw Analyze idle) |
 | D23 | Analyze's own collapsible sections replaced by `widgets.CollapsibleSection` or by cards | todo | `analyze/form_chrome.py` | One collapse implementation in the application |
@@ -385,7 +454,7 @@ awk -F'|' '/^\| D[0-9]+ /{gsub(/ /,"",$4); n[$4]++} END{for(s in n) print s, n[s
 | D27 | Home: Overview, Cell Gating, Sample Map, Ratios, Pipeline Info, QC Triage; the empty band strip removed | todo | `review/features/home/` | §4; `tests/test_home_phone_layout.py`, `tests/test_sample_map_phone_layout.py` |
 | D28 | Dialogs and windows: Manage Remote Servers and those under it, Storage, Reset analysis, Copy analysis, the curve windows, Test detection, the message-box wording | todo | `analyze/remote_dialog.py` and the others in `SURFACES_TRACKER.md` §11.5 | A render of each, before and after |
 | D29 | Phone layout: the touch sizes re-derived from the new tokens; every page on all six screens | todo | `core/phone_layout.py`, `ui/theme.py` (`_touch_qss`), `ui/phone_shell.py` | `tests/test_every_page_renders.py` green; shots reviewed |
-| D30 | The well colours, **only if the user decides to change them**: a palette that passes contrast and colour-blind separation on the plot background and on white, and a migration for saved sample definitions | todo | `domain/well_palette.py`, `domain/plot_groups.py`, `review/persistence/` | Not started until §3's question is answered |
+| D30 | The well colours (§3.4). Design all 96: the eight shown are the first eight, and the remaining 88 must be derived so that every colour is at least 3 : 1 on both palettes' plot backgrounds and on white (exported figures), and neighbouring ranks stay apart under colour-blind simulation. Read how the 96 are generated today before choosing how to extend eight. Then migrate: sample definitions store colours per well, so decide with the user, before changing any saved file, whether an existing dataset keeps its saved colours, is offered the new ones, or is converted | todo | `domain/well_palette.py`, `domain/plot_groups.py`, `ui/theme.py` (which re-exports the palette), `review/persistence/` | A test that computes contrast and simulated separation for all 96 on each background, failing on today's palette for the 19 it should; a round-trip test that a dataset saved with the old colours opens as the user decided |
 | D34 | The palette is the user's choice, in the application: a Grey / Blue setting, remembered between sessions (`core/app_settings.py`), honoured at start-up ahead of `DEFAULT_THEME` and behind an explicit `ALLWELL_THEME` or `--theme`. `ui/theme.py` says a live switch is not possible while widgets cache inline style sheets built from the tokens, so the setting applies at the next start and says so beside the control; once row D12 has removed those style sheets, make it live and delete that sentence. Where the control lives is the surfaces plan's question: the dataset-tools / `⋯` menu of `SURFACES_TRACKER.md` S23 unless a settings page exists by then | todo | `ui/theme.py` (`select_theme_from_env`), `core/app_settings.py`, `allwell.py` | A test through the real start-up path: with the setting stored as blue and no environment variable, the built window's card colour is blue's; with `ALLWELL_THEME=grey` set, grey's. Mutation: ignoring the stored setting fails the first, ignoring the variable the second |
 | D31 | Every roster from D09 is empty or holds only reasoned entries; the per-widget names in the theme's sheet that only restated a role are gone | todo | `tests/`, `ui/theme.py` | The rosters; the count of named widgets in the sheet, from a script, before and after |
 | D32 | Reconcile: re-render every page and compare each against §2's rules, not against this table; list anything that does not follow them | todo | this file | The reconciliation, in the pull request body |

@@ -528,7 +528,14 @@ Step log (newest last):
     now `unlabelled` with the band's caption; (b) smFISH's band needs 80 px at 1284 px wide (two rows) now that
     FOV and Timepoint carry captions beside them. D17 is reopened (`in progress`) with `("smFISH", "band rows")`
     back in `DESIGN_PENDING`; the fix is to move LUT min / LUT max and the secondary actions (This frame CDF,
-    Refresh) off the band into the inspector, as §6 does for the plot pages. Next: re-run the desk cases.
+    Refresh) off the band into the inspector, as §6 does for the plot pages. Commit `e7a246b`.
+11. CI on `e7a246b`: the same two Identity Diagnostics cases fail with identical numbers, so the font fix of step 9
+    did not take there. Established here: with Inter removed from matplotlib's list A01 measures 26.89 pt (CI:
+    26.93) — the cause is the face the figure is drawn in. Not the lookup cache (a probe passes without clearing
+    it). Not established: why CI still draws in a fallback with the bundled faces registered — most likely the
+    figure's style pass names its family from somewhere else (the Qt application font, or `ui/theme`'s family).
+    Stated on the PR (comment 7227715674). Left open, not chased further, per the user's "no rabbit holes".
+    Desk-case every-page re-run on `e7a246b` in progress.
 
 ## 10. Rows
 

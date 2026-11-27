@@ -183,6 +183,7 @@ NANOWELL_E2E_FILES = {
 #: own docstring; membership is by subject, so no further reason is owed.
 NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_test_helpers_stay_cheap.py": "the synthetic-plate painter and tile renderer: exact, and cheap",
+    "test_nanowell_key_title_fits.py": "the occupancy key's title stays inside the figure, however narrow the figure is",
     "test_nanowell_observations_service.py": "the plot tools' nanowell observations, from the Nanowells service",
     "test_nanowell_confluence_reference.py": "confluence against the empty reference well, on a painted scene",
     "test_nanowell_segmenter_reference.py": "the rim-removed count input divided by the empty reference well's template",

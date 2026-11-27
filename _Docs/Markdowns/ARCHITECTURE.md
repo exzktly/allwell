@@ -13896,7 +13896,11 @@ names are given once in the footer, and an axis with any unknown time is ticked 
 page draws is themed as it is created (`renderer._prepare_axes`: the card's ground, spines and tick ink, and
 `_aw_type_scale` for the Properties pass). The footer sums the
 panels drawn only, names the panels past `MAX_PANELS`, counts the wells, and a key at the top right decodes
-the occupancy colours and names the baseline (`renderer._occupancy_key`, which Trajectories draws too). Whether a
+the occupancy colours and names the baseline (`renderer._occupancy_key`, which Trajectories draws too). The key's
+title sits left of its dots, on their row, where the figure is wide enough for both; on a narrower one — a phone held
+upright, whose raised DPI leaves the figure about 185 pt wide — it is written above the dots, wrapped to the figure's
+width (`renderer._key_title_lines`), and `_head_room`, given the same title (`key_text`), makes the key's band that
+many rows taller so the panels' titles start below it (`tests/test_nanowell_key_title_fits.py`). Whether a
 column's wells are drawn as dots, violins or histograms is the band's **Show** (`NanowellState.dist_style`, built
 by `distribution_style_view.py`): `distribution_style_compute.density_above(style)` is the well count past which a
 column is drawn as shapes rather than dots — `DENSITY_ABOVE` (4) for Auto (violins), 0 for Violin and Histogram,

@@ -270,15 +270,17 @@ def _line_step(fig, size_pt: float = FOOTER_PT) -> float:
     return max(_LINE, _LINE_LEADING * size_pt / max(_figure_pt(fig)[1], 1.0))
 
 
-def _head_room(fig, *, floor_top: float, title_pt: float = _TITLE_PT) -> tuple[float, float, float]:
+def _head_room(fig, *, floor_top: float, title_pt: float = _TITLE_PT, key_text: str = "") -> tuple[float, float, float]:
     """``(top, key_bottom, key_height)``, as shares of the figure's height, for panels with a *title_pt* title over
     them and the occupancy key above that.
 
     *floor_top* is where the panels' tops sit on a figure tall enough for them; on a short one they come down just
     far enough that the key, the title and the panels' counts each have their own band instead of the key being
-    written over the titles."""
+    written over the titles. *key_text* is the key's title (:func:`_key_title`): on a figure too narrow to hold it
+    beside the key's dots it is written above them, and the key is that many rows taller (:func:`_key_title_lines`)."""
     h_pt = max(_figure_pt(fig)[1], 1.0)
-    key_h = max(_LINE * 0.9, _KEY_PT / h_pt)
+    rows = 1 + len(_key_title_lines(fig, key_text))
+    key_h = max(_LINE * 0.9, _KEY_PT / h_pt) * rows
     top = min(floor_top, 0.995 - key_h - title_pt / h_pt)
     return top, min(0.995 - key_h, max(0.955, top + title_pt / h_pt)), key_h
 
@@ -340,7 +342,10 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     panels = model.panels[:MAX_PANELS]
     rows, cols = _grid(len(panels))
     bottom = 0.10 if footer_out else 0.10 + _FOOTER_BASE + _line_step(fig) * _FOOTER_LINES
-    top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT)
+    # The room the occupancy key takes is its title's too (``_figure_key`` writes it; a value key has none).
+    key_text = "" if model.decoration.colours else _key_title(_DISTRIBUTION_KEY, baseline_text(model.baseline),
+                                                               model.starting)
+    top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT, key_text=key_text)
     _adjust(fig, left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
                         hspace=0.62)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(panels))] if panels else []
@@ -829,6 +834,12 @@ def _footer(fig, model: DistributionModel, inks, panels, densities: int, hidden:
     return footer
 
 
+#: The occupancy key's title on the Trajectories figure.
+_TRAJECTORY_KEY = "Thick lines · cells at baseline"
+#: The occupancy key's title on the Distribution figure.
+_DISTRIBUTION_KEY = "Cells at baseline"
+
+
 def _figure_key(fig, model: DistributionModel, key_at) -> None:
     """The key the dots' colours decode by, at the figure's top right: it stays in the figure wherever the footer is."""
     if model.decoration.colours:
@@ -837,7 +848,7 @@ def _figure_key(fig, model: DistributionModel, key_at) -> None:
         _value_key(fig, model.decoration)
         return
     # The occupancy key (U5): the colours decode only with it, and its title names the baseline in use.
-    _occupancy_key(fig, "Cells at baseline",
+    _occupancy_key(fig, _DISTRIBUTION_KEY,
                    baseline=baseline_text(model.baseline),
                    starting=model.starting, at=key_at)
 
@@ -864,6 +875,43 @@ def _value_key(fig, decoration) -> None:
         _ink(text, muted=True)
 
 
+def _key_title(title: str, baseline: str = "", starting=(None, None)) -> str:
+    """The occupancy key's title: ``title (baseline; faint: filtered out):``, each part in the brackets only when it
+    applies (*starting* as :func:`_occupancy_key` takes it)."""
+    lo, hi = starting
+    all_kept = all(occupancy_in_filter(cls, lo, hi) for cls in _KEY_CLASSES)
+    said = [part for part in (baseline, "" if all_kept else "faint: filtered out") if part]
+    return title + (f" ({'; '.join(said)})" if said else "") + ":"
+
+
+#: The occupancy key's classes, in the order of its dots; ``None`` is a nanowell with no count at baseline ("?").
+_KEY_CLASSES = ("0", "1", "2", "3+", None)
+#: The key's dots take its right six tenths (x 4 to 10 of its axes); the title ends where the first begins.
+_KEY_DOTS_SHARE = 0.6
+
+
+def _key_width(fig) -> float:
+    """The key's width as a share of the figure's: its dots need :data:`_KEY_WIDTH_PT`, so a narrow figure's key
+    takes more of its width than 38% rather than the entries touching."""
+    return min(0.96, max(0.38, _KEY_WIDTH_PT / max(_figure_pt(fig)[0], 1.0)))
+
+
+def _key_title_lines(fig, text: str) -> list[str]:
+    """The lines *text* (the key's title) is written on **above** the key's dots, or ``[]`` when it fits on the dots'
+    own row, left of them. The title is right-aligned against the first dot and runs left from there, over the
+    figure's own edge when the figure is narrower than the two together — a phone held upright cut
+    "Cells at baseline (earliest):" to "aseline (earliest):". Too long for that room, it gets rows of its own across
+    the key's width, wrapped to it."""
+    if not text:
+        return []
+    w_pt = max(_figure_pt(fig)[0], 1.0)
+    size = ANNOTATION_PT + 0.5
+    beside_pt = (0.98 - _key_width(fig) * _KEY_DOTS_SHARE) * w_pt - size        # figure's left edge to the first dot
+    if len(text) * size * _GLYPH_EM <= beside_pt:
+        return []
+    return _fit_text(text, 0.96 * w_pt, size).split("\n")
+
+
 def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None),
                    at: tuple[float, float] | None = None) -> None:
     """The occupancy colours' key at the figure's top right: every figure coloured by occupancy class carries one,
@@ -875,36 +923,45 @@ def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)
     titles whatever the figure's height. Without one the key sits where a tall figure puts it."""
     from widgets.plot_card import theme_paired_colours
 
-    bottom, height = at if at is not None else _head_room(fig, floor_top=0.88)[1:]
-    # Five dots with their class beside each, and the title ending where the first begins: 217 pt holds them at the key's
-    # type with a dot's room between, so a narrow figure's key takes more of its width than 38% rather than touching.
-    width = min(0.96, max(0.38, _KEY_WIDTH_PT / max(_figure_pt(fig)[0], 1.0)))
+    text = _key_title(title, baseline, starting)
+    bottom, height = at if at is not None else _head_room(fig, floor_top=0.88, key_text=text)[1:]
+    # Five dots with their class beside each, and the title ending where the first begins — or, on a figure too narrow
+    # for the title there, on rows of its own above the dots (``_key_title_lines``; the caller's ``_head_room`` was
+    # given the same title, so the key is that many rows tall).
+    above = _key_title_lines(fig, text)
+    rows = 1 + len(above)
+    width = _key_width(fig)
     key = fig.add_axes([0.98 - width, bottom, width, height])  # top right, above the panels' titles
     # Phone layout hands the panels to constrained layout, which keeps clear of text written on the figure and knows
-    # nothing of an axes added by hand (``plot_style._figure_text_band``). A blank line of the key's own height at
-    # the key's own place tells it the band is taken, so the panels' titles start below the key rather than under it.
-    fig.text(0.98, bottom + height / 2, " ", fontsize=ANNOTATION_PT + 0.5, ha="right", va="center", alpha=0.0,
-             color=_inks(key)[1], gid="nw-legend-band")
+    # nothing of an axes added by hand (``plot_style._figure_text_band``). Blank lines of the key's own height at
+    # the key's own place tell it the band is taken, so the panels' titles start below the key rather than under it.
+    fig.text(0.98, bottom + height / 2, "\n".join([" "] * rows), fontsize=ANNOTATION_PT + 0.5, ha="right",
+             va="center", alpha=0.0, color=_inks(key)[1], gid="nw-legend-band")
     key.set_axis_off()
     key.set_xlim(0, 10)
     key.set_ylim(0, 1)
-    classes = ["0", "1", "2", "3+", None]
+    dots_y = 0.5 / rows                                  # the dots' row is the key's lowest
+    classes = list(_KEY_CLASSES)
     # The classes the Subset removes whole are drawn faint and named so, or a key would decode
     # colours the figure cannot contain.
     lo, hi = starting
     kept = [occupancy_in_filter(cls, lo, hi) for cls in classes]
     screen, publication = _occupancy_colours(classes)
     faces, edges = publication if _is_publication(key) else screen
-    coll = key.scatter([4.2, 5.4, 6.6, 7.8, 9.0], [0.5] * 5, s=(DOT_PT * 1.3) ** 2, facecolors=faces,
+    coll = key.scatter([4.2, 5.4, 6.6, 7.8, 9.0], [dots_y] * 5, s=(DOT_PT * 1.3) ** 2, facecolors=faces,
                        edgecolors=edges, linewidths=0.8)
     coll.set_alpha([1.0 if k else 0.2 for k in kept])
     theme_paired_colours(coll, screen=screen, publication=publication)
     muted = _inks(key)[2]
-    said = [part for part in (baseline, "" if all(kept) else "faint: filtered out") if part]
-    _ink(key.text(4.0, 0.5, title + (f" ({'; '.join(said)})" if said else "") + ":", ha="right",
-                  va="center", fontsize=ANNOTATION_PT + 0.5, color=muted, gid="nw-legend"), muted=True)
+    if above:
+        # Right-aligned to the figure's right margin, where the key ends, over the dots' row.
+        _ink(key.text(10.0, (1.0 + 1.0 / rows) / 2, "\n".join(above), ha="right", va="center",
+                      fontsize=ANNOTATION_PT + 0.5, color=muted, gid="nw-legend"), muted=True)
+    else:
+        _ink(key.text(4.0, dots_y, text, ha="right", va="center", fontsize=ANNOTATION_PT + 0.5, color=muted,
+                      gid="nw-legend"), muted=True)
     for xk, label, k in zip([4.2, 5.4, 6.6, 7.8, 9.0], ["0", "1", "2", "3+", "?"], kept):
-        _ink(key.text(xk + 0.2, 0.5, label, ha="left", va="center", fontsize=ANNOTATION_PT + 0.5, color=muted,
+        _ink(key.text(xk + 0.2, dots_y, label, ha="left", va="center", fontsize=ANNOTATION_PT + 0.5, color=muted,
                       gid="nw-legend", alpha=1.0 if k else 0.35), muted=True)
 
 
@@ -2291,7 +2348,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
     fig.clear()
     shown = panels[:MAX_PANELS]
     rows, cols = _grid(len(shown))
-    top, key_bottom, key_h = _head_room(fig, floor_top=0.88)
+    top, key_bottom, key_h = _head_room(fig, floor_top=0.88, key_text=_key_title(_TRAJECTORY_KEY))
     _adjust(fig, left=0.07, right=0.98, top=top, bottom=0.10 + _FOOTER_BASE + 2 * _line_step(fig), wspace=0.12,
                         hspace=0.42)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(shown))]
@@ -2359,7 +2416,7 @@ def render_trajectories(fig, panels, *, label: str, time_source: str | None = No
         if i + cols >= len(axes) or mixed:
             _ink(ax.set_xlabel("Time (h)" if panel.in_hours else "Timepoint (order; times unknown)", color=ink))
     if axes:
-        _occupancy_key(fig, "Thick lines · cells at baseline", at=(key_bottom, key_h))
+        _occupancy_key(fig, _TRAJECTORY_KEY, at=(key_bottom, key_h))
     lines = [(f"Fixed cohort: {drawn:,} nanowells with a value at every timepoint drawn, one line each; {without:,} "
               "without one at some timepoint not drawn." if cohort else
               f"{drawn:,} nanowells drawn, one line each; {without:,} with no value at any timepoint not drawn. "

@@ -336,6 +336,8 @@ def build_centre(win, parent: QWidget) -> None:
             f"QComboBox:hover {{ color: {_C.text_primary}; }}"
         )
         win._plotting_metric_cb.addItems(_METRIC_ORDER)
+        # A ceiling, so a long property ("Fraction above threshold") elides rather than pushing the band to two rows.
+        win._plotting_metric_cb.setMaximumWidth(theme.Metrics.form_label_w)
 
         def _on_global_metric(_idx: int) -> None:
             handler = getattr(win, "_on_metric_selected_global", None)

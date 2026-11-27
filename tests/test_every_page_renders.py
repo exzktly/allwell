@@ -59,12 +59,6 @@ DESIGN_PENDING: dict[tuple[str, str], str] = {
     ("Nanowells/QC", "band rows"): "D16",
     ("Nanowells/Statistics", "band rows"): "D16",
     ("Nanowells/Trajectories", "band rows"): "D16",
-    ("Plotting/Bar Plots", "band rows"): "D14",
-    ("Plotting/Distribution", "band rows"): "D14",
-    ("Plotting/Heat Map", "band rows"): "D14",
-    ("Plotting/Line Graphs", "band rows"): "D14",
-    ("Plotting/Response Curves", "band rows"): "D14",
-    ("Plotting/Scatter Plot", "band rows"): "D14",
 }
 
 def _design_key(page: str, check: str) -> tuple[str, str]:

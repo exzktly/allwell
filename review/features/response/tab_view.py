@@ -47,7 +47,7 @@ def _curves_summary(ctx) -> str:
     """What the Curves row reads: the X variable and the series split ("Dose · none")."""
     x_combo = ctx.widgets.get_or_none("_response_x_cb")
     x_text = (x_combo.currentText() if x_combo is not None else "") or "—"
-    return f"{_panels.short(x_text, 12)} · {_panels.short(series_button_text(ctx).split(': ', 1)[-1], 12)}"
+    return f"{_panels.short(x_text, 8)} · {_panels.short(series_button_text(ctx).split(': ', 1)[-1], 8)}"
 
 
 def build_response_tab(ctx, parent: QWidget) -> None:
@@ -104,7 +104,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     metric_combo.currentIndexChanged.connect(
         lambda *_: on_response_metric_changed(ctx))
     # A ceiling, so a long property ("Fraction above threshold") elides rather than widening the band past one row.
-    metric_combo.setMaximumWidth(theme.Metrics.form_label_w + theme.Spacing.xl)
+    metric_combo.setMaximumWidth(theme.Metrics.form_label_w)
     band.add_scope("Property", metric_combo)
 
     # Scope, beside X and for the same reason: it says what the figure is *of*.

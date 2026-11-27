@@ -68,25 +68,25 @@ class _HeaderLender:
         self._holders: list[tuple[QWidget, QWidget]] = []
 
     def arrange(self, phone: bool) -> None:
+        # The placeholders are made once and kept, hidden (a hidden widget takes no room in a layout), never
+        # deleted: a switch into phone layout is when phone layout's own event filter is being installed on the
+        # band's widgets, and an object torn down then has crashed the filter with an event for it.
         band_layout = self._band.layout()
-        if phone:
-            for w, holder in self._holders:
-                index = band_layout.indexOf(holder)
-                band_layout.insertWidget(index, w)
-                band_layout.removeWidget(holder)
-                holder.deleteLater()
-                w.show()
-            self._holders = []
-            self._band.show()
-            return
         if not self._holders:
-            for i, w in enumerate(self._widgets):
+            for w in self._widgets:
                 holder = QWidget(self._band)
                 holder.hide()
-                index = band_layout.indexOf(w)
-                band_layout.insertWidget(index, holder)
-                self._header_layout.insertWidget(self._at + i, w)
+                band_layout.insertWidget(band_layout.indexOf(w), holder)
                 self._holders.append((w, holder))
+        if phone:
+            for w, holder in self._holders:
+                if band_layout.indexOf(w) < 0:
+                    band_layout.insertWidget(band_layout.indexOf(holder) + 1, w)
+                w.show()
+            self._band.show()
+            return
+        for i, (w, _holder) in enumerate(self._holders):
+            self._header_layout.insertWidget(self._at + i, w)
         self._band.hide()
 
 

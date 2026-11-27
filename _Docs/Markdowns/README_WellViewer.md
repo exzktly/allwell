@@ -2018,8 +2018,10 @@ environment — and reports what the job found on its node: which node and Slurm
 job, how many of the node's CPUs it was given, the GPUs it can see, whether
 Torch can use them, and the Cellpose version. A job given one core of a bigger
 node, a GPU node whose Torch is a CPU-only build, or a missing Torch is called
-out with what to change. A node that has to start can take several minutes;
-closing the window cancels the job.
+out with what to change. The test opens in the host form itself, in place of
+the form's fields, and **Close** brings the form back; so does the SSH key
+setup. A node that has to start can take several minutes; **Cancel** cancels
+the job.
 
 **Reserve the whole node (--exclusive)**, under the scheduler command, is
 unticked by default, including for remotes you set up before. Ticked, it asks

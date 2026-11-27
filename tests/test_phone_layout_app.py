@@ -190,7 +190,9 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     shell._page_menu.actions()[1].trigger()
     _pump(qapp)
     assert shell.page_button.text() == f"{PROGRESS} ▾"
-    assert not _visible(form) and not dash.isCompact() and _visible(analyze._log)
+    assert not _visible(form) and not dash.isCompact()
+    # The log waits behind Show log until a run starts (design language D22), on a phone as at the desk.
+    assert not _visible(analyze._log) and _visible(analyze._raw_log_cb)
     grid = dash._plate.findChild(QWidget)
     assert grid.height() == grid.heightForWidth(grid.width()), \
         "the plate kept the height it had while the strip was compact"
@@ -238,7 +240,8 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert analyze._left_sidebar.parentWidget() is not drawer.contentWidget()
     split = analyze._left_sidebar.parentWidget()
     assert split.orientation() == Qt.Horizontal and split.indexOf(form) == 0
-    assert form.width() == theme.Metrics.rail_w
+    # The desk's own width again: Analyze's form column (design language D22), wider than the rail.
+    assert form.width() == theme.Metrics.form_column_w
     assert run_bar.objectName() != "PhoneRunBar" and form.isAncestorOf(run_bar)
     assert not dash.isCompact()
     assert not drawer.isVisible()

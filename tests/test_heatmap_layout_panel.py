@@ -205,7 +205,20 @@ def test_a_well_dropped_on_a_cell_of_the_panel_lands_in_that_cell(qtbot):
     assert table.item(2, 4).text() == "B02"
 
 
-def test_a_whole_plate_shows_in_the_inspector_without_scrolling(qtbot):
+@pytest.fixture(params=["app font", "DejaVu Sans"])
+def font(request):
+    """The application's font, and DejaVu Sans — the CI runner's, which is
+    wider: with it the grid once came out 1 px too wide and scrolled."""
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+    old = QApplication.font()
+    if request.param != "app font":
+        QApplication.setFont(QFont(request.param, old.pointSize()))
+    yield request.param
+    QApplication.setFont(old)
+
+
+def test_a_whole_plate_shows_in_the_inspector_without_scrolling(qtbot, font):
     """An 8×12 plate fits the inspector's width whole."""
     rig = _rig(qtbot)
     rig.button.click()

@@ -43,12 +43,10 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QAbstractScrollArea,
     QApplication,
-    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QStyle,
@@ -431,10 +429,10 @@ def open_layout_panel_if_empty(ctx) -> None:
 class _LayoutPanel(QWidget):
     """The Layout panel: the body of the inspector's Layout page.
 
-    A scrolling body: the grid size, the bulk actions, the grid, and one line
-    saying how to use it. The inspector's header carries the title, Back and
-    Close. The body scrolls so the panel fits a phone held sideways, where the
-    sheet is shorter than the grid and its controls.
+    The grid size, the bulk actions, the grid, and one line saying how to use
+    it. The inspector's header carries the title, Back and Close, and its page
+    scrolls the panel on a phone held sideways, where the sheet is shorter than
+    the grid and its controls.
     """
 
     def __init__(self, ctx, parent: QWidget | None) -> None:
@@ -446,17 +444,15 @@ class _LayoutPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(sp.sm)
 
-        scroll = QScrollArea(self)
-        scroll.setObjectName("HeatmapLayoutScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        body = QWidget()
+        # No scroll area of its own: the inspector page it is shown as scrolls
+        # (``Inspector._new_slot``). A second one inside it took its scroll
+        # bar's width from the grid, and with DejaVu Sans an 8 × 12 plate then
+        # no longer fitted (measured: 12 columns of 26 px into 298).
+        body = QWidget(self)
         body_l = QVBoxLayout(body)
-        body_l.setContentsMargins(sp.xs, 0, sp.xs, 0)
+        body_l.setContentsMargins(0, 0, 0, 0)
         body_l.setSpacing(sp.md)
-        scroll.setWidget(body)
-        root.addWidget(scroll, 1)
+        root.addWidget(body, 1)
 
         body_l.addWidget(self._build_size_row(ctx, body))
 

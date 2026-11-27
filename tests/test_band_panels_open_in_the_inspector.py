@@ -36,7 +36,12 @@ def _buttons(ctx, window) -> list[QToolButton]:
     """The panel buttons on screen, in the order the row holds them."""
     found = [b for b in window.findChildren(QToolButton)
              if panels.panel_of(b) is not None and b.isVisibleTo(window)]
-    return sorted(found, key=lambda b: b.mapTo(window, b.rect().topLeft()).x())
+    # Row by row, then left to right: with a wider font (DejaVu Sans on the CI
+    # runner) the band wraps, and x alone then put a second-row button first.
+    def at(b):
+        p = b.mapTo(window, b.rect().topLeft())
+        return (p.y(), p.x())
+    return sorted(found, key=at)
 
 
 @pytest.mark.parametrize("name", sorted(PANELS))

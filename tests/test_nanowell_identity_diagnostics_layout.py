@@ -23,6 +23,21 @@ import pytest
 
 from tests.test_nanowell_identity_view import _draw, _montages, _texts, dataset  # noqa: F401  (a fixture)
 
+
+@pytest.fixture(autouse=True, scope="module")
+def _the_app_s_own_font():
+    """Draw in the face the app ships and registers at start-up (``startup/mpl_bootstrap``), not whatever the
+    machine has: these layouts fit to the point, so a container with Inter installed system-wide and a CI runner
+    falling back to the wider DejaVu Sans measured different cards, and the small-card cases passed on one and
+    failed on the other."""
+    from pathlib import Path
+
+    from matplotlib import font_manager
+
+    for face in sorted((Path(__file__).resolve().parent.parent / "assets" / "fonts").glob("Inter*.ttf")):
+        font_manager.fontManager.addfont(str(face))
+    assert "Inter" in {f.name for f in font_manager.fontManager.ttflist}
+
 #: The sizes the plot card is seen at, in inches: the default, the site detail open beside it, a short wide window,
 #: a large window, a phone's width — and three cards smaller than that phone. The layout held at 4 × 6 here and
 #: overlapped on CI, whose text set a hair larger: 4 × 6 was the edge of what it could fit, and below it the pictures

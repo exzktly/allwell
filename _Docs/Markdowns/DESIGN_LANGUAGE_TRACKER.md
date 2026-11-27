@@ -513,7 +513,15 @@ Step log (newest last):
    beside an `unlabelled` box inside the Where scope; `_show_where` shows and hides the field) and the Statistics
    view's Donor (`statistics_view.py`, `StatisticsControls.donor_field` is what is shown and hidden). The five
    Nanowells `label inside` entries removed from `DESIGN_PENDING` — to be confirmed by the every-page run. Ruff
-   and 17 Nanowells test files (261 tests) green. No `LabeledComboBox` in a band is left painting its label.
+   and 17 Nanowells test files (261 tests) green. No `LabeledComboBox` in a band is left painting its label. Commit `e1dae3e`.
+9. CI on `830a3f9`: the nanowell-features job failed `test_nanowell_identity_diagnostics_layout.py::
+   test_a_low_card_leaves_the_axis_labels_out_and_says_their_unit[A01, A02]` (pictures 26.9 pt against > 40; tick
+   overlaps). Cause: the runner has no Inter installed and matplotlib fell back to DejaVu Sans (its glyph warning is
+   in the log), which is wider; this container has Inter system-wide, so it passed here. Fix: the test file
+   registers the bundled `assets/fonts/Inter*.ttf` (what the app registers at start-up) in a module fixture.
+   Checked here that with the system Inter removed from matplotlib's list, `findfont("Inter")` falls back to
+   DejaVu without the fixture and resolves to `assets/fonts/Inter-Regular.ttf` with it; the file's 34 tests pass.
+   Whether CI then passes is for the next run. Every-page run on `e1dae3e` in progress.
 
 ## 10. Rows
 

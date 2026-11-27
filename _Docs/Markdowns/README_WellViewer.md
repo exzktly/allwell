@@ -11018,7 +11018,7 @@ holds the jobs a plan becomes, and the Runs tab what each use of one did.
 - **Open the result in Review when the last Analyze step finishes** — tick
   it, and every run applied from then on puts its analysed result in front of
   you when it is ready, carefully, since nobody may be expecting it:
-  - **nobody is using the app** (no key or mouse input for two minutes, or
+  - **nobody is using the app** (the mouse has not moved for two minutes, or
     another application is in front): it loads the result and switches to
     Review;
   - **you are working in Analyze or Datasets**: it loads the result in Review

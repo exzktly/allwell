@@ -1556,8 +1556,8 @@ allwell/
 │   ├── safe.py                 ← swallow() / swallowed(): the logged suppression every module
 │   │                              reaches for (util/aw_safe.py is its pipeline-side twin, which
 │   │                              exists because util/ may not import Qt)
-│   ├── user_activity.py        ← when the person last used the app (an application event
-│   │                              filter), and review_hand_off: whether a recipe run's
+│   ├── user_activity.py        ← when the person last used the app (the mouse position,
+│   │                              sampled), and review_hand_off: whether a recipe run's
 │   │                              result may move the window to Review
 │   ├── app_settings.py         ← the one QSettings wrapper
 │   ├── profile.py              ← reads ALLWELL_PROFILE and resolves profiles/<name>.toml
@@ -21371,15 +21371,19 @@ Qt event loop. Four layers:
   last), and calls `review_hook(root, when_idle=True)`, which `DatasetsTab`
   sets from the shell (`AllWellApp._show_result_in_review`). The shell asks
   `core.user_activity.review_hand_off`: `switched` (nobody is using the app —
-  no input for `IDLE_AFTER_SECONDS`, or another application in front),
+  the mouse has not moved for `IDLE_AFTER_SECONDS`, or another application is
+  in front),
   `loaded` (someone is working in another pane: the dataset loads behind them
   and the window stays), or `held` (someone is reading Review itself: nothing
   is loaded, since that would replace what they are reading). The outcome, in
   `OUTCOME_MESSAGES`' words, is appended to the job's message, journalled as a
   `status` event, and for `held` also toasted (`on_review_held`). A root with
   nothing analysed is said, not opened. `core/user_activity.py`'s
-  `UserActivity` filter is installed by the shell at start-up so the idle clock
-  runs from launch. The load itself is the shell's deferred
+  `UserActivity` samples the mouse position every `SAMPLE_MS` (a moved cursor
+  is activity), started by the shell at launch so the idle clock runs from
+  then. It samples rather than installing an application-wide event filter:
+  a Python `eventFilter` on the `QApplication` runs for every event of every
+  widget, and one crashed the app natively under the page-tour test. The load itself is the shell's deferred
   `_load_in_review_later`, so a dataset that then fails to load is reported by
   Review. The option is a property of the recipe rather than a job of its own:
   it has no settings beyond on and off, and a queue step for it would have

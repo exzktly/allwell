@@ -387,3 +387,47 @@ def test_the_page_is_one_sidebar_entry_with_three_tabs(tab):
     page = tab._automation
     assert [page.tabs.tabText(i) for i in range(page.tabs.count())] == ["Queue", "Recipes", "Runs"]
     assert page.tabs.widget(0) is tab._controllers["job_queue"].page
+
+
+def test_activity_is_a_moved_mouse_and_idle_is_a_still_one(qapp, monkeypatch):
+    """Sampled, not intercepted: an application-wide Python event filter
+    crashed the app natively under the page tour."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QGuiApplication
+
+    import core.user_activity as ua
+
+    positions = iter([QPoint(1, 1), QPoint(1, 1), QPoint(5, 9)])
+    monkeypatch.setattr(ua.QCursor, "pos", staticmethod(lambda: next(positions)))
+    clock = [100.0]
+    monkeypatch.setattr(ua.time, "monotonic", lambda: clock[0])
+    sampler = ua.UserActivity()
+    try:
+        monkeypatch.setattr(ua, "_INSTANCE", sampler)
+        monkeypatch.setattr(QGuiApplication, "applicationState",
+                            staticmethod(lambda: Qt.ApplicationActive))
+        clock[0] = 100.0 + ua.IDLE_AFTER_SECONDS - 1
+        sampler.sample()                       # same position: no activity
+        assert not ua.is_idle()
+        clock[0] = 100.0 + ua.IDLE_AFTER_SECONDS
+        assert ua.is_idle()
+        sampler.sample()                       # moved: activity now
+        assert not ua.is_idle()
+        monkeypatch.setattr(QGuiApplication, "applicationState",
+                            staticmethod(lambda: Qt.ApplicationInactive))
+        assert ua.is_idle()                    # another application in front
+    finally:
+        sampler._timer.stop()
+        sampler.deleteLater()
+
+
+def test_the_app_installs_no_application_wide_event_filter():
+    """The guard for the crash: nothing in core.user_activity reimplements
+    eventFilter or installs one on the application."""
+    import inspect
+
+    import core.user_activity as ua
+
+    source = inspect.getsource(ua)
+    assert "def eventFilter" not in source
+    assert "installEventFilter" not in source

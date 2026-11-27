@@ -65,3 +65,20 @@ def test_set_spacing_rerenders_once_a_table_is_built(image_table_app, monkeypatc
     C.image_table_set_spacing(ctx, "row_group_gap", 30)
     assert ctx.state.image_table.row_group_gap == 30
     assert calls, "set_spacing must re-render once cells exist, even pre-Generate"
+
+
+@pytest.mark.qt
+def test_share_names_its_entries_as_every_plot_page_does_in_the_same_order(image_table_app):
+    """The plot pages' Share reads Save figure…, Copy figure as SVG, then Save to
+    Saved Plots (``ui_helpers.build_plot_save_menu``). The Image Table's said
+    "Export to File…" and "Copy SVG" for the same jobs."""
+    from PySide6.QtWidgets import QToolButton
+
+    window = image_table_app
+    share = next(b for b in window.findChildren(QToolButton)
+                 if b.property("bandRole") == "share" and b.menu() is not None
+                 and "Save figure…" in [a.text() for a in b.menu().actions()])
+    names = [a.text() for a in share.menu().actions() if a.text()]
+    assert "Export to File…" not in names and "Copy SVG" not in names
+    order = [n for n in names if n in ("Save figure…", "Copy figure as SVG", "Save to Saved Plots")]
+    assert order == ["Save figure…", "Copy figure as SVG", "Save to Saved Plots"], names

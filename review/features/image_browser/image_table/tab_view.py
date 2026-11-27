@@ -487,14 +487,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
     export_btn.setProperty("bandRole", "share")
     emenu = export_btn.menu()
-    owned_action(emenu, "Export to File…").triggered.connect(
+    owned_action(emenu, "Save figure…").triggered.connect(
         lambda _=False: image_table_export(ctx))
     owned_action(emenu, "Export to PowerPoint…").triggered.connect(
         lambda _=False: image_table_export_pptx(ctx))
     emenu.addSeparator()
-    owned_action(emenu, "Copy PNG").triggered.connect(
+    owned_action(emenu, "Copy figure as PNG").triggered.connect(
         lambda _=False: image_table_copy_png(ctx))
-    owned_action(emenu, "Copy SVG").triggered.connect(
+    owned_action(emenu, "Copy figure as SVG").triggered.connect(
         lambda _=False: image_table_copy_svg(ctx))
     emenu.addSeparator()
     owned_action(emenu, "Save to Saved Plots").triggered.connect(

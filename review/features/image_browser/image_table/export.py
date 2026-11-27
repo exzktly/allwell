@@ -91,7 +91,7 @@ def _load_cell_array(ctx, cache, well, chan, tp, fov, *, use_tophat):
     The live grid resolves a ratio channel through ``_find_ratio_for_channel``
     / ``_load_ratio_array`` before falling back to a plain frame load
     (``controller._cell_array``); the export builder had only the plain load,
-    so every ratio cell exported as ``(no image)`` — in Export to File, Copy
+    so every ratio cell exported as ``(no image)`` — in Save figure, Copy
     PNG, Copy SVG and Save to Saved Plots alike — while the screen showed it.
     """
     ratio = _find_ratio_for_channel(ctx, chan)
@@ -116,7 +116,7 @@ def _export_opts(ctx) -> dict[str, Any]:
             "transparent_bg": True,
             # "Save to Saved Plots" resolution/speed trade-off -- see
             # GALLERY_QUALITY_PRESETS. Only the gallery-save path reads this;
-            # Export to File / Copy PNG / Copy SVG always render full-res.
+            # Save figure / Copy figure as PNG / as SVG always render full-res.
             "gallery_quality": DEFAULT_GALLERY_QUALITY,
         }
         ctx.state.image_table.export_opts = opts
@@ -158,7 +158,7 @@ def image_table_open_export_settings(ctx) -> None:
         opts.get("gallery_quality", DEFAULT_GALLERY_QUALITY)))
     quality_cb.setToolTip(
         "Resolution → speed trade-off for “Save to Saved Plots” only "
-        "(Export to File / Copy PNG / Copy SVG always render full resolution)."
+        "(Save figure / Copy figure as PNG / as SVG always render full resolution)."
     )
     form.addRow("Save to Saved Plots quality:", quality_cb)
 

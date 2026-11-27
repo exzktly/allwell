@@ -8203,7 +8203,7 @@ channel for every well).
   short list of real images looks exactly like a well that genuinely holds that
   few, so the status line after **Generate** names the wells whose inventory was
   cut short and why — and so does **every way of getting the table out of the
-  app**: Export to File, Copy PNG, Copy SVG and Save to Saved Plots all repeat
+  app**: Save figure, Copy figure as PNG, Copy figure as SVG and Save to Saved Plots all repeat
   it. Those artifacts outlive the status line and are short by however many
   frames were never reached, with nothing in them to say so. It is the same
   sentence in all five places, beside the one about a scale bar that would not
@@ -8292,8 +8292,8 @@ channel for every well).
   marked *(no image)*, and the slide says how many; if *no* field could be read
   there is nothing to lay out, and the gallery deck falls back to the flat
   picture rather than giving you a page of empty boxes.
-- **Exported layout** — the other ways out of the table (**Export to File…**, **Copy PNG**,
-  **Copy SVG**, **Save to Saved Plots**) reproduce the grid as you see it: the row and
+- **Exported layout** — the other ways out of the table (**Save figure…**, **Copy figure as PNG**,
+  **Copy figure as SVG**, **Save to Saved Plots**) reproduce the grid as you see it: the row and
   column axis labels, the vertical group strips, the corner label, and the extra
   spacing between groups. The saved image also reads at the same brightness as the
   grid on screen. Because the axis labels already identify every cell, the per-cell
@@ -8306,7 +8306,7 @@ channel for every well).
   field, so it takes noticeably more room in the dataset folder than the single
   snapshot did, and this preset is the control over that. Save to Saved Plots
   pre-shrinks each cell and caps the
-  assembled grid's longest side before saving (Export to File / Copy PNG / Copy SVG
+  assembled grid's longest side before saving (Save figure / Copy figure as PNG / as SVG
   always render full resolution), so a large grid saves faster at the cost of per-cell
   detail; raise it to **High** when the saved image needs to hold up in a full-page PDF
   report. Save to Saved Plots also reuses whatever the last **Generate** already

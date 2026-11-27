@@ -26,6 +26,25 @@ def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-")
 
 
+def start_window(qapp):
+    """Build the window as ``allwell.main`` does: the bundled fonts, then the shipped theme, then the window.
+
+    The fonts, so the pages are measured in the face the app ships rather than in whatever this machine's
+    fontconfig makes of "Sans Serif" — DejaVu Sans on the CI runner. The theme, because the token classes in
+    ``ui/theme.py`` hold the *blue* baseline until a theme is applied, and only ``allwell.main`` applies one:
+    a window built without this call is painted in a palette no user starts in, and every screenshot taken
+    from it shows that palette. ``select_theme_from_env`` honours ``ALLWELL_THEME``, so a run can render
+    either palette; unset, it applies ``DEFAULT_THEME``, which is what a user sees.
+    ``tests/test_the_render_harness_shows_the_shipped_theme.py`` holds both halves.
+    """
+    from allwell import AllWellApp, use_bundled_fonts
+    from ui import theme
+
+    use_bundled_fonts(qapp)
+    theme.select_theme_from_env()
+    return AllWellApp(None)
+
+
 def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     from PySide6.QtWidgets import QApplication
 
@@ -36,11 +55,6 @@ def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     from widgets.empty_state import EmptyState
 
     qapp = QApplication.instance() or QApplication([])
-    from allwell import AllWellApp, use_bundled_fonts
-
-    # The fonts every launch uses (``allwell.main``), so the pages are measured in the face the app ships rather
-    # than in whatever this machine's fontconfig makes of "Sans Serif" — DejaVu Sans on the CI runner.
-    use_bundled_fonts(qapp)
 
     rect, phone = SCREENS[screen], is_phone(screen)
     shots = os.environ.get("ALLWELL_PAGE_SHOTS")
@@ -49,7 +63,7 @@ def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     pages: list[dict] = []
     with FakeScreen(rect):
         data, wells = build(kind, workdir)
-        win = AllWellApp(None)
+        win = start_window(qapp)
         win.show()
         pump(qapp)
         win._review._load_path(data)

@@ -67,6 +67,10 @@ def scenarios(qapp, phone_screen):
 
     shutil.rmtree(SNAPSHOT_DATASET.parent, ignore_errors=True)
     dataset = build_mini_dataset(SNAPSHOT_DATASET)
+    # The theme the app starts in, as ``allwell.main`` applies it (``tests/_page_render_case.start_window``
+    # says why a window built without it shows the blue baseline). A theme bundle moves colours only today, so
+    # the recorded geometry is the same in either palette; the theme is applied so that stops being an accident.
+    theme.select_theme_from_env()
     win = AllWellApp(None)
     win.show()
     place(win, phone_screen.rect, qapp)
@@ -79,6 +83,7 @@ def scenarios(qapp, phone_screen):
     finally:
         phone_layout.set_on(False)
         theme.apply_ui_scale(1.0)
+        theme.apply_theme("blue")
         shutil.rmtree(SNAPSHOT_DATASET.parent, ignore_errors=True)
         win.close()
 

@@ -65,9 +65,16 @@ def _page(qtbot, path):
     window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features   # as ReviewApp sets them
     load_dataset(ctx, path)
     ctx.state.channel.active_channel = "gfp"
+    # The splitter Review's pages sit in (``app_shell_view``); the desk
+    # inspector docks at its right.
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSplitter
+    split = QSplitter(Qt.Horizontal)
     frame = QWidget()
     QHBoxLayout(frame)
-    window.setCentralWidget(frame)
+    split.addWidget(frame)
+    window.setCentralWidget(split)
+    window._h_pane = split
     build_nanowell_tab(ctx, frame)
     window.resize(1500, 900)
     window.show()
@@ -633,7 +640,7 @@ def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
                if t.get_gid() == "nw-array-notes")
     nwc.apply_array_preset(page, "qc")                                 # a preset keeps the reader's choice
     assert st.layers.notes and button.isChecked()
-    page.widgets.get("_nw_layer_notes").trigger()                      # and the menu entry turns both off
+    page.widgets.get("_nw_layer_notes").click()                      # and the menu entry turns both off
     assert not st.layers.notes and not button.isChecked() and not _texts(page, "nw-array-notes")
 
 

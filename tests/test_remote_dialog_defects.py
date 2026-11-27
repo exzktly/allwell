@@ -781,3 +781,23 @@ def test_a_launcher_with_a_loose_word_is_refused_and_named(qtbot, boxes, monkeyp
         "--constraint=g4dn.12xlarge")
     dlg._on_ok()
     assert written, "the corrected launcher was refused too"
+
+
+
+def test_the_ssh_key_wizard_is_a_page_of_the_form_and_its_key_reaches_the_field(qtbot, monkeypatch):
+    """Manage Remote Servers → the host form → the wizard was three windows
+    deep. It is a page of the form; finishing it puts the key in the form."""
+    from pathlib import Path
+
+    import analyze.remote_dialog as ard
+
+    form = ard.RemoteFormDialog(None)
+    qtbot.addWidget(form)
+    form._ssh_alias_edit.setText("hpc")
+    form._open_ssh_key_wizard()
+    wizard = form.current_page()
+    assert isinstance(wizard, ard.SSHKeyWizardDialog) and wizard.window() is form
+    wizard.installed_key_path = Path("/tmp/id_allwell")
+    wizard.accept()
+    assert form._ssh_key_edit.text() == "/tmp/id_allwell"
+    assert not isinstance(form.current_page(), ard.SSHKeyWizardDialog)

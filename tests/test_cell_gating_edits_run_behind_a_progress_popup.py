@@ -25,6 +25,7 @@ import pytest
 pytest.importorskip("PySide6")
 pytest.importorskip("matplotlib")
 
+from tests import _panels as panels  # noqa: E402
 from tests._panel_jobs import wait_for_panel_jobs  # noqa: E402
 
 _MAIN = threading.get_ident()
@@ -131,10 +132,8 @@ def test_typing_a_qc_bound(qtbot, panel, monkeypatch):
 # ── fields of view ───────────────────────────────────────────────────────
 
 def test_changing_the_fields_of_view(qtbot, panel, monkeypatch):
-    from PySide6.QtWidgets import QCheckBox
 
     from review.features.qc import controller as qc
-    from widgets import menu_exec
 
     from review.features.home.cell_gating import controller
 
@@ -144,13 +143,12 @@ def test_changing_the_fields_of_view(qtbot, panel, monkeypatch):
     _record_thread(monkeypatch, qc, "reproject_verdicts", threads)
     _record_thread(monkeypatch, controller, "_read_first_frames", cdf_threads)
 
-    def _untick_2(menu, _pos):
-        for box in menu.findChildren(QCheckBox):
-            if box.text() == "FOV 2":
-                box.setChecked(False)
-
-    monkeypatch.setattr(menu_exec, "exec_menu", _untick_2)
-    ctx.widgets.get("_cell_gating_fov_btn").click()
+    button = ctx.widgets.get("_cell_gating_fov_btn")
+    button.click()
+    page = panels.picker(button)
+    next(box for box in page.boxes() if box.text() == "FOV 2").setChecked(False)
+    assert shown == [], "a tick applied before the burst had settled"
+    panels.settle(page)
     assert shown == ["Applying the fields of view"]
     wait_for_panel_jobs(qtbot, ctx)
     assert _off_gui(threads)
@@ -223,13 +221,10 @@ def test_switching_fraction_on_to_a_scatter_gate(qtbot, panel, monkeypatch):
     assert ctx.state.cell_gating.applied_gating["use_thresh"] is True
 
 
-def test_picking_gates_applies_once_when_the_menu_closes(qtbot, panel, monkeypatch):
-    """Two ticks in one opening are one pass and one popup, run after the menu
-    has closed — a popup opening on the first tick would close the menu."""
-    from PySide6.QtWidgets import QCheckBox
-
-    from review.features.home.cell_gating.tab_view import _open_gate_filter_menu
-    from widgets import menu_exec
+def test_picking_gates_applies_once_per_burst_of_ticks(qtbot, panel, monkeypatch):
+    """Three ticks in one burst are one pass and one popup, run once the burst
+    has settled — not one per tick, each behind a progress popup."""
+    from review.features.home.cell_gating.tab_view import _GATE_BUTTON_ATTR, _open_gate_filter_menu
 
     ctx, shown = panel
     _draw_two_gates(ctx)
@@ -237,18 +232,14 @@ def test_picking_gates_applies_once_when_the_menu_closes(qtbot, panel, monkeypat
     wait_for_panel_jobs(qtbot, ctx)
     shown.clear()
     threads = _gating_threads(monkeypatch)
-    during_menu: list = []
-
-    def _untick_both_then_retick_g2(menu, _pos):
-        boxes = {b.text(): b for b in menu.findChildren(QCheckBox)}
-        boxes["G1"].setChecked(False)
-        boxes["G2"].setChecked(False)
-        boxes["G2"].setChecked(True)
-        during_menu.extend(shown)
-
-    monkeypatch.setattr(menu_exec, "exec_menu", _untick_both_then_retick_g2)
     _open_gate_filter_menu(ctx, "gating")
-    assert during_menu == [], "a tick applied while the menu was still open"
+    page = panels.picker(getattr(ctx.runtime.cell_gating, _GATE_BUTTON_ATTR["gating"]))
+    boxes = {b.text(): b for b in page.boxes()}
+    boxes["G1"].setChecked(False)
+    boxes["G2"].setChecked(False)
+    boxes["G2"].setChecked(True)
+    assert shown == [], "a tick applied before the burst had settled"
+    panels.settle(page)
     assert shown == ["Applying cell gating"]
     wait_for_panel_jobs(qtbot, ctx)
     assert _off_gui(threads) and len(threads) == 1

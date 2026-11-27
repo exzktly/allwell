@@ -1,6 +1,6 @@
 """The converters' timepoint picker: which of the source's timepoints to convert.
 
-A :class:`~widgets.checkable_dropdown.CheckableDropdown` listing every
+A :class:`~widgets.multi_select.MultiSelectButton` listing every
 timepoint the source holds by its own token (``t0``, ``24h``), with the one
 piece of meaning the three converter pages share on top of it: **everything
 ticked is the default and is reported as no selection at all**, so a page left
@@ -20,14 +20,14 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget
 
-from widgets.checkable_dropdown import CheckableDropdown
+from widgets.multi_select import MultiSelectButton
 
 _MISSING_SUFFIX = " (not in this source)"
-#: The menu's first line while the source is being read and no timepoint is listed yet.
+#: What the page says while the source is being read and no timepoint is listed yet.
 _READING_MENU = "Reading the timepoints… they are listed here once the source has been read"
 
 
-class TimepointPicker(CheckableDropdown):
+class TimepointPicker(MultiSelectButton):
     """Tick the timepoints to convert; ``subset()`` is what the params carry."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -64,7 +64,7 @@ class TimepointPicker(CheckableDropdown):
         """
         tokens = [str(t) for t in tokens]
         self._reading = False
-        self.setEmptyMenuText("")
+        self.setEmptyPageText("")
         if tokens == self._tokens:
             self._refresh_summary()
             return
@@ -74,7 +74,7 @@ class TimepointPicker(CheckableDropdown):
     def set_reading(self, reading: bool) -> None:
         """Say the source is being read and its timepoints are not listed yet.
 
-        Without it an empty list read "No timepoints ticked", and the menu offered only All and None —
+        Without it an empty list read "No timepoints ticked", and the page offered only All and None —
         a picker that looks broken, beside a Convert button that is available during the read and
         then converts every timepoint. A new source clears the old one's tokens as it starts reading.
         """
@@ -83,7 +83,7 @@ class TimepointPicker(CheckableDropdown):
             self._tokens = []
             self._rebuild()
         self._refresh_summary()
-        self.setEmptyMenuText(_READING_MENU if self._reading else "")
+        self.setEmptyPageText(_READING_MENU if self._reading else "")
 
     def is_reading(self) -> bool:
         return self._reading
@@ -94,16 +94,16 @@ class TimepointPicker(CheckableDropdown):
         if getattr(self, "_tokens", None) is None or self._tokens or self.count():
             return
         if getattr(self, "_reading", False):
-            self._button.setText("Reading the timepoints…  ▾")
+            self._set_face("Reading the timepoints…")
             self._button.setToolTip(
                 "The source is still being read. Its timepoints are listed here as soon as they are "
                 "known; a conversion started before then converts every timepoint.")
         elif self._subset == ():
-            self._button.setText("Every timepoint  ▾")
+            self._set_face("Every timepoint")
 
     # ── internals ────────────────────────────────────────────────────────
     def _set_all(self, value: bool) -> None:
-        """The menu's **All** / **None**. *All* means the whole source.
+        """The page's **All** / **None**. *All* means the whole source.
 
         Overridden because ticking every *listed* item also ticks a restored
         token the source does not hold — and when the plan refused on that
@@ -122,6 +122,12 @@ class TimepointPicker(CheckableDropdown):
             self.changed.emit()
         finally:
             self._settled = False
+
+    def _bulk_enabled(self) -> bool:
+        # All means "every timepoint of the source" whatever is listed, and it
+        # is the way out of a selection the plan refused before the source's
+        # tokens arrived — so it is offered over an empty list too.
+        return True
 
     def _rebuild(self) -> None:
         subset = self._subset

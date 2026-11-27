@@ -8,8 +8,8 @@ handling those one frame at a time means repeating an identical gesture hundreds
 of times. Equally, a crop that should only clip the two wells whose edge was
 imaged badly must not be forced onto the rest of the plate.
 
-Both needs are the same control: three checkable dropdowns (wells, FOVs,
-timepoints), a shortcut that arms the current plate selection, and a reset. What
+Both needs are the same control: three multi-selects (wells, FOVs,
+timepoints), each a row that opens its list as a page over the scope's own, a shortcut that arms the current plate selection, and a reset. What
 differs between them is carried by the :class:`~review.core.frame_scope.ScopeSpec`
 — which typed-state fields to write, what an un-armed field means, and what to
 re-derive after a change. The Qt-free half (options, readout, state writes) is
@@ -25,11 +25,13 @@ from PySide6.QtWidgets import QLabel, QWidget
 
 from review.core.frame_scope import (
     ScopeSpec, apply_scope_change, current_frame, read_scope,
-    refresh_scope_button, reset_scope, scope_options, write_scope_field,
+    refresh_scope_button, reset_scope, scope_options, scope_value, write_scope_field,
 )
 from core.safe import swallowed
-from review.core.ui_helpers import make_popover_button
-from widgets.checkable_dropdown import CheckableDropdown
+from review.core import inspector_panels
+from review.core.inspector_panels import make_popover_button
+from review.core import inspector_pages
+from widgets.multi_select import MultiSelectButton
 from ui import buttons
 
 # Width the three dropdowns share, so they line up as a column. This is what a
@@ -38,7 +40,7 @@ from ui import buttons
 _FIELD_W = 190
 
 # How long a burst of ticks is allowed to run together before the spec's
-# ``on_change`` fires. A ``CheckableDropdown`` emits ``changed`` once per item,
+# ``on_change`` fires. A ``MultiSelectButton`` emits ``changed`` once per tick,
 # and the crop's on_change re-projects ``Crop_Pass`` over every cached well,
 # redraws the active plot and re-renders the canvas — so ticking eleven wells
 # one at a time ran eleven full recomputes on the UI thread. The state and the
@@ -51,7 +53,7 @@ _COMMIT_DEBOUNCE_MS = 400
 def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     """Build *spec*'s scope popover button for the Segmentation control band."""
     btn, panel, lay = make_popover_button(
-        f"{spec.title}: {spec.unarmed_text}", ctrl)
+        spec.title, ctrl, ctx=ctx, tab="data", summary=lambda: scope_value(ctx, spec))
     btn.setToolTip(spec.tooltip)
     ctx.widgets.register(spec.button_key, btn)
 
@@ -67,15 +69,25 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     # which, in every state including un-armed (``_seed`` ticks either the
     # displayed frame's value or every option, so a button reads "1 of 3
     # timepoints" rather than going blank).
-    wells_dd = CheckableDropdown(panel, noun="wells", empty_text="No wells")
-    fovs_dd = CheckableDropdown(panel, noun="FOVs", empty_text="No FOVs")
-    tps_dd = CheckableDropdown(panel, noun="timepoints", empty_text="No timepoints")
+    wells_dd = MultiSelectButton(panel, noun="wells", empty_text="No wells", title="Wells")
+    fovs_dd = MultiSelectButton(panel, noun="FOVs", empty_text="No FOVs", title="FOVs")
+    tps_dd = MultiSelectButton(panel, noun="timepoints", empty_text="No timepoints", title="Timepoints")
     dropdowns = (wells_dd, fovs_dd, tps_dd)
+
+    def _open_page(dropdown: MultiSelectButton) -> None:
+        # The list is a page of the inspector, over this scope's own page: the
+        # one way to pick several in Review, and nothing opens on top of it.
+        inspector_pages.open_multi_select(
+            ctx, dropdown, key=f"{spec.button_key}/{dropdown.title()}", title=dropdown.title(),
+            items=dropdown.items(), checked=dropdown.checkedData(),
+            on_change=dropdown.applyChecked, tab="data")
+
     for _dd in dropdowns:
         _dd.setMinimumWidth(_FIELD_W)
+        _dd.setOpener(_open_page)
         lay.addWidget(_dd)
 
-    def _seed(dropdown: CheckableDropdown, options, armed, current) -> None:
+    def _seed(dropdown: MultiSelectButton, options, armed, current) -> None:
         """Refill *dropdown* and restore its ticks without emitting ``changed``.
 
         When the field is un-armed (``None``) the popover shows what that field
@@ -145,7 +157,7 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
 
     panel.destroyed.connect(lambda *_a: _apply_on_teardown())
 
-    def _commit(index: int, dropdown: CheckableDropdown) -> None:
+    def _commit(index: int, dropdown: MultiSelectButton) -> None:
         """Write one field now; let the re-derivation settle.
 
         ``write_scope_field`` is given no ``on_change`` here — the state write
@@ -208,10 +220,8 @@ def build_frame_scope_control(ctx, ctrl: QWidget, spec: ScopeSpec):
     reset_btn.clicked.connect(lambda _=False: _reset())
     lay.addWidget(reset_btn)
 
-    menu = btn.menu()
-    if menu is not None:
-        menu.aboutToShow.connect(_repopulate)
-        # Closing the popover is the user saying they are done ticking, so the
-        # pending re-derivation runs then rather than waiting out its timer.
-        menu.aboutToHide.connect(_flush)
+    inspector_panels.on_open(btn, _repopulate)
+    # Leaving the page is the user saying they are done ticking, so the
+    # pending re-derivation runs then rather than waiting out its timer.
+    inspector_panels.on_close(btn, _flush)
     return btn

@@ -1,13 +1,14 @@
 """ColorSwatchRow — a curated row of tappable colour swatches (+ recents + a
-"Custom" tile that opens the full colour picker).
+"Custom" tile that asks for the full colour picker).
 
 The mockup never opens a free-form colour dialog by default; you pick from a
 small constrained set. The selected swatch gets a 2-px accent ring drawn
 outside its fill. When ``allow_custom`` is on, the row also shows:
 
 * a small group of *recent* custom colours (≤ ``max_recents``), and
-* a conic-gradient **"Custom"** tile at the very end — clicking it opens a
-  :class:`widgets.color_picker_popover.ColorPickerPopover` anchored at the
+* a conic-gradient **"Custom"** tile at the very end — clicking it emits
+  ``customRequested``, and the caller shows a custom picker as a page (the
+  row opens nothing over the page itself), anchored at the
   tile; the committed colour becomes the current selection and is prepended to
   the recents list.
 
@@ -45,6 +46,8 @@ from widgets._support import with_alpha
 
 class ColorSwatchRow(QWidget):
     colorPicked = Signal(QColor)
+    #: The Custom tile was pressed: show a custom picker.
+    customRequested = Signal()
 
     def __init__(self, colors=None, parent=None, *, allow_custom: bool = False,
                  recents=None, max_recents: int = 8) -> None:
@@ -60,8 +63,7 @@ class ColorSwatchRow(QWidget):
         self._allow_custom = bool(allow_custom)
         self._current = QColor(self._colors[0]) if self._colors else QColor()
         self._hover = -1            # index into self._tiles()
-        self._picker = None         # lazily created ColorPickerPopover
-        self._picker_anchor = None  # lazily created 1×1 anchor widget
+
 
     # ── API ──────────────────────────────────────────────────────────────
     def setColors(self, colors) -> None:
@@ -182,7 +184,9 @@ class ColorSwatchRow(QWidget):
             return
         kind, payload = self._tiles()[i]
         if kind == "custom":
-            self._open_picker(self._tile_rects()[i])
+            # The row opens nothing over the page: whoever shows it shows the
+            # custom picker as a page (``widgets.colour_page``) on this signal.
+            self.customRequested.emit()
             return
         c = QColor(payload)
         changed = c.rgb() != self._current.rgb()
@@ -202,24 +206,9 @@ class ColorSwatchRow(QWidget):
             self._hover = -1
             self.update()
 
-    # ── custom-colour picker ─────────────────────────────────────────────
-    def _open_picker(self, tile_rect: QRectF) -> None:
-        from widgets.color_picker_popover import ColorPickerPopover  # local: heavy
-        if self._picker is None:
-            self._picker = ColorPickerPopover(self)
-            self._picker.colorPicked.connect(self._on_picker_live)
-            self._picker.colorCommitted.connect(self._on_picker_committed)
-        self._picker.setRecents(self._recents)
-        self._picker.setColor(self._current if self._current.isValid() else QColor(theme.Colors.accent))
-        # Anchor: a 1×1 invisible child at the tile centre — popup() maps it to global.
-        if self._picker_anchor is None:
-            self._picker_anchor = QWidget(self)
-            self._picker_anchor.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        c = tile_rect.center()
-        self._picker_anchor.setGeometry(int(c.x()), int(c.y()), 1, 1)
-        self._picker_anchor.show()
-        self._picker.popup(self._picker_anchor, side="bottom", align="start")
-
+    # ── a colour from elsewhere ──────────────────────────────────────────
+    # The Custom tile asks for a picker (``customRequested``); the caller shows
+    # one as a page. A colour chosen there comes back through these two.
     def _on_picker_live(self, color: QColor) -> None:
         self._current = QColor(color)
         self.update()

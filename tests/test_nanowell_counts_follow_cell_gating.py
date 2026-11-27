@@ -323,7 +323,7 @@ def test_the_array_s_cells_layer_draws_the_cells_the_counts_hold(qtbot, tmp_path
     st = _loaded(qtbot, ctx)
     nwc.set_view(ctx, "array")
     nwc.set_timepoint(ctx, "t_c")
-    ctx.widgets.get("_nw_layer_cells").trigger()
+    ctx.widgets.get("_nw_layer_cells").click()
 
     def dots():
         found = [c for c in st.drawn.ax.collections if c.get_gid() == "nw-array-cells"]

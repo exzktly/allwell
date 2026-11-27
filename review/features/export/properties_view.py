@@ -23,7 +23,6 @@ from review.features.export.style import (
     EXPORT_PROFILES,
     _ensure_custom_export_profiles,
     _get_all_profile_names,
-    _resolve_export_dock,
 )
 from review.core.plot_style import DEFAULT_EXPORT_STYLE_PREFS, apply_export_style_to_current
 from review.core.plot_style import (
@@ -298,9 +297,11 @@ class ExportStyleSidebar(QWidget):
         self._fig_attr, self._facets = self._declared_facets()
         self._kit: _SectionGrid | None = None
 
-        self.setFixedWidth(EXPORT_STYLE_PANEL_WIDTH)
-        self.setMinimumWidth(EXPORT_STYLE_PANEL_WIDTH)
+        # No width of its own: the panel is the inspector's Style tab and is
+        # as wide as the inspector — a column at the desk, the sheet on a phone.
         self._build_ui()
+        for section in (self._kit.section_facets if self._kit is not None else ()):
+            section.setOpener(self._open_section)
         self._apply_facets()
 
     def _bind_getter_setter(self, key: str, widget) -> None:
@@ -353,7 +354,7 @@ class ExportStyleSidebar(QWidget):
         """
         sp = theme.Spacing
         root = QVBoxLayout(self)
-        root.setContentsMargins(sp.sm, sp.sm, sp.sm, sp.sm)
+        root.setContentsMargins(0, 0, 0, 0)        # the inspector pads its pages
         root.setSpacing(sp.sm)
         self._build_header(root)
 
@@ -413,22 +414,8 @@ class ExportStyleSidebar(QWidget):
         self._build_footer(root)
 
     def _build_header(self, root: QVBoxLayout) -> None:
-        """The panel's title row and its close button."""
-        sp = theme.Spacing
-        # ── header ──────────────────────────────────────────────────────────
-        hdr = QWidget(self)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(sp.xs, 0, 0, 0)
-        title = QLabel("Properties", hdr)
-        title.setProperty("textRole", "sectionHeading")
-        hl.addWidget(title)
-        hl.addStretch(1)
-        from widgets.icon_button import IconButton as _IconButton
-        close_btn = _IconButton("x", hdr)
-        close_btn.setToolTip("Hide this panel")
-        close_btn.clicked.connect(lambda _=False: self._close_dock())
-        hl.addWidget(close_btn)
-        root.addWidget(hdr)
+        """Nothing: the inspector's header names the page and holds the one
+        Close, so the panel carries neither a title nor a close of its own."""
 
     def _build_profile_section(self, kit: _SectionGrid) -> None:
         """Properties → Profile & Format."""
@@ -1798,10 +1785,24 @@ class ExportStyleSidebar(QWidget):
             swallowed()  # was: pass (silent except)
 
     def _close_dock(self) -> None:
-        self.hide()
-        dock = _resolve_export_dock(self._app, self._fig)
-        if dock is not None:
-            dock.setVisible(False)
+        """Close the inspector, which is where this panel is shown."""
+        from review.core import inspector_service
+        ctx = getattr(self._app, "_ctx", None)
+        if ctx is not None:
+            inspector_service.close(ctx)
+        else:
+            self.hide()
+
+    def _open_section(self, section) -> None:
+        """A section's header is a row: pressing it shows the section's rows
+        as a page of the inspector, so the Style tab's first page is a list
+        that fits one screen."""
+        from review.core import inspector_service
+        ctx = getattr(self._app, "_ctx", None)
+        if ctx is None:
+            return
+        title = section.titleText()
+        inspector_service.push(ctx, f"style/{title}", title, section.freeBody(), tab="style")
 
     def _reset_defaults(self) -> None:
         self._updating = True

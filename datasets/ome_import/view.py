@@ -82,6 +82,8 @@ from ui import buttons
 # helper's parameter is invisible to the pixel guard that enforces it.
 _FIELD_W = 48
 _ORIGIN_W = 56
+#: The button under the stage path that does what double-clicking it does.
+PATH_FIT_TEXT = "Fit whole path"
 
 def _is_destination(root) -> str:
     """The destination rule with no run in view — see `OmeImportPage._dest_rule`.
@@ -414,6 +416,17 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._path_view.setMaximumHeight(PLATE_MAX_HEIGHT)
         self._path_view.setVisible(False)
         outer.addWidget(self._path_view, 0, PLATE_ALIGNMENT)
+        # What a double click on the path does, as a button a user can see:
+        # back to the whole run. Enabled only while the path is zoomed in.
+        self._path_fit_btn = buttons.default(PATH_FIT_TEXT, self)
+        self._path_fit_btn.setToolTip("Show the whole stage path again "
+                                      "(double-clicking the path does the same)")
+        self._path_fit_btn.setEnabled(False)
+        self._path_fit_btn.setVisible(False)
+        self._path_fit_btn.clicked.connect(lambda _=False: self._path_view.resetView())
+        self._path_view.zoomChanged.connect(
+            lambda zoom: self._path_fit_btn.setEnabled(zoom > 1.0))
+        outer.addWidget(self._path_fit_btn, 0, PLATE_ALIGNMENT)
 
         # Which way the stage's axes run against the plate. A scan that swept
         # left to right can be written with X decreasing, and read straight it
@@ -1034,6 +1047,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._path_view.setPath(points)
         self._path_view.setVisible(bool(points))
         self._path_caption.setVisible(bool(points))
+        self._path_fit_btn.setVisible(bool(points))
         # The mirror control belongs to the drawing: with no coordinates there is
         # nothing to reflect, and a live control over an empty box invites the
         # user to answer a question the file never asked.

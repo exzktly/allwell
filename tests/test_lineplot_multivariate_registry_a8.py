@@ -18,7 +18,7 @@ from review.features.multivariate.tab_view import build_multivariate_tab
 from tests.widget_registry_helpers import assert_handles_registered as _check
 
 _LINE = (
-    "_line_export_dock", "_chan_cb_line", "_plot_chan_var", "_chan_var",
+    "_chan_cb_line", "_plot_chan_var", "_chan_var",
     "_metric_selector_frame", "_metric_cb", "_metric_var",
     "_line_card", "_line_fig", "_line_ax_mean", "_line_ax_frac",
     "_line_ax_n", "_line_ax_cdf", "_line_canvas",

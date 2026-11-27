@@ -186,7 +186,7 @@ def test_the_site_detail_s_close_button_clears_the_selection_and_hides_the_pane(
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("A01", 1, 0))
     pane = page.widgets.get("_nw_detail_pane")
-    button = page.widgets.get("_nw_detail_close_btn")
+    button = page.widgets.get("_nw_detail_clear_btn")
     qtbot.waitUntil(lambda: pane.isVisible() and button.isVisible() and button.width() > 0, timeout=5000)
     qtbot.mouseClick(button, Qt.LeftButton)
     assert page.state.feature_slice("nanowell").selected_sites == []
@@ -256,7 +256,9 @@ def test_a_choice_made_in_the_pop_out_brings_it_back_to_the_front(page, qtbot, k
     monkeypatch.setattr(_PopoutWindow, "activateWindow", lambda self: raised.append("activate"))
     qtbot.wait(50)
     assert raised == []
-    for name in ("_nw_popout_tps_menu", "_nw_popout_channels_menu", "_nw_popout_grid_menu", "_nw_popout_save_menu"):
+    # Timepoints and Channels are lists in small windows of the pop-out's own: the pop-out is under them, not behind
+    # the main window. The two menus are what handed activation to the main window.
+    for name in ("_nw_popout_grid_menu", "_nw_popout_save_menu"):
         raised.clear()
         menu = page.widgets.get(name)
         menu.triggered.emit(menu.addAction("x"))

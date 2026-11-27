@@ -91,7 +91,7 @@ def _load_cell_array(ctx, cache, well, chan, tp, fov, *, use_tophat):
     The live grid resolves a ratio channel through ``_find_ratio_for_channel``
     / ``_load_ratio_array`` before falling back to a plain frame load
     (``controller._cell_array``); the export builder had only the plain load,
-    so every ratio cell exported as ``(no image)`` — in Export to File, Copy
+    so every ratio cell exported as ``(no image)`` — in Save figure, Copy
     PNG, Copy SVG and Save to Saved Plots alike — while the screen showed it.
     """
     ratio = _find_ratio_for_channel(ctx, chan)
@@ -116,7 +116,7 @@ def _export_opts(ctx) -> dict[str, Any]:
             "transparent_bg": True,
             # "Save to Saved Plots" resolution/speed trade-off -- see
             # GALLERY_QUALITY_PRESETS. Only the gallery-save path reads this;
-            # Export to File / Copy PNG / Copy SVG always render full-res.
+            # Save figure / Copy figure as PNG / as SVG always render full-res.
             "gallery_quality": DEFAULT_GALLERY_QUALITY,
         }
         ctx.state.image_table.export_opts = opts
@@ -138,93 +138,76 @@ def set_gallery_quality(ctx, key: str) -> None:
     _export_opts(ctx)["gallery_quality"] = key
 
 
-def image_table_open_export_settings(ctx) -> None:
-    """Pop a small modal dialog to edit the image-table export options."""
-    from PySide6.QtWidgets import (
-        QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
-    )
+def build_export_settings(ctx, parent):
+    """The export options as rows of the Style page — what the "Export
+    settings…" dialog held, applied as each is changed rather than on an OK.
+
+    Returns the form's widget. Each control writes its key of
+    ``state.image_table.export_opts``, which every export reads."""
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QFormLayout, QWidget
 
     opts = _export_opts(ctx)
-    dlg = QDialog(ctx.window)
-    dlg.setWindowTitle("Image Table — Export settings")
-    form = QFormLayout(dlg)
+    host = QWidget(parent)
+    host.setObjectName("ImageTableExportSettings")
+    form = QFormLayout(host)
+    form.setContentsMargins(0, 0, 0, 0)
 
-    quality_cb = QComboBox(dlg)
+    def put(key: str, value) -> None:
+        _export_opts(ctx)[key] = value
+
+    quality_cb = QComboBox(host)
+    quality_cb.setObjectName("ImageTableGalleryQuality")
     quality_keys = list(GALLERY_QUALITY_PRESETS)
     for key in quality_keys:
-        cell_px, gallery_px = GALLERY_QUALITY_PRESETS[key]
+        _cell_px, gallery_px = GALLERY_QUALITY_PRESETS[key]
         quality_cb.addItem(f"{GALLERY_QUALITY_LABELS[key]} — {gallery_px}px", key)
     quality_cb.setCurrentIndex(quality_keys.index(
         opts.get("gallery_quality", DEFAULT_GALLERY_QUALITY)))
     quality_cb.setToolTip(
         "Resolution → speed trade-off for “Save to Saved Plots” only "
-        "(Export to File / Copy PNG / Copy SVG always render full resolution)."
+        "(Save figure / Copy figure as PNG / as SVG always render full resolution)."
     )
-    form.addRow("Save to Saved Plots quality:", quality_cb)
+    quality_cb.currentIndexChanged.connect(lambda _i: set_gallery_quality(ctx, quality_cb.currentData()))
+    form.addRow("Saved Plots quality", quality_cb)
 
-    pad_spin = DoubleSpinBox(dlg)
-    pad_spin.setRange(0.0, 4.0)
-    pad_spin.setSingleStep(0.05)
-    pad_spin.setDecimals(2)
-    pad_spin.setValue(float(opts.get("pad_inches", 0.10)))
-    pad_spin.setToolTip("Outer margin around the saved figure (pad_inches).")
-    form.addRow("Outer margin (in):", pad_spin)
+    def spin(name, kind, lo, hi, step, decimals, key, default, tip):
+        box = kind(host)
+        box.setObjectName(name)
+        box.setRange(lo, hi)
+        box.setSingleStep(step)
+        if decimals is not None:
+            box.setDecimals(decimals)
+        cast = float if decimals is not None else int
+        box.setValue(cast(opts.get(key, default)))
+        box.setToolTip(tip)
+        box.valueChanged.connect(lambda v, k=key, c=cast: put(k, c(v)))
+        return box
 
-    cell_spin = DoubleSpinBox(dlg)
-    cell_spin.setRange(0.0, 4.0)
-    cell_spin.setSingleStep(0.05)
-    cell_spin.setDecimals(2)
-    cell_spin.setValue(float(opts.get("cell_pad", 0.50)))
-    cell_spin.setToolTip(
-        "Gap between adjacent cells and label strips, as a fraction of the font size."
-    )
-    form.addRow("Cell gap:", cell_spin)
-
-    titles_cb = QCheckBox(dlg)
+    form.addRow("Outer margin (in)", spin("ImageTablePadInches", DoubleSpinBox, 0.0, 4.0, 0.05, 2,
+                                          "pad_inches", 0.10, "Outer margin around the saved figure."))
+    form.addRow("Cell gap", spin("ImageTableCellPad", DoubleSpinBox, 0.0, 4.0, 0.05, 2, "cell_pad", 0.50,
+                                 "Gap between adjacent cells and label strips, as a fraction of the font size."))
+    titles_cb = QCheckBox("Show titles", host)
+    titles_cb.setObjectName("ImageTableShowTitles")
     titles_cb.setChecked(bool(opts.get("show_titles", False)))
     titles_cb.setToolTip(
         "Repeat the well/channel/timepoint label above every image. The exported "
         "figure already carries the grid's row and column axis labels, so this is "
         "off unless you want the per-cell titles as well."
     )
-    form.addRow("Show titles:", titles_cb)
-
-    title_size_spin = SpinBox(dlg)
-    title_size_spin.setRange(4, 24)
-    title_size_spin.setValue(int(opts.get("title_fontsize", 7)))
-    form.addRow("Title font size:", title_size_spin)
-
-    dpi_spin = SpinBox(dlg)
-    dpi_spin.setRange(72, 1200)
-    dpi_spin.setSingleStep(25)
-    dpi_spin.setValue(int(opts.get("dpi", 300)))
-    dpi_spin.setToolTip("Raster DPI used for PNG output.")
-    form.addRow("PNG DPI:", dpi_spin)
-
-    transparent_cb = QCheckBox(dlg)
+    titles_cb.toggled.connect(lambda on: put("show_titles", bool(on)))
+    form.addRow(titles_cb)
+    form.addRow("Title font size", spin("ImageTableTitleSize", SpinBox, 4, 24, 1, None, "title_fontsize", 7,
+                                        "Font size of the per-image titles."))
+    form.addRow("PNG DPI", spin("ImageTableDpi", SpinBox, 72, 1200, 25, None, "dpi", 300,
+                                "Raster DPI used for PNG output."))
+    transparent_cb = QCheckBox("Transparent background", host)
+    transparent_cb.setObjectName("ImageTableTransparent")
     transparent_cb.setChecked(bool(opts.get("transparent_bg", True)))
-    transparent_cb.setToolTip(
-        "Save with a transparent background. Disable for an opaque white BG."
-    )
-    form.addRow("Transparent bg:", transparent_cb)
-
-    btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
-    btns.accepted.connect(dlg.accept)
-    btns.rejected.connect(dlg.reject)
-    form.addRow(btns)
-
-    if dlg.exec() != QDialog.Accepted:
-        return
-
-    opts.update({
-        "gallery_quality": quality_cb.currentData(),
-        "pad_inches": float(pad_spin.value()),
-        "cell_pad": float(cell_spin.value()),
-        "show_titles": bool(titles_cb.isChecked()),
-        "title_fontsize": int(title_size_spin.value()),
-        "dpi": int(dpi_spin.value()),
-        "transparent_bg": bool(transparent_cb.isChecked()),
-    })
+    transparent_cb.setToolTip("Save with a transparent background. Off for an opaque white one.")
+    transparent_cb.toggled.connect(lambda on: put("transparent_bg", bool(on)))
+    form.addRow(transparent_cb)
+    return host
 
 
 def _area_pool_rgb(rgb, max_side: int):
@@ -793,7 +776,7 @@ def image_table_save_to_gallery(ctx) -> None:
     grid in the gallery / PDF report without bloating the per-dataset store.
     The exact budget is user-tunable (``GALLERY_QUALITY_PRESETS`` via
     ``gallery_quality_px`` — Draft/Standard/High, set from the Export ▾ menu's
-    "Save quality" submenu or the "Export settings…" dialog), since a large
+    Saved Plots quality on the Style page), since a large
     plate walk at the default preset can still be slow enough to want faster
     (or, for a figure headed straight to a report, sharper) than the default.
 
@@ -846,7 +829,7 @@ def image_table_save_to_gallery(ctx) -> None:
         # smooth scale does, so the saved snapshot reads at the same brightness
         # as the grid. Both this cap and the final downsample below come from
         # the same user-tunable quality preset (Export ▾ → Save quality, or
-        # Export settings…) so raising/lowering it actually moves the speed/
+        # the Style page) so raising/lowering it actually moves the speed/
         # detail trade-off instead of just one half of it.
         collector = FrameCollector()
         fig, save_kwargs = _build_export_figure(

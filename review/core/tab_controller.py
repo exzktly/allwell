@@ -131,6 +131,10 @@ def on_tab_change(ctx, _e=None) -> None:
     notify = getattr(ctx, "notify", None)
     if notify is not None and hasattr(notify, "clear_unless_owned_by"):
         notify.clear_unless_owned_by(tab)
+    # The inspector serves one page: what it borrowed from the last one goes
+    # back before anything here shows or hides that page's controls.
+    from review.core import inspector_service
+    inspector_service.sync(ctx)
     prev_tab = ctx.runtime.tab.last_tab_name
     prev_selected = set(ctx.state.selection.selected_wells)
 
@@ -143,14 +147,6 @@ def on_tab_change(ctx, _e=None) -> None:
     from review.core.group_by_controller import refresh_decoration_combos
     with swallow("re-evaluate the Decorate button for the new tab"):
         refresh_decoration_combos(ctx)
-
-    # Dismiss any open figure configurator on tab change -- the user can
-    # re-open it on the new tab via the plot card's sliders IconButton.
-    for sb in list((ctx.widgets.get_or_none("_export_style_sidebars") or {}).values()):
-        try:
-            sb._close_dock()
-        except Exception:
-            swallowed()  # was: pass (silent except)
 
     _frames = _sidebar_section_frames(ctx)
     for _frame in _frames:

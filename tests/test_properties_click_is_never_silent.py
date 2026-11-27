@@ -86,16 +86,6 @@ def _mount(win, *, size) -> _Sidebar:
     return sb
 
 
-def test_a_panel_the_user_can_see_is_closed_by_the_click(win, launches):
-    sb = _mount(win, size=(120, 120))
-    assert sb.isVisible() and not sb.visibleRegion().isEmpty()
-
-    style.open_export_style_panel(win, "scatter_cells")
-
-    assert sb.closed == 1
-    assert launches == []
-
-
 def test_a_panel_visible_to_qt_but_with_no_pixel_on_screen_is_reopened_not_closed(win, launches):
     # Shown, every ancestor shown, and nothing of it drawn: what the old toggle closed.
     sb = _mount(win, size=(0, 0))

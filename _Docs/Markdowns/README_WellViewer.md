@@ -2033,8 +2033,10 @@ environment — and reports what the job found on its node: which node and Slurm
 job, how many of the node's CPUs it was given, the GPUs it can see, whether
 Torch can use them, and the Cellpose version. A job given one core of a bigger
 node, a GPU node whose Torch is a CPU-only build, or a missing Torch is called
-out with what to change. A node that has to start can take several minutes;
-closing the window cancels the job.
+out with what to change. The test opens in the host form itself, in place of
+the form's fields, and **Close** brings the form back; so does the SSH key
+setup. A node that has to start can take several minutes; **Cancel** cancels
+the job.
 
 **Reserve the whole node (--exclusive)**, under the scheduler command, is
 unticked by default, including for remotes you set up before. Ticked, it asks
@@ -3432,7 +3434,7 @@ uses it) its identity, so plots saved
 with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on Overview and on
 the Variables layer, where there are no groups to import into. Everything on these tabs autosaves to the dataset folder as you
 edit, so there is no Save button to look for; to discard definitions, use
-**Reset analysis** in the title bar ([Starting over](#starting-over)), which
+**Reset analysis** under Dataset tools ([Starting over](#starting-over)), which
 lets you pick exactly which kinds to drop.
 
 The autosave waits until you have stopped editing for half a second, then writes
@@ -4154,8 +4156,9 @@ variable".
 **By group.** If you have replicate groups defined, a list under the plate shows
 what each one resolves to. A group whose wells all agree shows that value. One
 whose wells disagree reads *—mixed—*. One containing even a single well with no
-value reads *no value*, and names the wells that are short. **Double-click any
-row to select that group's wells on the plate.**
+value reads *no value*, and names the wells that are short. **Select a row and
+press Select wells under the list — or double-click the row — to select that
+group's wells on the plate.**
 
 That last case is the one to know about. Wells are never given a value they were
 not assigned: if you add a well to a group after filling, it stays unassigned and
@@ -4202,7 +4205,7 @@ Group by, Colour by, Split by and Then by are cleared when you open a different
 dataset.
 They name that plate's variables, and the next plate's are different ones.
 
-**Colour by and Split by**, in the band's **Decorate** popover beside it, use a
+**Colour by and Split by**, on the band's **Colour & split** page beside it, use a
 *second* variable to say how the bars look rather than what they are. Neither
 moves a single number: with two cell lines at six doses, set **Group by** to
 `Dose` and **Colour by** to `Cell line` and you get the same twelve bars in two
@@ -4362,7 +4365,7 @@ offered yet.
 ├──────────────┬──────────────────────────────────────────────────┤
 │ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …    │  ← one band
 ├──────────────┼──────────────────────────────────────────────────┤
-│ 📁 my_run  ▾ │  Channel [GFP ▾] Property [Mean ▾]  Display ▾ ⚙  │  ← controls
+│ 📁 my_run  ▾ │  Channel [GFP ▾] Property [Mean ▾]  Display Style │  ← controls
 │  ⊙ Plotting  │  ┌────────────────────────────────────────────┐  │
 │   …          │  │                                            │  │
 │   …          │  │            (plot canvas)                   │  │
@@ -4386,14 +4389,15 @@ offered yet.
 - **Title bar** — the app name and the version.
 - **Top band** — one row carrying everything that steers the window. On the
   left, the `[Review | Analyze | Datasets]` selector switches modes; beside it
-  are the current page's sub-tabs; and at the far right the dataset actions —
-  Refresh (re-read the folder), presentation toggle (flip every plot
-  Screen ↔ Publication), **Reset analysis**, reveal the dataset folder, and
-  **Reset view**. Those five act on the loaded dataset or on the plots drawn
-  from it, so they appear in Review only; the two resets are described under
-  [Starting over](#starting-over). The **storage** button (a hard drive) and the
-  **`i`** Help drawer button sit to their right in all three modes — storage is
-  described under [Freeing disk space](#freeing-disk-space). Help stays in that
+  are the current page's sub-tabs; and at the far right Refresh (re-read the
+  folder) and the presentation toggle (flip every plot Screen ↔ Publication),
+  which act on the loaded dataset and so appear in Review only. The commands
+  about the dataset itself — copy analysis, reveal its folder, storage, and the
+  two resets — are **Dataset tools**, the last group of the dataset menu at the
+  head of the left panel (the button that names the open dataset); the resets
+  are described under [Starting over](#starting-over) and storage under
+  [Freeing disk space](#freeing-disk-space). The **`i`** Help drawer button sits
+  at the band's right end in all three modes. Help stays in that
   same spot in every mode, because the manual it
   opens documents all three; `Ctrl+/` opens it too. Opening it from a Datasets
   tool lands on that tool's section of the manual, and from Analyze on the form
@@ -4419,8 +4423,13 @@ offered yet.
   **All** / **None**, then the Saved selections drawer. The well selection they
   drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on
-  the left (channel, property, timepoint, threshold), what to do with it on the
-  right (`Display ▾`, `Save ▾`, Properties).
+  the left (channel, property, timepoint, threshold, and buttons such as
+  `Fold change: vs DMSO ›` that read a choice and open its options), and on the
+  right the same three buttons on every page: **Display**, **Style**, **Share**.
+- **Inspector** — the column that opens at the right of the page when you press
+  **Display**, **Style** or one of the band's `›` buttons. Everything that
+  changes what the page shows is in it, on one of its tabs; see
+  [The inspector](#the-inspector) below.
 - **Status bar** — a live status dot on the left, keyboard-shortcut chips on
   the right.
 - **Back and Forward** — **‹** and **›** just right of the Review · Analyze ·
@@ -4638,10 +4647,42 @@ empty — those tabs name Review's pages.
 Every tab in the Review pane states its controls the same way, in one row above
 the content: **what is shown** on the left — channel, property, timepoint,
 threshold, and whatever else scopes the data — and **what to do with it** on the
-right, flush to the edge: `Display ▾`, `Save ▾`, and the **Properties** button.
+right, flush to the edge: **Display**, **Style** and **Share**, in that order on
+every page. A page with nothing for one of the three shows that button greyed
+out rather than leaving a gap, so each is always in the same place.
 Nothing is centred; which view you are looking at is the tab bar's job. When the
 pane is too narrow the left side wraps onto a second line rather than squeezing
 its controls, so nothing ever becomes unreachable.
+
+#### The inspector
+
+Anything that changes what a page shows opens in one place: the **inspector**,
+a column at the right of the page. It stays open while you work — the plot is
+beside it, not under it — and you can drag its left edge to make it wider or
+narrower; the width is remembered. Its tabs are the same on every page:
+
+- **Display** — how the plot is drawn: error bands, layout, colour maps, image
+  brightness and colours. The band's **Display** button opens it.
+- **Style** — the export look of the figure: fonts, axes, legend, limits,
+  layout. The band's **Style** button opens it. Its sections are a list; press
+  one to open its settings, and **‹** to come back.
+- **Detail** — the one thing you last picked: the cell behind a point on the
+  Scatter plot, for instance. Picking another updates it in place.
+- **Data** — in the desktop layout this is the controls band itself, above the
+  plot; the tab is used in phone layout, where the band is a list in the panel.
+
+A band button that ends in **›** reads its current choice — `Fold change: vs
+DMSO ›`, `Colour & split: Dose · none ›` — and opens that choice's options as a
+page of the inspector. Press it again, or **‹**, to leave the page. Picking
+several of a list (timepoints, series, fields of view, gates) is always the same
+page: a tick beside each item under **All** and **None**, applied as you tick.
+
+**Close**, at the inspector's top right, closes it; so does pressing **Display**
+or **Style** again. A tab the page has nothing for is greyed out, never missing.
+Nothing in the inspector opens another panel on top of it.
+
+**Share**, the band's last button, is a menu of commands — save the figure, copy
+it, save its data, send it to Saved Plots.
 
 The Image Table is the one deliberate exception. Its crop and ON-threshold
 controls act on the images directly below them, so they stay in a strip beside
@@ -4658,10 +4699,10 @@ row empty rather than starting its content higher — so moving between pages
 never shifts the top of what you are looking at. It grows only when it has to:
 on a narrow window, where the left side wraps onto a second line.
 
-#### Figure actions — the Save dropdown · Properties
+#### Figure actions — Share · Style
 
 Every plot tab (Bar Plot, Line Graphs, Scatter, Distribution, Heat Map,
-Spatial, Multivariate) carries the same **Save ▾** dropdown on its controls
+Spatial, Multivariate) carries the same **Share ▾** dropdown on its controls
 row, holding five actions:
 
 - **Save plot data…** (Spatial says *Save summary data…*) — writes the plotted
@@ -4722,7 +4763,7 @@ row, holding five actions:
   figure is captured twice — once as a high-resolution image, once as vector —
   which is what later lets the gallery export it to PowerPoint as shapes you can
   edit rather than as a picture.
-- **Properties** — opens a slide-out sidebar that styles the active figure:
+- **Style** — opens a slide-out sidebar that styles the active figure:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale (with the **log base** each
   logarithmic axis is drawn in — 10, 2, 3, e, or anything else above 1), layout
@@ -4782,7 +4823,7 @@ row, holding five actions:
   limits back to the plot: it clears what you typed on *every* panel of that
   figure and redraws it, so the axes fit their data again. The Heat Map has no
   Limits & Scale section: its axes are the plate's rows and columns, which a
-  typed limit could only crop, and its colour range is set under Display ▾. Clearing the four
+  typed limit could only crop, and its colour range is set under Display. Clearing the four
   boxes by hand does not do this — an axis keeps the bounds it was last given
   until the plot is drawn again — which is what the button is for. It leaves
   the log scaling and the log base alone: an axis you set to logarithmic stays
@@ -4793,7 +4834,7 @@ row, holding five actions:
   end take the first colour, values above the high end the last, and the colour
   bar follows. Leave a box blank to keep the plot's own end. It applies to every
   plot with a colour bar on that figure, and **Auto scale** clears it too. The
-  Heat Map has no Colour limits row: its range is set under **Display ▾**. Settings persist across
+  Heat Map has no Colour limits row: its range is set under **Display**. Settings persist across
   redraws — and across the **Screen / Publication** switch, which decides
   colours and nothing else. **Show grid** in particular reaches the files you
   export: a figure saved, copied, filed in Saved Plots or sent through Batch
@@ -4822,7 +4863,7 @@ row, holding five actions:
   bar plot's second row of x ticks), no **Show: Mean / Mean+spread / All
   points** (a cell is one value), and no **Log scale** or **Log base** rows —
   the two axes carry row and column positions rather than values, and colouring
-  the grid on a log scale is **Display ▾ → Log scale**, which acts on the
+  the grid on a log scale is **Display → Log scale**, which acts on the
   colours. Everything the Heat Map does use is still there, including
   **Statistics → Error bars** and **Across**, which pick the interval the
   per-cell `±` prints. The **Axis #** picker lists the figure's plot panels and
@@ -4840,7 +4881,7 @@ make room for a larger size.
 
 #### Bar colours — Plate or Grey
 
-The Bar Plots tab's Properties sidebar carries a **Colours** section with two
+The Bar Plots tab's Style tab carries a **Colours** section with two
 modes for the bars themselves.
 
 **Plate** is the default and is what the tab has always drawn: each column takes
@@ -4880,7 +4921,7 @@ close together, a sliver apart, so each group reads as one block:
 Groups themselves stay a full bar apart, and bands from **Split by** and
 **Then by** keep their wider gaps. With one timepoint nothing changes.
 
-The Bar Plots tab's Properties sidebar has a **Bars** section with two
+The Bar Plots tab's Style tab has a **Bars** section with two
 settings for this:
 
 - **Width** — **Auto** (the default) narrows the bars as more of them share the
@@ -4894,7 +4935,7 @@ state.
 
 #### Beeswarm point spacing
 
-The Properties sidebar of the **Bar Plots** tab (Beeswarm and All points) and
+The Style tab of the **Bar Plots** tab (Beeswarm and All points) and
 of the **Nanowells** page (Distribution view) has a **Beeswarm** section with
 one setting, **Point spacing**:
 
@@ -4993,7 +5034,7 @@ rest of the view state.
 
 #### Value labels — printing the numbers on the plot
 
-Under **Properties → Overlays** is a **Show value labels** switch. Turn it on
+Under **Style → Overlays** is a **Show value labels** switch. Turn it on
 and every plotted point states its own value beside it — `1200 ± 85` above a
 bar, `0.420 ± 0.050` above a Line Graphs marker — so a figure can be read
 without going back to the CSV.
@@ -5007,7 +5048,7 @@ there is no spread to state and one label per cell would bury the curve. The
 **Batch Export** bar, line and scatter-aggregate figures follow the switch too,
 so a plate exported in bulk is labelled like the figure you set the switch on.
 One caveat on the bar figures: the batch ones have always drawn a plain SEM
-whisker regardless of Properties → Statistics, so with *95 % CI* or *Error bars:
+whisker regardless of Style → Statistics, so with *95 % CI* or *Error bars:
 None* selected their labels state that SEM — each figure's label matches its own
 whisker, but the exported figure and the tab will disagree.
 
@@ -5024,7 +5065,7 @@ in its top-left corner saying so, rather than leaving you to wonder whether the
 switch is working.
 
 **A label always states the spread the panel beside it draws, and never any
-other.** On the Bar Plots tab that means the Properties → Statistics controls
+other.** On the Bar Plots tab that means the Style → Statistics controls
 reach the text as well as the whisker: set *Show: Mean* or *Error bars: None*
 and the labels print the mean alone, set *95 % CI* and they state the interval
 rather than the SEM behind it. The Line Graphs tab has no such control — it
@@ -5057,14 +5098,14 @@ Panels make room for the text: the y-axis gains extra headroom while the labels
 are on — below the axis as well as above it, for bars a subtractive fold change
 has pushed negative — and the Fraction panels' usual ceiling of 1.05 opens up,
 so a bar or trace at the top of its range is not labelled over the panel title.
-Where you have pinned a panel's own upper limit under Properties → Axes, that
+Where you have pinned a panel's own upper limit under Style → Axes, that
 limit wins, and a label that would sit above it is drawn inside the bar
 instead. Both the switch and the format are saved with the rest of the view
 state.
 
 #### Interval per timepoint, and Offset
 
-Under **Properties → Time** are two controls that together state what the
+Under **Style → Time** are two controls that together state what the
 timepoints on your plate really are, and correct the numbers printed on every
 time axis to match. They are there for plates whose filenames don't encode the
 real acquisition schedule.
@@ -5252,7 +5293,7 @@ mutant RNA behave relative to WT under a drug, compared with under vehicle?*
 
 1. Pair each sample with its WT control within its treatment, as above:
    **Pair by variable** with control *RNA = WT*, within each *Treatment*.
-2. Open **Fold change ▾** on the Bar Plots tab. Under **Then relative to**,
+2. Open **Fold change** on the Bar Plots tab. Under **Then relative to**,
    choose *Treatment* = *Vehicle*. *RNA* is ticked under "within each" for
    you, because the vehicle bars differ on it.
 
@@ -5447,10 +5488,10 @@ per-cell distribution, or a **histogram** of it.
   above threshold* the cell count for every well. Those two panels then say
   "ON threshold not set — every cell counts as above it" instead of drawing bars
   (Line Graphs does the same). Set a threshold — even 0, on purpose — and they draw.
-- **Controls** (the **Display ▾** menu gathers the view options):
-  - **Group by** (Well / Timepoint) — how bars are clustered (default *Well*;
-    a replicate set groups its members).
-  - **Pool replicates** (a switch) — collapse each replicate set's wells into one column (off = one
+- **Controls** (the **Display** menu gathers the view options):
+  - **Grouping** — how bars are grouped (default *Well*; a replicate set groups
+    its members).
+  - **Pooled** — collapse each replicate set's wells into one column (off = one
     column per well). For **bars** this averages the per-well means; for
     **beeswarm** / **violin** / **histogram** it pools every cell across the set
     into a single distribution. Enabled once ≥1 replicate set is active.
@@ -5466,7 +5507,7 @@ per-cell distribution, or a **histogram** of it.
     figure, and the widest bar in the figure fills its slot with every other
     bar measured against it. A note at the top right says so — e.g. *30 bins ·
     widest bar = 23% of a column*. A count metric (smFISH spots) bins on whole
-    numbers, one bin per value when the range fits; with **Properties → Y log**
+    numbers, one bin per value when the range fits; with **Style → Y log**
     on, the bins are log-spaced and the note counts any values ≤ 0 that a log
     axis cannot place. A column with fewer than three cells is drawn as its
     values — every one of them — and so is a violin's column whose cells all
@@ -5504,7 +5545,7 @@ per-cell distribution, or a **histogram** of it.
     Fraction panel, and a build with the Statistics feature left out, say so in
     the same way.
 
-    **Violin**, **Beeswarm** and Properties → Statistics → **Show: All points**
+    **Violin**, **Beeswarm** and Style → Statistics → **Show: All points**
     draw per-cell points instead of bars, so there is no bar for a bracket to
     sit on and none is drawn in those modes. "All points" is the one worth
     knowing about: it is a sidebar setting rather than a visible mode switch, so
@@ -5522,7 +5563,7 @@ per-cell distribution, or a **histogram** of it.
 
     The brackets stack above the tallest bar, and they respect an axis limit
     you set for that panel: if you have typed a **Y max** under
-    Properties → Axes, they are fitted underneath it rather than drawn above it
+    Style → Axes, they are fitted underneath it rather than drawn above it
     where the limit would hide them. If the limit leaves no room above the bars
     at all, the panel says so instead of annotating nothing.
 
@@ -5589,7 +5630,7 @@ average intensity of the ON cells and there are none to average.
 
 - **Needs** — selected wells spanning more than one timepoint to see a trend
   (single-timepoint data draws a single point).
-- **Controls** (under **Display ▾**) — the **error band** (SEM / SD); the
+- **Controls** (under **Display**) — the **error band** (SEM / SD); the
   **per-FOV spread** toggle, which treats each field of view as a replicate so
   the band reflects field-to-field variability (for a multi-well group every
   FOV across *all* its wells is pooled as an independent replicate — see the
@@ -5611,11 +5652,11 @@ average intensity of the ON cells and there are none to average.
 
   **Exporting repaints the figure at full detail first**, so a saved image, a
   copied vector, a plot filed in Saved Plots and a batch export all name every
-  trace and draw every cell — from this tab's own **Save ▾** menu as much as from
+  trace and draw every cell — from this tab's own **Share ▾** menu as much as from
   the Batch Export tab. You may notice the plot flicker as it redraws during an
   export; that is the full-detail repaint, and the screen version comes back
   afterwards.
-- **What the exported data file holds.** The tab's **Save ▾ → Save plot
+- **What the exported data file holds.** The tab's **Share ▾ → Save plot
   data…** writes one row per **drawn curve** per timepoint, so a file describes
   the figure beside it. With replicate sets active a row is one set, and the
   `replicate_set` / `wells` / `well_names` / `n_wells` columns say which wells
@@ -5818,7 +5859,7 @@ threshold has a fraction of zero, and dividing by it is undefined. The figure
 says so in as many words rather than reporting a missing control — switch the
 operation to subtract, or plot the raw fraction.
 
-**Error bars with one well.** Set **Spread** to **FOV** in the Display popover
+**Error bars with one well.** Set **Spread** to **FOV** on the Display tab
 and each field of view counts as a replicate, so a condition run in a single
 well still gets an error bar. Left on the default, spread is measured across
 wells and a one-well condition has none — the caption under the figure names
@@ -5848,7 +5889,7 @@ doubling the label. Colour tells you the series and the dash pattern
 tells you the timepoint, so with two cell lines at two timepoints you get four
 curves in two colours and two dash patterns, and you can see at a glance which
 share a cell line and which share a moment. For a figure that has to print
-without colour, Properties → **Colours** switches the series onto shades of grey
+without colour, Style → **Colours** switches the series onto shades of grey
 and distinct markers and leaves the dashes to the timepoints — see
 [Curve colours](#curve-colours--series-or-grey). Each curve is fitted on its own,
 with the same model and the same pinned plateaus, so their EC50s are
@@ -5942,7 +5983,7 @@ a lower bound the fit does not support. The same numbers go into **Save plot
 data…**.
 
 **Comparing conditions.** With a fit on and the curves split into series (for
-example one per cell line), **Compare EC50 to** in the Fit popover picks a
+example one per cell line), **Compare EC50 to** on the Fit page picks a
 reference series. Every other curve's EC50 is then reported as a multiple of
 the reference's EC50 *at the same timepoint* — `EC50 ×4 (2.6–6.1)` means that
 curve needs about four times as much to reach its half-maximal effect, with a
@@ -5981,7 +6022,7 @@ the fit is the point of the page and none of it can be worked out again from the
 plate.
 
 If the axis went logarithmic because your doses span two decades rather than
-because you asked, the caption says so and points at Properties. Until you give
+because you asked, the caption says so and points at Style. Until you give
 an answer of your own the switch there shows what is on screen, so an axis the
 tab chose reads as log rather than contradicting the plot above it; once you set
 it either way, your answer stands and the doses stop deciding.
@@ -5994,7 +6035,7 @@ log drawer says so. Type a small positive floor instead (`0.01`, say), turn
 the log scale off for that axis, or press **Auto scale** to hand the range back
 to the plot.
 
-**Properties → Limits & Scale → Log base** sets what that axis is logarithmic
+**Style → Limits & Scale → Log base** sets what that axis is logarithmic
 in. **10** is the default, with **2**, **3** and **e** on the list, and you can
 type any other number above 1. The base does not move the points relative to one another
 — every base is the same axis stretched by a constant — so what it changes is
@@ -6013,7 +6054,7 @@ cannot place it, and the footer says how many values made it so.
 
 #### Fold change on a response curve
 
-The band's **Fold change** popover is the same one the Bar and Line tabs carry,
+The band's **Fold change** page is the same one the Bar and Line tabs carry,
 over the same shared setting — a control picked on one is picked on all three,
 and the y-axis label says what it was normalised by so a normalised number is
 never sitting under a raw label.
@@ -6074,8 +6115,8 @@ cells it kept.
   **Layout** (*Overlay* all wells on one axis, or *Separate axes* one panel per
   well), **Color by time** (one well → a single cloud's trajectory; several
   wells → auto-stacked one panel per well so the time-coloured clouds don't
-  overlap) and **Plot only the gated cells** (below) together under **Display ▾**. **Show
-  gates** is in the Properties sidebar; **draw rectangular gates** by dragging
+  overlap) and **Plot only the gated cells** (below) together under **Display**. **Show
+  gates** is in the Style tab; **draw rectangular gates** by dragging
   on the canvas.
 - **Click a point to see that cell.** The cell opens in a panel on the right:
   one channel at a time, with the cell's boundary drawn in red, its well,
@@ -6087,7 +6128,7 @@ cells it kept.
   one you are looking at. A cell that cannot be shown says why where the image
   would be (no segmentation mask for the field, the nucleus is not in it, or
   the plot is out of date and needs redrawing).
-- **Highlight saved cells** (under **Display ▾**, or **Highlight on scatter** in
+- **Highlight saved cells** (under **Display**, or **Highlight on scatter** in
   Cell Gating → Saved cells). Draws one saved set's cells solid in cyan over the
   rest of the cloud, which fades but keeps its colours. A line under the plot
   says how many of the set are shown and why the others are not (in wells you
@@ -6097,12 +6138,12 @@ cells it kept.
   changes no number. A saved plot remembers it, and says so if the set has been
   deleted since. The per-cell export gains an `in_saved_cells[<set>]` column (1 /
   0, blank for a well segmented again since the set was saved).
-- **Plot only the gated cells** (under **Display ▾**). This plot is the one place that shows the *whole* cloud even
+- **Plot only the gated cells** (under **Display**). This plot is the one place that shows the *whole* cloud even
   when your gates are filtering everything else — that is deliberate, because
   you draw the gates here and need to see what falls outside them to judge or
   resize a box. Switch **Plot only the gated cells** on to plot only the cells inside the
   boxes shown here; the title gains a `· gate-filtered` tag so a copied or saved
-  figure says which it is — and so a filter left on inside a popover still
+  figure says which it is — and so a filter left on inside the inspector still
   announces itself. It filters against the boxes on screen, so it always
   agrees with what you are looking at, and it needs nothing switched on
   elsewhere. Two things to know: it is a *view* filter — it changes nothing
@@ -6124,7 +6165,7 @@ cells it kept.
   error to report, so its cells are **empty**; the same points draw no whisker
   on the figure, in a batch export as well as on the tab.
 - **Gates (definition).** Each gate you draw is auto-named (`Gate 1`, `Gate 2`,
-  …), shown on the plot, and renameable in Properties — where each entry also
+  …), shown on the plot, and renameable in Style — where each entry also
   states the x and y metrics that gate was drawn on, so a list built up across
   several axis pairs stays readable. Gates become selectable
   **cell-inclusion** or **fraction-on** filters on the [Cell Gating](#cell-gating)
@@ -6178,8 +6219,8 @@ Plots, Line Graphs, Response Curves, the Scatter Wells view or the Heat Map.
 - **No error band** — this tab draws the whole population per group rather than
   reducing it to a mean, so there is no spread for a band to describe and no
   SEM/SD control on its controls row. The SEM/SD choice itself is app-wide: set
-  it on Bar Plots or Line Graphs (under **Display ▾**), or in the **Properties**
-  panel under *Statistics* → *Error bars*, and every tab that draws a band
+  it on Bar Plots or Line Graphs (under **Display**), or on the **Style**
+  tab under *Statistics* → *Error bars*, and every tab that draws a band
   follows.
 - **Optimal use** — compare a handful of wells at a single timepoint to read
   how a treatment shifts the *whole* population, not just its mean; facet when
@@ -6192,25 +6233,30 @@ place cells in a grid that mirrors your plate or your experimental design.
 This is the first Plotting sub-tab, and the one Plotting opens on.
 
 - **Needs** — a well selection and a channel; a **Timepoint** chosen from the
-  dropdown; and wells placed in the grid, from the **Layout** panel.
-- **The Layout panel** — where you say which well goes in which cell. The
-  **Layout** button on the controls row opens it at the right of the figure,
-  in the same place the **Properties** panel opens (one of the two at a time),
-  and closes it again; its **✕** closes it too. While the grid is still empty
-  the panel opens by itself when you come to the page, since the map has
-  nothing to draw until a cell holds a well; once the grid is filled it stays
-  out of the figure's way until you press **Layout**. In it:
+  dropdown; and wells placed in the grid, from the **Layout** page.
+- **The Layout page** — where you say which well goes in which cell. The
+  **Layout** row on the controls row reads the grid's size (`Layout: 8 × 12 ›`)
+  and opens the page in the inspector at the right of the window, where every
+  page's options open; pressing the row again leaves it, and the inspector's
+  **Close** closes it. While the grid is still empty the page opens by itself
+  when you come to the Heat Map, since the map has nothing to draw until a cell
+  holds a well; once the grid is filled it stays out of the way until you press
+  **Layout**. In it:
   - **Grid** — the number of rows × columns.
   - **Auto-populate from selection** — fills the grid with the wells the plate
     shows as selected (more below). **Clear** empties every cell and keeps the
     grid's size and any row / column names you typed.
   - **The grid itself.** Drag wells from the plate map at the left into its
     cells; drag a cell to another cell to move it (onto an occupied cell, the
-    two swap); double-click a cell, or drag it back onto the plate map, to
-    empty it. Wells already placed are drawn as tinted tiles. A grid bigger
-    than a whole 96-well plate scrolls.
+    two swap). To empty a cell, select it and press **Empty cell** — or
+    double-click it, or drag it back onto the plate map. Wells already placed
+    are drawn as tinted tiles. A grid bigger than a whole 96-well plate
+    scrolls.
 
-  To rename a row or column, double-click its label on the heat map itself.
+  To rename a row or column, open **Display** and press **Labels**: the page
+  has one field per row and per column, and a field left empty puts the grid's
+  own label back. Double-clicking a label on the heat map itself renames it
+  too.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
     *Rep-set avg*). **Events above threshold** colours each cell by how many
@@ -6234,7 +6280,7 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     which hour was missing, rather than putting up a neighbouring one that would
     look exactly like the one you saved.
 
-  Under **Display ▾**, since these set how the grid is drawn rather than what
+  Under **Display**, since these set how the grid is drawn rather than what
   it shows:
   - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
   - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**. The two
@@ -6262,7 +6308,7 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     value. It is the same error the bar and line plots draw for the same set:
     the replicates are wells, or fields of view when the app-wide **per-FOV
     spread** toggle is on, and the interval is whichever one you picked under
-    **Properties → Statistics → Error bars**. All four choices govern the cell,
+    **Style → Statistics → Error bars**. All four choices govern the cell,
     not just two — **SEM** and **SD** as you would expect, **95% CI** scaling it
     by the same 1.96 the whisker is scaled by, and **None** silencing the cell
     annotation just as it hides the whisker. The title names which one you are
@@ -6288,8 +6334,8 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     across the columns and the cell line changing down the rows labels itself
     `1 µM` / `10 µM` and `HeLa` / `U2OS` instead of `1`–`12` and `A`–`H`. Three
     rules keep the labels worth reading:
-    - a **name you typed yourself** on a tick always wins. Double-clicking a row
-      or column header still renames it, and the sample map will not overwrite
+    - a **name you typed yourself** on a tick always wins. **Display › Labels**
+      (or a double click on the label) still renames it, and the sample map will not overwrite
       what you wrote — clear the name and the tick goes back to being one the
       sample map can speak for;
     - a variable that is the **same everywhere** names nothing, because a tick
@@ -6309,15 +6355,14 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     back.
 
   And elsewhere:
-  - **Value format** (in the **Properties** panel, under *Cell values*) — a
+  - **Value format** (in the **Style** tab, under *Cell values*) — a
     printf-style format for the number written in each cell: `%.2f` for two
     decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
     blank to let the tab choose per metric — counts as whole numbers, fractions to
     two places, intensities scaled to their size.
-  - **On a phone** the **Layout** button is in the **⚙ Controls** sheet,
-    beside **Save** and **Properties**, and opens the Layout panel across the
-    whole screen; its **✕** returns you to the map. It does not open by itself
-    there. Dragging by touch is not dependable, so choose wells under
+  - **On a phone** the **Layout** row is in the **⚙ Controls** sheet and
+    opens the Layout page inside that sheet; **Back** returns to the controls
+    and **Close** to the map. It does not open by itself there. Dragging by touch is not dependable, so choose wells under
     **Wells** and use **Auto-populate from selection**.
 - **Selecting wells.** The sidebar plate map does double duty on this tab: a
   *click* on a well selects or deselects it exactly as on every other tab, while
@@ -6710,7 +6755,7 @@ The **Nanowell** box goes to one nanowell, the same way on every view. Type its 
 addresses are written on the images (`q,r`, for example `-2,3`) or as a ring label such as `3.7` — and lead it with
 a well to go to a nanowell in another well: `B04 2,-1` (also `B04: 2,-1`, `b4/3.7`). Without a well, the address is
 in the well the **Well** control shows. **Origin** goes to nanowell `0,0`. On every view the nanowell is then
-selected: its well becomes the page's well, the site detail opens as a panel down the right of the page with its
+selected: its well becomes the page's well, the site detail opens as the inspector's Detail tab with its
 plots over time and its crops (and **Pop out** shows it large), and then each view shows where it is —
 
 - **Distribution** rings its dot in each timepoint's swarm;
@@ -6750,7 +6795,7 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     **Subset** and **Baseline** pickers are this page's own two settings: pick a saved subset (or *All
     nanowells*) or the timepoint fold changes are measured from, and this page changes with it. Click a nanowell's
     point to open it here, selected, at that point's timepoint; hovering names it. Its
-    Properties panel works as on the cell scatter: **X log** / **Y log** (on by default for each nanowell, as for
+    Style tab works as on the cell scatter: **X log** / **Y log** (on by default for each nanowell, as for
     each cell, drawn as log(value + 1) so an empty nanowell's zero stays on the axis), the **Log base**, and the
     marker size and shape. Density shading and error bars are not offered, because nanowell points are drawn solid
     and a per-well median draws no spread. The other plots below draw every nanowell of the selected wells;
@@ -6780,7 +6825,7 @@ A nanowell dataset also opens in every other Review tab, which read it like this
     scale, so grey means unchanged and a doubling and a halving are equally strong; the colour key always marks where
     1 falls. The values
     follow the Nanowells page's **Baseline** and the Cell Gating rules, so they match the page and the plots. To take
-    a fold change from a particular timepoint instead, open the channel's ⚙ menu and choose under **Fold change
+    a fold change from a particular timepoint instead, press the channel's ⚙ and choose under **Fold change
     relative to**: the page's baseline, the earliest or first measurable timepoint, or any timepoint of the run. The
     row then reads e.g. *NW: Count fold change vs 0h*, and adding the same metric twice with two baselines shows them
     side by side. The colour key always says what each fold change is relative to.
@@ -6919,11 +6964,13 @@ the sentence names it.
   The occupancy colours and *Starting cells* use the count at the same baseline.
 - **Subset** — which nanowells every view uses. The quick choices keep the nanowells that held a given number of
   cells at the Baseline: *All nanowells*, *Starting cells ≥1 (occupied)*, *1 (single cell)*, *1–2* and *≥2*.
-  *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
+  *Custom subset…* or the **Conditions** row beside the list (it reads how many conditions the subset has) opens
+  the subset editor as a page of the inspector — beside the figure at a desk, in the ⚙ Controls sheet on a phone —
+  where you can combine any number of
   conditions and choose whether a nanowell must meet *all* of them or *any*. On a narrow screen each condition wraps
-  onto as many lines as it needs, and the editor scrolls once it holds more than its share of the page; on a screen
-  too short for the editor and the figure both, such as a phone held sideways, the editor takes the figure's place
-  until you press **Close**. Each condition tests one of:
+  onto as many lines as it needs, and the page scrolls once it holds more than fits; the figure keeps its place
+  either way. **Back** or **Close** in the inspector's header leaves the editor. A condition on the imaging
+  field or the identity verdict picks its values on a page of ticks. Each condition tests one of:
   - **Starting cells** — the count at the Baseline;
   - **a metric** — cell count, confluence, cell fluorescence and nanowell fluorescence (per channel), any fold change or the growth
     rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*
@@ -7033,10 +7080,11 @@ the sentence names it.
   the name you gave it on Well Labels or, failing that, by the sample variables it holds (`HeLa · 1 µM`). When two
   wells drawn side by side share a name, each gets its well added (`HeLa · 1 µM (A01)`); the views of one well and
   the **Well** list always show both. Under a group of several wells, each well's own swarm is marked with its well.
-- **Group by** and **Decorate** (once the plate has a variable, Home → Sample Map → Variables) — the same
+- **Group by** (once the plate has a variable, Home → Sample Map → Variables) and **Colour & split** (always
+  listed; with no variables its page says so and where to define them) — the same
   controls as on the Plotting row, and the same settings: choosing one here changes it on every plot, and one chosen
   on a Plotting tab shows here. **Group by** pools the page's wells by a variable's values instead of by your
-  replicate groups, one group per value, on every view; wells with no value are not drawn. **Decorate** (on
+  replicate groups, one group per value, on every view; wells with no value are not drawn. **Colour & split** (on
   *Distribution*) holds **Colour by**, **Split by** and **Then by**, which change how the groups look, never a
   value. *Colour by* colours each group's dots by its value, with a key naming the values at the top right, in
   place of the occupancy colours — those come back when *Colour by* is set to *Occupancy* again, and the
@@ -7164,8 +7212,8 @@ the sentence names it.
   axis is in hours (*Time (h)*, under the bottom row), and the footer names the timepoint at each hour; if any
   timepoint has no recorded time, the axis is ticked by timepoint name instead. Fold changes carry a dotted line
   at no change (1×, or 0 on log₂).
-- Text on this page is drawn at a share of the **Properties** font sizes, scaled to the size of a panel, so a
-  grid of wells stays legible; raising a size in Properties still raises it here.
+- Text on this page is drawn at a share of the **Style** font sizes, scaled to the size of a panel, so a
+  grid of wells stays legible; raising a size in Style still raises it here.
 - **Show** (Auto / Beeswarm / Violin / Histogram), on the band's third row, chooses how each well's nanowells are
   drawn. **Auto** draws dots while a column holds four wells or fewer, and past that one violin per well, with its
   median (or mean, for a metric averaged per well), since a slot shared by many wells is too narrow for readable
@@ -7179,7 +7227,7 @@ the sentence names it.
 - **Bins** sets the histograms' bin count (2–200, default 30). Every well's bars sum to 1, and every well in the
   figure — across all its panels, which share one y axis — is binned on one set of edges and measured against one
   width scale, so widths compare across wells. A cell count bins on whole numbers, one bin per value when the
-  range fits, so a request for 30 bins over counts of 0–4 draws 5; with **Properties → Y log** on, the bins are
+  range fits, so a request for 30 bins over counts of 0–4 draws 5; with **Style → Y log** on, the bins are
   log-spaced. The footer says how many bins were drawn and what the widest bar means. Greyed unless Show is
   Histogram.
 - **Smoothing** sets how smooth the violins are: their kernel bandwidth as a multiple of the automatic one
@@ -7560,12 +7608,13 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   other settings; a page saved on the old *Array map* or *Array QC* view opens on the Array view with the
   layers that view drew.
 
-**Site detail.** Click a dot to open that nanowell's history in a panel down the right of the page, from the top
-of the controls to the bottom of the figure — drag its edge to share the width with the plot: cell count,
+**Site detail.** Click a dot to open that nanowell's history as the **Detail** tab of the inspector, down the right
+of the window — drag its edge to share the width with the page: cell count,
 confluence, cell fluorescence and nanowell fluorescence against time. One nanowell is shown at a time: clicking another dot
-shows that one instead, whatever keys are held. The **✕** at the top of the site detail closes it and clears the
-selection, as does clicking empty space on the plot. In phone layout the site detail takes the whole screen while a
-nanowell is selected, and its crops wrap into rows; **✕** brings the plot back. A timepoint where the
+shows that one instead, whatever keys are held. **Clear selection** at the top of the site detail deselects the
+nanowell and empties the tab, as does clicking empty space on the plot; the inspector's **Close** closes the
+inspector and leaves the nanowell selected. In phone layout the site detail opens in the ⚙ Controls sheet over the
+lower half of the screen, with the plot still above it, and its crops wrap into rows. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
 Under the plots, a strip of crops shows the selected nanowell at each timepoint, cut at full resolution
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset
@@ -7591,7 +7640,7 @@ a row of crops of its own on its own brightness scale (that channel's **Range** 
 99th percentile), and the caption names each channel's scale. **Grid** sets the shape: *Auto* (one channel wraps into
 a near-square grid; several take a row each, the timepoints across), *One row*, *One column* (the timepoints down, a
 column per channel) or *N across* (the timepoints wrap every N panels, each wrapped line keeping its channels
-together). **Save ▾** saves the figure exactly as drawn — *Save figure…* names the file after the nanowell and its
+together). **Share ▾** saves the figure exactly as drawn — *Save figure…* names the file after the nanowell and its
 channels (`A01_q3_r-2_phase_EGFP_over_time.png`) — copies it as SVG, or files it in Saved Plots. These choices are
 kept with the page's settings. The plot of the selected nanowell over time and the strip of crops under it carry the
 same hover **save** button as every other plot, so each of the page's figures — the main plot on any view, the detail,
@@ -7702,7 +7751,7 @@ leaves that well out of every figure on the Nanowells page and out of *Save nano
 which wells are left out. It applies only to this page — the well stays in the rest of Review — and is remembered with
 the page's settings. **Excluded (n) ▾** on the band brings back one well or all of them.
 
-**Saving.** *Save ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
+**Saving.** *Share ▾ → Save nanowell data…* writes every nanowell, timepoint and metric of the wells the page
 draws as one long CSV, with the baseline and where the times came from. Its `n_cells` and cell fluorescence are the
 page's, so they leave out the cells Home's Cell Gating leaves out; beside them `n_cells_run` is the run's own
 count, `cells_left_out` how many cells the gating took from it, and `cell_gating` says what the gating left out
@@ -7819,8 +7868,9 @@ chooses what it draws:
   read each check.
 
 Every Compare mode zooms with the scroll wheel and pans by dragging. Side by side's two images move together, as do
-Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them
-changes.
+Diagnostics' two images. **Reset zoom** on the controls row shows the whole of every image again (a double click on
+an image does the same for that image). The zoom stays while the same well, timepoint and mode are shown and resets
+when any of them changes.
 
 An address typed in the **Nanowell** box (*Going to one nanowell*, above) is also where the Identity view looks: the
 Distance map, Blink and Side by side zoom onto it and stay there as you change the timepoint, the well or the mode,
@@ -8091,7 +8141,7 @@ channel for every well).
   axis to make it vary; click the **×** on a root to drop it back to Fixed. Wells
   come from the sidebar plate; changing that selection — including **Select all /
   none** — re-runs the layout in place.
-- **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
+- **Per-channel render options** — each channel chip's **⚙** opens a page of its options: **Raw /
   Corrected**, **Mask**, **> threshold** (renders that channel's
   ON-cutoff binary — ThreshFracOn, or ThreshCountOn when the selected Property
   is a spot count — positive cells white), **Colour cells**, a **boundary** outline
@@ -8171,7 +8221,7 @@ channel for every well).
   short list of real images looks exactly like a well that genuinely holds that
   few, so the status line after **Generate** names the wells whose inventory was
   cut short and why — and so does **every way of getting the table out of the
-  app**: Export to File, Copy PNG, Copy SVG and Save to Saved Plots all repeat
+  app**: Save figure, Copy figure as PNG, Copy figure as SVG and Save to Saved Plots all repeat
   it. Those artifacts outlive the status line and are short by however many
   frames were never reached, with nothing in them to say so. It is the same
   sentence in all five places, beside the one about a scale bar that would not
@@ -8185,7 +8235,7 @@ channel for every well).
   12 columns, so a tall table turned on its side can leave images off the end;
   the status line says how many, and **Wrap** bands the columns to show them
   all. In Plate mode it turns the plate on its side — columns 1–12 down the rows,
-  rows A–H across — and a second Transpose turns it back) · **Crop view ▾** (drag a region on any image — the button reads
+  rows A–H across — and a second Transpose turns it back) · **Crop view ▾** (**Start cropping**, then drag a region on any image — the button reads
   the current crop, `Crop view · (full FOV)` when there is none). This crops what
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value
@@ -8197,13 +8247,14 @@ channel for every well).
   ThreshCountOn instead. Caption, value and write target move together, so the
   number you see is the number you are changing. A channel with no spot-count
   column has no count cutoff, so it keeps editing its ON threshold whatever the
-  Property says · **Save ▾** (to file ·
+  Property says · **Share ▾** (to file ·
   to PowerPoint · Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
-  % to reset to 100) · a **Properties** button that slides out a
-  right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
+  % to reset to 100) · **Cell ›** (one cell's own well / channel / timepoint / FOV) ·
+  a **Style** button that opens the inspector's Style tab with the grouped
+  view's **spacing gaps** and **label font sizes**,
   plus the **Scale bar** and **Cell labels** options below.
 - **Scale bar** — **on by default**: enter the **pixel size (µm/px)** and a **bar
-  length (µm)** in the Properties panel to burn a scale bar into the images (pixel
+  length (µm)** in the Style tab to burn a scale bar into the images (pixel
   size isn't stored by the pipeline, so you supply it). Choose which cell(s) show it
   (**every cell**, or a single grid corner), where in the image it sits, its
   **thickness**, and its colour (**Auto** picks black or white for contrast against
@@ -8241,8 +8292,10 @@ channel for every well).
   to rest instead of reverting to the plain cell tooltip. Opening another dataset,
   or reloading this one, drops every remembered MFI, so the readout always quotes
   the data that is open.
-- **Per-cell tweak** — right-click any rendered cell to override just that cell's
-  well / channel / timepoint / FOV.
+- **Per-cell tweak** — press **Cell** on the action strip to override one
+  cell's well / channel / timepoint / FOV: choose the cell by its row and
+  column, then the value to change. Right-clicking a rendered cell opens the
+  same page on that cell.
 - **Export to PowerPoint…** — writes the grid as a slide of **editable frames**
   rather than as a picture of it. Every field of view becomes its own PowerPoint
   group holding that field's image, its identity label as a text box you can
@@ -8252,26 +8305,27 @@ channel for every well).
   field leaves its row header where it was. A scale bar too long for its field is
   left out of the slide exactly as it is left out of the picture, because a bar
   shortened to fit would state a distance nobody measured. The same slide comes
-  out of **Saved Plots → Export ▾ → PowerPoint deck** for a grid saved to the
+  out of **Saved Plots → Share ▾ → PowerPoint deck** for a grid saved to the
   gallery. A field the app could not read keeps its place and its labels and is
   marked *(no image)*, and the slide says how many; if *no* field could be read
   there is nothing to lay out, and the gallery deck falls back to the flat
   picture rather than giving you a page of empty boxes.
-- **Exported layout** — the other ways out of the table (**Export to File…**, **Copy PNG**,
-  **Copy SVG**, **Save to Saved Plots**) reproduce the grid as you see it: the row and
+- **Exported layout** — the other ways out of the table (**Save figure…**, **Copy figure as PNG**,
+  **Copy figure as SVG**, **Save to Saved Plots**) reproduce the grid as you see it: the row and
   column axis labels, the vertical group strips, the corner label, and the extra
   spacing between groups. The saved image also reads at the same brightness as the
   grid on screen. Because the axis labels already identify every cell, the per-cell
-  titles are off — switch **Show titles** on in the Export settings dialog if you want
+  titles are off — switch **Show titles** on under **Style › Export** if you want
   them repeated above each image as well.
 - **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
-  **Standard**, **High**), picked either from the Save menu's quick-pick submenu
-  or the Export settings dialog. It also sets how large each field's own picture is
+  **Standard**, **High**), picked under **Style › Export**, with the other
+  export settings (margin, cell gap, titles, PNG DPI, transparent background);
+  each applies as you change it. It also sets how large each field's own picture is
   inside the saved grid's PowerPoint frames — a saved grid keeps one image per
   field, so it takes noticeably more room in the dataset folder than the single
   snapshot did, and this preset is the control over that. Save to Saved Plots
   pre-shrinks each cell and caps the
-  assembled grid's longest side before saving (Export to File / Copy PNG / Copy SVG
+  assembled grid's longest side before saving (Save figure / Copy figure as PNG / as SVG
   always render full resolution), so a large grid saves faster at the cost of per-cell
   detail; raise it to **High** when the saved image needs to hold up in a full-page PDF
   report. Save to Saved Plots also reuses whatever the last **Generate** already
@@ -8520,7 +8574,8 @@ Operates on **one well at a time** (spot detection is per-frame).
 **What it shows.** A tabular view of the loaded per-well CSVs — the raw
 per-nucleus rows behind every plot.
 
-- **Controls** — the **Well** picker; column filtering; **double-click a row**
+- **Controls** — the **Well** picker; column filtering; select a row and press
+  **Open in Segmentation** (or double-click the row)
   to jump to that cell in the Segmentation tab. The jump switches wells for
   you: the row's well becomes the Segmentation sidebar's selected well, and the
   view opens on that cell's field of view and timepoint, zoomed to the nucleus.
@@ -8630,7 +8685,7 @@ rather than a single panel.
 - **Clear all** asks first, and only clears if you say yes. If the
   confirmation cannot be shown at all, nothing is cleared — an answer that could
   not be obtained is not consent.
-- **Export ▾** — send the whole gallery, in the order the cards are arranged
+- **Share ▾** — send the whole gallery, in the order the cards are arranged
   here, to a single file. Two formats:
   - **PDF report** — a cover page plus one full-quality page per plot, each with
     its parameter summary. The figure on the page is the picture that was
@@ -8675,7 +8730,7 @@ rather than a single panel.
   it match. A plot placed as a picture (see below) cannot be aligned either.
 
   One thing does still pull two plots apart, and it is upstream of the export:
-  the Properties sidebar's **Layout › Tight** and **Layout › Constrained**
+  the Style tab's **Layout › Tight** and **Layout › Constrained**
   switches move the plotting area *inside* the figure to fit whatever the labels
   need, so two plots of the same size genuinely end up with plotting areas of
   different sizes and no export can reconcile them. Measured on a pair of plots
@@ -8787,7 +8842,7 @@ display** chooses how the top panel draws each column — **Bars**, **Beeswarm**
 and the whole run uses the choice made when it started. A histogram is the
 tab's: every column's bars sum to 1, on one set of bins and one width scale per
 figure, log-spaced when the run's Value row sets a log scale (or the plot's
-Properties do).
+Style tab does).
 
 **Response** exports the [Response Curves](#response-curves) figure one group at
 a time: a curve per timepoint (and per series value, if you pick a series
@@ -9057,16 +9112,17 @@ previous run put it.
 
 ### Starting over
 
-Two buttons at the right of the top band discard saved state, and they divide it
-between them. Neither ever touches your image or CSV files.
+Two commands under **Dataset tools** — the last group of the dataset menu at the
+head of the left panel — discard saved state, and they divide it between them.
+Neither ever touches your image or CSV files.
 
-**Reset view** (the circular arrow) returns the window to how a freshly-opened
+**Reset view** returns the window to how a freshly-opened
 dataset looks, in one step: selected wells and group visibility, fold-change
 scopes, per-tab controls, plot and figure preferences, draw order, the heatmap
 arrangement, the Multivariate configuration, and the Image Table grid. Nothing it
 clears is a decision about your samples, so it asks once and clears the lot.
 
-**Reset analysis** (the trash can) discards decisions, and asks which ones. It
+**Reset analysis** discards decisions, and asks which ones. It
 opens a checklist — everything ticked by default — and clears only what you
 leave ticked, then reloads the dataset:
 
@@ -9527,7 +9583,7 @@ If you start the same plate with the same settings from a second window while th
 
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates. **Scroll on it to zoom, drag to move around, and
-double-click to fit the whole run again.** Each position numbers itself in
+press Fit whole path under it (or double-click it) to fit the whole run again.** Each position numbers itself in
 acquisition order as soon as there is room to print the number — so zoom into a
 well and its fields of view are labelled 1, 2, 3… in the order the stage took
 them, which is the detail a plate map can never show. A number is only printed
@@ -11302,17 +11358,20 @@ holds:
 | Control | What it does |
 |---|---|
 | **Bar Plots ▾** | Picks a page within the section you are in (Bar Plots, Line Graphs, Heat Map, …). To change section (Home, Statistics, Image Browser, …), use **☰**. A section with only one page has no such button. |
-| **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
-| **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Display** (Display ▾, Fold change ▾, Decorate ▾, …) and **Actions** (Save ▾, Reset order, Properties, …), each a row of equal buttons, so they are in view as soon as the panel opens; then **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest, which you scroll on a page with many settings. A note about the data sits under the **Data** heading. **Decorate ▾** appears only where it changes the plot — Bar Plots, and the Nanowells page's Distribution view — and only once the plate has sample variables. **Done** puts them away. |
+| **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Close**, at the panel's top right, or the button again puts the plate away. On pages that do not pick wells (Home, Statistics) the button is greyed out. |
+| **⚙ Controls** | Slides the **inspector** up from the bottom, with the plot still in view above it so you can watch it change. It has the desktop's tabs: **Data** — the page's controls (channel, property, timepoints, threshold, …), one per row with its name on the left and its value on the right; a row ending in **›** opens that choice's options as a page of the same panel — **Display**, **Style** and **Detail**. **‹** goes back a page and **Close**, at the top right, puts the panel away. Nothing opens on top of it. A page of settings long enough to need it (a table of pairs, an editor) takes the full height. |
+| **Share ▾** | The page's menu of commands: save the figure, copy it, save its data. Greyed out on a page with nothing to share. |
 
-**Wells** and **⚙ Controls** both rise from just above the bar, so **Done** is
-where you tapped to open them; opening one puts the other away. Saved
+**Wells** and **⚙ Controls** both rise from just above the bar, and the button
+you tapped stays where it was, shown as pressed, so the same tap puts the panel
+away; opening one puts the other away. The four buttons are in the same place on
+every page — one a page cannot use is greyed out, never removed. Saved
 selections, and the extra panels some pages add under the plate, stay in
-**☰**. The Heat Map's **Layout** panel is not one of those: it opens from the
-**Layout** button in **⚙ Controls**.
+**☰**. The Heat Map's **Layout** page is not one of those: it opens from the
+**Layout** row in **⚙ Controls**.
 
-The **Properties** button among those controls (the sliders icon) puts the
-controls away and opens the figure's Properties panel across the whole screen.
+The **Style** button among those controls (the sliders icon) puts the
+controls away and opens the figure's Style tab across the whole screen.
 Its **✕** closes it and returns you to the plot.
 
 In Datasets the bottom bar holds **‹tool› ▾** — the tool on screen (Convert CZI,
@@ -11356,7 +11415,7 @@ readable height and the page scrolls, rather than squashing several plots into
 the screen's height.
 
 Everything that scrolls scrolls by dragging it with a finger — pages, the
-sidebar, the controls, the Properties panel, Home, logs, lists, a drop-down's
+sidebar, the controls, the Style tab, Home, logs, lists, a drop-down's
 list, and any window that opens on top. A drag that starts on a well plate
 still selects wells, one on a slider still moves it, one on a colour picker
 still picks, and one on an Image Table chip still carries the chip. A drag on a
@@ -11381,10 +11440,12 @@ layout gives an open window its desktop size again. The Windows file pickers
 (*Browse…* for a folder or a file) are Windows' own and cannot be rearranged by
 All-Well; on a phone they open at whatever size Windows gives them.
 
-The buttons that change or discard work — Reset view, Reset analysis, Copy
-analysis, the publication look, Reveal folder and Storage — are hidden in phone layout so a
-stray tap cannot reach them, as are the Review CSV and Batch Export sections;
-switch back to the desktop layout to use them.
+The commands about the open dataset — Copy analysis, Reveal folder, Storage,
+Reset view and Reset analysis — are under **⋯ → Dataset tools…**, a full-screen
+list. The two resets ask first and do nothing until you confirm, so a stray tap
+cannot discard work. **⋯ → Manage remote servers…** opens the server list. The
+publication look, and the Review CSV and Batch Export sections, are not offered
+in phone layout; switch back to the desktop layout to use them.
 
 **Analyze** has two views, picked from the button in the bottom bar:
 

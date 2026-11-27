@@ -153,21 +153,59 @@ def fill_group_by_combo(ctx, combo) -> bool:
     return bool(variables)
 
 
+#: What the *Colour & split* page says in place of its controls while the
+#: plate has no sample variables. The row is listed all the same: a control
+#: that vanishes until something is defined elsewhere cannot be found.
+NO_VARIABLES_NOTE = ("No sample variables are defined yet. Define them on "
+                     "Home › Sample Map, and this plot can be coloured and "
+                     "split by them.")
+
+
+def have_variables(ctx) -> bool:
+    vset = getattr(ctx.state.selection, "variables", None)
+    return bool(getattr(vset, "variables", ()) or ())
+
+
+def decoration_summary(ctx) -> str:
+    """What the *Colour & split* row shows as its value: the variable the plot
+    is coloured by and the one it is split by, or that there are none to use."""
+    vset = getattr(ctx.state.selection, "variables", None)
+    names = {v.id: v.name for v in (getattr(vset, "variables", ()) or ())}
+    if not names:
+        return ""           # nothing to read out; the page itself says why
+    colour = names.get(str(getattr(ctx.state.plot, "colour_by_variable", "") or ""))
+    split = names.get(str(getattr(ctx.state.plot, "split_by_variable", "") or ""))
+    return f"{colour or 'none'} · {split or 'none'}"
+
+
+def show_decoration_controls(note, combos, have: bool) -> None:
+    """With no variables the page shows its note instead of combos that could
+    only offer the status quo."""
+    if note is not None:
+        note.setVisible(not have)
+    for combo in combos:
+        if combo is not None:
+            combo.setVisible(have)
+
+
 def refresh_decoration_combos(ctx) -> None:
-    """Fill the band's three decoration combos, and hide its popover with no variables.
+    """Fill the band's three decoration combos and its *Colour & split* row.
 
     The rules each combo follows are :func:`fill_decoration_combos`'; this adds
-    only the band's own button, which shows on the tabs whose renderer reads
-    the controls (:data:`DECORATED_TABS`).
+    only the band's own row, which shows on the tabs whose renderer reads the
+    controls (:data:`DECORATED_TABS`) whether or not a variable is defined.
     """
-    fill_decoration_combos(ctx, {field: ctx.widgets.get_or_none(name)
-                                 for field, name, _label in DECORATION_CONTROLS})
+    combos = {field: ctx.widgets.get_or_none(name)
+              for field, name, _label in DECORATION_CONTROLS}
+    fill_decoration_combos(ctx, combos)
+    show_decoration_controls(ctx.widgets.get_or_none("_plotting_decorate_note"),
+                             combos.values(), have_variables(ctx))
 
     button = ctx.widgets.get_or_none("_plotting_decorate_btn")
     if button is not None:
-        vset = getattr(ctx.state.selection, "variables", None)
-        has_variables = bool(getattr(vset, "variables", ()) or ())
-        button.setVisible(has_variables and _current_tab_decorates(ctx))
+        button.setVisible(_current_tab_decorates(ctx))
+        from review.core import inspector_panels
+        inspector_panels.refresh(button)
 
 
 def fill_decoration_combos(ctx, combos: dict, no_labels: dict | None = None) -> None:

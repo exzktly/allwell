@@ -68,7 +68,9 @@ class SchedulerTestDialog(QDialog):
         row = QHBoxLayout()
         row.addStretch(1)
         self._close_btn = buttons.default("Cancel", self)
-        self._close_btn.clicked.connect(self.close)
+        # reject, not close: shown as a page of the host form, this is a child
+        # widget, and closing a child widget ends nothing (``done`` below).
+        self._close_btn.clicked.connect(self.reject)
         row.addWidget(self._close_btn)
         layout.addLayout(row)
 
@@ -111,8 +113,11 @@ class SchedulerTestDialog(QDialog):
         self._summary_lbl.setText("\n".join(sentences))
         self._close_btn.setText("Close")
 
-    def closeEvent(self, event) -> None:  # Qt override
+    def done(self, code: int) -> None:  # Qt override
+        """However the test ends — Cancel, Close, or the window's own close,
+        which Qt turns into ``reject`` — a test still running is cancelled."""
         if not self._finished:
+            self._finished = True
             self._probe.cancel()
         self._clock.stop()
-        super().closeEvent(event)
+        super().done(code)

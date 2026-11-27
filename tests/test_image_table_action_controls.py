@@ -93,7 +93,7 @@ def test_the_save_menu_button_says_save(image_table_app):
     """One verb across the app for the same button.
 
     Every plot tab's equivalent is built by ``ui_helpers.build_plot_save_menu``
-    and reads *Save ▾*; this tab builds its own — its menu is not a plot card's
+    and reads *Share ▾*; this tab builds its own — its menu is not a plot card's
     and offers no CSV — and read *Export*, which is the drift that builder
     exists to end, one tab past where it can reach.
 
@@ -115,8 +115,8 @@ def test_the_save_menu_button_says_save(image_table_app):
     ]
     assert len(buttons) == 1, (
         f"expected exactly one save menu on the Image Table, found {len(buttons)}")
-    assert buttons[0].text() == "Save", (
-        f"the button reads {buttons[0].text()!r}; every other tab's says 'Save'")
+    assert buttons[0].text() == "Share", (
+        f"the button reads {buttons[0].text()!r}; every other tab's says 'Share'")
 
 
 def _controller():

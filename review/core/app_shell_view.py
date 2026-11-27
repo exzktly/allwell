@@ -108,7 +108,7 @@ RECENTS_IN_MENU = 6
 
 
 def _fill_dataset_menu(win, menu) -> None:
-    """``Open…``, the datasets this user opened recently, then the ``Palette`` choice.
+    """``Open…``, the datasets this user opened recently, the dataset tools, then the ``Palette`` choice.
 
     Rows come from ``core.recent_view.entry_rows``, the same function Home's
     card and its placeholder draw from, so a folder that has gone missing reads
@@ -125,15 +125,15 @@ def _fill_dataset_menu(win, menu) -> None:
     # ``plate3_run2`` from ``plate3_run2`` on another drive.
     menu.setToolTipsVisible(True)
     owned_action(menu, "Open…").triggered.connect(lambda _=False: win._browse())
-    _fill_recents(win, menu)
+    _add_recent_datasets(win, menu)
+    _add_dataset_tools(win, menu)
     _add_palette(menu)
 
 
 def _add_palette(menu) -> None:
     """The ``Palette`` choice, last and set apart: it is the application's setting, not the dataset's, and this
-    menu is the one place the window offers settings until the title bar's own menu exists. Rebuilt with the
-    rest, so its check mark follows a choice made since; the previous copy is deleted, because ``clear`` drops
-    the action and not the submenu it opened."""
+    menu is the one place the window offers settings. Rebuilt with the rest, so its check mark follows a choice
+    made since; the previous copy is deleted, because ``clear`` drops the action and not the submenu it opened."""
     from ui.palette_setting import palette_menu
 
     old = getattr(menu, "_aw_palette_menu", None)
@@ -144,7 +144,31 @@ def _add_palette(menu) -> None:
     menu.addMenu(menu._aw_palette_menu)
 
 
-def _fill_recents(win, menu) -> None:
+#: The widget-registry key of the callable that lists the window's dataset
+#: tools (``ui.dataset_tools.Tool``). The window that owns the commands
+#: registers it there under this key; Review only shows them.
+DATASET_TOOLS_KEY = "_dataset_tools"
+
+
+def _add_dataset_tools(win, menu) -> None:
+    """The commands about the open dataset — copy analysis, reveal folder, storage and the two resets — under a
+    caption. They were five unlabelled icons in the title bar."""
+    registry = getattr(getattr(win, "_ctx", None), "widgets", None)
+    provider = registry.get_or_none(DATASET_TOOLS_KEY) if registry is not None else None
+    tools = list(provider()) if callable(provider) else []
+    if not tools:
+        return
+    from ui.dataset_tools import TITLE
+    menu.addSeparator()
+    heading = menu.addAction(TITLE)
+    heading.setEnabled(False)
+    for tool in tools:
+        action = owned_action(menu, tool.label)
+        action.setToolTip(tool.about)
+        action.triggered.connect(lambda _checked=False, _fn=tool.run: _fn())
+
+
+def _add_recent_datasets(win, menu) -> None:
     """The datasets this user opened recently, under a ``Recent`` heading; nothing when there are none."""
     from review.core.recent_view import entry_rows
 

@@ -389,7 +389,7 @@ def test_a_restore_puts_the_toggle_and_the_picker_back_in_step(loaded_app, qtbot
 
 
 @pytest.mark.qt
-def test_a_bar_tab_built_later_opens_on_the_mode_already_chosen(viewer_app, qtbot):
+def test_a_bar_tab_built_later_opens_on_the_mode_already_chosen(loaded_app, qtbot):
     """Tab bodies build lazily, so the picker is usually constructed *after*
     the mode was set — by a restore, or on another plate. It has to open on the
     live value; seeding it from the default would show ``Stars (*)`` over a
@@ -397,7 +397,9 @@ def test_a_bar_tab_built_later_opens_on_the_mode_already_chosen(viewer_app, qtbo
     from PySide6.QtWidgets import QWidget
     from review.features.barplot import tab_view as bar_tab_view
 
-    app = viewer_app
+    # A dataset is loaded: the band — and with it the panels its buttons
+    # open — is greyed out until one is, exactly as its Display button is.
+    app = loaded_app
     app._app_state.plot.significance_label_mode = "both"
     app._app_state.plot.show_significance = True
     parent = QWidget()
@@ -437,7 +439,7 @@ def test_a_new_dataset_keeps_the_chosen_mode():
 # ── the control the user actually touches ───────────────────────────────────
 
 @pytest.mark.qt
-def test_the_display_popover_s_picker_moves_the_state(viewer_app, qtbot,
+def test_the_display_tab_s_picker_moves_the_state(loaded_app, qtbot,
                                                       monkeypatch):
     """Drives the real controls rather than the handlers behind them.
 
@@ -460,7 +462,9 @@ def test_the_display_popover_s_picker_moves_the_state(viewer_app, qtbot,
     monkeypatch.setattr(bar_tab_view, "redraw_bars",
                         lambda _ctx: redraws.append(1))
 
-    app = viewer_app
+    # A dataset is loaded: the band — and with it the panels its buttons
+    # open — is greyed out until one is, exactly as its Display button is.
+    app = loaded_app
     parent = QWidget()
     qtbot.addWidget(parent)
     bar_tab_view.build_bar_plots_tab(app._ctx, parent)

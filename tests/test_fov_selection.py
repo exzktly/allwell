@@ -172,17 +172,16 @@ def test_auto_threshold_keeps_the_saved_selection(tmp_path, monkeypatch):
 @pytest.mark.qt
 def test_unticking_a_field_in_the_picker_removes_its_cells_everywhere(
         qtbot, tmp_path, monkeypatch):
-    """Press the real button, untick field 2 in the real menu, and the cells of
+    """Press the real button, untick field 2 on the real page, and the cells of
     field 2 are gone from the chokepoint, the button says so, and the choice is
     on disk for the next session."""
-    from PySide6.QtWidgets import QCheckBox, QWidget
+    from PySide6.QtWidgets import QWidget
 
     from review.data.data_loading import get_rows
     from review.features.home.cell_gating.tab_view import build_cell_gating_tab
     from tests._minimal_shell import load_dataset, minimal_shell
     from tests._panel_jobs import wait_for_panel_jobs
     from tests.fixtures.mini_dataset import build_mini_dataset
-    from widgets import menu_exec
 
     dataset = build_mini_dataset(tmp_path / "multifov", n_fovs=3)
     ctx, _window = minimal_shell(qtbot)
@@ -193,17 +192,12 @@ def test_unticking_a_field_in_the_picker_removes_its_cells_everywhere(
 
     btn = ctx.widgets.get("_cell_gating_fov_btn")
     assert btn.text() == "All FOVs"
-    offered: list[str] = []
-
-    def _untick_field_2(menu, _pos):
-        for box in menu.findChildren(QCheckBox):
-            offered.append(box.text())
-            if box.text() == "FOV 2":
-                box.setChecked(False)
-        return None
-
-    monkeypatch.setattr(menu_exec, "exec_menu", _untick_field_2)
+    from tests import _panels as panels
     btn.click()
+    page = panels.picker(btn)
+    offered = [box.text() for box in page.boxes()]
+    next(box for box in page.boxes() if box.text() == "FOV 2").setChecked(False)
+    panels.settle(page)                 # the burst of ticks is over
     # The selection is saved at once; the re-projection and the CDF re-read run
     # behind the panel's progress popup, and the button repaints after them.
     assert ctx.state.cell_gating.fov_selection == {"1", "3"}
@@ -221,13 +215,10 @@ def test_unticking_a_field_in_the_picker_removes_its_cells_everywhere(
     assert saved["cell_gating"]["fov_selection"] == ["1", "3"]
 
     # Ticking it back is every field again: no column, nothing on disk.
-    def _tick_all(menu, _pos):
-        for box in menu.findChildren(QCheckBox):
-            box.setChecked(True)
-        return None
-
-    monkeypatch.setattr(menu_exec, "exec_menu", _tick_all)
     btn.click()
+    page = panels.picker(btn)
+    page.all_button.click()
+    panels.settle(page)
     wait_for_panel_jobs(qtbot, ctx)
     assert ctx.state.cell_gating.fov_selection is None
     assert fs.FOV_PASS_COLUMN not in get_rows(ctx, well).columns
@@ -376,13 +367,12 @@ def test_closing_the_picker_unchanged_writes_nothing_and_keeps_absent_fields(
     """Opening the picker to look and closing it rewrote the saved selection
     from the boxes alone, deleting a selected field the dataset does not have,
     and re-projected every well. Only an edit applies, and an edit keeps it."""
-    from PySide6.QtWidgets import QCheckBox, QWidget
+    from PySide6.QtWidgets import QWidget
 
     from review.features.home.cell_gating.tab_view import build_cell_gating_tab
     from tests._minimal_shell import load_dataset, minimal_shell
     from tests._panel_jobs import wait_for_panel_jobs
     from tests.fixtures.mini_dataset import build_mini_dataset
-    from widgets import menu_exec
 
     dataset = build_mini_dataset(tmp_path / "multifov", n_fovs=3)
     ctx, _window = minimal_shell(qtbot)
@@ -411,19 +401,18 @@ def test_closing_the_picker_unchanged_writes_nothing_and_keeps_absent_fields(
 
     monkeypatch.setattr(ctx.features, "query", _query)
 
-    monkeypatch.setattr(menu_exec, "exec_menu", lambda _menu, _pos: None)
-    ctx.widgets.get("_cell_gating_fov_btn").click()
+    from tests import _panels as panels
+    button = ctx.widgets.get("_cell_gating_fov_btn")
+    button.click()                               # opened, looked at, left as it was
+    page = panels.picker(button)
+    panels.settle(page)
     assert ctx.state.cell_gating.fov_selection == {"01", "2", "9"}
     assert info.read_text() == before and recomputes == []
 
-    def _untick_2(menu, _pos):
-        for box in menu.findChildren(QCheckBox):
-            if box.text() == "FOV 2":
-                box.setChecked(False)
-        return None
-
-    monkeypatch.setattr(menu_exec, "exec_menu", _untick_2)
-    ctx.widgets.get("_cell_gating_fov_btn").click()
+    button.click()
+    page = panels.picker(button)
+    next(box for box in page.boxes() if box.text() == "FOV 2").setChecked(False)
+    panels.settle(page)
     wait_for_panel_jobs(qtbot, ctx)
     assert ctx.state.cell_gating.fov_selection == {"1", "9"}
     assert json.loads(info.read_text())["cell_gating"]["fov_selection"] == ["1", "9"]

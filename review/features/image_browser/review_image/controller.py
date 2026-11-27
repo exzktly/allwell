@@ -568,11 +568,10 @@ def on_review_image_channel_selected(ctx, _e=None) -> None:
 
 
 def pick_review_image_color(ctx, which: str) -> None:
-    """Open a v2 ColorSwatchRow popover anchored at the swatch button."""
+    """Show the colour page for the *which* element, from its swatch button."""
     from PySide6.QtGui import QColor
 
-    from widgets.color_swatch_row import ColorSwatchRow
-    from widgets.popover import Popover
+    from review.core.inspector_pages import open_colour
 
     anchor = (ctx.runtime.review_image.color_swatches or {}).get(which)
     if anchor is None:
@@ -581,11 +580,7 @@ def pick_review_image_color(ctx, which: str) -> None:
     r, g, b = review_image_get_color(ctx, which)
     recents = list(ctx.runtime.review_image.color_recents or [])
 
-    pop = Popover(anchor)
-    row = ColorSwatchRow(allow_custom=True, recents=recents)
-    row.setCurrentColor(QColor(int(r), int(g), int(b)))
-
-    def _apply(c: QColor, _which=which, _pop=pop, _row=row) -> None:
+    def _apply(c: QColor, _which=which) -> None:
         if not c.isValid():
             return
         review_image_set_color(ctx, _which, (c.red(), c.green(), c.blue()))
@@ -593,9 +588,8 @@ def pick_review_image_color(ctx, which: str) -> None:
                      if QColor(x).rgb() != c.rgb()]
         ctx.runtime.review_image.color_recents = rec[:8]
 
-    row.colorPicked.connect(_apply)
-    pop.setContentWidget(row)
-    pop.popup(anchor, side="bottom", align="start")
+    open_colour(ctx, anchor, key=f"segmentation/colour/{which}", title=f"{str(which).capitalize()} colour",
+                color=QColor(int(r), int(g), int(b)), on_pick=_apply, recents=recents)
 
 
 def set_review_cell_included(ctx, fov: str, tp: str, nid: str, included: str) -> None:

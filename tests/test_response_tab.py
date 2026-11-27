@@ -226,31 +226,34 @@ def _load_two_series(tab, timepoints=(24.0,)):
 
 
 def _series_menu(tab):
-    """Open the real Series menu and return ``{label: checkbox}``.
+    """Open the real Series page and return ``(picker, {label: checkbox})``.
 
-    ``exec_menu`` is the modal seam every menu in this app goes through, so
-    stubbing it is what lets a test open the menu, read what it offers and tick
-    a box — the control the user actually operates, rather than the handler
-    behind it. Redraws first, because ``refresh_series_control`` runs inside the
-    redraw and decides what the menu may offer.
+    Series is a multi-select page of the inspector. This fixture's context is
+    a stand-in with no window to host an inspector, so the one call that
+    shows the page is captured: the button pressed is the real button, the
+    page the real ``MultiSelect`` the controller filled, and a box ticked in it
+    reaches the controller through the page's own ``changed`` — the control
+    the user operates, rather than the handler behind it. Redraws first,
+    because ``refresh_series_control`` runs inside the redraw and decides what
+    the page may offer.
     """
-    from PySide6.QtWidgets import QCheckBox
-
-    from widgets import menu_exec
+    from review.core import inspector_service
 
     rctl.redraw_response(tab.ctx)
     shown = {}
-    tab.monkeypatch.setattr(menu_exec, "exec_menu",
-                            lambda menu, _pos: shown.setdefault("menu", menu))
+    tab.monkeypatch.setattr(inspector_service, "is_showing", lambda _ctx, _w: False)
+    tab.monkeypatch.setattr(inspector_service, "inspector",
+                            lambda _ctx: SimpleNamespace(holds=lambda _w: False))
+
+    def _push(_ctx, _key, title, widget, **_kw):
+        shown["page"], shown["title"] = widget, title
+        return True
+    tab.monkeypatch.setattr(inspector_service, "push", _push)
     tab.series.click()
-    menu = shown.get("menu")
-    assert menu is not None, "the Series button did not open its menu"
-    boxes = {}
-    for action in menu.actions():
-        widget = action.defaultWidget() if hasattr(action, "defaultWidget") else None
-        if isinstance(widget, QCheckBox):
-            boxes[widget.text()] = widget
-    return menu, boxes
+    picker = shown.get("page")
+    assert picker is not None, "the Series button did not open its page"
+    assert shown["title"] == "Series"
+    return picker, {box.text(): box for box in picker.boxes()}
 
 
 def _load_two_rnas(tab, timepoints=(24.0,)):

@@ -1575,6 +1575,8 @@ _SUPPORT_SERVICES = {
         "review.features.crop.controller", "apply_crop_to_cache"),
     "export_style.open_panel": lambda: _import_attr(
         "review.features.export.style", "open_export_style_panel"),
+    "export_style.sidebar": lambda: _import_attr(
+        "review.features.export.style", "style_sidebar"),
     "export_style.copy_figure": lambda: _import_attr(
         "widgets.fig_clipboard", "copy_figure_to_clipboard"),
 }

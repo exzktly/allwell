@@ -394,9 +394,20 @@ def build_centre(win, parent: QWidget) -> None:
         # Hidden with the same rule and for the same reason as Group by: two
         # combos whose only option is the status quo are two controls that do
         # nothing.
-        from review.core.ui_helpers import make_popover_button
+        from review.core.inspector_panels import make_popover_button
 
-        _dec_btn, _dec_panel, _dec_lay = make_popover_button("Decorate ▾", band)
+        from review.core.group_by_controller import (
+            NO_VARIABLES_NOTE as _NO_VARIABLES_NOTE,
+            decoration_summary as _decoration_summary,
+        )
+        _dec_btn, _dec_panel, _dec_lay = make_popover_button(
+            "Color & split", band, ctx=win._ctx, tab="data",
+            summary=lambda: _decoration_summary(win._ctx))
+        _dec_note = win._ctx.widgets.register(
+            "_plotting_decorate_note", _QLabel(_NO_VARIABLES_NOTE, _dec_panel))
+        _dec_note.setWordWrap(True)
+        _dec_note.setProperty("textRole", "help")
+        _dec_lay.addWidget(_dec_note)
         _dec_btn.setToolTip("Color and split the plot by a sample variable")
         win._ctx.widgets.register("_plotting_decorate_btn", _dec_btn)
         for _field, _name, _label in _DECORATION_CONTROLS:

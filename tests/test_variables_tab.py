@@ -1297,6 +1297,36 @@ def test_a_group_row_selects_the_wells_it_is_complaining_about(tab):
     assert set(tab.w("_var_plate").selectedWells) == {"A01", "A02", "B04"}
 
 
+def test_select_wells_does_what_the_double_click_does_from_a_button(tab):
+    """The double click is a shortcut. The button under the list is the route a
+    user can see: disabled until a row that carries wells is selected, then it
+    selects that row's wells — the second group here, so "always the first"
+    would select something else."""
+    _dose_tab(tab)
+    tab.ctx.state.selection.selections = [
+        {"name": "Ctrl", "wells": ["A01", "A02", "B04"]},
+        {"name": "Drug", "wells": ["B01", "B02"]}]
+    from review.features.home.variables.controller import refresh_variables
+    refresh_variables(tab.ctx)
+
+    listing = tab.w("_var_groups")
+    select = tab.w("_var_groups_select")
+    assert select.text() == "Select wells" and not select.isHidden()
+    assert not select.isEnabled(), "nothing is selected in the list yet"
+    listing.setCurrentRow(1)
+    assert select.isEnabled()
+    select.click()
+    assert set(tab.w("_var_plate").selectedWells) == {"B01", "B02"}
+
+    # Repainting the list drops its selection, and the button with it.
+    refresh_variables(tab.ctx)
+    assert not select.isEnabled()
+    # With no groups there is no list and no button.
+    tab.ctx.state.selection.selections = []
+    refresh_variables(tab.ctx)
+    assert select.isHidden()
+
+
 # ── the fill honours the selection, and says so ─────────────────────────────
 
 def test_a_fill_with_wells_selected_touches_only_those(tab):

@@ -346,9 +346,10 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         # square: with no text, the width a tool button reserves is empty space.
         side = browse.sizeHint().height()
         button.setFixedSize(side, side)
+        # The list itself, not a menu holding one submenu of it.
         menu = QMenu(button)
-        sub = QMenu(title, menu)
-        menu.addMenu(sub)
+        menu.setTitle(title)
+        sub = menu
 
         def fill() -> None:
             sub.clear()

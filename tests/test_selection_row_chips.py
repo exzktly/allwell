@@ -131,3 +131,56 @@ def test_a_plate_factory_that_raises_is_recorded(qapp, caplog):
     # half-built. Logging the fault and then failing to open would trade a
     # silent substitution for a silent nothing.
     assert row._compose_pop is not None
+
+
+def test_a_row_s_wells_chooser_is_a_page_through_the_list_s_opener_and_ok_writes_the_wells(qapp):
+    """Not a popover over the rail: the chooser goes to the opener the window
+    set (its inspector), and OK on that page writes the chosen wells — the
+    second well here, so "keep what it had" writes something else."""
+    from PySide6.QtWidgets import QPushButton
+
+    from widgets.well_plate_selector import WellPlateSelector
+
+    lst = ssl.SavedSelectionsList()
+    shown, closed = [], []
+
+    def opener(title, widget, _anchor):
+        shown.append((title, widget))
+        return lambda: closed.append(title)
+
+    lst.setComposable(True)
+    lst.setSelections([dict(SEL, wells=["A01"])])
+    lst.setPageOpener(opener)                 # after the rows exist: they must be told too
+    row = next(iter(lst._rows.values()))
+    row._enabled_wells = ["A01", "A02"]
+    edits = []
+    row.compositionEdited.connect(lambda _sel_id, wells, _r: edits.append(list(wells)))
+    row._open_compose_popover()
+    (title, page), = shown
+    assert title == "Wells"
+    plate = page.findChild(WellPlateSelector)
+    plate.setSelectedWellIds(["A02"])
+    plate.selectionChanged.emit(["A02"])
+    ok = next(b for b in page.findChildren(QPushButton) if b.text() == "OK")
+    ok.click()
+    assert row._wells == ["A02"] and edits and edits[-1] == ["A02"]
+    assert closed == ["Wells"], "OK did not close the page"
+
+
+def test_recolour_is_the_colour_page_through_the_list_s_opener(qapp):
+    from widgets.colour_page import ColourPage
+
+    lst = ssl.SavedSelectionsList()
+    shown = []
+    lst.setPageOpener(lambda title, widget, anchor: shown.append((title, widget)) or (lambda: None))
+    lst.setSelections([dict(SEL, color="#112233")])
+    sel_id = next(iter(lst._rows))
+    recoloured = []
+    lst.entryRecoloured.connect(lambda i, c: recoloured.append((i, c)))
+    lst._on_recolour_requested(sel_id, lst)
+    (title, page), = shown
+    assert title == "Recolour" and isinstance(page, ColourPage)
+    assert page.color().name().upper() == "#112233"
+    page.hex_edit.setText("#AA5500")
+    page.hex_edit.editingFinished.emit()
+    assert recoloured == [(sel_id, "#AA5500")]

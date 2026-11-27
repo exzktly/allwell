@@ -133,3 +133,46 @@ def test_opening_a_cell_focuses_it_and_the_button_shows_it_in_segmentation(qtbot
     assert (cell.well, cell.fov, cell.tp, cell.nucleus_id) == ("A02", "F001", "0h", 1)
     viewer._show_in_seg_btn.click()
     assert calls == [("image_browser.show_cell", ("A02", "F001", "0h", "1"))]
+
+
+def test_a_picked_cell_is_the_inspector_s_detail_tab_and_picking_another_updates_it_in_place(qtbot, tmp_path):
+    """Two cells, so "the first one picked" and "the one just picked" differ:
+    the Detail tab must show *that* one — in the same viewer, not a second
+    panel — and the plot's column is the docked inspector, not a surface over
+    the page. Clearing the pick empties the tab and closes an inspector that
+    has nothing else to show."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSplitter, QWidget
+
+    from review.core import inspector_service as svc
+    from tests import _surface_checks as surf
+    from tests._minimal_shell import load_dataset, minimal_shell
+    from tests._page_datasets import image_plate
+
+    root = image_plate(tmp_path / "plate")
+    ctx, window = minimal_shell(qtbot)
+    split = QSplitter(Qt.Horizontal)
+    split.addWidget(QWidget())
+    split.addWidget(QWidget())
+    window.setCentralWidget(split)
+    window._h_pane = split                       # where the desk inspector docks
+    window.resize(1300, 800)
+    window.show()
+    load_dataset(ctx, root / "out")
+    ctx.state.dataset.data_dir = root / "out"
+    ctx.state.dataset.in_dir = root / "in"
+
+    first = _open(qtbot, ctx, "A01", 2)
+    insp = svc.inspector(ctx)
+    assert svc.is_open(ctx) and insp.currentTab() == "detail"
+    assert insp.tabWidget("detail") is first and first.isVisibleTo(window)
+    assert first._title_label.text() == "Cell · A01 · F001 · 0h · #2"
+    assert surf.depth(window) == 0, surf.describe(surf.open_transients(window))
+
+    second = _open(qtbot, ctx, "A01", 1)
+    assert second is first, "a second viewer was built instead of updating the first"
+    assert insp.tabWidget("detail") is first
+    assert first._title_label.text() == "Cell · A01 · F001 · 0h · #1"
+
+    first._close_dock()
+    assert insp.tabWidget("detail") is None and not svc.is_open(ctx)

@@ -71,7 +71,7 @@ def _shell(qapp, mode: str = "review", split=None):
     box = QWidget()
     row = QHBoxLayout(box)
     row.setContentsMargins(0, 0, 0, 0)
-    for glyph in ("refresh-cw", "image", "trash-2", "home", "rotate-ccw"):
+    for glyph in ("refresh-cw", "image"):
         row.addWidget(IconButton(glyph, box))
     review = types.SimpleNamespace(currentMode=lambda: mode)
     if split is not None:
@@ -80,7 +80,6 @@ def _shell(qapp, mode: str = "review", split=None):
     shell = types.SimpleNamespace(
         _review_actions=box,
         _remote_node_btn=IconButton("server"),
-        _storage_btn=IconButton("hard-drive"),
         _help_btn=IconButton("info"),
         _review=review,
     )
@@ -96,17 +95,17 @@ def _widgets(layout):
 
 
 def test_icons_land_on_the_header_row_in_order(qapp):
-    """Split toggle, its picker, the cluster, the remote-node indicator,
-    Storage, then Help — after the header's stretch, so hard right on the
-    wordmark's line."""
+    """Split toggle, its picker, the cluster, the remote-node indicator, then
+    Help — after the header's stretch, so hard right on the wordmark's line.
+    Storage, the resets, copy analysis and reveal folder are not here: they
+    are *Dataset tools*, in the dataset menu (``tests/test_dataset_tools.py``)."""
     band, _bl, split = _review_band(qapp)
     shell, box = _shell(qapp, split=split)
     row, layout = _band(qapp)
     AllWellApp._mount_review_actions(shell, row)
     ws = _widgets(layout)
-    assert ws[-6:] == [split.toggle_btn, split.pane_combo, box,
-                       shell._remote_node_btn, shell._storage_btn,
-                       shell._help_btn]
+    assert ws[-5:] == [split.toggle_btn, split.pane_combo, box,
+                       shell._remote_node_btn, shell._help_btn]
     stretch_at = next(i for i in range(layout.count())
                       if layout.itemAt(i).spacerItem() is not None)
     assert layout.indexOf(split.toggle_btn) > stretch_at

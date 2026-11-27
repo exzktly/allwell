@@ -1,10 +1,17 @@
-"""A list row with a remove button that appears while the pointer is over it.
+"""A list row with a remove button that appears while the pointer is over it —
+and is always drawn where there is no pointer to hover with.
 
 Two surfaces draw the recent-datasets list — Home's card and the no-dataset
 placeholder — and both want the same affordance: the row is the target, and a
 small × on its right edge takes it off the list. The × is hidden until the
 pointer is over the row, because a column of ten rows each wearing a permanent
 delete control reads as a page about deleting rather than a page about opening.
+
+**Hover is a shortcut to tidiness, not the only route.** A layout with no
+hover (a touch screen) has no way to reveal the ×, so the row declares an
+alternate form (``widgets.form_registry.register``) in which the × is always
+drawn; whoever listens for forms — the application's phone shell — switches
+it. The row does not know which layout that is.
 
 No All-Well knowledge here: a button, a callback and a tooltip go in, a row
 widget comes out.
@@ -37,10 +44,14 @@ because the Python subclass's part of the object is gone first.
 
 from __future__ import annotations
 
+import weakref
+
+import shiboken6
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from ui import theme
+from widgets import form_registry
 
 #: Side of the × button, in pixels. The same 18 the Variables rail's row delete
 #: uses — it is the smallest square that still takes a click without demanding
@@ -70,6 +81,18 @@ class _RemovableRow(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._target: QWidget | None = None
+        #: The form with no hover: the × is drawn whether or not the pointer
+        #: is over the row (:meth:`setAlwaysShown`).
+        self._always = False
+
+    def setAlwaysShown(self, on: bool) -> None:
+        """Draw the × permanently (*on*), or only while the row is hovered."""
+        self._always = bool(on)
+        if self._target is not None:
+            self._target.setVisible(self._always or self.underMouse())
+
+    def isAlwaysShown(self) -> bool:
+        return self._always
 
     def enterEvent(self, event) -> None:  # Qt naming
         if self._target is not None:
@@ -78,8 +101,22 @@ class _RemovableRow(QWidget):
 
     def leaveEvent(self, event) -> None:  # Qt naming
         if self._target is not None:
-            self._target.setVisible(False)
+            self._target.setVisible(self._always)
         super().leaveEvent(event)
+
+
+class _AlwaysShown:
+    """The row's alternate form, as ``form_registry.register`` wants it. It
+    holds the row weakly: the registry keys its callables by widget, and a
+    callable that held the row would keep every row ever built."""
+
+    def __init__(self, row: _RemovableRow) -> None:
+        self._row = weakref.ref(row)
+
+    def __call__(self, on: bool) -> None:
+        row = self._row()
+        if row is not None and shiboken6.isValid(row):
+            row.setAlwaysShown(on)
 
 
 def remove_button(parent: QWidget, object_name: str, tooltip: str) -> QPushButton:
@@ -140,6 +177,7 @@ def removable_row(widget: QWidget, on_remove, *, object_name: str,
     row.setProperty(_ROW_REMOVE_NAME, object_name)
 
     row._target = button
+    form_registry.register(row, _AlwaysShown(row))
     return row
 
 

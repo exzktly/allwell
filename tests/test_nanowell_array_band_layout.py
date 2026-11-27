@@ -106,15 +106,17 @@ def test_every_view_keeps_the_same_three_rows(qc_page, themed, qtbot, view):
 
     ctx = qc_page
     nwc.set_view(ctx, view)
-    for width in (1600, 1500, 1200):
+    for width in (1700, 1500, 1200):
         _settle(qtbot, ctx, width)
         rows = [{_row_of(ctx, name) for name in names} for names in _ROWS_BY_VIEW[view]]
         # In order, and no two rows share a line: each row's last line is above the next row's first.
         assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), (view, width, rows)
-        # Wide enough for one line each from 1600 px. At 1500 the filter row ended 2 px short of the edge, and the
+        # Wide enough for one line each from 1700 px. At 1500 the filter row ended 2 px short of the edge, and the
         # moving average's Trailing / Centred choice (agreed beside the window it shapes) wraps Distribution's
         # *Responding above* onto a second line of that row there — within the row, which the check above holds.
-        if width == 1600:
+        # The row's action zone ends in the three fixed buttons, in words — Display, Style, Share — where it held
+        # an icon and Save, so Distribution's filter row needs 1700 px for one line where 1600 did.
+        if width == 1700:
             assert rows == [{k} for k in range(len(rows))], (view, width, rows)
 
 
@@ -185,7 +187,7 @@ def test_no_layer_choice_moves_a_control(qc_page, themed, qtbot):
         assert where() == before, key
         _toggle(ctx, key)
     for colour in ("state", "metric"):
-        ctx.widgets.get(f"_nw_colour_{colour}").trigger()
+        ctx.widgets.get(f"_nw_colour_{colour}").click()
         assert where() == before, colour
     image = ctx.widgets.get("_nw_image_cb")
     for key in ("off", "tiles", "montage"):

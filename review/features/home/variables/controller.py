@@ -393,8 +393,25 @@ def wire_variables(ctx) -> None:
         lambda: select_unassigned(ctx))
     _widget(ctx, "_var_sel_same").clicked.connect(lambda: select_same(ctx))
 
-    _widget(ctx, "_var_groups").itemDoubleClicked.connect(
+    groups = _widget(ctx, "_var_groups")
+    groups.itemDoubleClicked.connect(
         lambda item: select_group_wells(ctx, item))
+    # The same action from a button a user can see (``plate_view._build_groups``).
+    select = _widget(ctx, "_var_groups_select")
+    if select is not None:
+        select.clicked.connect(
+            lambda _=False: select_group_wells(ctx, groups.currentItem()))
+        groups.currentItemChanged.connect(lambda *_a: sync_group_select(ctx))
+
+
+def sync_group_select(ctx) -> None:
+    """Enable **Select wells** exactly while the selected row carries wells."""
+    groups = _widget(ctx, "_var_groups")
+    select = _widget(ctx, "_var_groups_select")
+    if groups is None or select is None:
+        return
+    item = groups.currentItem()
+    select.setEnabled(bool(item is not None and item.data(Qt.UserRole)))
 
 
 def add_variable(ctx) -> None:
@@ -666,7 +683,8 @@ def select_same(ctx) -> None:
 
 
 def select_group_wells(ctx, item) -> None:
-    """Select the wells of the group whose row was double-clicked."""
+    """Select the wells of the group *item* is the row of — the row selected
+    when **Select wells** is pressed, or the one double-clicked."""
     wells = item.data(Qt.UserRole) if item is not None else None
     if wells:
         set_selection(ctx, list(wells))
@@ -1045,9 +1063,11 @@ def _paint_groups(ctx, variable) -> None:
     for name, summary, wells in rows:
         item = QListWidgetItem(f"{name} — {summary}")
         item.setData(Qt.UserRole, wells)
-        item.setToolTip("Double-click to select this group's wells.")
+        item.setToolTip("Press Select wells, or double-click, to select this "
+                        "group's wells.")
         listing.addItem(item)
-    for widget in (listing, title):
+    select = _widget(ctx, "_var_groups_select")
+    for widget in (listing, title, select):
         if widget is not None:
             # No groups is not an empty list to stare at: this tab works
             # perfectly well without any, which is most of its point.

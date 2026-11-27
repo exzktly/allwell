@@ -31,7 +31,7 @@ READ = object()
 #: How long each Blink frame is shown, in milliseconds: about two a second.
 BLINK_MS = 500
 #: The footer line every drawn Identity view ends with: how to zoom it (``_identity_zoom``).
-ZOOM_HINT = "Wheel to zoom about the pointer, drag to pan, double-click for the whole view."
+ZOOM_HINT = "Wheel to zoom about the pointer, drag to pan, Reset zoom (or a double-click) for the whole view."
 
 
 def _tile_sizes(data, well: str, timepoint: str) -> dict:

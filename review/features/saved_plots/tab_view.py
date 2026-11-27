@@ -258,7 +258,8 @@ def _build_export_button(ctx, band) -> QWidget:
     from review.core.ui_helpers import add_menu_action, make_action_menu_button
 
     button, menu = make_action_menu_button(
-        "Export", band, tooltip="Export every saved plot to a single file.")
+        "Share", band, tooltip="Export every saved plot to a single file.")
+    button.setProperty("bandRole", "share")
     add_menu_action(
         menu, "PDF report\u2026", lambda: C.export_report_pdf(ctx),
         tooltip="One page per saved plot, each showing the figure as it was "

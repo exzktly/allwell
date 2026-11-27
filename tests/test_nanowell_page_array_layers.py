@@ -50,7 +50,7 @@ def qc_page(montage_page, qtbot):  # noqa: F811
     for k, (x, y) in zip(st.metrics.index[rows], ((40.0, 40.0), (200.0, 40.0), (40.0, 200.0), (200.0, 200.0))):
         st.metrics.loc[k, ["well_x_um", "well_y_um", "radius_um"]] = (x, y, 30.0)
     st.montages.clear()
-    ctx.widgets.get("_nw_preset_qc").trigger()
+    ctx.widgets.get("_nw_preset_qc").click()
     qtbot.waitUntil(lambda: ("A01", "t_a") in st.montages, timeout=10000)
     assert st.montages[("A01", "t_a")][0] is not None, st.montages[("A01", "t_a")][1]
     # Let the band settle on the Array view's three rows before the draw the tests measure: drawn while the band was
@@ -81,7 +81,7 @@ def _drawn(ctx):
 
 
 def _toggle(ctx, layer):
-    ctx.widgets.get(f"_nw_layer_{layer}").trigger()                  # a click on the menu item
+    ctx.widgets.get(f"_nw_layer_{layer}").click()                    # a click on the Layers page
 
 
 def test_each_layer_comes_off_the_figure_and_back(qc_page):
@@ -125,7 +125,7 @@ def test_the_nanowells_are_filled_by_the_metric_or_outlined_by_state_in_the_shar
     drawn = [ring[(round(float(x), 3), round(float(y), 3))] for x, y in zip(sites.x, sites.y)]
     assert drawn == [to_hex(state_colour(s)) for s in sites.state]
     assert sorted(sites.state) == sorted(states)
-    ctx.widgets.get("_nw_colour_metric").trigger()
+    ctx.widgets.get("_nw_colour_metric").click()
     filled = [c for c in st.drawn.ax.collections if c.get_array() is not None]
     assert len(filled) == 1 and list(filled[0].get_array()) == [2.0, 4.0, 3.0, 1.0]     # the cell counts at t_a
 
@@ -136,7 +136,7 @@ def test_the_presets_are_the_views_this_one_replaced(qc_page):
     ctx = qc_page
     st = ctx.state.feature_slice("nanowell")
     for name in ("map", "full", "qc"):
-        ctx.widgets.get(f"_nw_preset_{name}").trigger()
+        ctx.widgets.get(f"_nw_preset_{name}").click()
         assert st.layers == ArrayLayers.preset(name)
     assert (st.layers.image, st.layers.positions, st.layers.colour) == ("montage", "measured", "state")
     assert st.layers.tiles and st.layers.record and not st.layers.addresses
@@ -173,3 +173,25 @@ def test_the_array_controls_show_only_on_the_array_view(qc_page):
     nwc.set_view(ctx, "distribution")
     assert not any(ctx.widgets.get(name).isVisible() for name in names)
     assert not ctx.widgets.get("_nw_anchor_btn").isVisible()
+
+
+def test_layers_is_a_row_whose_page_holds_its_choices_not_a_menu(qc_page):
+    """Layers opens a page of the inspector — a box per layer, a choice of two
+    for the colouring, the presets as buttons — and has no menu at all."""
+    from PySide6.QtWidgets import QCheckBox, QPushButton, QRadioButton
+
+    from review.core import inspector_service as svc
+    from tests import _panels
+
+    ctx = qc_page
+    button = ctx.widgets.get("_nw_layers_btn")
+    assert button.menu() is None and button.text() == "Layers ›"
+    button.click()
+    page = _panels.content(button)
+    assert svc.is_showing(ctx, page)
+    assert ctx.widgets.get("_nw_layer_tiles") in page.findChildren(QCheckBox)
+    radios = page.findChildren(QRadioButton)
+    assert {ctx.widgets.get("_nw_colour_metric"), ctx.widgets.get("_nw_colour_state")} == set(radios)
+    assert ctx.widgets.get("_nw_preset_qc") in page.findChildren(QPushButton)
+    ctx.widgets.get("_nw_colour_state").click()
+    assert ctx.state.feature_slice("nanowell").layers.colour == "state"

@@ -23,7 +23,7 @@ What phone layout does, and where:
   page's own controls go to a strip at the window's *foot*, in thumb reach:
   one "Bar Plots ▾" menu (the section's pages, then every other section),
   **Wells** (the page's plate in a sheet over the live plot) and
-  **⚙ Controls** (the page's control band in a sheet).
+  **Controls** (the page's control band in a sheet).
 * **Everything that scrolls, scrolls by a drag** (:func:`grab_every_scroll_area`
   and the sweep), except where a drag already means something
   (:func:`drag_scroll_eligible`, ``_DragOwnerGuard``); scroll bars are a
@@ -44,7 +44,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QEvent, QObject, QRect, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication
+from PySide6.QtGui import QAction, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QLabel,
     QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -53,8 +53,9 @@ import shiboken6
 
 from core import phone_layout
 from core.safe import swallowed
-from ui import phone_window, theme
+from ui import phone_inspector, phone_window, theme
 from widgets import form_registry
+from widgets.menu_marks import mark_current
 from widgets.control_band import ControlBand
 from ui import buttons
 
@@ -127,6 +128,17 @@ class PhoneHandles:
     show_log: Callable[[], None] | None = None
     #: The log button's "!" badge, mirrored onto ⋯ while the status bar is gone.
     log_badge: QWidget | None = None
+    #: The window's inspector (``widgets.inspector.Inspector``), which the
+    #: Controls sheet hosts; ``None`` for a window with no Review pane, whose
+    #: shell then keeps one of its own. And what fills it from the page on
+    #: screen just before the sheet opens (the page's Display and Style tabs).
+    inspector: Callable[[], object] | None = None
+    fill_inspector: Callable[[], None] | None = None
+    #: The commands about the open dataset (``ui.dataset_tools.Tool``), which
+    #: ⋯ › *Dataset tools* lists; and Manage Remote Servers, whose button is
+    #: in the title bar phone layout hides.
+    dataset_tools: Callable[[], list] | None = None
+    manage_remotes: Callable[[], None] | None = None
     #: Roots whose page control bands phone layout moves into the Controls
     #: sheet (Review's pages, the Analyze output page). Datasets keeps its own:
     #: its tools put their Run buttons there.
@@ -172,7 +184,7 @@ class PhoneHandles:
     history: object | None = None
     #: The splitter that holds Review's pages (and, at the desk, the rail
     #: beside them): on an unfolded foldable the Controls sheet docks in it,
-    #: left of the page (``ui.phone_dock``).
+    #: left of the page (``widgets.docked_panel``).
     centre_split: QWidget | None = None
 
 
@@ -1066,7 +1078,7 @@ WIDE_SCREEN_PT = 600
 #: full bar and touch targets at the floor.
 SHORT_SCREEN_PT = 500
 #: The Controls sheet docked at the left of the page on an unfolded foldable
-#: (``ui/phone_dock.py``). The Duo's inner screen is 626 pt across upright,
+#: (``widgets/docked_panel.py``). The Duo's inner screen is 626 pt across upright,
 #: which leaves the plot 326 pt — a phone's width less a margin — and 890
 #: sideways, which leaves it 590. The sheet's label column is
 #: ``phone_layout.SHEET_LABEL_PT``, so a control has about 170 pt beside it, and
@@ -1094,18 +1106,11 @@ _P_WATCHED = "_awPhoneWatched"
 #: Dynamic property marking a widget a sweep has already looked at.
 _P_SEEN = "_awPhoneSeen"
 
-def _show_as(button, text: str, icon: str = "", *, tip: str = "") -> None:
-    """Label a bottom-bar button: words, a drawn icon, or both. A sheet's close is the ✕ symbol with its tooltip,
-    not the word (design language §3.6), and the gear the Controls button carries is the drawn icon, not "⚙"."""
-    from PySide6.QtGui import QIcon
-    from PySide6.QtCore import Qt
-    from widgets import icons
-    button.setText(text)
-    button.setIcon(icons.make_icon(icon, 16, dpr=button.devicePixelRatioF() or 1.0) if icon else QIcon())
-    button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if text and icon
-                              else Qt.ToolButtonIconOnly if icon else Qt.ToolButtonTextOnly)
-    button.setToolTip(tip)
-    button.setAccessibleName(tip or text)
+#: The phone Share slot's label: worded in the bar (sideways), its glyph alone in
+#: the upright strip, where the page button needs the room.
+SHARE_TEXT = "Share ▾"
+SHARE_GLYPH = "⇪"
+
 
 class PhoneShell(QObject):
     """Owns phone layout's controls and drives the switch both ways."""
@@ -1131,6 +1136,8 @@ class PhoneShell(QObject):
         self._hid: list[QWidget] = []
         self._sheet = None
         self._sheet_band = None
+        self._own_inspector = None
+        self._wired_inspector = None
         self._landscape: bool | None = None
         #: Whether Forward is in the bar (a wide screen) rather than in ⋯.
         self._forward_in_bar = False
@@ -1229,7 +1236,7 @@ class PhoneShell(QObject):
 
     def is_docked(self) -> bool:
         """Phone layout on a foldable's inner screen, opened: the Controls sheet
-        is a column docked left of the page (``ui/phone_dock``) rather than an
+        is a column docked left of the page (``widgets/docked_panel``) rather than an
         overlay, and stays open from page to page."""
         a = self._avail()
         return (phone_layout.is_on() and self._h.centre_split is not None
@@ -1331,7 +1338,14 @@ class PhoneShell(QObject):
         # threshold, …) live in a sheet behind this, so the plot gets the screen.
         self.controls_button = buttons.tool_button()
         self.controls_button.setObjectName("PhoneControlsButton")
-        _show_as(self.controls_button, "Controls", "sliders")
+        # The drawn gear beside the word (design language §3.6), not the "⚙" character.
+        from widgets import icons as _icons
+        self.controls_button.setText("Controls")
+        self.controls_button.setIcon(_icons.make_icon("sliders", 16, dpr=self.controls_button.devicePixelRatioF() or 1.0))
+        self.controls_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        # It keeps its name while its sheet is open, and shows that it is by
+        # being checked: closing is the sheet's own Close, and this again.
+        self.controls_button.setCheckable(True)
         self.controls_button.clicked.connect(self.toggle_controls)
 
         # The well picker, one tap from the page: the page's plate and its
@@ -1340,7 +1354,19 @@ class PhoneShell(QObject):
         self.wells_button = buttons.tool_button()
         self.wells_button.setObjectName("PhoneWellsButton")
         self.wells_button.setText("Wells")
+        self.wells_button.setCheckable(True)
         self.wells_button.clicked.connect(self.toggle_wells)
+
+        # Share, the fourth permanent slot: it opens the menu of commands the
+        # page's own Share button holds (save the figure, copy it, save its
+        # data). The button has no menu of its own — the menu is the page's —
+        # so the one arrow is the caret in its label (CLAUDE.md §7.12).
+        self.share_button = QToolButton()
+        self.share_button.setObjectName("PhoneShareButton")
+        self.share_button.setText(SHARE_TEXT)
+        self.share_button.setToolTip("Share: save the figure, copy it, or save its data")
+        self.share_button.setAccessibleName("Share")
+        self.share_button.clicked.connect(self.open_share)
 
         self._band_spacer = QWidget()
         self._band_spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -1449,23 +1475,60 @@ class PhoneShell(QObject):
 
     def _phone_only(self) -> list[QWidget]:
         return [self.menu_button, *self._history_buttons(), self.page_button,
-                self.wells_button, self.controls_button, self._band_spacer,
-                self.options_button, self._strip]
+                self.wells_button, self.controls_button, self.share_button,
+                self._band_spacer, self.options_button, self._strip]
 
     def _place_page_controls(self, *, landscape: bool) -> None:
-        """The page menu, Wells and Controls: in the strip at the window's
-        foot upright, in the bar sideways."""
+        """The page menu, Wells, Controls and Share: in the strip at the
+        window's foot upright, in the bar sideways."""
         strip_lay = self._strip.layout()
         band = self._h.band
         band_lay = band.layout() if band is not None else None
         if landscape and band_lay is not None:
             at = band_lay.indexOf(self._band_spacer)
-            for i, b in enumerate((self.page_button, self.wells_button, self.controls_button)):
+            for i, b in enumerate(self.strip_buttons()):
                 band_lay.insertWidget(at + i, b, 0, Qt.AlignVCenter)
         else:
             strip_lay.insertWidget(0, self.page_button)
             strip_lay.addWidget(self.wells_button)
             strip_lay.addWidget(self.controls_button)
+            strip_lay.addWidget(self.share_button)
+        # Upright the strip holds four slots on a screen ~430 px wide, and a page
+        # named "Response Curves" needs ~150 px of it: measured, a worded Share
+        # squeezed the page button to ~105 px. Upright, Share is its glyph alone
+        # (its name in the tooltip and accessible name); sideways, in the bar,
+        # it is worded.
+        self.share_button.setText(SHARE_TEXT if landscape else SHARE_GLYPH)
+
+    def strip_buttons(self) -> list[QWidget]:
+        """The four permanent slots, in order: page, Wells, Controls, Share."""
+        return [self.page_button, self.wells_button, self.controls_button, self.share_button]
+
+    def _current_share(self) -> QToolButton | None:
+        """The Share button of the page on screen — the one in its band (or in
+        the block of controls it declared) that its builder gave the
+        ``share`` role — or ``None`` on a page with nothing to share."""
+        band = self._current_band()
+        if band is None:
+            return None
+        for b in band.findChildren(QToolButton):
+            if (b.property("bandRole") == "share" and not b.isHidden() and b.isEnabled()
+                    and not b.property("bandPlaceholder") and b.menu() is not None):
+                return b
+        return None
+
+    def open_share(self) -> None:
+        """Pop the page's Share menu up from the strip's Share button. One
+        surface: the sheets close first."""
+        share = self._current_share()
+        if share is None:
+            return
+        self.close_sheets(now=True)
+        menu = share.menu()
+        at = self.share_button.mapToGlobal(self.share_button.rect().topRight())
+        size = menu.sizeHint()
+        from PySide6.QtCore import QPoint
+        menu.popup(QPoint(at.x() - size.width(), at.y() - size.height()))
 
     def _sync_log_badge(self) -> None:
         """Mirror the log button's "!" onto ⋯, where the App log item is: the
@@ -1826,7 +1889,7 @@ class PhoneShell(QObject):
             strip_lay.setContentsMargins(self.pt(8), self.pt(4), self.pt(8), self.pt(4))
             strip_lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
             self._strip.setFixedHeight(self.pt(phone_layout.TOP_BAR_PT))
-            for b in (self.page_button, self.wells_button, self.controls_button):
+            for b in self.strip_buttons():
                 b.setFixedHeight(self.pt(phone_layout.TOUCH_MIN_PT))
         self._size_canvases(on)
         if band is not None and band.layout() is not None:
@@ -2138,10 +2201,43 @@ class PhoneShell(QObject):
             return self._sheet
         if self._sheet is not None:
             self._sheet.closeNow()
+            phone_inspector.unmount(self._inspector())   # it outlives the sheet
             self._sheet.deleteLater()
-        self._sheet = self._build_sheet(land, self._give_band_back, docked=form == "dock")
+        self._sheet = self._build_sheet(land, self._give_band_back, docked=form == "dock",
+                                        inspector=self._inspector())
         self._sheet._aw_form = form
         return self._sheet
+
+    def _inspector(self):
+        """The inspector the Controls sheet hosts: the window's, or one of the
+        shell's own where the window has none."""
+        fn = self._h.inspector
+        insp = fn() if fn is not None else None
+        if insp is None:
+            if self._own_inspector is None:
+                self._own_inspector = phone_inspector.own_inspector()
+            insp = self._own_inspector
+        if insp is not self._wired_inspector:
+            self._wired_inspector = insp
+            insp.closeRequested.connect(self._on_inspector_close)
+            insp.sizeWanted.connect(self._on_inspector_resized)
+            insp.contentResized.connect(self._on_inspector_resized)
+            insp.pageChanged.connect(self._on_inspector_page)
+        return insp
+
+    def _on_inspector_close(self) -> None:
+        if phone_layout.is_on():
+            self.close_controls()
+
+    def _on_inspector_resized(self, *_a) -> None:
+        sheet = self._sheet
+        if (sheet is not None and sheet.isOpen() and phone_layout.is_on()
+                and getattr(sheet, "_aw_form", None) is False):     # the bottom sheet
+            sheet.refit()
+
+    def _on_inspector_page(self, *_a) -> None:
+        if phone_layout.is_on() and self._sheet is not None and self._sheet.isOpen():
+            self._sweep(force=False)      # a pushed page's own scroll area
 
     def _ensure_wells_sheet(self):
         """The Wells sheet, built for the screen's present shape."""
@@ -2159,18 +2255,18 @@ class PhoneShell(QObject):
     def _foot_strip(self) -> int:
         """How much of the window's foot the strip holds, while it shows: a
         bottom sheet rises from above it, so the button that opened the sheet
-        — which then reads "Done" — stays where the thumb left it."""
+        — which then shows as pressed — stays where the thumb left it."""
         strip = self._strip
         if not strip.isVisibleTo(self._win):
             return 0
         return max(0, self._win.height() - strip.mapTo(self._win, strip.rect().topLeft()).y())
 
-    def _build_sheet(self, land: bool, on_closed, *, docked: bool = False):
+    def _build_sheet(self, land: bool, on_closed, *, docked: bool = False, inspector=None):
         """A sheet phone layout lends a page's widgets to: a bottom drawer
         upright, rising from above the strip, as tall as what it holds up to
         ``SHEET_HEIGHT_SHARE`` of the window; a right-hand panel sideways; and
         *docked*, a ``DOCKED_SHEET_PT`` column left of the page
-        (``ui.phone_dock.DockedSheet``) on an unfolded foldable."""
+        (``widgets.docked_panel.DockedPanel``) on an unfolded foldable."""
         from PySide6.QtWidgets import QScrollArea
         from widgets.drawer import Drawer
         band = self._h.band
@@ -2181,18 +2277,25 @@ class PhoneShell(QObject):
         def _content_height() -> int:
             # As tall as what it holds, up to its share of the window: a sheet
             # taller than its controls is dead space where the plot could be.
+            if inspector is not None:
+                return phone_inspector.sheet_height(
+                    inspector, self._win.width(), self._win.height(),
+                    self._win.height() - self._foot_strip(), SHEET_HEIGHT_SHARE, self.pt(8))
             holder = getattr(sheet, "_aw_holder", None)
             lay = holder.layout() if holder is not None else None
             want = (lay.totalHeightForWidth(self._win.width()) if lay is not None
                     and lay.hasHeightForWidth() else
                     holder.sizeHint().height() if holder is not None else 0)
+            head = getattr(sheet, "_aw_head", None)
+            if head is not None:
+                want += head.sizeHint().height()
             return min(int(self._win.height() * SHEET_HEIGHT_SHARE), want + self.pt(8))
 
         # No scrim: the plot above the sheet redraws as its controls change,
         # and a dimmed plot is one the user cannot judge the change by.
         if docked:
-            from ui.phone_dock import DockedSheet
-            sheet = DockedSheet(self._h.centre_split, self._docked_width)
+            from widgets.docked_panel import DockedPanel
+            sheet = DockedPanel(self._h.centre_split, self._docked_width)
         elif land:
             sheet = Drawer(self._win, edge="right", width_hint=lambda: self.pt(LANDSCAPE_SHEET_PT),
                            margin=0, top_inset=_below_band, scrim=0.0)
@@ -2200,6 +2303,8 @@ class PhoneShell(QObject):
             sheet = Drawer(self._win, edge="bottom", height_hint=_content_height,
                            margin=0, bottom_inset=self._foot_strip, scrim=0.0)
         sheet.setProperty("phoneSheet", True)
+        if inspector is not None:
+            return self._finish_inspector_sheet(sheet, inspector, land, on_closed)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
@@ -2208,9 +2313,32 @@ class PhoneShell(QObject):
         lay.setContentsMargins(self.pt(8), self.pt(8), self.pt(8), self.pt(8))
         lay.addStretch(1)
         scroll.setWidget(holder)
-        sheet.setContentWidget(scroll)
+        # One way to close a panel, in one place: a button reading Close at
+        # its top right, as the inspector's header has.
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
+        head = QWidget(body)
+        head_lay = QHBoxLayout(head)
+        head_lay.setContentsMargins(self.pt(8), self.pt(8), self.pt(8), 0)
+        title = QLabel("", head)
+        title.setProperty("role", "heading")
+        head_lay.addWidget(title, 1)
+        close = QPushButton("Close", head)
+        close.setObjectName("PhoneSheetClose")
+        close.setProperty("variant", "default")
+        close.clicked.connect(lambda _=False: sheet.close())
+        head_lay.addWidget(close)
+        body_lay.addWidget(head)
+        body_lay.addWidget(scroll, 1)
+        sheet.setContentWidget(body)
         sheet._aw_land = land
         sheet._aw_holder = holder
+        sheet._aw_head = head
+        sheet._aw_title = title
+        sheet._aw_close = close
         # Fitted like a Datasets page (``ui/phone_fit``): a form row holds its
         # label beside a group of controls kept on one line, and several were
         # wider than the sheet — Nanowells QC's four "Problem:" buttons in one
@@ -2245,6 +2373,43 @@ class PhoneShell(QObject):
         sheet.closed.connect(on_closed)
         return sheet
 
+    def _finish_inspector_sheet(self, sheet, inspector, land: bool, on_closed):
+        """The Controls sheet: the inspector is its content, and the page's
+        band — the inspector's Data tab — is what is fitted to its width."""
+        mount = phone_inspector.new_mount()
+        sheet.setContentWidget(mount)
+        sheet._aw_land = land
+        sheet._aw_mount = mount
+        slot = inspector.tabSlot("data")
+        sheet._aw_holder = slot.widget()
+
+        def _form_host() -> QWidget | None:
+            # A control band is fitted through its form, never itself (the fit
+            # would give the band a phone form of its own on top of the form,
+            # and turn its row); a page's own block of controls (the Image
+            # Table's shelf) is stacked by the sheet already, and is fitted as
+            # it stands.
+            band = self._sheet_band
+            if band is None:
+                return None
+            if hasattr(band, "form"):
+                form = band.form()
+                return form.host if form is not None else None
+            return band
+
+        fit = getattr(inspector, "_aw_phone_fit", None)
+        if fit is None:
+            # Fitted like a Datasets page (``ui/phone_fit``): a form row holds
+            # its label beside a group of controls kept on one line, and
+            # several were wider than the sheet, so the sheet scrolled
+            # sideways. One fit per inspector, which outlives its sheets.
+            fit = _FitOnShow(slot, target=_form_host)
+            slot.installEventFilter(fit)
+            inspector._aw_phone_fit = fit
+        sheet._aw_fit = fit
+        sheet.closed.connect(on_closed)
+        return sheet
+
     def toggle_controls(self) -> None:
         is_open = self._sheet is not None and self._sheet.isOpen()
         if self.is_docked():
@@ -2256,27 +2421,33 @@ class PhoneShell(QObject):
         else:
             self.open_controls()
 
-    def open_controls(self) -> None:
+    def open_controls(self, *, need_band: bool = True) -> bool:
+        """Open the Controls sheet on the page on screen. ``False`` when it
+        did not open: the page has no controls and *need_band* asked for some
+        (a page pushed by a feature opens it with ``need_band=False``)."""
         band = self._current_band()
+        if band is None and need_band:
+            return False
         if band is None:
-            return
+            return self._open_sheet_without_band()
         docked = self.is_docked()
         if self._sheet is not None and self._sheet.isOpen():
             if self._sheet_band is band and getattr(self._sheet, "_aw_form", None) == (
                     "dock" if docked else self.is_landscape()):
-                return
+                return True
             self.close_controls(now=True)   # another page's, or another shape's
         if not docked:
             self.close_wells(now=True)      # one sheet at a time
         sheet = self._ensure_sheet()
-        parent = band.parentWidget()
-        lay = parent.layout() if parent is not None else None
-        index = lay.indexOf(band) if lay is not None else -1
+        insp = self._inspector()
+        phone_inspector.mount(sheet._aw_mount, insp)
         self._sheet_band = band
-        band.setProperty("_awHome", index)
-        self._sheet_home = parent
-        holder = sheet._aw_holder
-        holder.layout().insertWidget(0, band)
+        self._sheet_home = band.parentWidget()
+        # Lent as the inspector's Data tab: the inspector reads the band's
+        # place before it moves and puts it back there (``_give_band_back``).
+        insp.setTabWidget("data", band)
+        self._fill_inspector()
+        insp.showTab("data")
         # A control band is read down as a form — one control per row, label
         # column, Data / Display / Actions; a page's own block of controls
         # (declared as ``controls``) takes its own stacked form.
@@ -2295,10 +2466,40 @@ class PhoneShell(QObject):
         fit = getattr(sheet, "_aw_fit", None)
         if fit is not None:
             fit.refit_now()
-        if docked:
-            _show_as(self.controls_button, "Hide controls")
-        else:
-            _show_as(self.controls_button, "", "x", tip="Close the controls")
+        self.controls_button.setChecked(True)
+        return True
+
+    def _fill_inspector(self) -> None:
+        fn = self._h.fill_inspector
+        if fn is not None:
+            try:
+                fn()
+            except RuntimeError:
+                swallowed()  # a page torn down while it was asked
+
+    def _open_sheet_without_band(self) -> bool:
+        """The sheet for a page with no controls of its own, opened because a
+        feature has a page or a detail to show in it."""
+        if self._sheet is not None and self._sheet.isOpen():
+            return True
+        if not self.is_docked():
+            self.close_wells(now=True)
+        sheet = self._ensure_sheet()
+        phone_inspector.mount(sheet._aw_mount, self._inspector())
+        self._fill_inspector()
+        sheet.open()
+        self.controls_button.setChecked(True)
+        return True
+
+    def inspector_is_open(self) -> bool:
+        return self._sheet is not None and self._sheet.isOpen()
+
+    def open_inspector(self) -> bool:
+        """The window's inspector service opening its phone host."""
+        return self.inspector_is_open() or self.open_controls(need_band=False)
+
+    def close_inspector(self) -> None:
+        self.close_controls()
 
     def close_controls(self, *, now: bool = False) -> None:
         if self._sheet is None:
@@ -2360,7 +2561,8 @@ class PhoneShell(QObject):
             w.show()
         self._sweep(force=False)    # the sheet's own scroll area, if new
         sheet.open()
-        _show_as(self.wells_button, "", "x", tip="Close the wells")
+        sheet._aw_title.setText("Wells")
+        self._sync_wells_label()
         self._wells_timer.start()
         self.refresh()
 
@@ -2391,24 +2593,24 @@ class PhoneShell(QObject):
 
     def _sync_wells_label(self) -> None:
         """"Wells · 4" — the count is what the plot shows, so it is worth a
-        glance from the foot of the screen — or "Done" while the sheet is
-        open."""
+        glance from the foot of the screen — checked while the sheet is open."""
         sheet = self._wells_sheet
-        if sheet is not None and sheet.isOpen():
-            _show_as(self.wells_button, "", "x", tip="Close the wells")
-            return
+        self.wells_button.setChecked(sheet is not None and sheet.isOpen())
         fn = self._h.wells_count
         try:
             n = fn() if fn is not None else None
         except RuntimeError:
             swallowed()  # read while the dataset was being swapped
             n = None
-        _show_as(self.wells_button, f"Wells · {n}" if n else "Wells")
+        self.wells_button.setText(f"Wells · {n}" if n else "Wells")
 
     def _give_band_back(self) -> None:
         band, self._sheet_band = self._sheet_band, None
-        _show_as(self.controls_button, "Controls", "sliders")
+        self.controls_button.setChecked(False)
+        insp = self._wired_inspector
         if band is None:
+            if insp is not None:
+                insp.giveBackAll()
             return
         try:
             fit = getattr(self._sheet, "_aw_fit", None) if self._sheet is not None else None
@@ -2421,10 +2623,10 @@ class PhoneShell(QObject):
             scope = getattr(band, "_scope", None)
             if scope is not None:
                 scope.setSpacing(-1)
-            home = getattr(self, "_sheet_home", None)
-            index = band.property("_awHome")
-            if home is not None and home.layout() is not None:
-                home.layout().insertWidget(max(0, int(index or 0)), band)
+            # Every page and every tab's widget goes home, the band to the
+            # index the inspector read when it was lent.
+            if insp is not None:
+                insp.giveBackAll()
             if phone_layout.is_on():
                 band.hide()          # already in self._hid from entering
             else:
@@ -2457,15 +2659,26 @@ class PhoneShell(QObject):
             self.page_button.setText(_button_label(self._h.current_tool()))
         elif bar is not None:
             self.page_button.setText(_button_label(bar.tabText(bar.currentIndex())))
-        self.controls_button.setVisible(review and self._current_band() is not None)
+        # In Review the four slots are permanent: one a page cannot use is
+        # disabled, never removed, so each is where the thumb last found it.
         wells_open = self._wells_sheet is not None and self._wells_sheet.isOpen()
-        self.wells_button.setVisible(review and (wells_open or bool(self._well_picker())))
+        controls_open = self._sheet is not None and self._sheet.isOpen()
+        for button, usable in (
+                (self.wells_button, wells_open or bool(self._well_picker())),
+                (self.controls_button, controls_open or self._current_band() is not None),
+                (self.share_button, self._current_share() is not None)):
+            button.setVisible(review)
+            button.setEnabled(bool(usable))
+        if review and bar is None:
+            # A section with no pages of its own: the slot stays, naming the
+            # section, with nothing to pick.
+            self.page_button.setVisible(True)
+            self.page_button.setText(self._current_section_label())
+        self.page_button.setEnabled(not review or bar is not None)
         self._sync_wells_label()
         land = bool(self._landscape)
         self._strip.setVisible((review or tools or views) and not land
-                               and any(b.isVisibleTo(self._strip) for b in (
-                                   self.page_button, self.wells_button,
-                                   self.controls_button)))
+                               and any(b.isVisibleTo(self._strip) for b in self.strip_buttons()))
         if not review:
             self.close_sheets()
         else:
@@ -2525,15 +2738,14 @@ class PhoneShell(QObject):
         # heading too, and two buttons offering the same sections read as one
         # control duplicated rather than as two with different jobs.
         bar = self._current_page_bar()
-        group = QActionGroup(self._page_menu)
         if bar is not None:
             self._menu_caption(self._current_section_label())
             for i in range(bar.count()):
-                act = QAction(_menu_text(bar.tabText(i)), self._page_menu, checkable=True)
-                act.setChecked(i == bar.currentIndex())
+                # The page on screen is marked, not ticked: a command, not a setting (``widgets.menu_marks``).
+                act = mark_current(QAction(self._page_menu), _menu_text(bar.tabText(i)),
+                                   i == bar.currentIndex())
                 act.setEnabled(bar.isTabEnabled(i))
                 act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
-                group.addAction(act)
                 self._page_menu.addAction(act)
 
     def _menu_caption(self, text: str) -> None:
@@ -2569,12 +2781,9 @@ class PhoneShell(QObject):
                               self._pick_tool)
 
     def _fill_named_menu(self, names, current: str, pick) -> None:
-        group = QActionGroup(self._page_menu)
         for name in names:
-            act = QAction(_menu_text(name), self._page_menu, checkable=True)
-            act.setChecked(name == current)
+            act = mark_current(QAction(self._page_menu), _menu_text(name), name == current)
             act.triggered.connect(lambda _c=False, n=name: pick(n))
-            group.addAction(act)
             self._page_menu.addAction(act)
 
     def _pick_page_view(self, name: str) -> None:
@@ -2594,32 +2803,19 @@ class PhoneShell(QObject):
         self.close_sheets(now=True)
         self.page_changed()
 
-    def _text_size_row(self):
-        """The ⋯ menu's first item: Text size, as three buttons in one row."""
-        from PySide6.QtWidgets import QHBoxLayout, QWidgetAction
-        act = QWidgetAction(self._menu)
-        row = QWidget()
-        row.setObjectName("PhoneTextSizeRow")
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(self.pt(16), self.pt(4), self.pt(12), self.pt(4))
-        lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
-        lay.addWidget(QLabel("Text size", row), 1)
-        # One choice of three: touch-sized segments of one exclusive group, the chosen one selected — a
-        # segmented control spread to touch size, not three push buttons that each carry a state.
+    def _add_text_sizes(self, menu) -> list:
+        """The ⋯ menu's first three entries: *Text size: Small / Medium / Large*, plain commands with the size in
+        use marked (``widgets.menu_marks``) — not a row of buttons inside the menu. The size is applied once the menu
+        has closed, from the event loop's top level, for the reason :meth:`_leave_from_menu` gives."""
+        from widgets.owned_action import owned_action
+        actions = []
         for size in phone_layout.TEXT_SIZES:
-            b = buttons.tool_button(row)
-            b.setText(phone_layout.TEXT_SIZE_LABEL[size][0])
-            b.setObjectName("PhoneTextSizeButton")
-            b.setCheckable(True)
-            b.setAutoExclusive(True)
-            b.setChecked(size == self._text_size)
-            b.setFixedSize(self.pt(phone_layout.TOUCH_ROW_PT),
-                           self.pt(phone_layout.TOUCH_MIN_PT))
-            b.clicked.connect(lambda _c=False, s=size: (self._menu.close(),
-                                                        self.set_text_size(s)))
-            lay.addWidget(b)
-        act.setDefaultWidget(row)
-        return act
+            act = mark_current(owned_action(menu, ""), f"Text size: {phone_layout.TEXT_SIZE_LABEL[size]}",
+                               size == self._text_size)
+            act.triggered.connect(lambda _c=False, s=size: (self._menu.close(),
+                                                            QTimer.singleShot(0, lambda: self.set_text_size(s))))
+            actions.append(act)
+        return actions
 
     def _leave_from_menu(self) -> None:
         """**Desktop layout**, from the ⋯ menu: close the menu, then leave phone layout once the menu and the button
@@ -2635,11 +2831,22 @@ class PhoneShell(QObject):
         self._menu.close()
         QTimer.singleShot(0, lambda: self.set_on(False))
 
+    def open_dataset_tools(self) -> None:
+        """⋯ › *Dataset tools*: the commands about the open dataset as a
+        full-screen list. The two resets ask first and do nothing until
+        confirmed (``ui/dataset_tools.py``)."""
+        from ui import dataset_tools
+        tools = self._h.dataset_tools() if self._h.dataset_tools is not None else []
+        if not tools:
+            return
+        self.close_sheets(now=True)
+        dataset_tools.open_list(self._win, list(tools))
+
     def _fill_menu(self) -> None:
         from widgets.owned_action import owned_action
         m = self._menu
         m.clear()
-        m.addAction(self._text_size_row())
+        self._add_text_sizes(m)
         m.addSeparator()
         if self._h.reload is not None and self._h.mode() == "review":
             owned_action(m, "Reload dataset").triggered.connect(self._h.reload)
@@ -2656,5 +2863,9 @@ class PhoneShell(QObject):
             fwd = owned_action(m, "Forward ›")
             fwd.setEnabled(history.can_forward())
             fwd.triggered.connect(history.forward)
+        if self._h.manage_remotes is not None:
+            owned_action(m, "Manage remote servers…").triggered.connect(self._h.manage_remotes)
+        if self._h.dataset_tools is not None and self._h.mode() == "review":
+            owned_action(m, "Dataset tools…").triggered.connect(self.open_dataset_tools)
         m.addSeparator()
         owned_action(m, "Desktop layout").triggered.connect(self._leave_from_menu)

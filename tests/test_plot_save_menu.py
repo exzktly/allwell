@@ -131,7 +131,8 @@ def test_the_builder_requires_the_cells_callback():
 
 
 def test_the_menu_reads_as_one_vocabulary():
-    """One verb, and no leftover "Export" inside a menu the button calls Save."""
+    """The button is **Share** on every page — the one name for "get this out
+    of the app" — and its entries keep one verb each, with no leftover "Export"."""
     from review.core import ui_helpers
 
     tree = parse_source(pathlib.Path(ui_helpers.__file__))
@@ -142,7 +143,7 @@ def test_the_menu_reads_as_one_vocabulary():
               if len(call.args) > 1 and isinstance(call.args[1], ast.Constant)]
     assert labels == ["Save figure…", "Copy figure as SVG", "Save to Saved Plots"]
     button = _calls(builder, "make_action_menu_button")[0]
-    assert button.args[0].value == "Save ▾"
+    assert button.args[0].value == "Share ▾"
     assert not any("export" in str(label).lower() for label in labels), (
-        "the button says Save; an entry inside it saying Export is the drift "
-        "this builder exists to end")
+        "an entry saying Export beside ones saying Save is the drift this "
+        "builder exists to end")

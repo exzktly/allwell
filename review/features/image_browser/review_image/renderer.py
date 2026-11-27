@@ -604,7 +604,7 @@ def draw_review_image(
         lo, hi = review_image_resolve_lut(ctx, arr)
     lut_chan_lbl = getattr(ctx.window, "_review_lut_chan_lbl", None)
     if lut_chan_lbl is not None:
-        lut_chan_lbl.setText(f"{state.channel.active_image_channel.upper()} LUT min:")
+        lut_chan_lbl.setText(f"{state.channel.active_image_channel.upper()} channel")
     # Keep the min/max boxes in sync with the LUT actually applied, so the
     # user always sees the real numbers (not a stale "auto") and edits start
     # from the current range. (These are ``_review_lmin_entry`` /

@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
 )
 
 from core.safe import swallowed
-from widgets import menu_exec
 from review.core.ui_helpers import (
     SECTION_HEADER_MARGINS,
     build_section_header,
@@ -556,17 +555,15 @@ def build_cell_gating_subtab(ctx) -> None:
 
 
 def _open_gate_filter_menu(ctx, mode: str) -> None:
-    """Pop up a checkbox menu under *mode*'s Gates button (multi-select).
+    """Show *mode*'s gates as a multi-select page of the inspector.
 
-    One checkbox per named gate plus All / None actions. Checking several
-    combines them (union). The ticks are gathered while the menu is open and
-    applied once when it closes, as the FOV picker's are: each application
-    re-runs the gating pass behind a progress popup, which is not something to
-    do per click — and a popup opening on the first tick would close the menu
-    under the user's pointer. A menu closed with every box as it opened applies
-    nothing."""
-    from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+    One box per named gate under All / None. Checking several combines them
+    (union). The page applies once per burst of ticks, as the FOV picker's
+    does (``fov_view.APPLY_SETTLE_MS``): each application re-runs the gating
+    pass behind a progress popup, which is not something to do per click.
+    Boxes left as they began apply nothing."""
+    from review.core.inspector_pages import open_multi_select
+    from review.features.home.cell_gating.fov_view import APPLY_SETTLE_MS
 
     btn = getattr(ctx.runtime.cell_gating, _GATE_BUTTON_ATTR[mode], None)
     if btn is None:
@@ -574,42 +571,16 @@ def _open_gate_filter_menu(ctx, mode: str) -> None:
     names = _cell_gating_gate_names(ctx)
     choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
     selected = set(names) if choices is None else set(choices)
-    initial = set(selected)
-    chosen = set(selected)
+    applied = [set(selected)]
 
-    menu = QMenu(btn)
-    if not names:
-        empty = QAction("No gates drawn yet", menu)
-        empty.setEnabled(False)
-        menu.addAction(empty)
-    boxes: list = []
-    for nm in names:
-        cb = QCheckBox(nm, menu)
-        cb.setChecked(nm in selected)
+    def _apply(picked: list) -> None:
+        chosen = set(picked)
+        if chosen != applied[0]:
+            applied[0] = set(chosen)
+            # Every gate ticked is "all", which ``_cell_gating_set_gate_choices``
+            # stores as ``None`` so gates drawn later are included too.
+            _cell_gating_set_gate_choices(ctx, mode, chosen)
 
-        def _on(checked: bool, _name=nm) -> None:
-            chosen.add(_name) if checked else chosen.discard(_name)
-
-        cb.toggled.connect(_on)
-        boxes.append(cb)
-        wa = QWidgetAction(menu)
-        wa.setDefaultWidget(cb)
-        menu.addAction(wa)
-    if names:
-        menu.addSeparator()
-
-        def _tick_all(state: bool) -> None:
-            for box in boxes:
-                box.setChecked(state)
-
-        all_a = QAction("All", menu)
-        all_a.triggered.connect(lambda _=False: _tick_all(True))
-        menu.addAction(all_a)
-        none_a = QAction("None", menu)
-        none_a.triggered.connect(lambda _=False: _tick_all(False))
-        menu.addAction(none_a)
-    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
-    if names and chosen != initial:
-        # Every gate ticked is "all", which ``_cell_gating_set_gate_choices``
-        # stores as ``None`` so gates drawn later are included too.
-        _cell_gating_set_gate_choices(ctx, mode, chosen)
+    open_multi_select(ctx, btn, key=f"cell_gating/gates/{mode}", title="Gates", items=list(names),
+                      checked=[n for n in names if n in selected], on_change=_apply,
+                      settle_ms=APPLY_SETTLE_MS, empty_text="No gates drawn yet.")

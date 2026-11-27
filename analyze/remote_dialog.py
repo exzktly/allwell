@@ -33,7 +33,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QGuiApplication
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QApplication, QCheckBox, QComboBox, QDialog, QStackedWidget, QDialogButtonBox, QFormLayout,
     QFrame, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMessageBox, QPlainTextEdit, QVBoxLayout, QWidget,
 )
@@ -226,7 +226,17 @@ class RemoteFormDialog(QDialog):
         self.setModal(True)
         self.resize(520, 380)
 
-        layout = QVBoxLayout(self)
+        # The form is the first page of this window. The SSH key wizard and
+        # the scheduler test open as further pages of it rather than as
+        # windows of their own: Manage Remote Servers → this form → a third
+        # window was a chain three deep (``show_page``).
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self._pages = QStackedWidget(self)
+        outer.addWidget(self._pages)
+        form_page = QWidget(self._pages)
+        self._pages.addWidget(form_page)
+        layout = QVBoxLayout(form_page)
         layout.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.md)
         layout.setSpacing(theme.Spacing.sm)
 
@@ -678,7 +688,37 @@ class RemoteFormDialog(QDialog):
             _say(self._test_result_lbl, str(exc), text_roles.FAILURE)
             return
         self._scheduler_test = SchedulerTestDialog(self, probe, host.name or host.ssh_alias)
-        self._scheduler_test.show()
+        self.show_page(self._scheduler_test)
+
+    def show_page(self, page: QDialog, on_done=None) -> None:
+        """Show *page* — a dialog's content — as a page of this window, and
+        come back to the form when it finishes (its Close, Cancel or OK).
+        *on_done* is called with the page's result code first."""
+        self._pages.addWidget(page)          # reparenting into the stack makes it a child widget, not a window
+        self._pages.setCurrentWidget(page)
+        page.show()
+
+        def back(code: int) -> None:
+            if on_done is not None:
+                on_done(code)
+            self._pages.removeWidget(page)        # the form, page 0, is shown again
+            page.deleteLater()
+
+        page.finished.connect(back)
+
+    def done(self, code: int) -> None:  # Qt override
+        """However the form ends — OK, Cancel, its window's close — a page still
+        open on it (a scheduler test waiting on a node) is ended first, so its
+        job is cancelled rather than left running behind a closed window."""
+        for i in range(self._pages.count() - 1, 0, -1):
+            page = self._pages.widget(i)
+            if isinstance(page, QDialog):
+                page.reject()
+        super().done(code)
+
+    def current_page(self) -> QWidget:
+        """What this window is showing: the form, or a page opened from it."""
+        return self._pages.currentWidget()
 
     def result_host(self) -> RemoteHost:
         """Build a ``RemoteHost`` from the current form state.
@@ -933,11 +973,12 @@ class RemoteFormDialog(QDialog):
             )
             return
         dlg = SSHKeyWizardDialog(self, ssh_alias=alias)
-        try:
-            if dlg.exec() == QDialog.Accepted and dlg.installed_key_path:
+
+        def done(code: int) -> None:
+            if code == QDialog.Accepted and dlg.installed_key_path:
                 self._ssh_key_edit.setText(str(dlg.installed_key_path))
-        finally:
-            dlg.deleteLater()
+
+        self.show_page(dlg, done)
 
     # ── inline test ────────────────────────────────────────────────────────
 

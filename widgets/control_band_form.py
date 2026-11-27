@@ -1,4 +1,4 @@
-"""A control band laid out as a form: one column, grouped, labelled alike.
+"""A control band laid out as a form: one column, one control per row.
 
 A :class:`~widgets.control_band.ControlBand` is a row: scope controls flowing
 from the left, actions pinned right. That is right for a wide pane and wrong for
@@ -6,31 +6,37 @@ a narrow sheet, where a flow wraps wherever a label happens to end and leaves
 no edge to scan down. :meth:`ControlBand.setForm` hands the band to
 :class:`BandForm`, which moves the *same* widgets — nothing is rebuilt, nothing
 is copied, so every connection and every later ``setVisible`` / ``setText`` a
-page makes still lands — into three sections, in a fixed order (``SECTIONS``):
-the two button grids, Display then Actions, short on every page and so always
-in view when the sheet opens, then Data, which scrolls.
+page makes still lands — into a form. The form is the **Data** tab of the
+inspector the band is lent to (``widgets/inspector.py``), so it holds what the
+Data tab holds and nothing else:
 
-* **Data** — every scope control (the band's own definition of scope: *what
-  data is shown*). One control per row: its label in a fixed-width column on
-  the left, the control stretched over the rest. A label is found wherever the
-  band's builders put it — the caption ``add_scope`` bundled with the control,
-  a ``LabeledComboBox``'s painted prefix, a button whose text reads
-  "Timepoints: 1/3 selected" — and moved into the column, so the control shows
-  only its value. A self-describing control (a checkbox, a segmented control
-  added without a label) spans the row. A standalone label in the scope (a
-  hint such as "Plots draw one member per selected well.") is a caption at the
-  top of the section, not a row.
-* **Display** — actions that open a panel of live options
-  (``make_popover_button``: Display ▾, Fold change ▾, Decorate ▾, Fit ▾).
-* **Actions** — everything else the action zone holds: commands (Save ▾, Reset
-  Order, Run test), the Properties toggle, a checkbox.
+* **Data rows** — every scope control (the band's own definition of scope:
+  *what data is shown*), then every *panel row*. One control per row: its
+  label in a fixed-width column on the left, the control stretched over the
+  rest. A label is found wherever the band's builders put it — the caption
+  ``add_scope`` bundled with the control, a ``LabeledComboBox``'s painted
+  prefix, a button whose text reads "Timepoints: 1/3 selected" — and moved
+  into the column, so the control shows only its value. A self-describing
+  control (a checkbox, a segmented control added without a label) spans the
+  row. A standalone label in the scope (a hint such as "Plots draw one member
+  per selected well.") is a caption at the top of the section, not a row.
 
-Display and Actions are grids of equal-width buttons, enabled ones first. Which
-of the two an action joins is read off the ``bandRole`` property its builder
-sets (``"display"`` or ``"action"``); with none, a button that drops a menu or
-panel is Display and anything else Actions. An icon-only button gets its
-``sheetText`` property (or the first clause of its tooltip) as its text, beside
-its icon, while it is in the form.
+  A **panel row** is an action that opens a page of the inspector (its
+  ``bandPanel`` property is ``"row"``: Fold change, Fit, Colour & split). Its
+  button reads "Fold change: vs DMSO ›", so in the form it is a row like any
+  other: the label in the column, the value and the chevron in the control.
+* **Actions** — what is left of the action zone: commands and toggles a page
+  keeps in its band. A grid of equal-width buttons, enabled ones first, above
+  the rows because it is a line or two whatever the page.
+
+An action that is the **root of an inspector tab** (``bandPanel`` is
+``"root"``: the Display button) is not in the form at all: in the inspector
+its panel is the tab beside this one, and a button for it would be a second
+way to the same place. It is *parked* — kept, hidden, with the visibility its
+page gave it — and goes back to the band's row with the rest.
+
+An icon-only button gets its ``sheetText`` property (or the first clause of its
+tooltip) as its text, beside its icon, while it is in the form.
 
 The page keeps owning visibility: a row, a grid cell and a section title follow
 the visibility of the widget the page shows and hides (the bundle ``add_scope``
@@ -52,14 +58,29 @@ from PySide6.QtWidgets import (
     QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
 
-#: The sections, in the order they are laid out. The button grids come first:
-#: they are a row or two whatever the page, while Data runs as long as the page
-#: has controls — a dozen rows on Nanowells — and grids laid out after it sat
-#: below the fold, where Decorate was reported as missing from the page.
-SECTIONS = ("Display", "Actions", "Data")
-#: Property a builder sets on an action to say which section it joins.
+#: The sections, in the order they are laid out. The button grid comes first:
+#: it is a row or two whatever the page, while Data runs as long as the page
+#: has controls — a dozen rows on Nanowells.
+SECTIONS = ("Actions", "Data")
+#: Property a builder sets on an action to say what it is: ``"display"``,
+#: ``"style"`` and ``"share"`` are the band's three fixed buttons, ``"panel"``
+#: a button that opens an inspector page, ``"action"`` a command.
 ROLE_PROPERTY = "bandRole"
-ROLE_SECTION = {"display": "Display", "action": "Actions"}
+#: Property a builder sets on an action whose panel is shown in an inspector:
+#: :data:`PANEL_ROOT` when the panel is a tab's first page, :data:`PANEL_ROW`
+#: when it is a page reached from a row.
+PANEL_PROPERTY = "bandPanel"
+PANEL_ROOT = "root"
+PANEL_ROW = "row"
+#: The band's three fixed buttons. None is shown in the form: the form is a
+#: tab of the inspector, where Display and Style are the tabs beside it, and
+#: the host that shows the form gives Share a permanent place of its own (the
+#: foot of a phone).
+TAB_ROLES = ("display", "style", "share")
+#: Where :func:`section_of_action` puts an action that is not in the form.
+PARKED = "Parked"
+#: What ends the text of a button that opens a page.
+_CHEVRON = "›"
 #: Property naming the text an icon-only button shows in the form.
 SHEET_TEXT_PROPERTY = "sheetText"
 #: Most buttons in one grid row.
@@ -80,13 +101,13 @@ def split_labelled_text(text: str) -> tuple[str, str] | None:
 
 
 def section_of_action(w: QWidget) -> str:
-    """Display or Actions, for a widget from the band's action zone."""
-    role = w.property(ROLE_PROPERTY)
-    if role in ROLE_SECTION:
-        return ROLE_SECTION[role]
-    if isinstance(w, QToolButton) and (
-            w.menu() is not None or w.popupMode() == QToolButton.InstantPopup):
-        return "Display"
+    """Where a widget from the band's action zone goes in the form: a Data
+    row, the Actions grid, or — the root of an inspector tab — nowhere."""
+    panel = w.property(PANEL_PROPERTY)
+    if panel == PANEL_ROOT or w.property(ROLE_PROPERTY) in TAB_ROLES:
+        return PARKED
+    if panel == PANEL_ROW:
+        return "Data"
     return "Actions"
 
 
@@ -113,7 +134,13 @@ class _ValueOnly(QObject):
         self._prefix = f"{label}: "
 
     def value(self, text: str) -> str:
-        return text[len(self._prefix):] if text.startswith(self._prefix) else text
+        if text.startswith(self._prefix):
+            return text[len(self._prefix):]
+        # "Fit ›": a row that opens a page and has no one value to show.
+        bare = self._prefix[:-2]
+        if text.startswith(bare + " "):
+            return text[len(bare) + 1:]
+        return text
 
     def eventFilter(self, obj, ev) -> bool:  # Qt naming
         if not isinstance(ev, QEvent) or ev.type() != QEvent.Paint:
@@ -166,14 +193,28 @@ class BandForm:
         self._sections: dict[str, dict] = {}
         for name in SECTIONS:
             self._sections[name] = self._section(name)
+        # The tabs above the form already say "Data"; a second heading is noise.
+        self._sections["Data"]["title"].hide()
+        #: Holds the actions that are not in the form (a tab's root button).
+        self._park = QWidget(host)
+        self._park.hide()
+        self._parked: list[QWidget] = []
         for item in scope:
             self._add_scope(item)
         for item in actions:
-            self._sections[section_of_action(item)]["buttons"].append(item)
-            self._adopt_button(item)
+            where = section_of_action(item)
+            if where == PARKED:
+                hidden = item.isHidden()
+                item.setParent(self._park)
+                item.setHidden(hidden)      # setParent hides; the page's choice is kept
+                self._parked.append(item)
+            elif where == "Data":
+                self._add_scope(item)
+            else:
+                self._sections[where]["buttons"].append(item)
+                self._adopt_button(item)
         self._watch(host)               # a new width may want fewer columns
-        for name in ("Display", "Actions"):
-            self._pack(name)
+        self._pack("Actions")
         self.sync()
 
     # ── building ────────────────────────────────────────────────────────────
@@ -307,6 +348,10 @@ class BandForm:
             return item.label()
         if isinstance(item, QAbstractButton) and not isinstance(item, QCheckBox):
             parts = split_labelled_text(item.text())
+            if parts is None and item.property(PANEL_PROPERTY) == PANEL_ROW:
+                # "Fit ›": the title is the label, the chevron the value.
+                bare = item.text().rstrip(_CHEVRON).strip()
+                parts = (bare, _CHEVRON) if bare else None
             if parts is not None:
                 painter = _ValueOnly(item, parts[0])
                 item.installEventFilter(painter)
@@ -448,6 +493,10 @@ class BandForm:
 
     def buttons(self, section: str) -> list[QWidget]:
         return list(self._sections[section]["buttons"])
+
+    def parked(self) -> list[QWidget]:
+        """The actions kept out of the form: the roots of inspector tabs."""
+        return list(self._parked)
 
     def hints(self) -> list[QLabel]:
         return list(self._sections["Data"]["hints"])

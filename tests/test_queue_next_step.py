@@ -13,6 +13,8 @@ and pages — the seams a user goes through (CLAUDE.md §7.6, §7.8 #3) — with
 
 from __future__ import annotations
 
+import re
+
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -111,9 +113,10 @@ def _row_menu_action(jq, job_id, *path):
     """Trigger a row menu entry by its labels, the way a click would."""
     menu = jq.page._rows[job_id].build_menu()
     for label in path:
-        # An entry naming another job carries its queue position ("2. …").
+        # An entry naming another job carries its queue position ("2. …"),
+        # which the path leaves out.
         action = next(a for a in menu.actions()
-                      if a.text() == label or a.text().split(". ", 1)[-1] == label)
+                      if a.text() == label or re.sub(r"\b\d+\. ", "", a.text()) == label)
         if action.menu() is not None:
             menu = action.menu()
         else:
@@ -125,7 +128,7 @@ def _row_menu_action(jq, job_id, *path):
 def test_concatenate_with_fills_both_inputs_as_pending(queue):
     jq = queue
     _row_menu_action(jq, "day1", NEXT_STEP_MENU,
-                     "Concatenate with", "Convert CZI — day2")
+                     "Concatenate with Convert CZI — day2")
     page = jq.tools["concatenate"].page
     assert page.dataset1_path() == str(jq.tmp / "plate_day1")
     assert page.dataset2_path() == str(jq.tmp / "plate_day2")
@@ -146,7 +149,7 @@ def test_concatenate_with_fills_both_inputs_as_pending(queue):
 def test_saving_queues_the_concatenate_with_both_links(queue):
     jq = queue
     _row_menu_action(jq, "day1", NEXT_STEP_MENU,
-                     "Concatenate with", "Convert CZI — day2")
+                     "Concatenate with Convert CZI — day2")
     jq.tools["concatenate"].page.set_destination_path(str(jq.tmp / "combined"))
     assert jq.save_session()
     cat = _new_job(jq, "concatenate")
@@ -159,7 +162,7 @@ def test_saving_queues_the_concatenate_with_both_links(queue):
 def test_swapping_the_datasets_swaps_the_links(queue):
     jq = queue
     _row_menu_action(jq, "day1", NEXT_STEP_MENU,
-                     "Concatenate with", "Convert CZI — day2")
+                     "Concatenate with Convert CZI — day2")
     page = jq.tools["concatenate"].page
     page.set_destination_path(str(jq.tmp / "combined"))
     page._swap_btn.click()
@@ -174,7 +177,7 @@ def test_swapping_the_datasets_swaps_the_links(queue):
 def test_browsing_a_real_folder_drops_that_input_s_link(queue):
     jq = queue
     _row_menu_action(jq, "day1", NEXT_STEP_MENU,
-                     "Concatenate with", "Convert CZI — day2")
+                     "Concatenate with Convert CZI — day2")
     page = jq.tools["concatenate"].page
     page.set_destination_path(str(jq.tmp / "combined"))
     page.set_dataset2_path(str(jq.tmp / "some_other_plate"))
@@ -206,7 +209,7 @@ def test_the_links_are_in_place_before_a_running_queue_can_start_the_job(queue):
     started: list[dict] = []
     jq.tools["concatenate"].start_from_queue = started.append
     _row_menu_action(jq, "day1", NEXT_STEP_MENU,
-                     "Concatenate with", "Convert CZI — day2")
+                     "Concatenate with Convert CZI — day2")
     page = jq.tools["concatenate"].page
     page.set_destination_path(str(jq.tmp / "combined"))
     for job_id in ("day1", "day2"):
@@ -279,7 +282,7 @@ def test_a_subset_next_step_offers_the_wells_the_conversion_mapped(queue):
 def test_merge_plates_with_marks_both_inputs_pending(queue):
     jq = queue
     _row_menu_action(jq, "day1", NEXT_STEP_MENU,
-                     "Merge plates with", "Convert CZI — day2")
+                     "Merge plates with Convert CZI — day2")
     page = jq.tools["merge_plates"].page
     assert page.has_pending_inputs()
     page._dest_field.set_path(str(jq.tmp / "merged"))
@@ -294,7 +297,7 @@ def test_merge_plates_with_marks_both_inputs_pending(queue):
 def test_removing_a_source_closes_its_next_step_setup(queue):
     jq = queue
     _row_menu_action(jq, "day1", NEXT_STEP_MENU,
-                     "Concatenate with", "Convert CZI — day2")
+                     "Concatenate with Convert CZI — day2")
     jq.bridge.remove_job("day2")
     assert jq.session() is None
     assert any("removed" in n for n in jq.notices)

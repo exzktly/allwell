@@ -12,7 +12,10 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QTimer
 
+from ui import buttons
+
 from review.features.nanowell import _identity_controller as idc
+from review.features.nanowell import _identity_zoom as izoom
 from review.features.nanowell import controller as nwc
 from review.features.nanowell.state import IDENTITY_COLOURS, IDENTITY_MODES
 
@@ -29,7 +32,7 @@ _MODE_TIP = ("What the Identity view shows of the chosen timepoint against the w
              "prediction crossed.\n"
              "Diagnostics: the central square looked for, where it was found and how clearly, and every check the\n"
              "verdict rests on with its numbers and thresholds.\n"
-             "Every mode zooms: the wheel about the pointer, drag to pan, double-click for the whole view.")
+             "Every mode zooms: the wheel about the pointer, drag to pan, Reset zoom or a double-click for the whole view.")
 _COLOUR_TIP = ("What the Distance map colors each nanowell by:\n"
                "Status: lands on itself, imprecise, wrong name, in a tile placed a lattice step off, or not compared —\n"
                "with a count of each, so the nanowells left out are seen at once.\n"
@@ -44,6 +47,7 @@ class IdentityControls:
     colour: object
     mode_group: object
     colour_group: object
+    reset_group: object = None
 
     @property
     def signalling(self) -> tuple:
@@ -61,6 +65,10 @@ def _segments(items, tip: str, on_choice):
     return seg
 
 
+#: The band button that does what double-clicking a panel does.
+RESET_ZOOM_TEXT = "Reset zoom"
+
+
 def build_identity_controls(ctx, band) -> IdentityControls:
     """The *Compare* and *Colour* switches on *band* (shown only on the Identity view by the page's refresh, the
     colouring only on the Distance map) and the Blink timer."""
@@ -72,7 +80,18 @@ def build_identity_controls(ctx, band) -> IdentityControls:
     timer.setInterval(idc.BLINK_MS)
     timer.timeout.connect(lambda: idc.blink_tick(ctx))
     ctx.widgets.register("_nw_blink_timer", timer)
-    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Color", colour))
+    # What a double click on a panel does, as a button a user can see: every panel back to its whole view.
+    reset = buttons.default(RESET_ZOOM_TEXT, band)
+    reset.setToolTip("Show the whole of every panel again (double-clicking a panel does the same for that panel)")
+    reset.clicked.connect(lambda _=False: reset_zoom(ctx))
+    ctx.widgets.register("_nw_identity_reset_zoom_btn", reset)
+    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Color", colour),
+                            band.add_scope("", reset))
+
+
+def reset_zoom(ctx) -> None:
+    st = ctx.state.feature_slice("nanowell")
+    izoom.reset(ctx, st)
 
 
 def refresh_identity_controls(st, controls: IdentityControls, on_view: bool) -> None:
@@ -83,3 +102,5 @@ def refresh_identity_controls(st, controls: IdentityControls, on_view: bool) -> 
                                      else IDENTITY_COLOURS[0])
     controls.mode_group.setVisible(on_view)
     controls.colour_group.setVisible(on_view and mode == "distance")
+    if controls.reset_group is not None:
+        controls.reset_group.setVisible(on_view)

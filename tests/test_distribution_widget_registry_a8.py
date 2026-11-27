@@ -18,7 +18,7 @@ from review.features.distribution.tab_view import build_distribution_tab
 from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (
-    "_distribution_export_dock", "_chan_cb_distribution", "_distribution_tp_cb",
+    "_chan_cb_distribution", "_distribution_tp_cb",
     "_distribution_tp_var", "_distribution_mode_cb", "_distribution_mode_var",
     "_distribution_bins_spin", "_distribution_layout_cb", "_distribution_layout_var",
     "_distribution_log_x_cb", "_distribution_log_y_cb",

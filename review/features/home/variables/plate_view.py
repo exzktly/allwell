@@ -305,11 +305,15 @@ def _build_overlay_row(ctx, host: QWidget, column, reg) -> None:
     column.addWidget(legend)
 
 
+#: The button under the group list that does what double-clicking a row does.
+GROUP_SELECT_TEXT = "Select wells"
+
+
 def _build_groups(ctx, host: QWidget, column, reg) -> None:
     """The saved groups, and what each one rolls up to.
 
-    Selectable, and a double-click selects the wells the row is complaining
-    about. The list knows exactly which wells are inconsistent and could only
+    Selectable, and **Select wells** under it (or a double-click) selects the
+    wells the row is complaining about. The list knows exactly which wells are inconsistent and could only
     print them into a sentence, leaving the one surface that has the answer
     unable to tell the plate 40 px above it.
     """
@@ -319,9 +323,16 @@ def _build_groups(ctx, host: QWidget, column, reg) -> None:
                                   section_label(host, "By group")))
     groups = reg.register("_var_groups", QListWidget(host))
     groups.setSelectionMode(QListWidget.SingleSelection)
-    groups.setToolTip("Double-click a row to select that group's wells on the "
-                      "plate.")
+    groups.setToolTip("Select a row and press Select wells — or double-click "
+                      "it — to select that group's wells on the plate.")
     column.addWidget(groups)
+    # What the double click does, as a button: the route a user can see, and
+    # the only one where there is no double click. Enabled while the row
+    # selected in the list carries wells.
+    select = reg.register("_var_groups_select", _action(host, GROUP_SELECT_TEXT))
+    select.setToolTip("Select the wells of the group selected in the list above")
+    select.setEnabled(False)
+    column.addWidget(select)
 
 
 def _action(parent: QWidget, text: str) -> QPushButton:

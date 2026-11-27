@@ -506,45 +506,27 @@ def build_section_header(
     return hdr
 
 
-def wrap_ctrl_row_with_properties(ctrl_row, on_click, *,
-                                  tooltip="Show / hide the figure properties panel"):
-    """Wrap a plot tab's control row so the figure-properties button pins to the
-    right edge of the plot area — aligned with where the export-style dock slides
-    out (``make_plot_with_right_dock``).
-
-    The control rows are ``FlowLayout``s, whose ``addStretch()`` and per-widget
-    alignment are no-ops (widgets/flow_layout.py), so the button cannot be
-    right-aligned inside them. Lift it into an outer ``QHBoxLayout``:
-    ``[ctrl_row (stretch 1)] [properties IconButton, top-right]``. ``AlignTop``
-    keeps the button in the top-right corner when the FlowLayout wraps to
-    multiple lines. ``on_click`` is invoked with no args on click.
-    """
-    from widgets.icon_button import IconButton
-    wrap = QWidget()
-    hl = QHBoxLayout(wrap)
-    hl.setContentsMargins(0, 0, 0, 0)
-    hl.setSpacing(theme.Spacing.xs)
-    hl.addWidget(ctrl_row, 1)
-    btn = IconButton("sliders-horizontal", wrap, tooltip=tooltip)
-    btn.clicked.connect(lambda _=False: on_click())
-    hl.addWidget(btn, 0, Qt.AlignTop | Qt.AlignRight)
-    return wrap
-
-
-def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
-                           tooltip="Show / hide the figure properties panel"):
-    """The Properties toggle, for a tab whose controls are a ``ControlBand``.
+def make_style_button(ctx, parent: QWidget, figure_key: str, *,
+                      tooltip="Show / hide the figure's style options"):
+    """The **Style** button of a page whose controls are a ``ControlBand``: it
+    opens the inspector on its Style tab with *figure_key*'s style panel
+    (``review/core/style_tab.py``), and closes it on a second press.
 
     The band right-aligns its action zone itself, so a tab on the band adds this
-    with ``band.add_action(...)`` and needs none of the
-    :func:`wrap_ctrl_row_with_properties` scaffolding that a ``FlowLayout`` row
-    required to get a button to the right edge.
+    with ``band.add_action(...)``.
     """
-    from widgets.icon_button import IconButton
-    btn = IconButton("sliders-horizontal", parent, tooltip=tooltip)
-    # What it reads where a band is laid out as a form, beside its icon.
-    btn.setProperty("sheetText", "Properties")
-    btn.clicked.connect(lambda _=False: ctx.figures.open_style_panel(figure_key))
+    from PySide6.QtWidgets import QToolButton
+    btn = QToolButton(parent)
+    btn.setText("Style")
+    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    btn.setProperty("variant", "default")
+    btn.setToolTip(tooltip)
+    # One of the band's three fixed buttons (``band_fixed_actions``).
+    btn.setProperty("bandRole", "style")
+    btn.setProperty("sheetText", "Style")
+    from review.core import style_tab
+    style_tab.register(btn, ctx, figure_key)
+    btn.clicked.connect(lambda _=False, b=btn: style_tab.press(b))
     return btn
 
 
@@ -658,113 +640,24 @@ def make_scrollable_canvas(parent: QWidget, **_kw) -> tuple[QScrollArea, QWidget
     return sa, inner
 
 
-class _PlotDockHost(QWidget):
-    """Container that hosts the plot area + a right-side dock as layout
-    siblings.
+def make_plot_area(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
+    """Build the area a plot page lays its band, figure and toolbar into.
 
-    Earlier the dock floated as a child overlay so that opening it never
-    resized matplotlib. That design clipped the dock when the host was
-    narrower than the panel's fixed width — content (incl. the close button)
-    fell off the window's right edge. We now lay the dock as a real layout
-    sibling: opening it does shrink the plot (a one-shot matplotlib redraw),
-    but the panel always renders at its full width with its close button
-    reachable.
-
-    ``set_overlay_dock`` is kept as a compatibility shim so existing callers
-    that pass a width hint still update the dock's fixed width.
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._overlay_dock: QWidget | None = None
-
-    def set_overlay_dock(self, dock: QWidget, width: int = 0) -> None:
-        # Written, never read: the host keeps a reference to the dock it is
-        # sizing itself around, so the dock outlives the call that mounted it.
-        self._overlay_dock = dock
-        if width > 0:
-            dock.setFixedWidth(int(width))
-
-
-def make_plot_with_right_dock(parent: QWidget) -> tuple[QWidget, QVBoxLayout, QWidget]:
-    """Build a plot area with a right-side dock as a layout sibling inside
-    ``parent``.
-
-    Returns ``(plot_area, plot_layout, right_dock)`` — callers lay their
-    figure/toolbar into ``plot_layout`` and the export-style sidebar docks
-    into ``right_dock``. ``right_dock`` is a layout sibling of ``plot_area``
-    so toggling it visible does shrink the plot (and re-renders the figure
-    once) — the trade-off accepted to keep the dock's full width on screen.
+    Returns ``(plot_area, plot_layout)``. The area fills *parent*; nothing
+    docks beside it — a page's panels are pages of the window's one inspector
+    (``review.core.inspector_service``), which sits beside the whole page.
     """
     root = parent.layout()
     if root is None:
         root = QVBoxLayout(parent)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-    host = _PlotDockHost(parent)
-    host_layout = QHBoxLayout(host)
-    host_layout.setContentsMargins(0, 0, 0, 0)
-    host_layout.setSpacing(0)
-
-    plot_area = QWidget(host)
+    plot_area = QWidget(parent)
     plot_layout = QVBoxLayout(plot_area)
     plot_layout.setContentsMargins(0, 0, 0, 0)
     plot_layout.setSpacing(0)
-    host_layout.addWidget(plot_area, 1)
-
-    right_dock = QWidget(host)
-    right_dock_layout = QVBoxLayout(right_dock)
-    right_dock_layout.setContentsMargins(0, 0, 0, 0)
-    right_dock_layout.setSpacing(0)
-    right_dock.setVisible(False)
-    right_dock._dock_host = host  # type: ignore[attr-defined]
-    host_layout.addWidget(right_dock, 0)
-    host.set_overlay_dock(right_dock, 0)
-
-    root.addWidget(host, 1)
-    return plot_area, plot_layout, right_dock
-
-
-def mount_widget_in_plot_dock(dock: QWidget, widget: QWidget, width: int = 0) -> None:
-    """Show *widget* in a plot tab's right *dock*, hiding any sibling panel
-    already docked there.
-
-    A plot tab's right dock (``make_plot_with_right_dock``) is a shared
-    slide-out: the Export-Style / Properties sidebar and the Scatter cell viewer
-    both live there. This keeps exactly one of them visible at a time, so the
-    two coexist without overlapping — open one and the other slides away.
-    """
-    if dock is None or widget is None:
-        return
-    lay = dock.layout()
-    if lay is None:
-        return
-    if lay.indexOf(widget) < 0:
-        lay.addWidget(widget)
-    for i in range(lay.count()):
-        sibling = lay.itemAt(i).widget()
-        if sibling is not None and sibling is not widget:
-            sibling.hide()
-    widget.show()
-    host = getattr(dock, "_dock_host", None)
-    if host is not None and hasattr(host, "set_overlay_dock"):
-        host.set_overlay_dock(dock, width)
-    # In phone layout the panel opens as a full-width sheet over the page
-    # instead of squeezing the figure beside it (``phone_panel_sheet``). It is
-    # lent to the sheet *before* it is ever shown: shown in the plot first,
-    # even for an instant, it took its fixed width out of the figure, and the
-    # style pass that runs as the panel opens fitted the plot's titles and
-    # margins to that squeezed figure — for good.
-    from review.core import phone_panel_sheet
-    if not phone_panel_sheet.present(dock):
-        dock.setVisible(True)
-
-
-def hide_plot_dock(dock: QWidget) -> None:
-    """Hide a plot tab's right dock (and whatever panel it currently holds)."""
-    if dock is not None:
-        dock.setVisible(False)
+    root.addWidget(plot_area, 1)
+    return plot_area, plot_layout
 
 
 def _with_caret(text: str) -> str:
@@ -780,46 +673,12 @@ def _with_caret(text: str) -> str:
     return text if text.rstrip().endswith("▾") else f"{text} ▾"
 
 
-def make_popover_button(text: str, parent: QWidget):
-    """A compact toolbar button that opens a small panel ("popover") on click.
-
-    Returns ``(button, content_widget, content_layout)`` — add controls to
-    ``content_layout`` and they appear in the popup. Used to collapse rarely-
-    changed plotting controls (e.g. Fold change) off the always-visible control
-    bar (C1), trading one row of vertical space for one click.
-    """
-    from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
-
-    btn = ui_buttons.tool_button(parent)
-    btn.setText(_with_caret(text))
-    btn.setPopupMode(QToolButton.InstantPopup)
-    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "default")
-    # The label carries the ▾ caret (added above if the caller left it off), so
-    # hide QToolButton's native menu-indicator — the two would otherwise render
-    # as overlapping double arrows.
-    btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
-    # A panel of live options: how the plot is shown. A band laid out as a
-    # form (phone layout's Controls sheet) puts it under Display.
-    btn.setProperty("bandRole", "display")
-    menu = QMenu(btn)
-    content = QWidget(menu)
-    content_layout = QVBoxLayout(content)
-    content_layout.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
-    content_layout.setSpacing(theme.Spacing.xs)
-    wa = QWidgetAction(menu)
-    wa.setDefaultWidget(content)
-    menu.addAction(wa)
-    btn.setMenu(menu)
-    return btn, content, content_layout
-
-
 def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     """A compact toolbar button that drops a menu of *actions* on click.
 
     Returns ``(button, menu)`` — add ``QAction``s (or use ``add_menu_action``)
-    to ``menu``. Unlike :func:`make_popover_button` (which hosts live widgets in
-    a panel), this is for click-and-close commands — Export CSV, Save figure,
+    to ``menu``. Unlike ``inspector_panels.make_popover_button`` (whose panel of
+    live widgets is a page of the inspector), this is for click-and-close commands — Export CSV, Save figure,
     etc. Used to collapse a cluster of action buttons into one entry so a
     control row stays reachable when Split View narrows the pane.
     """
@@ -833,7 +692,7 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     if tooltip:
         btn.setToolTip(tooltip)
     # The label carries the ▾ caret (added above if the caller left it off), so
-    # hide the native indicator — mirrors make_popover_button.
+    # hide the native indicator.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
     # Click-and-close commands: a band laid out as a form puts it under
     # Actions, although it drops a menu like a Display panel does.
@@ -894,8 +753,10 @@ def build_plot_save_menu(
         copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
     )
 
-    button, menu = make_action_menu_button("Save ▾", band,
-                                           tooltip="Save this plot and its data")
+    button, menu = make_action_menu_button("Share ▾", band,
+                                           tooltip="Save or copy this plot and its data")
+    # One of the band's three fixed buttons (``band_fixed_actions``).
+    button.setProperty("bandRole", "share")
     data_action = add_menu_action(menu, data_label, data_cb, tooltip=data_tooltip)
     add_menu_action(menu, cells_label, cells_cb,
                     tooltip="Every cell this plot was computed from, all columns")

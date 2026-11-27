@@ -1,9 +1,12 @@
-"""The title bar's storage button, through the real window.
+"""Storage, reached through Dataset tools, on the real window.
 
 Slow lane — this constructs the whole ``AllWellApp``. ``tests/test_local_storage.py``
 holds what the dialog lists and clears; this file is the one that would notice
-the button not being wired to it, or being gated to Review like the dataset
-actions beside it when a full disk is not a Review-only problem.
+the dataset menu's *Storage…* not being wired to it.
+
+Storage was a title-bar icon shown in every mode. It is one of the five
+*Dataset tools* now, in the dataset menu at the head of Review's rail, so at
+the desk it is reached from Review.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ def _pump(qapp, n: int = 15) -> None:
         qapp.processEvents()
 
 
-def test_the_button_opens_one_storage_dialog_in_every_mode(qapp, qtbot):
+def test_storage_in_the_dataset_menu_opens_one_storage_dialog(qapp, qtbot):
     from allwell import AllWellApp
     from ui.local_storage_view import StorageDialog
 
@@ -26,29 +29,28 @@ def test_the_button_opens_one_storage_dialog_in_every_mode(qapp, qtbot):
     qtbot.addWidget(win)
     win.show()
     _pump(qapp)
-    btn = win._storage_btn
+    assert not hasattr(win, "_storage_btn"), "the title bar still has a storage icon"
 
-    from core.panes import PANE_MODES
+    menu = win._review._dataset_menu
+    menu.aboutToShow.emit()                      # the menu is filled as it opens
+    entries = {a.text(): a for a in menu.actions()}
+    assert "Dataset tools" in entries and not entries["Dataset tools"].isEnabled()
+    storage = entries["Storage…"]
 
-    for idx, mode in reversed(list(enumerate(PANE_MODES))):   # end on Review
-        win._on_titlebar_mode_seg(idx)
-        _pump(qapp)
-        assert win._review.currentMode() == mode
-        assert btn.isVisible(), f"the storage button is hidden in {mode}"
-
-    btn.click()
+    storage.trigger()
     _pump(qapp)
     dialog = win._storage_dialog
     assert isinstance(dialog, StorageDialog) and dialog.isVisible()
     qtbot.waitUntil(lambda: dialog._status.text() != "Measuring…", timeout=15_000)
 
-    btn.click()           # a second click raises the open dialog, not a new one
+    storage.trigger()     # a second press raises the open dialog, not a new one
     _pump(qapp)
     assert win._storage_dialog is dialog
 
-    dialog.close()        # and a click after closing shows the same one again,
+    dialog.close()        # and a press after closing shows the same one again,
     _pump(qapp)           # surveyed afresh, rather than building another
-    btn.click()
+    menu.aboutToShow.emit()
+    next(a for a in menu.actions() if a.text() == "Storage…").trigger()
     _pump(qapp)
     assert win._storage_dialog is dialog and dialog.isVisible()
     assert len(win.findChildren(StorageDialog)) == 1

@@ -15,7 +15,7 @@ rather than shown as an empty list the next save would overwrite.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QMessageBox, QPushButton, QWidget
+from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QMessageBox, QToolButton, QWidget
 
 from analyze.domain import presets as store
 from core.safe import swallowed
@@ -30,9 +30,18 @@ NO_PRESETS = "No saved presets"
 class AnalyzePresetsMixin:
     """Mixed into ``AnalyzeTab`` through ``AnalyzeTabFormMixin``; every method binds to the tab."""
 
-    def _build_presets_button(self, parent: QWidget) -> QPushButton:
-        """The *Presets* button and its menu, for the caller to place."""
-        self._presets_btn = buttons.default("Presets", parent)
+    def _build_presets_button(self, parent: QWidget) -> QToolButton:
+        """The *Presets* button and its menu, for the caller to place.
+
+        A tool button with the theme's shared chevron (``hasMenu``), as every
+        menu button in the application is — not a push button with Qt's native
+        indicator, which drew a different arrow on every platform. (The
+        factory Review uses, ``make_action_menu_button``, lives in a pane this
+        one may not import.)"""
+        self._presets_btn = buttons.tool_button(parent)
+        self._presets_btn.setText("Presets")
+        self._presets_btn.setPopupMode(QToolButton.InstantPopup)
+        self._presets_btn.setProperty("hasMenu", True)
         self._presets_btn.setToolTip(
             "Save this form's settings under a name, or fill the form from a saved preset. "
             "A preset never changes the input folder, the wells chosen for a run, or what to do "

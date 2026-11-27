@@ -159,7 +159,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
     from review.core.ui_helpers import (
-        make_plot_with_right_dock, make_properties_button,
+        make_plot_area, make_style_button,
     )
 
     st = ctx.state.feature_slice("spatial")
@@ -172,8 +172,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # the current (level, viz) actually consumes them, and the band's flow skips
     # a hidden group, so at any one setting the row carries a handful of live
     # controls and wraps only when the pane is genuinely too narrow.
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_spatial_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
@@ -249,7 +248,11 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     band.add_action(export_btn)
     from review.core.cell_lasso_view import make_lasso_button
     band.add_action(make_lasso_button(ctx, band, "_sp_canvas", source="lasso · Spatial map"))
-    band.add_action(make_properties_button(ctx, band, "spatial"))
+    band.add_action(make_style_button(ctx, band, "spatial"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(band)
 
     # ── parameters: colony detection, boundary, summary display ─────────────
     # Each group is shown only when the current (level, viz) actually consumes
@@ -418,10 +421,6 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
                     header=False)
     card.setFigureTitle("")
-    try:
-        card.setStatsChipVisible(False)
-    except Exception:
-        swallowed()
     reg.register("_sp_card", card)
     reg.register("_sp_fig", card.figure)
     reg.register("_sp_canvas", card.canvas)

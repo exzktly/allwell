@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QLabel, QWidget,
+    QComboBox, QLabel, QWidget, QPushButton,
 )
 
 
@@ -628,6 +628,24 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     )
     _repopulate_order_combo(ctx, order_combo)
     layout.addWidget(order_combo)
+
+    # Per-sample control is a row you can see, not only the last entry of the
+    # Control combo: pressing it turns the mode on and opens its page.
+    pairs_btn = QPushButton("Per-sample control ›", parent)
+    pairs_btn.setObjectName("FoldChangePairsRow")
+    pairs_btn.setProperty("variant", "default")
+    pairs_btn.setToolTip("Give each sample its own control, in a table.")
+    layout.addWidget(pairs_btn)
+
+    def _open_pairs_row() -> None:
+        index = next((i for i in range(ctrl_combo.count())
+                      if ctrl_combo.itemData(i) is PER_SAMPLE), -1)
+        if index >= 0 and ctrl_combo.currentIndex() != index:
+            ctrl_combo.setCurrentIndex(index)      # the handler below opens the page
+        else:
+            _open_editor()
+
+    pairs_btn.clicked.connect(lambda _=False: _open_pairs_row())
 
     def _on_ctrl_changed(_idx: int) -> None:
         # The reference, not the text. The text is chrome and may carry a

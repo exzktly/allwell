@@ -183,21 +183,25 @@ def test_builder_clear_empties_the_shelf(qtbot):
     assert ctx.runtime.image_table.builder_dirty is True   # cues a Generate
 
 
-# ── the ⚙ channel menu — must be parented (else GC'd) + render modes on top ───
+# ── the ⚙ channel options — a page, not a menu ────────────────────────────────
 
-def test_channel_menu_is_parented_and_lists_render_modes(qtbot):
-    from PySide6.QtWidgets import QWidget
+def _page_controls(page):
+    from PySide6.QtWidgets import QCheckBox, QComboBox
+    return ({c.objectName(): c for c in page.findChildren(QComboBox)},
+            {c.objectName(): c for c in page.findChildren(QCheckBox)})
+
+
+def test_the_channel_page_lists_render_modes_and_the_cell_options(qtbot, monkeypatch):
+    monkeypatch.setattr(B, "_edit", lambda _ctx: None)
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
-    host = QWidget()
-    qtbot.addWidget(host)
-    menu = B._channel_menu(ctx, ChannelSpec("GFP", "corrected"), host)
-    # Regression: QToolButton.setMenu doesn't own the menu, so a parentless
-    # QMenu is garbage-collected and the ⚙ opens nothing. It must be parented.
-    assert menu.parent() is host
-    labels = [a.text() for a in menu.actions()]
-    for mode in ("corrected", "raw", "cell mask", "> threshold"):
-        assert mode in labels          # render modes one click from the chip
-    assert "Boundary outline" in labels
+    page = B.channel_page(ctx, ChannelSpec("GFP", "corrected"))
+    qtbot.addWidget(page)
+    combos, boxes = _page_controls(page)
+    render = combos["ITBRender"]
+    assert [render.itemText(i) for i in range(render.count())] == ["corrected", "raw", "cell mask", "> threshold"]
+    assert set(boxes) == {"ITBColourCells", "ITBBoundary", "ITBLog"}
+    cmaps = [combos["ITBColormap"].itemText(i) for i in range(combos["ITBColormap"].count())]
+    assert "Greens" in cmaps and "Magenta" in cmaps
 
 
 def test_recognised_fluorophores_get_standard_colours():
@@ -379,49 +383,95 @@ def test_chip_claims_the_mouse_press_that_starts_a_drag(qtbot):
     assert chip._press is not None
 
 
-def test_root_filter_menu_actually_filters(qtbot):
-    from PySide6.QtWidgets import QWidget
+def test_root_filter_values_and_apply_actually_filter():
+    """The filter's two halves: what the page lists and ticks, and what a
+    change of ticks writes. An empty filter means every value is shown."""
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01", "T02", "T03"])
-    host = QWidget()
-    qtbot.addWidget(host)
-    menu = B._root_filter_menu(ctx, "timepoint", host)
-    checkable = [a for a in menu.actions() if a.isCheckable()]
-    # empty filter ⇒ every value shown/ticked
-    assert len(checkable) == 3 and all(a.isChecked() for a in checkable)
-    checkable[0].setChecked(False)                     # toggled → commit
+    values, checked = B.root_filter_values(ctx, "timepoint")
+    assert len(values) == 3 and checked == values       # empty filter ⇒ every value ticked
+    B.apply_root_filter(ctx, "timepoint", values[1:])
     st = ctx.state.image_table
-    assert st.active_timepoints == {checkable[1].text(), checkable[2].text()}
+    assert st.active_timepoints == set(values[1:])
     assert ctx.runtime.image_table.builder_dirty is True
-    boxes = [a for a in menu.actions() if a.isCheckable()]
-    [a for a in menu.actions() if a.text() == "Select none"][0].trigger()
-    assert not any(a.isChecked() for a in boxes)       # Select none unchecks all
-    [a for a in menu.actions() if a.text() == "Select all"][0].trigger()
-    assert all(a.isChecked() for a in boxes)           # Select all rechecks all
-    assert st.active_timepoints == set()               # all ticked ⇒ show all
+    assert B.root_filter_values(ctx, "timepoint")[1] == values[1:]
+    B.apply_root_filter(ctx, "timepoint", values)        # all ticked ⇒ show all
+    assert st.active_timepoints == set()
+    B.apply_root_filter(ctx, "timepoint", values[:1])
+    B.apply_root_filter(ctx, "timepoint", [])            # none ticked is "all" too, never an empty table
+    assert st.active_timepoints == set()
 
 
-def test_channel_menu_is_flat_no_submenus(qtbot):
-    # The ⚙ menu must stay flat: an eager addMenu() submenu + keepalive created a
-    # GC cycle that could fault under native macOS menus. Colour items live at the
-    # top level, and no action carries a child QMenu.
-    from PySide6.QtWidgets import QWidget
-    host = QWidget()
-    qtbot.addWidget(host)
+def test_the_root_pill_s_button_opens_the_filter_as_a_page_of_ticks(qtbot, monkeypatch):
+    """A root's filter is opened by a button on its pill — not by pressing a
+    plain label — and it is the application's one multi-select page, whose
+    ticks reach the filter."""
+    from PySide6.QtWidgets import QToolButton
+
+    from review.core import inspector_pages
+
+    from review.core.widget_registry import WidgetRegistry
+
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01", "T02", "T03"])
+    ctx.widgets = WidgetRegistry()
+    opened = []
+    monkeypatch.setattr(inspector_pages, "open_multi_select",
+                        lambda _ctx, anchor, **kw: opened.append(kw))
+    spec = B.builder_spec(ctx)
+    pill = B._root_pill(ctx, spec, "rows", "timepoint")
+    qtbot.addWidget(pill)
+    (button,) = pill.findChildren(QToolButton, "ITBRootBtn")
+    assert button.text().endswith("›")
+    button.click()
+    (call,) = opened
+    assert call["title"] == "Timepoints" and call["key"] == "image_table/root_filter/timepoint"
+    assert list(call["items"]) == list(call["checked"]) and len(call["items"]) == 3
+    call["on_change"](list(call["items"])[:1])
+    assert ctx.state.image_table.active_timepoints == set(list(call["items"])[:1])
+
+    # Wells come from the plate: that pill has nothing to press.
+    well = B._root_pill(ctx, spec, "rows", "well")
+    qtbot.addWidget(well)
+    assert not well.findChildren(QToolButton, "ITBRootBtn")
+
+
+def test_the_channel_page_s_controls_mutate_the_channel_spec(qtbot, monkeypatch):
+    edits = []
+    monkeypatch.setattr(B, "_edit", lambda _ctx: edits.append(1))
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
-    menu = B._channel_menu(ctx, ChannelSpec("GFP", "corrected"), host)
-    assert all(a.menu() is None for a in menu.actions())      # no submenus at all
-    labels = [a.text() for a in menu.actions()]
-    assert "Greens" in labels and "Magenta" in labels         # colour is flat, top-level
-
-
-def test_channel_menu_actions_mutate_channel_spec(qtbot):
-    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
-    from PySide6.QtWidgets import QWidget
-    parent = QWidget()
-    qtbot.addWidget(parent)
     cs = ChannelSpec("GFP", "corrected")
-    menu = B._channel_menu(ctx, cs, parent)
-    [a for a in menu.actions() if a.text() == "cell mask"][0].trigger()
-    assert cs.render == "mask"
-    [a for a in menu.actions() if a.text() == "Boundary outline"][0].trigger()
+    page = B.channel_page(ctx, cs)
+    qtbot.addWidget(page)
+    combos, boxes = _page_controls(page)
+    assert not boxes["ITBColourCells"].isEnabled(), "an intensity image has no cells to colour"
+    combos["ITBRender"].setCurrentIndex(combos["ITBRender"].findData("mask"))
+    assert cs.render == "mask" and boxes["ITBColourCells"].isEnabled()
+    boxes["ITBBoundary"].setChecked(True)
     assert cs.boundary is True
+    combos["ITBColormap"].setCurrentIndex(combos["ITBColormap"].findData("Magenta"))
+    assert cs.colormap == "Magenta"
+    assert len(edits) == 3, "each change re-renders once"
+
+
+
+def test_a_channel_s_gear_opens_its_page_in_the_inspector_and_a_second_press_leaves_it(qtbot, monkeypatch):
+    from PySide6.QtWidgets import QToolButton
+
+    from review.core import inspector_service
+
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
+    shown, popped = [], []
+    monkeypatch.setattr(inspector_service, "push",
+                        lambda _ctx, key, title, widget, **kw: shown.append((key, title, widget)) or True)
+    monkeypatch.setattr(inspector_service, "is_showing", lambda _ctx, w: bool(shown) and shown[-1][2] is w)
+    monkeypatch.setattr(inspector_service, "pop", lambda _ctx: popped.append(1))
+    spec = B.builder_spec(ctx)
+    cs = ChannelSpec("GFP", "corrected")
+    pill = B._chan_pill(ctx, spec, "rows", 0, cs)
+    qtbot.addWidget(pill)
+    (gear,) = pill.findChildren(QToolButton, "ITBOpt")
+    assert gear.menu() is None, "the ⚙ still drops a menu"
+    gear.click()
+    (key, title, page), = shown
+    assert key == B.CHANNEL_PAGE_KEY and page.objectName() == "ImageTableChannelPage"
+    gear.click()
+    assert popped == [1] and len(shown) == 1

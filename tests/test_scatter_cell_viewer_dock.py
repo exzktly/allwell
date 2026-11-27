@@ -1,9 +1,10 @@
-"""Scatter cell viewer as a shared-dock slide-out (not a modal pop-up).
+"""The Scatter cell viewer is the inspector's Detail tab, on the built application.
 
-Clicking a point on the Scatter plot opens a single-cell image viewer. It used
-to be a disruptive modal ``QDialog`` window; it now slides out in the Scatter
-tab's right dock — the *same* dock the Export-Style / Properties sidebar uses —
-so only one of them is visible at a time.
+Clicking a point on the Scatter plot opens a single-cell image viewer. It was
+a modal dialog, then a slide-out sharing the plot's right dock with the
+Properties panel — so only one of the two could be seen. It is the inspector's
+Detail tab now, beside Style: both are one press apart and neither hides the
+other for good.
 """
 from __future__ import annotations
 
@@ -27,39 +28,38 @@ def test_cell_viewer_is_a_widget_not_a_dialog():
     assert not issubclass(ScatterCellViewer, QDialog)
 
 
-def test_cell_viewer_slides_into_scatter_dock(loaded_app):
+def test_cell_viewer_is_the_inspector_s_detail_tab(loaded_app):
+    from review.core import inspector_service as svc
     app = loaded_app
     _build_scatter_tab(app)
-    dock = app._scatter_export_dock
-    assert dock is not None
 
     app._open_scatter_cell_viewer("A01", "", "1", 0)
     viewer = app._ctx.runtime.scatter.cell_viewer
     assert viewer is not None
-    # The viewer lives inside the shared dock and is the visible panel.
-    assert viewer.parentWidget() is dock
-    assert not viewer.isHidden()
-    assert not dock.isHidden()
+    insp = svc.inspector(app._ctx)
+    assert svc.is_open(app._ctx)
+    assert insp.tabWidget("detail") is viewer and insp.currentTab() == "detail"
+    assert insp.isAncestorOf(viewer) and not viewer.isHidden()
 
 
-def test_cell_viewer_and_properties_are_mutually_exclusive(loaded_app):
+def test_cell_viewer_and_style_are_two_tabs_of_one_inspector(loaded_app):
+    from review.core import inspector_service as svc
     app = loaded_app
     _build_scatter_tab(app)
-    dock = app._scatter_export_dock
+    insp = svc.inspector(app._ctx)
 
-    # Open the cell viewer first.
     app._open_scatter_cell_viewer("A01", "", "1", 0)
     viewer = app._ctx.runtime.scatter.cell_viewer
-    assert not viewer.isHidden()
+    assert insp.currentTab() == "detail"
 
-    # Opening the Properties / Export-Style sidebar hides the cell viewer
-    # (one panel at a time in the shared dock).
+    # Opening Style shows the Style tab; the viewer keeps its tab, one press away.
     app._ctx.figures.open_style_panel("scatter_cells")
-    assert viewer.isHidden()
     sidebar = app._export_style_sidebars.get(id(app._scatter_fig))
-    assert sidebar is not None and not sidebar.isHidden()
+    assert sidebar is not None and insp.tabWidget("style") is sidebar
+    assert insp.currentTab() == "style"
+    assert insp.tabWidget("detail") is viewer and insp.isTabEnabled("detail")
 
-    # Re-opening the cell viewer hides the sidebar again.
+    # Picking another cell brings Detail back to the front, in the same viewer.
     app._open_scatter_cell_viewer("A02", "", "2", 0)
-    assert not viewer.isHidden()
-    assert sidebar.isHidden()
+    assert insp.currentTab() == "detail" and insp.tabWidget("detail") is viewer
+    assert insp.tabWidget("style") is sidebar

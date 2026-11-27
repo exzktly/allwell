@@ -15,6 +15,8 @@ live in ``ui/phone_shell.py``:
 
 from __future__ import annotations
 
+from widgets.menu_marks import is_current
+
 from types import SimpleNamespace
 
 import pytest
@@ -134,7 +136,7 @@ def test_the_page_button_lists_the_tools_in_datasets_mode(qtbot):
     PhoneShell._fill_page_menu(shell)
     actions = shell._page_menu.actions()
     assert [a.text() for a in actions] == tools
-    assert [a.text() for a in actions if a.isChecked()] == ["Convert CZI"]
+    assert [a.text() for a in actions if is_current(a) and not a.isCheckable()] == ["Convert CZI"]
     actions[2].trigger()
     assert shown == ["Job Queue"]
 
@@ -157,7 +159,7 @@ def test_the_page_button_lists_analyze_s_views_in_analyze_mode(qtbot):
     PhoneShell._fill_page_menu(shell)
     actions = shell._page_menu.actions()
     assert [a.text() for a in actions] == ["Settings", "Progress"]
-    assert [a.text() for a in actions if a.isChecked()] == ["Settings"]
+    assert [a.text() for a in actions if is_current(a) and not a.isCheckable()] == ["Settings"]
     actions[1].trigger()
     assert shown == ["Progress"]
 

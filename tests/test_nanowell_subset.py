@@ -25,6 +25,7 @@ from review.features.nanowell import subset_compute as ss  # noqa: E402
 from review.features.nanowell.collect import load_nanowell_data  # noqa: E402
 from review.features.nanowell.series_compute import site_metrics  # noqa: E402
 from review.features.nanowell.state import NanowellState  # noqa: E402
+from tests import _panels  # noqa: E402
 from tests.test_nanowell_page import _loaded, _page, _write_nanowell_dataset  # noqa: E402
 from tests.test_nanowell_page_starting_cells import COUNTS, _dots, _texts  # noqa: E402
 
@@ -303,8 +304,9 @@ def test_an_imaging_field_condition_is_built_from_the_tiles_the_run_recorded(pag
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset() and not editor.apply_btn.isEnabled()   # no tile ticked yet: nothing to apply
     assert editor.status.property("textTone") == "attention"
-    tiles = [a for a in row.tiles_menu.actions() if a.isCheckable()]
-    assert [a.text() for a in tiles] == ["F0"]
+    row.tiles_btn.click()                                        # the values, as a page of ticks
+    tiles = _panels.picker(row.tiles_btn).boxes()
+    assert [b.text() for b in tiles] == ["F0"]
     tiles[0].setChecked(True)
     editor.apply_btn.click()
     assert st.subset == ss.Subset((C("owner", "in", values=("F0",), at="baseline"),))
@@ -325,12 +327,13 @@ def test_an_identity_verdict_condition_is_built_from_the_verdicts_not_the_tiles(
     row.field_cb.setCurrentIndex(row.field_cb.findData("owner"))
     row.field_cb.setCurrentIndex(row.field_cb.findData("identity"))
     assert row.tiles_btn.isVisibleTo(page.window) and row.at_cb.isVisibleTo(page.window)
-    verdicts = [a for a in row.tiles_menu.actions() if a.isCheckable()]
-    assert [a.text() for a in verdicts] == ["confirmed", "reference", "partial", "inconclusive", "contradicted",
+    row.tiles_btn.click()
+    verdicts = _panels.picker(row.tiles_btn).boxes()
+    assert [b.text() for b in verdicts] == ["confirmed", "reference", "partial", "inconclusive", "contradicted",
                                             "not checked"]
     verdicts[-1].setChecked(True)
     verdicts[0].setChecked(True)
-    assert row.tiles_btn.text() == "confirmed, not checked"
+    assert row.tiles_btn.text() == "confirmed, not checked ›"
     editor.apply_btn.click()
     st = page.state.feature_slice("nanowell")
     assert st.subset == ss.Subset((C("identity", "in", values=("confirmed", "not_checked"), at="baseline"),))

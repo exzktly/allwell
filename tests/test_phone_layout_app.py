@@ -89,8 +89,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert theme.touch_unit() == pytest.approx(u)
     assert not _visible(win._header)
     assert not _visible(shell._banner)
-    for w in (win._present_btn, win._reset_saves_btn, win._copy_analysis_btn,
-              win._open_btn, win._reset_view_btn, win._refresh_btn,
+    for w in (win._present_btn, win._refresh_btn,
               win._help_btn, win._statusbar, shell.desk_button):
         assert not _visible(w), w
     assert _visible(win._mode_seg) and _visible(shell.options_button)
@@ -218,7 +217,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert not phone_layout.is_on()
     assert theme.ui_scale() == 1.0
     assert _visible(win._header)
-    for w in (win._present_btn, win._reset_view_btn, review._section_nav,
+    for w in (win._present_btn, win._refresh_btn, review._section_nav,
               review._page_tabs_host, review._sidebar_root,
               review._central_pane_stack, review._sidebar_toggle_btn):
         assert _visible(w), w
@@ -306,14 +305,15 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         assert _visible(shell._rail_status)
         shell.menu_button.click()
         _pump(qapp)
-        # The Controls sheet: 48 pt controls, and a "Done" to close it —
+        # The Controls sheet: 48 pt controls, and a Close at its top right —
         # on Plotting, whose band has controls with no dataset loaded (Home's
         # holds nothing tappable until one is).
         nav._rows["Plotting"].clicked.emit("Plotting")
         _pump(qapp)
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.toolTip() == "Close the controls" and not shell.controls_button.text()
+        assert shell.controls_button.text() == "Controls" and shell.controls_button.isChecked()
+        assert shell._inspector().close_button.text() == "Close"
         # At most 60 % of the window (Plotting's controls fill that on this
         # small screen), and no scrim: the plot above it is what the controls
         # are judged by.
@@ -330,7 +330,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
             (type(w).__name__, w.height()) for w in ctrls if w.height() < round(48 * u) - 1]
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.text() == "Controls"
+        assert not shell.controls_button.isChecked()
         # The run view drops what repeats the headline.
         dash = win._analyze._dashboard
         assert dash.isStacked() and dash._status.isHidden()
@@ -557,13 +557,17 @@ def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
     assert "above" in empty._hint.text()
 
 
-def test_properties_from_the_controls_sheet_opens_a_full_width_sheet(qapp, win, mini_dataset):
-    """Bar Plots → ⚙ Controls → Properties: the panel opens over the page at the
-    window's width, with the Controls sheet closed — not in the plot's side dock
-    under the sheet, 360 px wide on a 390 px screen — and its ✕ puts it back."""
+def test_style_is_the_tab_beside_data_in_the_controls_sheet(qapp, win, mini_dataset):
+    """Bar Plots → ⚙ Controls → Style: the figure's style panel is a tab of
+    the same sheet — not a second sheet opened over the first, and not the
+    plot's side dock under it — its sections are rows, a row opens a page of
+    the sheet, and closing the sheet gives every piece back."""
     from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QToolButton
 
-    from widgets.icon_button import IconButton
+    from review.features.export.properties_view import ExportStyleSidebar
+    from tests import _surface_checks as surf
+    from widgets.collapsible_section import CollapsibleSection
 
     review, shell = win._review, win._phone
     if win._mode_seg.currentIndex() != 0:
@@ -581,38 +585,37 @@ def test_properties_from_the_controls_sheet_opens_a_full_width_sheet(qapp, win, 
         win.resize(390, 780)
         _pump(qapp)
         shell.controls_button.click()
-        _pump(qapp)
-        props = [b for b in shell._sheet_band.findChildren(IconButton)
-                 if "properties" in (b.toolTip() or "").lower() and b.isVisible()]
-        assert props, "no Properties button in the Controls sheet"
-        props[0].click()
-        _pump(qapp)
-        dock = review._bar_export_dock
-        assert not shell._sheet.isOpen() and shell._sheet_band is None, \
-            "the panel opened under the Controls sheet"
-        from review.core import phone_panel_sheet
-        sheet = phone_panel_sheet.sheet_of(win)
-        assert sheet is not None and sheet.isOpen(), \
-            "Properties opened in the plot's side dock, not as a phone sheet"
-        assert dock.parentWidget() is sheet.contentWidget()
         QTest.qWait(400)
         _pump(qapp)
-        assert sheet.width() == win.width() and dock.width() == win.width()
-        # Reported: the Properties panel did not scroll by a drag. Its scroll
-        # area was outside every root phone layout grabbed.
-        from PySide6.QtWidgets import QAbstractScrollArea, QScroller
-        long_areas = [a for a in dock.findChildren(QAbstractScrollArea)
-                      if a.isVisible() and a.verticalScrollBar().maximum() > 0]
-        assert long_areas, "the Properties panel had nothing to scroll on this screen"
-        for a in long_areas:
-            assert a.viewport().property("_awDragScroll"), \
-                f"{type(a).__name__} in the Properties panel does not scroll by a drag"
-            assert QScroller.hasScroller(a.viewport())
-
-        sidebar = next(iter(review._export_style_sidebars.values()))
-        sidebar._close_dock()
+        insp = shell._inspector()
+        assert not [b for b in shell._sheet_band.findChildren(QToolButton)
+                    if b.property("bandRole") == "style" and b.isVisible()], \
+            "a Style button is shown inside the sheet whose Style tab is one tap away"
+        assert insp.isTabEnabled("style"), "the sheet's Style tab has nothing in it"
+        insp.showTab("style")
+        QTest.qWait(300)
         _pump(qapp)
-        assert not sheet.isOpen() and dock.parentWidget() is not sheet.contentWidget()
+        panel = insp.tabWidget("style")
+        assert isinstance(panel, ExportStyleSidebar) and panel.isVisibleTo(win)
+        assert shell._sheet.isOpen() and surf.depth(win) == 1, \
+            "Style opened a second surface: " + surf.describe(surf.open_transients(win))
+        assert panel.width() <= win.width(), "the Style tab is wider than the phone"
+        grid = next(sec for sec in panel.findChildren(CollapsibleSection) if sec.titleText() == "Grid")
+        # The header's own signal: a synthetic mouse click on a drag-scrolled
+        # viewport is held by the scroller as the start of a drag. The click
+        # itself is pressed for real at the desk
+        # (``test_band_panels_open_in_the_inspector``).
+        grid._header.clicked.emit()
+        QTest.qWait(300)
+        _pump(qapp)
+        assert insp.currentWidget() is grid.body() and insp.back_button.isVisibleTo(win)
+        assert surf.depth(win) == 1
+        insp.close_button.click()
+        QTest.qWait(400)
+        _pump(qapp)
+        assert not shell._sheet.isOpen()
+        assert not insp.holds(panel) and not insp.holds(grid.body())
+        assert grid.body().parentWidget() is grid
     finally:
         shell.set_on(False)
         QTest.qWait(600)
@@ -704,7 +707,7 @@ def test_wells_at_the_foot_opens_the_rail_s_plate_over_the_live_plot(qapp, win, 
         review._set_selected_wells({"A01", "B02"}, commit=True)
         QTest.qWait(500)
         _pump(qapp)
-        assert shell.wells_button.toolTip() == "Close the wells" and not shell.wells_button.text()
+        assert shell.wells_button.isChecked() and shell._wells_sheet._aw_close.text() == "Close"
         shell.wells_button.click()
         QTest.qWait(400)
         _pump(qapp)
@@ -732,14 +735,14 @@ def test_the_controls_sheet_reads_as_one_column_of_labelled_rows(qapp, win, mini
     others, a hint between two of them, data choices and commands mixed.
     Through the real sheet on Bar Plots: every data control starts and ends at
     the same x with its label in a column to its left ("Timepoints" a label,
-    not part of the button), the sections run Data, Display, Actions top to
-    bottom, the Properties icon says what it is, nothing scrolls sideways — and
-    closing the sheet gives the page its row back. Stated without the form's
-    own API, so it fails on the old sheet with an AssertionError."""
+    not part of the button), a panel that opens a page is a row with its title
+    in that column too, the page's Display options are the tab beside Data and
+    not a button in it, nothing scrolls sideways — and closing the sheet gives
+    the page its row back. Stated without the form's own API, so it fails on
+    the old sheet with an AssertionError."""
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QComboBox, QLabel
+    from PySide6.QtWidgets import QComboBox, QLabel, QToolButton
 
-    from widgets.icon_button import IconButton
     from widgets.labeled_combo import LabeledComboBox
     from widgets.stepper import Stepper
 
@@ -762,7 +765,8 @@ def test_the_controls_sheet_reads_as_one_column_of_labelled_rows(qapp, win, mini
         QTest.qWait(500)
         _pump(qapp)
         band = shell._sheet_band
-        sheet_scroll = shell._sheet.contentWidget()
+        insp = shell._inspector()
+        sheet_scroll = insp.tabSlot("data")
 
         def shown(t):
             return [w for w in band.findChildren(t) if w.isVisible()]
@@ -781,20 +785,31 @@ def test_the_controls_sheet_reads_as_one_column_of_labelled_rows(qapp, win, mini
         assert tp_label.mapTo(band, tp_label.rect().topRight()).x() < min(lefts)
         for combo in shown(LabeledComboBox):
             assert ": " not in combo._painted_text(), combo._painted_text()
-        # The button grids first, so they are in view when the sheet opens
-        # whatever the length of the page's Data rows.
-        heads = [labels[h] for h in ("DISPLAY", "ACTIONS", "DATA")]
-        ys = [h.mapTo(band, h.rect().topLeft()).y() for h in heads]
-        assert ys == sorted(ys), dict(zip(("DISPLAY", "ACTIONS", "DATA"), ys))
-        props = [b for b in shown(IconButton) if "properties" in (b.toolTip() or "").lower()]
-        assert props and props[0].text() == "Properties"
+        # Fold change opens a page: it is a row, its title in the label column.
+        assert "Fold change" in labels, "Fold change is not a labelled row"
+        fold = labels["Fold change"]
+        assert fold.mapTo(band, fold.rect().topRight()).x() < min(lefts)
+        # The sheet is the inspector: Data is the tab on show, the page's
+        # Display panel is the tab beside it, and no button in the form leads
+        # to a tab that is one tap away already.
+        assert insp.currentTab() == "data" and insp.isTabEnabled("display")
+        assert "DISPLAY" not in labels and "DATA" not in labels
+        assert not [b for b in shown(QToolButton) if b.text() == "Display"], \
+            "the Display tab's own button is shown inside the Data tab"
+        insp.showTab("display")
+        _pump(qapp)
+        grouping = review._ctx.widgets.get("_bar_group_mode_btn")
+        assert grouping.isVisibleTo(win), "the Display tab does not show the page's display options"
+        insp.showTab("data")
+        _pump(qapp)
         assert sheet_scroll.widget().width() <= sheet_scroll.viewport().width(), \
             "the sheet scrolls sideways"
 
         shell.controls_button.click()
         QTest.qWait(400)
         _pump(qapp)
-        assert band.parentWidget() is not shell._sheet._aw_holder
+        assert not insp.holds(band) and not shell._sheet.isAncestorOf(band)
+        assert not insp.holds(grouping), "the Display panel was not given back with the sheet"
         channel = review._plotting_channel_cb
         assert channel._painted_text().startswith("Channel: ")
     finally:

@@ -138,7 +138,7 @@ def test_scatter_gate_exempts_shape_columns():
 def test_checkable_dropdown_data_contract(qapp):
     """The CheckableDropdown is a drop-in for the multi-select chip group:
     addItem / checkedData / setCheckedData / All / None, with a summary."""
-    from widgets.checkable_dropdown import CheckableDropdown
+    from widgets.multi_select import MultiSelectButton as CheckableDropdown
 
     d = CheckableDropdown(noun="metrics selected", empty_text="No metrics selected")
     for label, key in (("Area", "area"), ("Eccentricity", "eccentricity"),
@@ -164,7 +164,7 @@ def test_analyze_shape_selector_is_dropdown(qapp):
     (not a wide chip row), defaults round-trip into the run options, and a
     changed selection flows through unchanged."""
     from analyze.tab import AnalyzeTab
-    from widgets.checkable_dropdown import CheckableDropdown
+    from widgets.multi_select import MultiSelectButton as CheckableDropdown
 
     tab = AnalyzeTab()
     sel = tab._shape_chips

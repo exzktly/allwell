@@ -49,6 +49,7 @@ from services.job_kinds import (
     linkable_targets,
 )
 from services.job_queue import JobSpec, JobState
+from widgets.menu_marks import mark_current
 from widgets.owned_action import owned_action
 
 # Queue position number at the row's left edge.
@@ -122,6 +123,10 @@ def failure_reason(job: JobSpec) -> str | None:
         return message
     return f"{word} — {message}"
 
+
+
+#: The input lists' first entry: the job reads the folder set on its own page.
+NOTHING_TEXT = "Nothing (use the folder on its page)"
 
 class JobRow(QWidget):
     """A single queue entry, rewritable in place."""
@@ -499,9 +504,7 @@ class JobRow(QWidget):
         sub = QMenu("Input from", menu)
         sub.setObjectName("JobRowChainMenu")
         menu.addMenu(sub)
-        none_action = owned_action(sub, "Nothing (use the folder on its page)")
-        none_action.setCheckable(True)
-        none_action.setChecked(not self._job.chain_from)
+        none_action = mark_current(owned_action(sub, ""), NOTHING_TEXT, not self._job.chain_from)
         none_action.triggered.connect(lambda: self.chainRequested.emit(self.job_id, ""))
         current = self._job.chain_from
         self._add_sources(sub, self._predecessors, self._below,
@@ -521,9 +524,7 @@ class JobRow(QWidget):
         menu.addMenu(sub)
         current = self._job.link_for(target)
         taken = {link.source for link in self._job.links() if link.target != target}
-        none_action = owned_action(sub, "Nothing (use the folder on its page)")
-        none_action.setCheckable(True)
-        none_action.setChecked(current is None)
+        none_action = mark_current(owned_action(sub, ""), NOTHING_TEXT, current is None)
         none_action.triggered.connect(
             lambda _checked=False, t=target: self.linkRequested.emit(self.job_id, t, ""))
         above = [(pid, plabel) for pid, plabel in self._predecessors if pid not in taken]
@@ -543,9 +544,7 @@ class JobRow(QWidget):
             return
         sub.addSeparator()
         for pred_id, label in above:
-            act = owned_action(sub, self._job_entry(pred_id, label))
-            act.setCheckable(True)
-            act.setChecked(checked(pred_id))
+            act = mark_current(owned_action(sub, ""), self._job_entry(pred_id, label), checked(pred_id))
             act.triggered.connect(lambda _checked=False, p=pred_id: choose(p))
         if below:
             sub.addSeparator()
@@ -590,16 +589,15 @@ class JobRow(QWidget):
             owned_action(sub, f"{KIND_LABEL.get(kind, kind)}…").triggered.connect(
                 lambda _checked=False, k=kind: self.nextStepRequested.emit(self.job_id, k, ""))
         sub.addSeparator()
+        # One level, never two: each pairing is an entry of this list rather
+        # than a submenu of its own ("Merge with ▸" inside "New job using
+        # this output ▸" was a menu two levels deep).
         for kind in PAIR_STEP_KINDS:
-            pair = QMenu(f"{KIND_LABEL.get(kind, kind)} with", sub)
-            pair.setObjectName("JobRowPairMenu")
-            sub.addMenu(pair)
-            owned_action(pair, "A folder you pick on the page…").triggered.connect(
+            label = KIND_LABEL.get(kind, kind)
+            owned_action(sub, f"{label} with a folder you pick on the page…").triggered.connect(
                 lambda _checked=False, k=kind: self.nextStepRequested.emit(self.job_id, k, ""))
-            if self._others:
-                pair.addSeparator()
             for other_id, other_label in self._others:
-                owned_action(pair, self._job_entry(other_id, other_label)).triggered.connect(
+                owned_action(sub, f"{label} with {self._job_entry(other_id, other_label)}").triggered.connect(
                     lambda _checked=False, k=kind, o=other_id:
                         self.nextStepRequested.emit(self.job_id, k, o))
 

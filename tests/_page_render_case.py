@@ -33,15 +33,16 @@ def start_window(qapp):
     fontconfig makes of "Sans Serif" — DejaVu Sans on the CI runner. The theme, because the token classes in
     ``ui/theme.py`` hold the *blue* baseline until a theme is applied, and only ``allwell.main`` applies one:
     a window built without this call is painted in a palette no user starts in, and every screenshot taken
-    from it shows that palette. ``select_theme_from_env`` honours ``ALLWELL_THEME``, so a run can render
-    either palette; unset, it applies ``DEFAULT_THEME``, which is what a user sees.
+    from it shows that palette. ``apply_startup_palette`` is the function ``allwell.main`` calls: it honours
+    ``ALLWELL_THEME``, so a run can render either palette, and then the palette stored in the run's own
+    settings file; with neither, it applies ``DEFAULT_THEME``, which is what a new user sees.
     ``tests/test_the_render_harness_shows_the_shipped_theme.py`` holds both halves.
     """
     from allwell import AllWellApp, use_bundled_fonts
-    from ui import theme
+    from ui.palette_setting import apply_startup_palette
 
     use_bundled_fonts(qapp)
-    theme.select_theme_from_env()
+    apply_startup_palette()
     return AllWellApp(None)
 
 

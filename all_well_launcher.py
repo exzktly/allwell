@@ -149,13 +149,16 @@ sys.path.insert(0, str(_BUNDLE_DIR))
 
 
 def _apply_baked_theme() -> None:
-    """Apply a build-time-baked default UI theme, if the bundle carries one.
+    """Apply a build-time-baked default palette, if the bundle carries one.
 
     ``ALLWELL_THEME=<name> scripts/build_executable.sh`` writes
     ``allwell_theme.txt`` at the bundle root (mirroring the profile marker). Read
-    it and ``setdefault`` the env var so ``allwell.main`` picks it up — while a
-    runtime ``ALLWELL_THEME`` env var or ``--theme`` flag still overrides (soft).
-    No-op when running from source or from an unthemed build.
+    it into ``ALLWELL_BUILD_THEME``, the build's default, which
+    ``ui.palette_setting.apply_startup_palette`` takes only when nothing ranks
+    above it: ``--theme``, a runtime ``ALLWELL_THEME`` and the palette the user
+    chose in the app all win. Not ``ALLWELL_THEME`` itself, which would outrank
+    the user's own choice on every launch of that build. No-op when running from
+    source or from an unthemed build.
     """
     import os
     try:
@@ -163,7 +166,7 @@ def _apply_baked_theme() -> None:
     except OSError:
         return
     if name:
-        os.environ.setdefault("ALLWELL_THEME", name)
+        os.environ.setdefault("ALLWELL_BUILD_THEME", name)
 
 
 def _dispatch() -> None:

@@ -2568,8 +2568,8 @@ def main() -> None:
     ap.add_argument("--data_dir", type=Path, default=None,
                     help="Pre-load a results directory into the Review tab on startup.")
     ap.add_argument("--theme", default=None, choices=theme_v2.available_themes(),
-                    help="UI theme (overrides the ALLWELL_THEME env var). "
-                         f"Unset uses {theme_v2.DEFAULT_THEME}.")
+                    help="Palette for this launch (overrides the ALLWELL_THEME env var and the "
+                         f"palette chosen in the app). Unset uses those, else {theme_v2.DEFAULT_THEME}.")
     args = ap.parse_args()
 
     _boot_diag.boot("creating QApplication (loads Qt platform plugin) …")
@@ -2580,10 +2580,11 @@ def main() -> None:
     _boot_diag.install_hang_recorder(app)
     _install_combobox_popup_widener()
     use_bundled_fonts(app)
-    # Select the UI theme (dev-facing ALLWELL_THEME env var) BEFORE building any
-    # widgets, so qss() and every widget's cached inline QSS pick up its tokens.
-    _active_theme = (theme_v2.apply_theme(args.theme) if args.theme
-                     else theme_v2.select_theme_from_env())
+    # Apply the palette BEFORE building any widgets, so qss() and every widget's
+    # cached inline QSS pick up its tokens: --theme, else ALLWELL_THEME, else the
+    # user's stored choice, else the default (ui/palette_setting.py).
+    from ui.palette_setting import apply_startup_palette
+    _active_theme = apply_startup_palette(args.theme)
     _boot_diag.boot(f"theme applied: {_active_theme}")
     _start_phone = _phone_layout_at_startup(app)
     app.setStyleSheet(theme_v2.qss())

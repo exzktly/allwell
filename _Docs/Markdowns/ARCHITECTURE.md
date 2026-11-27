@@ -91,9 +91,9 @@ A handful of things live on the application root rather than per-pane because
 they're shell-wide:
 
 - **Stylesheet.** `theme.qss()` is set as the application-wide QSS string in
-  `AllWellApp._apply_stylesheet`. All chrome reads from it. The active theme is
-  chosen once at startup (dev-facing `ALLWELL_THEME` env var / `--theme` flag) —
-  see §8.
+  `AllWellApp._apply_stylesheet`. All chrome reads from it. The palette is
+  applied once at startup — `--theme`, else `ALLWELL_THEME`, else the palette
+  the user chose in the rail head's menu, else the default — see §8.
 - **Help drawer + keyboard shortcuts** — `Ctrl+O` (open), `Ctrl+E` (export the
   active figure), `Ctrl+←`/`→` (Back / Forward, below), `Ctrl+/` (help drawer), `Ctrl+L`
   (log drawer), `Ctrl+B` (collapse the sidebar), `Ctrl+W` (close). All are
@@ -1018,7 +1018,9 @@ the log and last-run card hidden, the run side capped at its own height);
 **Progress** hides the form and shows the full dashboard and the log, fitted to
 the page: nothing on it scrolls but the log inside its own box. At full phone
 width the stacked plate alone is ~540 px tall, and the plate holds its
-aspect-locked height as a floor (`WellPlateSelector.resizeEvent`), so on a short
+aspect-locked height as a floor (`WellPlateSelector.resizeEvent`, which does not
+re-apply the floor from inside its own relayout — inside a scroll area that
+re-entry fed the scroll bar's toggling and never ended), so on a short
 screen it is not shared out — everything below the plate is pushed off the page.
 So `AnalyzePhoneView._fit_progress` caps the plate instead, by width and height at
 the same aspect (a height cap alone at full width squeezes the wells and runs the
@@ -1616,10 +1618,13 @@ allwell/
 │   │                              about All-Well, a module here knows the app but belongs to no
 │   │                              one pane. Nothing here imports a pane
 │   ├── theme.py                ← the design tokens (Colors / Typography / Spacing / Radii), the
-│   │                              theme registry, and qss() — the one place a raw colour literal
-│   │                              may be written (tests/test_hardcoded_tokens.py names it,
-│   │                              alongside domain/well_palette.py, whose 96 rank colours
-│   │                              this module re-exports)
+│   │                              theme registry, and qss() — with palettes.py, the one place a raw
+│   │                              colour literal may be written (tests/test_hardcoded_tokens.py names
+│   │                              both, alongside domain/well_palette.py, whose 96 rank colours
+│   │                              this module re-exports). Its class values are the blue palette
+│   ├── palettes.py             ← the palettes as data: the grey bundle, role by role (§8)
+│   ├── palette_setting.py      ← the palette the user chose (stored, offered in the rail head's
+│   │                              Palette menu) and the start-up order that applies it (§8)
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
 │   ├── nanowell_sites.py       ← how a nanowell is drawn over a montage: the state palette, the
 │   │                              fused colour, the outline and its address, the greyscale image.
@@ -22319,6 +22324,7 @@ all — which is correct, since nothing about them is in flight.
 The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which used to come only from rsync's own per-file output. That is a poor thing to depend on: rsync says nothing on a cache hit (it moves nothing), nothing for files an incremental re-send skips, and nothing at all when the local rsync predates `--info=name1` — macOS still ships 2.6.9. In each case the transfer had succeeded and the rail sat at 0/N, reading as a stalled upload. Batched mode was worst, since `upload_subset` had no compensator at all where `ensure_uploaded` at least synthesised lines on a cache hit. `_log_wells_uploaded` now emits one line per archive from both paths' success branch, where the caller knows which archives it asked for and that rsync returned 0; the dashboard de-dupes into sets, so it costs nothing alongside live per-file lines, and a non-zero rc emits nothing rather than drawing a rail ahead of the data. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |
 | `NamedPageStack` (`widgets/page_stack.py`) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
 | `CurrentPageStack` (`widgets/page_stack.py`) | A `NamedPageStack` exactly as tall as its current page, for a block of form rows that changes with a choice above it. The Analyze form's per-method segmentation settings. |
+| `SettlingScrollArea` (`widgets/settling_scroll_area.py`) | A resizable `QScrollArea` that answers each content resize once, never from inside its own answer. A plain one holding height-for-width content (a well plate) re-sizes it each time its vertical scroll bar comes or goes, synchronously, and at sizes where neither state is stable recurses until the stack overflows — Review's rail did, on the way to Plotting. Review's rail. `tests/test_settling_scroll_area.py`. |
 | `FooterScrollArea` (`widgets/footer_scroll_area.py`) | A `QScrollArea` with a pinned footer under the viewport; the viewport is shortened by the footer's height, which follows the footer's contents. The Analyze run footer. |
 | `TextCombo` (`widgets/text_combo.py`) | An editable combo with a line edit's text API (`text()`, `setText()`, `clear()`, `textChanged`, `textEdited`) whose list is only suggestions; `set_options` replaces them silently. It has no completer, so a typed prefix of a suggestion (`DAPI` beside `DAPI_405`) is kept as typed rather than completed inline to the listed name. The Analyze form's Segmentation and Cytoplasm channels, offering the channels in the Channels rows (`seg_params._refresh_seg_channel_options`, which also writes the line saying whether the typed name is one of them). |
 | `wheel_guard` (`core/wheel_guard.py`) | `keep_guarding(root)`, called by `AnalyzeTab._build_form` (`analyze/form.py`) on its form: a filter on each `QComboBox` and `QAbstractSpinBox` under the form, so a wheel over a dropdown (whatever its focus, since it keeps focus after a choice) or over a number box that has no keyboard focus is forwarded to the scroll area it sits in, and a long form scrolls without changing the fields under the pointer. A watcher on the form's root re-walks it on a layout change or a show, so fields the form adds later are guarded too; a field is marked `_aw_wheel_guarded` and filtered once. **Never a filter on the application.** It was one, so a field built anywhere was covered, and a Windows session then crashed twice with an access violation inside it, each time just after Review loaded a dataset during a remote run with every other thread idle; started without it, it ran with no crash. A Python filter on the application is called for every event of every object on the main thread — Review's pages and the objects Qt destroys after a load among them — and a filter on a field for that field's events alone. `tests/test_wheel_guard.py` holds both: no `install`, nothing in `allwell.main`, a dropdown outside a guarded form keeps Qt's wheel, and the real Analyze tab's fields are guarded. |
@@ -22488,24 +22494,35 @@ per-widget rewiring**.
   halves of that.
 - `theme.apply_theme(name)` resets every themeable attribute to its captured
   default, applies the bundle, and fires post-apply hooks
-  (`register_theme_hook`). `select_theme_from_env()` reads the **`ALLWELL_THEME`**
-  env var (falling back to `DEFAULT_THEME` — `grey` — on unset/unknown).
-  `allwell.main()`
-  calls it once, before building `AllWellApp`; `--theme <name>` overrides the env
-  var. `tests/visual/render_views.py` honours it too, so
-  `ALLWELL_THEME=grey … render_views.py` audits any theme.
+  (`register_theme_hook`). `select_theme_from_env(default)` applies the theme the
+  **`ALLWELL_THEME`** env var names, else *default*.
+- **The palette is the user's choice.** `ui/palette_setting.py` stores it in the
+  settings file (`appearance/palette`, through `core.app_settings`), offers it as
+  a **Palette** submenu of the rail head's dataset menu (Grey first, the choice
+  the next start will use checked, and a disabled line saying it applies the
+  next time All-Well starts), and owns the start-up order in
+  `apply_startup_palette(command_line)`: `--theme`, else `ALLWELL_THEME`, else
+  the stored choice, else a build's baked default, else `DEFAULT_THEME`.
+  `allwell.main()` calls it once, before building `AllWellApp`, and so does the
+  page-render harness (`tests/_page_render_case.start_window`), so what the
+  screenshots show is what a user starts in. `tests/test_palette_setting.py`
+  holds the order and the menu;
+  `tests/test_the_stored_palette_is_the_one_the_window_starts_in.py` holds it on
+  a painted window. `tests/visual/render_views.py` honours `ALLWELL_THEME` too,
+  so `ALLWELL_THEME=grey … render_views.py` audits any theme.
 - **Build-time default (soft).** `ALLWELL_THEME=<name> scripts/build_executable.sh`
   bakes `allwell_theme.txt` at the frozen bundle root (mirroring the profile
-  marker); `all_well_launcher._apply_baked_theme` reads it and `setdefault`s the
-  env var, so the shipped exe starts on that theme while a runtime `ALLWELL_THEME`
-  / `--theme` still overrides. The `.spec` validates the name against
+  marker); `all_well_launcher._apply_baked_theme` reads it into
+  `ALLWELL_BUILD_THEME`, the build's default, which ranks below the user's own
+  choice as well as below a runtime `ALLWELL_THEME` / `--theme` — written into
+  `ALLWELL_THEME` itself it would outrank the choice on every launch. The `.spec` validates the name against
   `theme.available_themes()` and skips baking an unknown one (the build then
   starts on `DEFAULT_THEME` like any other).
 - **Startup-only, by design.** There is no in-app live switch of *colours* — a
   runtime swap would need every cached inline QSS rebuilt (see the
-  per-instance-QSS note below), which hit a ~20 s repaint cascade. Selection is
-  a dev-facing env var / flag. *Sizes* do switch live: that is the UI scale,
-  below.
+  per-instance-QSS note below), which hit a ~20 s repaint cascade, so a palette
+  chosen in the app applies at the next start and the menu says so. *Sizes* do
+  switch live: that is the UI scale, below.
 - `WELL_COLORS_TUPLE` (categorical data identity) and `CPub` (white-bg
   publication export) are deliberately **theme-independent**.
 - `ui/theme.py` registers `refresh_legacy_palette` as a theme hook, so its

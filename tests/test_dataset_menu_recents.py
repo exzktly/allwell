@@ -86,7 +86,11 @@ def _win(monkeypatch, paths, *, data_dir=None, opened=None):
 
 
 def _labels(menu):
-    return [a.text() for a in menu.actions() if not a.isSeparator()]
+    """The menu's entries up to its settings section: ``Palette`` ends every fill and is
+    ``tests/test_palette_setting.py``'s to test."""
+    texts = [a.text() for a in menu.actions() if not a.isSeparator()]
+    assert texts[-1] == "Palette", texts
+    return texts[:-1]
 
 
 def test_the_menu_lists_the_datasets_opened_recently(qapp, tmp_path, monkeypatch):

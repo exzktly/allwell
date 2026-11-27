@@ -183,16 +183,18 @@ Run it:
 ```sh
 python allwell.py
 python allwell.py --data_dir /path/to/results   # pre-load a dataset
-python allwell.py --theme blue                  # the alternative palette
+python allwell.py --theme blue                  # this launch in the blue palette
 ```
 
-The window opens in a neutral charcoal-grey palette. A second palette, `blue`,
-is available with `--theme blue` or by setting `ALLWELL_THEME=blue` before
-launching; the two differ only in colour, and both keep the same layout,
-control sizes and spacing. The choice is read once at startup, so switching
-means restarting the app. Nothing about a dataset or an export changes with it:
-the well colours that identify samples, and the white-background palette
-figures are exported in, are the same in either.
+The window opens in a neutral charcoal-grey palette. A second palette, blue, is
+offered beside it: open the dataset button at the top of Review's sidebar and
+choose **Palette ▸ Grey** or **Palette ▸ Blue**. The choice is remembered, and it
+applies the next time All-Well starts — the menu says so under the two entries.
+For one launch only, `--theme blue` (or `ALLWELL_THEME=blue`) overrides the
+remembered choice. The two palettes differ only in colour; both keep the same
+layout, control sizes and spacing. Nothing about a dataset or an export changes
+with it: the well colours that identify samples, and the white-background
+palette figures are exported in, are the same in either.
 
 The pipeline alone (no GUI) can be invoked directly — useful for CI or
 batch processing on headless workers. `--input_dir` must hold one `<WELL>.zip`

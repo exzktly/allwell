@@ -99,7 +99,7 @@ RECENTS_IN_MENU = 6
 
 
 def _fill_dataset_menu(win, menu) -> None:
-    """``Open…``, then the datasets this user opened recently.
+    """``Open…``, the datasets this user opened recently, then the ``Palette`` choice.
 
     Rows come from ``core.recent_view.entry_rows``, the same function Home's
     card and its placeholder draw from, so a folder that has gone missing reads
@@ -110,14 +110,34 @@ def _fill_dataset_menu(win, menu) -> None:
     because a ``QMenu`` row is a line of text with nothing to reveal a second
     control over; forgetting a dataset is Home's ×.
     """
-    from review.core.recent_view import entry_rows
-
     menu.clear()
     # Qt hides action tooltips by default, and the tooltip is where a row says
     # its full path and when it was last opened — the two facts that tell
     # ``plate3_run2`` from ``plate3_run2`` on another drive.
     menu.setToolTipsVisible(True)
     owned_action(menu, "Open…").triggered.connect(lambda _=False: win._browse())
+    _fill_recents(win, menu)
+    _add_palette(menu)
+
+
+def _add_palette(menu) -> None:
+    """The ``Palette`` choice, last and set apart: it is the application's setting, not the dataset's, and this
+    menu is the one place the window offers settings until the title bar's own menu exists. Rebuilt with the
+    rest, so its check mark follows a choice made since; the previous copy is deleted, because ``clear`` drops
+    the action and not the submenu it opened."""
+    from ui.palette_setting import palette_menu
+
+    old = getattr(menu, "_aw_palette_menu", None)
+    if old is not None:
+        old.deleteLater()
+    menu.addSeparator()
+    menu._aw_palette_menu = palette_menu(menu)
+    menu.addMenu(menu._aw_palette_menu)
+
+
+def _fill_recents(win, menu) -> None:
+    """The datasets this user opened recently, under a ``Recent`` heading; nothing when there are none."""
+    from review.core.recent_view import entry_rows
 
     ctx = getattr(win, "_ctx", None)
     if ctx is None:

@@ -2090,10 +2090,11 @@ QLabel#PlateWellDetail {{
 # (``Colors`` / ``Metrics`` / ``Radii``) before the UI is built. Because
 # :func:`qss` reads those classes at call time and every ``widgets/*`` builder
 # reads ``theme.Colors.*`` at construction, applying a theme up-front (see
-# ``allwell.main`` → :func:`select_theme_from_env`) re-skins the whole app with
-# no per-widget rewiring. Selection is a dev-facing env var — ``ALLWELL_THEME``
-# — so there is no in-app live switch (which would need every cached inline QSS
-# rebuilt on ``QEvent.StyleChange``; see ARCHITECTURE.md §8). ``WELL_COLORS_TUPLE``
+# ``ui.palette_setting.apply_startup_palette``) re-skins the whole app with no
+# per-widget rewiring. Which palette: ``--theme``, else ``ALLWELL_THEME``, else
+# the palette the user chose in the app, else :data:`DEFAULT_THEME`. A choice
+# made in the app applies at the next start, because many widgets cache inline
+# QSS built from the tokens (ARCHITECTURE.md §8). ``WELL_COLORS_TUPLE``
 # (categorical data identity) and ``CPub`` (white-bg publication export) are
 # deliberately theme-independent.
 
@@ -2103,14 +2104,15 @@ import logging as _logging
 _LOG = _logging.getLogger(__name__)
 
 #: The theme the app starts in when nothing names one. ``grey`` is the
-#: shipped default; ``blue`` remains available via ``ALLWELL_THEME=blue`` or
-#: ``--theme blue``.
+#: shipped default; ``blue`` is offered beside it, chosen in the app (the rail
+#: head's Palette menu, ``ui/palette_setting.py``), by ``ALLWELL_THEME=blue`` or
+#: by ``--theme blue``.
 #:
 #: Note what this does *not* change: the token classes above still hold blue's
 #: values, because that is what makes them the restore baseline
 #: :func:`apply_theme` resets to (``_THEME_DEFAULTS`` captures them at import).
 #: Nothing here applies a theme on its own — the app applies one at startup via
-#: :func:`select_theme_from_env`, and a caller that reads ``Colors.*`` without
+#: ``ui.palette_setting.apply_startup_palette``, and a caller that reads ``Colors.*`` without
 #: having applied one is reading blue.
 DEFAULT_THEME = "grey"
 

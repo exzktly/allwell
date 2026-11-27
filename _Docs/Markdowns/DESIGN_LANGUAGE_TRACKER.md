@@ -503,7 +503,11 @@ Step log (newest last):
    confirmed by the every-page run. Not converted, because they are inside Display / inspector panels rather than a
    band and no page tour opens them: Response's Model and Compare EC50 to (`response/tab_view.py:201,227`), Bar's
    significance Label (`barplot/tab_view.py:247`). D14's other half, each Plotting band on one row, is still open.
-   Ruff and 914 fast Plotting tests green.
+   Commit `f4b13a6`. Ruff and 914 fast Plotting tests green.
+6. Small rows exhausted. Next: one round of long checks on the head — `ALLWELL_FULL_LANE=1 scripts/test.sh`, then
+   `scripts/test.sh tests/test_every_page_renders.py -m ""` — and fix what they find: stale `DESIGN_PENDING`
+   entries, new `band rows` from captions moved beside boxes. Still open after that: D14 and D15–D16 band rows,
+   D16's two label sites, D18 Segmentation band rows, D28, D29, D31, D32, D33.
 
 ## 10. Rows
 

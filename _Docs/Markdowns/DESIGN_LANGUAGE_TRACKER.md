@@ -508,6 +508,12 @@ Step log (newest last):
    `scripts/test.sh tests/test_every_page_renders.py -m ""` — and fix what they find: stale `DESIGN_PENDING`
    entries, new `band rows` from captions moved beside boxes. Still open after that: D14 and D15–D16 band rows,
    D16's two label sites, D18 Segmentation band rows, D28, D29, D31, D32, D33.
+7. Fast lane on `830a3f9`: 14,542 passed, 15 skipped, 0 failed (5 min 07 s).
+8. D16 (part), the last two label sites: the Nanowells Timepoint (`nanowell/tab_view.py`, now a `LabelledField`
+   beside an `unlabelled` box inside the Where scope; `_show_where` shows and hides the field) and the Statistics
+   view's Donor (`statistics_view.py`, `StatisticsControls.donor_field` is what is shown and hidden). The five
+   Nanowells `label inside` entries removed from `DESIGN_PENDING` — to be confirmed by the every-page run. Ruff
+   and 17 Nanowells test files (261 tests) green. No `LabeledComboBox` in a band is left painting its label.
 
 ## 10. Rows
 

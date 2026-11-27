@@ -59,7 +59,8 @@ from review.features.nanowell.statistics_view import (
 )
 from widgets.control_band import ControlBand
 from widgets.delayed_tooltip import DelayedToolTip
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
+from widgets.labelled_field import LabelledField
 from widgets.spin_box import SpinBox
 from ui import buttons
 from ui.text_roles import NOT_SET
@@ -374,16 +375,17 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     well_cb.currentIndexChanged.connect(lambda _i: nwc.set_well(ctx, well_cb.currentData() or ""))
     reg.register("_nw_well_cb", well_cb)
     exclusion = build_exclude_controls(ctx, well_cb)
-    # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
-    # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
-    # draws one timepoint — the Array view's included, which had a slider of its own.
-    tp_cb = LabeledComboBox("Timepoint")
+    # The Plotting tabs' timepoint control (Distribution, Heat Map): the timepoints in time order and named by their
+    # hours, labelled beside the box rather than inside it. One control for every view that draws one timepoint —
+    # the Array view's included, which had a slider of its own.
+    tp_cb = unlabelled("Timepoint")
     tp_cb.setToolTip(_TP_TIP)
     tp_cb.currentIndexChanged.connect(lambda _i: nwc.set_timepoint(ctx, tp_cb.currentData() or ""))
     reg.register("_nw_tp_cb", tp_cb)
     # *Where*: the well and the timepoint, one flow item, so "A01 at 5 h" never wraps apart.
     well_part = _well_part(band, well_cb)
-    grp_where = band.add_scope("", well_part, tp_cb)
+    tp_part = LabelledField("Timepoint", tp_cb, band, above=False)
+    grp_where = band.add_scope("", well_part, tp_part)
     reg.register("_nw_where_group", grp_where)
     positions_seg, grp_positions = _build_positions_control(ctx, band)
     selection_row_end = band.add_break()
@@ -713,7 +715,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             shows_tp = ((at_one_timepoint and not per_nanowell) or view == "position"
                         or view in RANKED_WELL_VIEWS or view in ONE_WELL_VIEWS)
             shows_well = view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS
-            _show_where(grp_where, well_part, tp_cb, shows_well, shows_tp,
+            _show_where(grp_where, well_part, tp_part, shows_well, shows_tp,
                         walking=view == walk_view, exclude=grp_exclude)
             exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)

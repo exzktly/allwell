@@ -235,6 +235,22 @@ def test_a_card_too_small_for_the_checks_folds_them_into_one_line_and_keeps_the_
     assert all(drawn.axes[name].get_window_extent().width > 0 for name in ("looked", "found", "surface"))
 
 
+@pytest.mark.parametrize("well", ("A01", "A02"))
+def test_a_low_card_leaves_the_axis_labels_out_and_says_their_unit(dataset, well):  # noqa: F811
+    """A low window's card (5.03 x 2.81 in, the page test's window made narrower): with the checks folded the panels'
+    axis labels still broke over two or three rows under each picture, no picture edge fitted, and the pictures were
+    drawn a point wide under 25 texts outside the figure or on top of one another. The labels now give way too, the
+    folded line saying the unit; the pictures keep a usable edge."""
+    from review.features.nanowell._identity_diagnostics_layout import SUMMARY_KEY
+
+    fig, drawn = _styled(dataset, well, (5.03, 2.81))
+    assert _problems(fig) == []
+    assert " ".join(_texts(fig, f"nw-identity-check-{SUMMARY_KEY}")).endswith(
+        "make the card larger to read each one. Axes in µm.")
+    assert all(not ax.get_xlabel() for ax in drawn.axes.values())
+    assert min(drawn.axes[n].get_window_extent().width / fig.dpi * 72 for n in ("looked", "found", "surface")) > 40
+
+
 def test_the_default_card_keeps_every_check_and_the_footer(dataset):  # noqa: F811
     """The fold is the last resort: at the default card size every check has its own line and the footer is drawn."""
     from review.features.nanowell._identity_diagnostics_layout import SUMMARY_KEY

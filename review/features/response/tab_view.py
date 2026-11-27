@@ -43,6 +43,13 @@ from ui import buttons
 _FIG_W, _FIG_H, _DPI = 7.2, 4.6, 100
 
 
+def _curves_summary(ctx) -> str:
+    """What the Curves row reads: the X variable and the series split ("Dose · none")."""
+    x_combo = ctx.widgets.get_or_none("_response_x_cb")
+    x_text = (x_combo.currentText() if x_combo is not None else "") or "—"
+    return f"{x_text} · {series_button_text(ctx).split(': ', 1)[-1]}"
+
+
 def build_response_tab(ctx, parent: QWidget) -> None:
     from widgets.labeled_combo import unlabelled
     from widgets.plot_card import PlotCard
@@ -66,7 +73,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
 
     curves_btn, curves_panel, curves_lay = make_popover_button(
         "Curves", band, ctx=ctx, tab="data",
-        summary=lambda: f"{x_combo.currentText() or '—'} · {series_button_text(ctx).split(': ', 1)[-1]}")
+        summary=lambda: _curves_summary(ctx))
     curves_btn.setToolTip("What the curves run along (X) and what splits them into series")
     reg.register("_response_curves_btn", curves_btn)
     curves_form = FormGrid(curves_panel)

@@ -167,7 +167,7 @@ def test_a_picked_cell_is_the_inspector_s_detail_tab_and_picking_another_updates
     assert svc.is_open(ctx) and insp.currentTab() == "detail"
     assert insp.tabWidget("detail") is first and first.isVisibleTo(window)
     assert first._title_label.text() == "Cell · A01 · F001 · 0h · #2"
-    assert surf.depth(window) == 0
+    assert surf.depth(window) == 0, surf.describe(surf.open_transients(window))
 
     second = _open(qtbot, ctx, "A01", 1)
     assert second is first, "a second viewer was built instead of updating the first"

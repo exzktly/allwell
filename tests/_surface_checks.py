@@ -14,7 +14,11 @@ docked inspector is **not** one: it is a pane of the page's own splitter, laid
 out beside the page, and it is where a transient is replaced by a page.
 
 :func:`crawl` presses every enabled button under a root and reports the depth
-each press reached. It never blocks: :func:`stub_blocking` turns every modal
+each press reached, and presses every button inside whatever a press opened.
+It does not open a menu's submenus: under the offscreen platform a second
+popup is shown or not depending on timing, which made that probe pass and fail
+on the same tree, and a submenu is held from the syntax tree instead
+(``tests/test_a_menu_holds_commands_only.py``). It never blocks: :func:`stub_blocking` turns every modal
 call into its non-blocking form first (CLAUDE.md §7.10 #6), and a button that
 drops a menu has its menu popped up rather than executed.
 """
@@ -33,12 +37,27 @@ def _is_alert(w: QWidget) -> bool:
     return isinstance(w, (QMessageBox, QFileDialog))
 
 
+def _belongs(w: QWidget, main: QWidget) -> bool:
+    """Whether top-level *w* was opened from *main*: its parent chain (a
+    window keeps its parent) leads there."""
+    node = w.parentWidget()
+    while node is not None:
+        if node is main:
+            return True
+        node = node.parentWidget()
+    return False
+
+
 def open_transients(main: QWidget | None = None) -> list[QWidget]:
     """Every transient surface on screen now, alerts and file dialogs left out."""
     from widgets.drawer import Drawer
     found: list[QWidget] = []
     for w in QApplication.topLevelWidgets():
         if not shiboken6.isValid(w) or w is main or not w.isVisible() or _is_alert(w):
+            continue
+        if main is not None and not _belongs(w, main):
+            # Another test's window, still waiting on its deferred delete in
+            # this worker: not something this window opened.
             continue
         flags = w.windowFlags()
         is_popup = (flags & Qt.WindowType_Mask) == Qt.Popup
@@ -182,20 +201,5 @@ def crawl(root: QWidget, main: QWidget | None = None, *,
                         if extra not in now and shiboken6.isValid(extra):
                             extra.close()
                     QApplication.processEvents()
-                # A submenu is a menu opened from a menu: two surfaces.
-                if isinstance(t, QMenu):
-                    for act in t.actions():
-                        sub = act.menu()
-                        if sub is None or not shiboken6.isValid(sub):
-                            continue
-                        sub.aboutToShow.emit()
-                        sub.popup(t.mapToGlobal(t.rect().topRight()))
-                        QApplication.processEvents()
-                        deep.pressed.append(f"{label} ▸ {act.text()}")
-                        stacked = open_transients(main)
-                        if len(stacked) > 1:
-                            deep.append((f"{label} ▸ {act.text()}", len(stacked),
-                                         describe(stacked)))
-                        sub.close()
             close_transients(main)
     return deep

@@ -112,18 +112,6 @@ def test_the_crawl_reports_a_menu_opened_from_a_dialog_and_passes_a_plain_menu(m
     assert found[0][1] == 2
 
 
-def test_the_crawl_opens_a_menu_s_submenu_and_counts_it(main, monkeypatch):
-    surf.stub_blocking(monkeypatch)
-    layers = QToolButton(main)
-    layers.setText("Layers")
-    layers.setMenu(QMenu(layers))
-    layers.menu().addAction("Cells")
-    layers.menu().addMenu("Show as").addAction("Outline")
-    main.layout().addWidget(layers)
-    QApplication.processEvents()
-    found = surf.crawl(main, main)
-    assert [(f[0], f[1]) for f in found] == [("Layers ▸ Show as", 2)]
-
 
 # ── every page, through its real builder ──────────────────────────────────────
 

@@ -47,6 +47,7 @@ from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidg
 from ui import theme
 from widgets import form_registry
 from widgets.checkbox_fit import fit_checkbox_width
+from widgets.control_band_form import PANEL_PROPERTY, PANEL_ROW
 from widgets.flow_layout import FlowLayout, flow_break, flow_group, sync_flow_height
 
 
@@ -270,7 +271,16 @@ class ControlBand(QWidget):
             self._scope.move_to_end(item)
 
     def add_action(self, widget: QWidget) -> QWidget:
-        """Add an action to the right zone, in call order, flush to the edge."""
+        """Add an action to the right zone, in call order, flush to the edge.
+
+        A button that opens a page of options about *what is plotted* — its
+        ``bandPanel`` property is ``"row"``: Fold change, Fit, Colour & split —
+        is scope, whatever its builder calls it, and joins the scope zone's
+        flow instead: it reads its value there beside the other choices of
+        data, it wraps with them rather than taking the plot's row, and the
+        right zone is left to the three buttons every page ends in."""
+        if widget.property(PANEL_PROPERTY) == PANEL_ROW:
+            return self.add_scope("", widget)
         _fit_checkboxes((widget,))
         widget.setParent(self)
         self._actions.addWidget(widget)

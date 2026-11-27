@@ -108,8 +108,10 @@ def test_every_scope_control_is_a_row_with_its_label_in_one_column(qtbot):
     _settle()
     form = band.form()
     rows = form.rows("Data")
+    # The two panel rows are scope: they sit with the other choices of data,
+    # before the trailing threshold, not in the action zone.
     assert [_row_label(r) for r, _i in rows] == [
-        "Channel", "Property", "Timepoints", "ON threshold", "Fold change", "Fit"]
+        "Channel", "Property", "Timepoints", "Fold change", "Fit", "ON threshold"]
     for row, item in rows:
         assert row.minimumHeight() == ROW_H
         assert [lb.width() for lb in row.findChildren(QLabel) if lb.isVisible()
@@ -231,7 +233,7 @@ def test_leaving_the_form_puts_the_row_back_as_it_was(qtbot):
     band, parts, w = _band(qtbot)
     scope_before = [band._scope.itemAt(i).widget() for i in range(band.scope_count())]
     actions_before = [band._actions.itemAt(i).widget() for i in range(band.action_count())]
-    assert w["display"] in actions_before and w["fold"] in actions_before
+    assert w["display"] in actions_before and w["fold"] in scope_before
     margins = band.layout().contentsMargins()
     band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
     _settle()

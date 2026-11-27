@@ -226,7 +226,16 @@ def _choose(combo, data):
     combo.setCurrentIndex(index)
 
 
-def test_without_variables_the_page_offers_neither_control(qtbot, tmp_path):
+def test_without_variables_group_by_is_hidden_and_colour_and_split_says_where_to_define_them(qtbot, tmp_path):
+    """*Group by* with nothing to group by is a combo of one entry, and stays
+    hidden. *Colour & split* used to hide with it — which is how it could not
+    be found: it is listed all the same, reads no value, and its page shows a
+    note naming Home › Sample Map in place of combos that could only offer the
+    status quo."""
+    from PySide6.QtWidgets import QComboBox, QLabel
+
+    from review.core import inspector_panels
+    from review.core.group_by_controller import NO_VARIABLES_NOTE
     from review.features.nanowell import controller as nwc
     from tests.test_nanowell_page import _loaded, _page, _write_nanowell_dataset
 
@@ -235,7 +244,12 @@ def test_without_variables_the_page_offers_neither_control(qtbot, tmp_path):
     _loaded(qtbot, ctx)
     nwc.redraw(ctx)
     assert not ctx.widgets.get("_nw_groupby_grp").isVisibleTo(ctx.window)
-    assert not ctx.widgets.get("_nw_decorate_btn").isVisibleTo(ctx.window)
+    button = ctx.widgets.get("_nw_decorate_btn")
+    assert button.isVisibleTo(ctx.window) and button.text() == "Colour & split ›"
+    content = inspector_panels.panel_of(button).content
+    notes = [lab for lab in content.findChildren(QLabel) if lab.text() == NO_VARIABLES_NOTE]
+    assert len(notes) == 1 and not notes[0].isHidden()
+    assert all(combo.isHidden() for combo in content.findChildren(QComboBox))
 
 
 def test_group_by_on_the_page_regroups_the_page_by_the_variable_s_values(page, qtbot):

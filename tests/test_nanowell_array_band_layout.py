@@ -105,18 +105,17 @@ def test_every_view_keeps_the_same_three_rows(qc_page, themed, qtbot, view):
 
     ctx = qc_page
     nwc.set_view(ctx, view)
-    for width in (1900, 1500, 1200):
+    for width in (1700, 1500, 1200):
         _settle(qtbot, ctx, width)
         rows = [{_row_of(ctx, name) for name in names} for names in _ROWS_BY_VIEW[view]]
         # In order, and no two rows share a line: each row's last line is above the next row's first.
         assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), (view, width, rows)
-        # Wide enough for one line each from 1900 px. At 1500 the filter row ended 2 px short of the edge, and the
+        # Wide enough for one line each from 1700 px. At 1500 the filter row ended 2 px short of the edge, and the
         # moving average's Trailing / Centred choice (agreed beside the window it shapes) wraps Distribution's
         # *Responding above* onto a second line of that row there — within the row, which the check above holds.
-        # The action zone is wider than it was: *Colour & split* is listed whether or not the plate has variables
-        # (hidden until one was defined, it could not be found), and the row ends in the three fixed buttons —
-        # Display, Style, Share — in words. Distribution's filter row needs 1900 px for one line where 1600 did.
-        if width == 1900:
+        # The row's action zone ends in the three fixed buttons, in words — Display, Style, Share — where it held
+        # an icon and Save, so Distribution's filter row needs 1700 px for one line where 1600 did.
+        if width == 1700:
             assert rows == [{k} for k in range(len(rows))], (view, width, rows)
 
 

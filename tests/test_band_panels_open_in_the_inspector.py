@@ -48,8 +48,10 @@ def _buttons(ctx, window) -> list[QToolButton]:
 def test_each_panel_button_opens_its_panel_in_the_inspector(name, qtbot, mini_dataset):
     ctx, window, _frame, _bands = build_page(qtbot, name, mini_dataset)
     buttons = _buttons(ctx, window)
-    assert [(panels.panel_of(b).title, panels.panel_of(b).tab, panels.panel_of(b).root)
-            for b in buttons] == PANELS[name]
+    # Which panels, on which tab — not their order on screen, which depends on
+    # how the band wraps at the runner's font (DejaVu Sans on CI).
+    assert sorted((panels.panel_of(b).title, panels.panel_of(b).tab, panels.panel_of(b).root)
+                  for b in buttons) == sorted(PANELS[name])
     insp = svc.inspector(ctx)
     for b in buttons:
         panel = panels.panel_of(b)

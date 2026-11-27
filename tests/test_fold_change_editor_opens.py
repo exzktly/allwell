@@ -71,7 +71,23 @@ class _Registry:
 
 
 @pytest.fixture
-def installed(qapp):
+def shown(monkeypatch):
+    """What was shown as a page of the inspector. This fixture's context is a
+    stand-in with no window to host one, so the one call that shows a page is
+    captured; ``tests/test_band_panels_open_in_the_inspector.py`` presses the
+    same row on a real page and reads the real inspector."""
+    from review.core import inspector_service
+    seen: list[dict] = []
+
+    def _push(_ctx, key, title, widget, **kw):
+        seen.append({"key": key, "title": title, "widget": widget, **kw})
+        return True
+    monkeypatch.setattr(inspector_service, "push", _push)
+    return seen
+
+
+@pytest.fixture
+def installed(qapp, shown):
     """The Fold-change controls, built into a real parent widget."""
     app = MockApp(
         per_well_pts={"A01": [make_agg(0.0, 100.0)],
@@ -94,7 +110,7 @@ def _control_combo(ctx):
     return combo
 
 
-def test_choosing_per_sample_control_opens_the_editor(installed):
+def test_choosing_per_sample_control_opens_the_editor(installed, shown):
     ctx, _parent = installed
     combo = _control_combo(ctx)
 
@@ -111,10 +127,12 @@ def test_choosing_per_sample_control_opens_the_editor(installed):
         "per-sample mode turned on and no editor opened — the user is left in a "
         "mode with no way to configure it"
     )
-    assert win.isVisible()
+    ctx_, _p = installed
+    assert shown and shown[-1]["widget"] is win, "the editor was built and never shown"
+    assert shown[-1]["title"] == "Per-sample control" and shown[-1]["large"] is True
 
 
-def test_the_edit_link_opens_the_editor(installed):
+def test_the_edit_link_opens_the_editor(installed, shown):
     """The second way in, and the only one once the combo already reads
     per-sample: re-selecting the item already showing fires no signal."""
     ctx, _parent = installed
@@ -127,6 +145,24 @@ def test_the_edit_link_opens_the_editor(installed):
 
     win = ctx.widgets.get_or_none("_fc_pairing_window_bar")
     assert win is not None, "the Edit… link opened nothing"
+    assert shown and shown[-1]["widget"] is win
+
+
+def test_the_visible_row_turns_the_mode_on_and_opens_the_editor(installed, shown):
+    """Per-sample control was reachable only as the last entry of a combo. It
+    is a row of the Fold change page: pressing it turns the mode on and shows
+    the editor — and pressed again with the mode already on, shows it again,
+    which re-selecting the combo's entry cannot do (no signal fires)."""
+    from PySide6.QtWidgets import QPushButton
+    ctx, parent = installed
+    row = parent.findChild(QPushButton, "FoldChangePairsRow")
+    assert row is not None and row.text() == "Per-sample control ›"
+    assert ctx.state.plot.fc_control_mode != "per_member"
+    row.click()
+    assert ctx.state.plot.fc_control_mode == "per_member"
+    assert len(shown) == 1 and shown[0]["widget"] is ctx.widgets.get_or_none("_fc_pairing_window_bar")
+    row.click()
+    assert len(shown) == 2, "a second press, with the mode already on, opened nothing"
 
 
 def test_the_editor_lists_the_plotted_members(installed):

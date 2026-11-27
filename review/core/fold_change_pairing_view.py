@@ -26,10 +26,9 @@ Cancel that cannot un-draw the plot behind it is a lie.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -157,8 +156,15 @@ def _window_attr(scope: str) -> str:
     return f"_fc_pairing_window_{scope}"
 
 
-def open_pairing_editor(ctx, scope: str) -> QDialog | None:
-    """Show (building on first use) the editor for *scope*."""
+#: The page's title in the inspector.
+PAGE_TITLE = "Per-sample control"
+
+
+def open_pairing_editor(ctx, scope: str) -> QWidget | None:
+    """Show (building on first use) the editor for *scope* as a full-height
+    page of the inspector, on top of whatever page asked for it."""
+    from review.core import inspector_service
+
     win = ctx.widgets.get_or_none(_window_attr(scope))
     if win is None:
         win = build_pairing_window(ctx, scope)
@@ -166,8 +172,9 @@ def open_pairing_editor(ctx, scope: str) -> QDialog | None:
             return None
         ctx.widgets.register(_window_attr(scope), win)
     refresh_pairing_window(ctx, scope)
-    win.show()
-    win.raise_()
+    # On the Data tab, where Fold change is: over the Fold change page when
+    # that is what asked for it, so Back returns there.
+    inspector_service.push(ctx, f"fold_change/pairs/{scope}", PAGE_TITLE, win, tab="data", large=True)
     return win
 
 
@@ -181,13 +188,14 @@ def refresh_pairing_window(ctx, scope: str) -> None:
         populate()
 
 
-def build_pairing_window(ctx, scope: str) -> QDialog | None:
-    """Build the non-modal editor. Never shown modally — see the module docstring."""
+def build_pairing_window(ctx, scope: str) -> QWidget | None:
+    """Build the editor: a plain widget, kept hidden on the window until the
+    inspector shows it as a page. It was a window of its own, opened from a
+    combo entry inside a popover; nothing opens over the page now."""
     parent = getattr(ctx, "window", None)
-    win = QDialog(parent)
-    win.setWindowTitle("Per-sample control")
-    win.setModal(False)
-    win.setWindowFlag(Qt.Window, True)
+    win = QWidget(parent)
+    win.setObjectName("PairingEditor")
+    win.hide()
 
     root = QVBoxLayout(win)
     blurb = QLabel(
@@ -217,15 +225,14 @@ def build_pairing_window(ctx, scope: str) -> QDialog | None:
     footer = QWidget(win)
     frow = QHBoxLayout(footer)
     frow.setContentsMargins(0, 0, 0, 0)
+    # Two buttons, each dropping one menu of commands; the inspector's header
+    # holds the one Close.
     set_all_btn = QPushButton("Set all to ▾", footer)
     auto_btn = QPushButton("Auto-pair ▾", footer)
     frow.addWidget(set_all_btn)
     frow.addWidget(auto_btn)
     frow.addStretch(1)
-    close_btn = QPushButton("Close", footer)
-    frow.addWidget(close_btn)
     root.addWidget(footer)
-    close_btn.clicked.connect(win.hide)
 
     def _write(mapping: dict) -> None:
         # No ``_populate()`` after this. ``set_fold_change_state`` syncs every

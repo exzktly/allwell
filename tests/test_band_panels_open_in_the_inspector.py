@@ -216,3 +216,39 @@ def test_bar_timepoints_is_a_multi_select_page_and_a_tick_reaches_the_bar_state(
     button.click()                                     # the button is a toggle
     QApplication.processEvents()
     assert not insp.holds(picker), "a second press on the button did not leave the page"
+
+
+# ── Per-sample control: a row you can see, opening a full-height page ─────────
+
+def test_per_sample_control_is_a_row_of_fold_change_and_opens_a_page_over_it(qtbot, mini_dataset):
+    """The four-level chain — a popover, its Control combo, the dialog one
+    combo entry opened, a menu inside the dialog — is two pages of one
+    inspector. Pressed for real: the Fold change button, then the row."""
+    from PySide6.QtWidgets import QDialog, QPushButton
+    ctx, window, _frame, _bands = build_page(qtbot, "Bar Plots", mini_dataset)
+    # The shell wires the bar tab's drag order; the minimal one does not, and
+    # the editor lists the plotted members in that order.
+    ctx.state.selection.selected_wells = {"A01", "A02"}
+    ctx.runtime.barplot.current_keys = lambda: ["A01", "A02"]
+    fold = next(b for b in _buttons(ctx, window) if panels.panel_of(b).title == "Fold change")
+    fold.click()
+    QApplication.processEvents()
+    insp = svc.inspector(ctx)
+    row = panels.panel_of(fold).content.findChild(QPushButton, "FoldChangePairsRow")
+    assert row is not None and row.isVisibleTo(window), "the row is not on the Fold change page"
+    sizes: list[str] = []
+    insp.sizeWanted.connect(sizes.append)
+    row.click()
+    QApplication.processEvents()
+    editor = ctx.widgets.get("_fc_pairing_window_bar")
+    assert ctx.state.plot.fc_control_mode == "per_member"
+    assert insp.currentWidget() is editor and editor.isVisibleTo(window)
+    assert insp.title_label.text() == "Per-sample control"
+    assert insp.crumb_label.text() == "Data › Fold change"
+    assert sizes and sizes[-1] == "full", "the editor did not ask for the inspector's full height"
+    assert not isinstance(editor, QDialog) and not editor.isWindow()
+    assert surf.depth(window) == 0, surf.describe(surf.open_transients(window))
+    insp.back_button.click()
+    assert insp.currentWidget() is panels.panel_of(fold).content, "Back did not return to Fold change"
+    svc.close(ctx)
+    assert editor.isHidden() and editor.parentWidget() is window

@@ -154,6 +154,10 @@ _METHOD_TOOLTIPS = {
 }
 
 
+#: Milliseconds a resize must settle before the page checks its grid of wells.
+_REGRID_MS = 250
+
+
 def build_spatial_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
@@ -429,6 +433,18 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     wire_cell_picking(ctx, card.canvas, lambda: card.figure)
     from review.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Spatial")
+    # Rendered again once a resize has settled, when the grid of wells no longer suits the figure's new shape (a phone
+    # turned, its sheet opened): the grid is chosen as the page renders (``renderer.grid_is_stale``).
+    from PySide6.QtCore import QTimer
+
+    from review.features.spatial.renderer import grid_is_stale, render_spatial
+    regrid = QTimer(card)
+    regrid.setSingleShot(True)
+    regrid.setInterval(_REGRID_MS)
+    # ``render_spatial`` itself: the controller's re-render needs a computed result, which the per-well maps do not
+    # keep, so through it the grid was never laid out again.
+    regrid.timeout.connect(lambda: render_spatial(ctx) if grid_is_stale(card.figure) else None)
+    card.canvas.mpl_connect("resize_event", lambda _event: regrid.start())
     card.plotThemeChanged.connect(lambda _m: sp_ctrl.sp_recompute(ctx))
     from review.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(

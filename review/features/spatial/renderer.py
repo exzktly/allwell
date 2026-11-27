@@ -120,30 +120,16 @@ def _grid_shape(n: int, aspect: float = 1.0, width_in: float | None = None) -> t
     return rows, cols
 
 
-def _regrid_as_drawn(fig) -> None:
-    """Lay the wells out again for the figure's shape each time it is drawn. The grid is chosen when the page
-    renders, at the card's size then; a phone sizes the figure afterwards without rendering it again, and four wells
-    stayed two abreast on a figure taller than wide (every-page tour, tracker row S31)."""
-    canvas = getattr(fig, "canvas", None)
-    if canvas is None or getattr(fig, "_aw_regrid_cid", None) is not None:
-        return
-
-    def on_draw(event) -> None:
-        f = event.canvas.figure
-        axes = [ax for ax in getattr(f, "_aw_spatial_axes", ()) if ax in f.axes]
-        if not axes:
-            return
-        shape = _grid_shape(len(axes), f.bbox.width / max(f.bbox.height, 1.0),
-                            f.bbox.width / max(f.dpi, 1.0))
-        if shape == getattr(f, "_aw_spatial_shape", None):
-            return
-        grid = f.add_gridspec(*shape)
-        for i, ax in enumerate(axes):
-            ax.set_subplotspec(grid[i // shape[1], i % shape[1]])
-        f._aw_spatial_shape = shape
-        event.canvas.draw_idle()
-
-    fig._aw_regrid_cid = canvas.mpl_connect("draw_event", on_draw)
+def grid_is_stale(fig) -> bool:
+    """Whether *fig*'s grid of wells no longer suits its shape: it was chosen when the page rendered, at the card's
+    size then, and a phone sizes the figure afterwards without rendering it again, so four wells stayed two abreast on
+    a figure taller than wide. The page renders again when this says so (``tab_view``)."""
+    drawn = getattr(fig, "_aw_spatial_shape", None)
+    n = getattr(fig, "_aw_spatial_n", 0)
+    if drawn is None or n <= 1:
+        return False
+    width, height = fig.get_size_inches()
+    return _grid_shape(n, width / max(height, 0.01), width) != drawn
 
 
 def _render_frames_grid(fig, st) -> None:
@@ -151,13 +137,10 @@ def _render_frames_grid(fig, st) -> None:
     n = len(frames)
     width, height = fig.get_size_inches()
     rows, cols = _grid_shape(n, width / max(height, 0.01), width)
-    axes = []
     for i, payload in enumerate(frames):
         ax = fig.add_subplot(rows, cols, i + 1)
         _render_one_panel(ax, st, payload)
-        axes.append(ax)
-    fig._aw_spatial_axes, fig._aw_spatial_shape = axes, (rows, cols)
-    _regrid_as_drawn(fig)
+    fig._aw_spatial_n, fig._aw_spatial_shape = n, (rows, cols)
     if getattr(st, "frames_truncated", 0):
         _bg, title_fg, _muted, _grid, _spine = _tokens(fig.axes[0])
         fig.suptitle(

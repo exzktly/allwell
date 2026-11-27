@@ -1115,6 +1115,16 @@ SHARE_TEXT = "Share ▾"
 SHARE_GLYPH = "⇪"
 
 
+def _rows_of(fig) -> int:
+    """The most rows of axes *fig*'s grids lay out: what a phone's plot is made tall enough for."""
+    rows = 1
+    for ax in fig.axes:
+        spec = ax.get_subplotspec()
+        if spec is not None:
+            rows = max(rows, spec.get_gridspec().nrows)
+    return rows
+
+
 class PhoneShell(QObject):
     """Owns phone layout's controls and drives the switch both ways."""
 
@@ -1671,6 +1681,7 @@ class PhoneShell(QObject):
         if on:
             scale_canvas(w, self.plot_factor())
             self.size_canvas(w, True)
+            self._follow_rows(w)
 
     @staticmethod
     def _adapt_custom(w: QWidget, on: bool) -> None:
@@ -1943,17 +1954,31 @@ class PhoneShell(QObject):
             except RuntimeError:
                 swallowed()  # canvas deleted while the list was walked
 
+    def _follow_rows(self, c) -> None:
+        """Size *c* again whenever a draw finds its figure's rows of axes changed: a page that lays its panels out
+        again after showing (Spatial stacking four wells on a phone held upright) kept the height of the old grid,
+        and each map was drawn a few pixels tall. Connected once per canvas; only phone layout acts on it."""
+        if c.property("_awFollowsRows"):
+            return
+        c.setProperty("_awFollowsRows", True)
+
+        def on_draw(_event, canvas=c) -> None:
+            if not phone_layout.is_on():
+                return
+            rows = _rows_of(canvas.figure)
+            if rows != canvas.property("_awRows"):
+                self.size_canvas(canvas, True)
+
+        c.mpl_connect("draw_event", on_draw)
+
     def size_canvas(self, c, on: bool) -> None:
         base = c.property("_awMinH")
         if on:
             if base is None:
                 base = c.minimumHeight()
                 c.setProperty("_awMinH", base)
-            rows = 1
-            for ax in c.figure.axes:
-                spec = ax.get_subplotspec()
-                if spec is not None:
-                    rows = max(rows, spec.get_gridspec().nrows)
+            rows = _rows_of(c.figure)
+            c.setProperty("_awRows", rows)
             c.setMinimumHeight(max(int(base), rows * self.pt(PLOT_ROW_PT)))
         elif base is not None:
             c.setMinimumHeight(int(base))

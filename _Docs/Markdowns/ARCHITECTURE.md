@@ -15144,7 +15144,9 @@ neither holds it — the detail is re-placed on every redraw, and when each wrot
 first redraw after an Apply brought the figure back under an open editor
 (`tests/test_nanowell_subset_fits_a_phone.py::test_a_redraw_with_the_editor_open_on_a_sideways_phone_keeps_the_figure_aside`); opening it closes the ⚙ Controls sheet,
 `phone_panel_sheet.close_controls_sheets`, since on a phone Edit… is in that sheet, which is drawn over the page the
-editor opens in, and at a desk there is no such sheet); an edit changes only the draft the rows
+editor opens in, and at a desk there is no such sheet. The helper searches the *top-level* window of the widget it is
+handed: the sheet is a child of the app's window, and a feature's `ctx.window` is Review's widget inside it, among whose
+children the sheet is not); an edit changes only the draft the rows
 hold — `SubsetEditor.changed` says in the panel's `Warn` line that it is not applied yet (or why it is not a subset
 yet) — and *Apply* passes the draft through `controller.set_subset` once, so the page redraws once per Apply rather
 than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the rows have

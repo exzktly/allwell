@@ -122,16 +122,33 @@ def test_at_a_desk_the_figure_stays_beside_the_editor(qtbot, page):
 def test_edit_closes_the_controls_sheet_it_was_pressed_in(qtbot, page):
     """On a phone, Edit… is one of the controls the ⚙ Controls sheet holds, and the sheet is drawn over the page: the
     editor opened under it, only its heading showing above the sheet (found by pressing every control of every page's
-    sheet at phone size). Pressing Edit… closes the sheet, as opening Properties from it does."""
+    sheet at phone size). Pressing Edit… closes the sheet, as opening Properties from it does.
+
+    The sheet is a child of the app's top-level window, and ``ctx.window`` is Review's widget *inside* that window, as
+    in the real app (``allwell.AllWellApp`` hosts the Review pane; ``ui/phone_shell.py`` parents the sheet to the
+    top-level). This test once parented the sheet to ``ctx.window`` itself, the one place the helper searched, and
+    passed while the real sheet — a sibling of Review, not its child — stayed up over the editor."""
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
     from widgets.drawer import Drawer
 
-    sheet = Drawer(page.window, edge="bottom", scrim=0.0)       # the shell's Controls sheet, as phone_shell builds it
-    sheet.setProperty("phoneSheet", True)
-    sheet.open()
-    qtbot.waitUntil(sheet.isOpen, timeout=2000)
-    page.widgets.get("_nw_subset_edit_btn").click()
-    assert not sheet.isOpen(), "the editor opened under the Controls sheet"
-    assert page.widgets.get("_nw_subset_editor").isVisibleTo(page.window)
+    top = QWidget()                                             # the app's window, holding the Review pane
+    QVBoxLayout(top).addWidget(page.window)
+    top.resize(*UPRIGHT)
+    top.show()
+    try:
+        assert page.window.window() is top and page.window is not top
+        sheet = Drawer(top, edge="bottom", scrim=0.0)               # the shell's Controls sheet, as phone_shell builds it
+        sheet.setProperty("phoneSheet", True)
+        sheet.open()
+        qtbot.waitUntil(sheet.isOpen, timeout=2000)
+        page.widgets.get("_nw_subset_edit_btn").click()
+        assert not sheet.isOpen(), "the editor opened under the Controls sheet"
+        assert page.widgets.get("_nw_subset_editor").isVisibleTo(page.window)
+    finally:
+        # Back out of the stand-in window before it goes: qtbot closes the page's own window at teardown.
+        page.window.setParent(None)
+        top.deleteLater()
 
 
 def test_the_editor_s_scroll_area_hooks_nothing_python_onto_its_own_tree(qtbot):

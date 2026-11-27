@@ -58,9 +58,16 @@ def close_controls_sheets(win: QWidget) -> None:
     """Close the ⚙ Controls sheet (any Drawer marked ``phoneSheet``). Nothing happens at the desk, where no such
     sheet exists — so a page that opens a panel of its own from a control the phone lends to that sheet (the
     Nanowells Subset editor) calls it without asking which layout is on, and the panel is not opened underneath
-    the sheet the user has just tapped in."""
+    the sheet the user has just tapped in.
+
+    *win* may be any widget of the window: the sheet is a child of the top-level window, and a feature's
+    ``ctx.window`` is Review's own widget inside it, whose children the sheet is not among — handed that, this
+    found nothing and the Subset editor opened under a sheet that stayed up."""
     from widgets.drawer import Drawer
-    for d in win.findChildren(Drawer):
+    top = win.window() if win is not None else None
+    if top is None:
+        return
+    for d in top.findChildren(Drawer):
         if d.property("phoneSheet") and d.isOpen():
             d.close()
 

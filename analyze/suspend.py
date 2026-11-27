@@ -992,6 +992,9 @@ class AnalyzeSuspendMixin:
         reports complete. The offer is left up and its record untouched — Load
         is not a decision about the run, and Resume or Discard remain available.
         """
+        # The settings it could not apply are reported in the raw log and nowhere else, and the log starts behind
+        # Show log: open it, as a failed run does.
+        self.force_raw_log_open()
         try:
             offer = self._resumable(self._card_scope())
             if offer is None:

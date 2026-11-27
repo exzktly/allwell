@@ -220,7 +220,7 @@ class BarBatchExportPanel(BatchExportPanel):
         return [
             ("Groups come from Home \u2192 Sample Map \u2192 Replicates."
              if self._use_sidebar_groups
-             else "Groups are defined in the left panel."),
+             else "Groups are defined in the Groups card."),
             "SD/SEM is computed within each ReplicateSet only.",
         ]
 

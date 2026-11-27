@@ -8,14 +8,13 @@ mixins start it and drain its queue; this shows what the run then said.
 
 * ``_build_log`` — the "Pipeline output" band (the raw-log toggle and Clear)
   over the log view itself.
-* ``_on_toggle_raw_log`` — reveal or hide that view. It is open at build; the
-  toggle is there to put it away.
+* ``_on_toggle_raw_log`` — reveal or hide that view. It starts hidden, behind
+  Show log, until a run starts.
 * ``force_raw_log_open`` / ``restore_raw_log`` — open that view on the user's
-  behalf when a run fails, since the sentence explaining why is written here
-  and nowhere else they can see, then hand the toggle back at the next run
-  unless they have since made the choice their own. Only reachable once the
-  user has closed the view themselves, which is the whole of what they are for
-  now that it starts open.
+  behalf when a run starts or fails, or when loading a run's settings reports
+  what it could not restore, since those sentences are written here and nowhere
+  else they can see; then hand the toggle back after a clean run unless the
+  user has since made the choice their own.
 * ``_surface_run_failure`` — the whole outcome path: the dashboard's failed or
   cancelled state, the raw log, and unfolding whichever form section the
   message names.
@@ -245,12 +244,12 @@ class AnalyzeLogPaneMixin:
     def force_raw_log_open(self) -> bool:
         """Reveal the raw log on the user's behalf, remembering that we did.
 
-        Returns True when the toggle actually moved, which happens only when
-        the user had closed the view — it starts open. A failure writes its
-        reason into the log view and nowhere else, so re-opening it is the only
-        way that reason reaches the screen for someone who had put it away; but
-        closing it was their choice, so the change is recorded rather than
-        kept, and the next run calls ``restore_raw_log`` to hand it back.
+        Returns True when the toggle actually moved, which happens whenever the
+        view is hidden — it starts hidden. A failure, a run's progress and a
+        settings load write into the log view and nowhere else, so opening it
+        is the only way those reach the screen; the change is recorded rather
+        than kept, and a clean run's end calls ``restore_raw_log`` to hand it
+        back.
         """
         cb = getattr(self, "_raw_log_cb", None)
         if cb is None or cb.isChecked():

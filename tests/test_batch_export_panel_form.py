@@ -286,7 +286,7 @@ def test_the_deck_and_the_gallery_are_told_apart_by_their_verbs():
 def test_the_summary_says_where_groups_come_from():
     inline = _FormStub(_spec())
     inline._refresh_run_summary()
-    assert "Groups are defined in the left panel." in inline._summary_lbl.text
+    assert "Groups are defined in the Groups card." in inline._summary_lbl.text
     sidebar = _FormStub(_spec(), sidebar=True)
     sidebar._refresh_run_summary()
     assert ("Groups come from Home → Sample Map → Replicates."

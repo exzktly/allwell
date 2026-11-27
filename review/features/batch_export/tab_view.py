@@ -249,7 +249,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     # groups", but the widget wrapped here is the *whole* panel — plate map,
     # group list, the Output and Plot forms and the Export button. Swapping all
     # of that for a placeholder would hide the output configuration precisely
-    # while the user is setting it up. Its "No export groups." line already sits
+    # while the user is setting it up. Its "No export groups yet." notice already sits
     # inside the group list, which is where the groups themselves would appear.
     from review.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(

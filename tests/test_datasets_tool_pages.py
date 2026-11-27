@@ -91,3 +91,18 @@ def test_the_foot_row_says_which_folder_is_missing(tab, tmp_path):
     tab.show_tool("Validate & Repair")
     page = tab._pages.currentWidget()
     assert page._action_row.reason() == "Choose a folder for “Dataset folder”."
+
+
+def test_the_foot_row_follows_a_path_set_from_code(tab, tmp_path):
+    """A swap, a restored job or a queued job's output fills a field from code, with no Browse — and with the
+    action still disabled, nothing else re-reads the reason. Here Concatenate's two datasets are filled by the
+    page's own setters (what a restored job does); the reason must move on to the destination."""
+    tab.show_tool("Concatenate Datasets")
+    page = tab._pages.currentWidget()
+    row = page._action_row
+    assert row.reason() == "Choose a folder for “Dataset 1 (base)”."
+    page.set_dataset1_path(str(tmp_path / "a"))
+    page.set_dataset2_path(str(tmp_path / "b"))
+    assert not page._run_btn.isEnabled()
+    assert row.reason() != "Choose a folder for “Dataset 1 (base)”."
+    assert row.reason() == "Choose a folder for “Destination”.", row.reason()

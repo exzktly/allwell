@@ -65,7 +65,12 @@ def folder_picker(prompt: str) -> Picker:
 class PathField(QWidget):
     """Caption + path box + Browse button, with an optional inline hint."""
 
+    #: The user chose a path (Browse). Not emitted when the host sets one.
     changed = Signal()
+    #: The path, or what the field says about it, changed — by the user or the host (``set_path``,
+    #: ``set_pending``, ``revalidate``). For a reader of the field's state, such as a page's "why it cannot run yet"
+    #: line, which must not go stale when a swap or a restored job fills the field from code.
+    stateChanged = Signal()
 
     def __init__(
         self,
@@ -214,11 +219,12 @@ class PathField(QWidget):
             self._set_hint_tone("")
             self._hint.setText(self._pending_note)
             self._hint.setVisible(True)
-            return
-        self._set_hint_tone("failure")
-        message = self._validity_message()
-        self._hint.setText(message)
-        self._hint.setVisible(bool(message))
+        else:
+            self._set_hint_tone("failure")
+            message = self._validity_message()
+            self._hint.setText(message)
+            self._hint.setVisible(bool(message))
+        self.stateChanged.emit()
 
     def show_note(self, text: str) -> None:
         """Show *text* as a neutral, non-error inline note in place of the

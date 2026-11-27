@@ -59,3 +59,15 @@ def test_a_run_parameter_the_record_does_not_hold_reads_not_recorded(shell_ctx, 
         assert pairs[name].text() == "not recorded", name
         assert pairs[name].property("unset") is True, name
     assert pairs["Flat-field"].text() == "basic"
+
+
+def test_a_flat_field_the_record_does_not_hold_is_not_none(shell_ctx, qtbot, monkeypatch):
+    """The pipeline always writes a flat-field mode, "none" included; a record without the key says nothing, and
+    reading it as "none" states a setting nobody recorded."""
+    from review.features.home import collect as hc
+
+    ctx, _scroll = _overview(shell_ctx, qtbot, width=1200)
+    monkeypatch.setattr(hc, "_sidecar", lambda _ctx: {"qc_options": {}})
+    assert {r["label"]: r["value"] for r in hc.run_parameters(ctx)}["Flat-field"] is None
+    monkeypatch.setattr(hc, "_sidecar", lambda _ctx: {"qc_options": {"flatfield": "none"}})
+    assert {r["label"]: r["value"] for r in hc.run_parameters(ctx)}["Flat-field"] == "none"

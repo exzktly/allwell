@@ -120,7 +120,6 @@ class JobQueuePage(QWidget):
 
         from widgets.card import Card
         self._empty_hint = Card(parent=self)
-        self._empty_hint.setProperty("emptyState", True)   # keeps its "Card" name, which the card rule reads
         heading = QLabel("No jobs queued", self._empty_hint)
         heading.setProperty("textRole", "sectionHeading")
         lines = QLabel(

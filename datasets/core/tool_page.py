@@ -110,9 +110,10 @@ class _ReasonFromFields(QObject):
         self._page, self._row = page, row
         from widgets.path_field import PathField
         # A field can change without the action's state changing (the source filled, the destination still
-        # empty), so each field's own change re-reads the reason too.
+        # empty), so each field's own change re-reads the reason too — a Browse or a path set from code (a swap,
+        # a restored job, a queued job's pending output), which ``stateChanged`` carries and ``changed`` does not.
         for field in page.findChildren(PathField):
-            field.changed.connect(self._refresh)
+            field.stateChanged.connect(self._refresh)
         self._refresh()
 
     def _refresh(self) -> None:

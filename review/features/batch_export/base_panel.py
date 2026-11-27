@@ -238,6 +238,17 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
     row["fold_change_outcome"] = str(outcome or "") if vs_control else ""
 
 
+def _scroll_into_view(widget) -> None:
+    """Bring *widget* into view in the scroll area it sits in. Export is in the page title and the progress line at
+    the foot of the Output card, which on a short or stacked page is below the fold when a run starts."""
+    parent_of = getattr(widget, "parentWidget", None)
+    g = parent_of() if callable(parent_of) else None
+    while g is not None and not isinstance(g, QScrollArea):
+        g = g.parentWidget()
+    if g is not None:
+        g.ensureWidgetVisible(widget)
+
+
 class _Destination(NamedTuple):
     """The "→ …" clause in two lengths: the progress label, and the status bar."""
 
@@ -1731,7 +1742,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         return [
             ("Groups come from Home \u2192 Sample Map \u2192 Replicates."
              if self._use_sidebar_groups
-             else "Groups are defined in the left panel."),
+             else "Groups are defined in the Groups card."),
             "No statistics are computed across group members.",
             "SD/SEM is only computed within a ReplicateSet.",
         ]
@@ -2691,6 +2702,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self._prog_bar.setMaximum(max(len(jobs), 1))
         self._prog_bar.setValue(0)
         self._run_btn.setEnabled(False)
+        _scroll_into_view(self._prog_bar)
         # Fixed before the first job, and before the staging directory is
         # chosen from it. Everything downstream — ``_out_path``, the spool, the
         # commit, the headline — reads this one answer. See ``_destinations``.

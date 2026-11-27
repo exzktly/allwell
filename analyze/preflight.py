@@ -616,10 +616,14 @@ class AnalyzePreflightMixin:
         ``RunSpec`` — every form field, exactly as the user set it — while the
         sidecar carries what the pipeline was passed, which is most of it and
         is all a dataset produced before the journal existed can offer.
+
+        What it loaded, and any field it could not, is written to the raw log and nowhere else, so the log is
+        opened for it (``force_raw_log_open``) — it starts behind Show log.
         """
         out_dir = Path(self._preflight_dir) if self._preflight_dir else None
         if out_dir is None:
             return
+        self.force_raw_log_open()
         info, source = _previous_settings(out_dir)
         if not info:
             self._log_line(

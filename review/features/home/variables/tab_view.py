@@ -187,7 +187,8 @@ def _caption(parent: QWidget, text: str) -> QLabel:
 
 
 def section_label(parent: QWidget, text: str) -> QLabel:
+    """A section heading (``ui/text_roles``) on the Variables layer."""
     label = QLabel(text, parent)
-    label.setObjectName("HomeCardTitle")
+    label.setProperty("textRole", "sectionHeading")
     label.setAlignment(Qt.AlignLeft)
     return label

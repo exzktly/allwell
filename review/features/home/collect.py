@@ -658,8 +658,11 @@ def run_parameters(ctx) -> list:
     rows.extend(_correction_parameter_rows(background, qc, execution,
                                            which="background"))
 
+    # The pipeline always records a mode, "none" included (``--flatfield`` defaults to it), so a missing key is
+    # a record that does not say — not "none".
     flatfield = str(qc.get("flatfield") or "none")
-    rows.append({"label": "Flat-field", "value": flatfield.replace("_", " ")})
+    rows.append({"label": "Flat-field",
+                 "value": flatfield.replace("_", " ") if qc.get("flatfield") else None})
     rows.extend(_correction_parameter_rows(flatfield, qc, execution,
                                            which="flatfield"))
 

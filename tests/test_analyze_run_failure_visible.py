@@ -96,6 +96,16 @@ def test_the_raw_log_is_behind_show_log_until_a_run_starts(tab):
     assert tab._log.isVisibleTo(tab) is True
 
 
+def test_loading_a_folder_s_settings_shows_what_it_said(tab, tmp_path):
+    """Loading a previous run's settings reports what it could not restore in the raw log and nowhere else, and the
+    log starts hidden: the load opens it, or "Nothing to load" and "check the form before running" are never seen."""
+    assert tab._log.isVisibleTo(tab) is False
+    tab._preflight_dir = str(tmp_path)          # a folder that records no run
+    tab._load_previous_settings()
+    assert "Nothing to load" in tab._log.toPlainText()
+    assert tab._log.isVisibleTo(tab) is True
+
+
 def test_a_failed_run_reveals_the_raw_log(tab):
     """The reason is written into a pane the user can close. Re-opening it on
     failure is what turns "nothing happened" into an explanation.

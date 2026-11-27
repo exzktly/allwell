@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QRadioButton,
     QSlider,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -39,7 +38,8 @@ from review.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from core.safe import swallow
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from review.core.lazy import lazy as _lazy
-from widgets.separator import build_hline_separator
+from widgets.form_grid import FormGrid
+from review.features.batch_export._page import form_row, form_wide, hug
 from widgets.spin_box import SpinBox
 from review.domain.column_histogram import BINS_DEFAULT, BINS_MAX, BINS_MIN, clamp_bins
 from review.core.plot_annotations import (
@@ -114,13 +114,15 @@ class BarBatchExportPanel(BatchExportPanel):
     ) -> None:
         super().__init__(ctx, parent, use_sidebar_groups=use_sidebar_groups)
 
-    def _build_output_panel(self, layout: QVBoxLayout) -> None:
-        self._build_output_header_and_io(layout)
-        self._build_channel_row(layout, attr="_bar_channel_cb")
+    def _mode_title(self) -> str:
+        return "Bar"
 
-        layout.addWidget(build_hline_separator(None))
+    def _build_output_panel(self, output: FormGrid, plot: FormGrid) -> None:
+        self._build_output_header_and_io(output)
+        self._build_channel_row(plot, attr="_bar_channel_cb")
+        self._build_output_tail(plot)
 
-        self._build_timepoints_section(layout)
+        self._build_timepoints_section(plot)
 
         _update_bar_tp_menu(self._ctx)
         _tp_cb = self._ctx.runtime.barplot.tp_cb
@@ -130,41 +132,24 @@ class BarBatchExportPanel(BatchExportPanel):
                 self._tp_lb.addItem(QListWidgetItem(tp))
         self._tp_select_all()
 
-        layout.addWidget(build_hline_separator(None))
-
         # \u2500\u2500 Layout options (multi-tp figure + group-by + pool-replicates) \u2500\u2500
         # These mirror the on-tab toggles; defaults preserve the legacy
         # batch behaviour (one figure per (group, tp), rsets pooled).
-        opts_row = QHBoxLayout()
-        opts_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
         self._multi_tp_cb = QCheckBox("Single figure spans selected timepoints")
         self._multi_tp_cb.setChecked(False)
-        opts_row.addWidget(self._multi_tp_cb)
-        opts_row.addStretch(1)
-        layout.addLayout(opts_row)
+        form_wide(plot, hug(self._multi_tp_cb))
 
-        layout_row = QHBoxLayout()
-        layout_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
-        layout_row.addWidget(QLabel("When spanning timepoints, cluster by"))
         self._group_mode_cb = QComboBox()
         self._group_mode_cb.addItem("Well")
         self._group_mode_cb.addItem("Timepoint")
-        layout_row.addWidget(self._group_mode_cb)
-        layout_row.addStretch(1)
-        layout.addLayout(layout_row)
+        form_row(plot, "Cluster by", hug(self._group_mode_cb), help="When one figure spans the timepoints.")
 
-        pool_row = QHBoxLayout()
-        pool_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         self._pool_reps_cb = QCheckBox("Pool replicate-set wells into one bar")
         self._pool_reps_cb.setChecked(True)
-        pool_row.addWidget(self._pool_reps_cb)
-        pool_row.addStretch(1)
-        layout.addLayout(pool_row)
+        form_wide(plot, hug(self._pool_reps_cb))
 
         # ── Display mode (bars / beeswarm / violin / histogram) ────────
         mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, 0)
-        mode_row.addWidget(QLabel("Mean panel display"))
         self._display_mode_grp = QButtonGroup(self)
         self._mode_bar_rb = QRadioButton("Bars")
         self._mode_bar_rb.setChecked(True)
@@ -178,38 +163,27 @@ class BarBatchExportPanel(BatchExportPanel):
             self._display_mode_grp.addButton(rb)
             mode_row.addWidget(rb)
         mode_row.addStretch(1)
-        layout.addLayout(mode_row)
+        form_row(plot, "Mean panel display", mode_row)
 
         # ── Violin smoothing slider (5–200, default 100; matches on-tab) ─
-        smooth_row = QHBoxLayout()
-        smooth_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
-        smooth_row.addWidget(QLabel("Violin smoothing"))
         self._violin_smooth_slider = QSlider(Qt.Horizontal)
         self._violin_smooth_slider.setRange(5, 200)
         self._violin_smooth_slider.setValue(100)
         self._violin_smooth_slider.setFixedWidth(_VIOLIN_SMOOTH_SLIDER_W)
-        smooth_row.addWidget(self._violin_smooth_slider)
         self._violin_smooth_label = QLabel("1.00")
-        smooth_row.addWidget(self._violin_smooth_label)
-        smooth_row.addStretch(1)
-        layout.addLayout(smooth_row)
+        form_row(plot, "Violin smoothing", hug(self._violin_smooth_slider, self._violin_smooth_label))
         self._violin_smooth_slider.valueChanged.connect(
             lambda v: self._violin_smooth_label.setText(f"{v/100.0:.2f}")
         )
 
         # ── Histogram bins (the tab's range and default) ───────────────
-        bins_row = QHBoxLayout()
-        bins_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
-        bins_row.addWidget(QLabel("Histogram bins"))
         self._hist_bins_spin = SpinBox()
         self._hist_bins_spin.setRange(BINS_MIN, BINS_MAX)
         self._hist_bins_spin.setValue(BINS_DEFAULT)
         self._hist_bins_spin.setToolTip(
             "How many bins each figure's range is split into. A count metric bins on whole numbers, one bin per value "
             "when the range fits.")
-        bins_row.addWidget(self._hist_bins_spin)
-        bins_row.addStretch(1)
-        layout.addLayout(bins_row)
+        form_row(plot, "Histogram bins", hug(self._hist_bins_spin))
 
         # Gate the cluster-by combo on multi-tp mode; gate the smoothing
         # slider on whether the violin mode is selected.
@@ -223,11 +197,6 @@ class BarBatchExportPanel(BatchExportPanel):
         self._multi_tp_cb.toggled.connect(lambda _=False: _refresh_layout_widgets())
         self._display_mode_grp.buttonToggled.connect(lambda *_: _refresh_layout_widgets())
         _refresh_layout_widgets()
-
-        layout.addWidget(build_hline_separator(None))
-
-        self._build_summary_label(layout)
-        self._build_run_row(layout)
 
     # \u2500\u2500 the run summary \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     _SUMMARY_CSV_LINE = "One CSV row per member at each timepoint"

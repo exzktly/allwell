@@ -5,7 +5,6 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from widgets.page_body import build_page_body
 from review.features.batch_export import (
     BatchExportPanel,
     BarBatchExportPanel,
@@ -173,16 +172,23 @@ def _show_batch_mode(ctx, mode: str) -> None:
 
 
 def build_batch_export_tab(ctx, parent: QWidget) -> None:
-    band, body = build_page_body(parent, content_margins=(12, 12, 12))
-    layout = body.layout()
+    # No band: each mode is a form page — its title carries Sync from app and Export, its controls are in cards
+    # (design language §6, ``_page.py``) — so a band here held nothing, an empty strip across the top of every mode
+    # (``tests/_layout_checks.no_empty_band``).
+    from ui import theme
+    layout = parent.layout()
+    if layout is None:
+        layout = QVBoxLayout(parent)
+    pad = theme.Spacing.lg
+    layout.setContentsMargins(pad, pad, pad, pad)
+    layout.setSpacing(0)
 
     # The four modes are a page selector, so the bar carrying them lives in the
     # shell's mode band beside the Review / Analyze / Datasets segments, exactly
     # like Plotting's and Image Browser's sub-tab bars — not as a fifth strip of
     # chrome inside the page. ``PlottingSubTabs`` is the object name theme.qss
     # styles every nested page bar with, so the three cannot drift apart. The
-    # Error-band / per-FOV spread controls live in each line/bar panel's OUTPUT
-    # SETTINGS.
+    # Error-band / per-FOV spread controls live in each line/bar panel's Plot form.
     from PySide6.QtWidgets import QTabBar
     modes = _offered_modes(ctx)
     mode_bar = QTabBar()
@@ -221,12 +227,8 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
             fn(ctx)
     mode_bar.currentChanged.connect(_on_mode_changed)
 
-    # The Error-band (SEM/SD) + per-FOV-points toggles used to sit in a separate
-    # row here; they now live inside each line/bar panel's OUTPUT SETTINGS (see
-    # BatchExportPanel._build_spread_settings_rows), with the rest of the config.
-
     # Host the mode panels inside a vertical-scroll area: when the window is
-    # narrow the panel stacks its plate-map / OUTPUT-SETTINGS vertically (see
+    # narrow the panel stacks its Groups and Output cards vertically (see
     # BatchExportPanel.apply_split_orientation), which grows taller — vertical
     # scroll keeps it usable on short windows, and horizontal scroll stays off so
     # nothing ever scrolls sideways (the stack removes horizontal overflow). The
@@ -245,7 +247,7 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     # Dataset-gated only, deliberately. The obvious next step would be to gate
     # this on "no export groups" the way Statistics is gated on "no comparison
     # groups", but the widget wrapped here is the *whole* panel — plate map,
-    # group list, OUTPUT SETTINGS and the Run Batch Export button. Swapping all
+    # group list, the Output and Plot forms and the Export button. Swapping all
     # of that for a placeholder would hide the output configuration precisely
     # while the user is setting it up. Its "No export groups." line already sits
     # inside the group list, which is where the groups themselves would appear.
@@ -260,7 +262,6 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "mode": _DEFAULT_MODE,
         "mode_bar": mode_bar,
         "modes": modes,
-        "band": band,
     }
     ctx.runtime.batch_export.set_mode = (
         lambda mode=_DEFAULT_MODE: _show_batch_mode(ctx, mode))

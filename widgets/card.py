@@ -11,8 +11,8 @@ API
 * ``body()`` — the card's content layout (a ``QVBoxLayout`` on its own body widget), for the caller to fill.
 * ``heading()`` — the heading row's ``QHBoxLayout``, or ``None`` for a card with no heading.
 
-Its plain containers are transparent, so a row built from a bare ``QWidget`` does not paint the canvas across
-the card (the rule is in :func:`qss`).
+Its plain containers and scroll areas are transparent, so a row built from a bare ``QWidget``, or a list in a
+scroll area (Batch Export's groups), does not paint the canvas across the card (the rules are in :func:`qss`).
 """
 
 from __future__ import annotations
@@ -76,4 +76,5 @@ def qss() -> str:
         border-radius: {r.lg}px;
     }}
     QFrame#Card .QWidget {{ background: transparent; }}
+    QFrame#Card QScrollArea {{ background: transparent; border: none; }}
     """

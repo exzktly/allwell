@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidgetItem,
     QMessageBox,
-    QVBoxLayout,
     QWidget,
 )
 
@@ -35,7 +34,8 @@ from review.core.plot_annotations import (
 from core.safe import swallowed
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from review.core.lazy import lazy as _lazy
-from widgets.separator import build_hline_separator
+from widgets.form_grid import FormGrid
+from review.features.batch_export._page import form_row, form_wide
 from review.core.channel_state_controller import (
     get_fluor_gate as _get_fluor_gate,
     ratio_label_for as _ratio_label_for,
@@ -106,9 +106,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
     #: they are all the same plot of the same two columns, so they take one
     #: range and one scale between them rather than a row of controls each.
     _PANELS = (Panel("plot", "Plot"),)
-    _X_ROW_LABEL = "X range:"
-    _Y_ROW_LABEL = "Y range:"
-    _AXES_FOLLOW_HEADER = False
+    _X_ROW_LABEL = "X range"
+    _Y_ROW_LABEL = "Y range"
     #: This mode's own ``X log`` / ``Y log`` checkboxes below apply
     #: ``log10(v + 1)`` so cells at zero stay on the figure, which the generic
     #: combo's plain log would drop. One control per axis, and the one kept is
@@ -178,11 +177,11 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self._scatter_mode = "aggregate" if scatter_mode == "aggregate" else "cells"
         super().__init__(ctx, parent, use_sidebar_groups=use_sidebar_groups)
 
-    def _build_output_panel(self, layout: QVBoxLayout) -> None:
-        title = ("OUTPUT SETTINGS \u2014 SCATTER CELLS"
-                 if self._scatter_mode == "cells"
-                 else "OUTPUT SETTINGS \u2014 SCATTER AGGREGATE")
-        self._build_output_header_and_io(layout, title=title)
+    def _mode_title(self) -> str:
+        return "Scatter (cells)" if self._scatter_mode == "cells" else "Scatter (aggregate)"
+
+    def _build_output_panel(self, output: FormGrid, plot: FormGrid) -> None:
+        self._build_output_header_and_io(output)
 
         # X / Y selection rows. Each axis carries its own Channel +
         # Property pair so the batch export mirrors the per-tab plot UI
@@ -192,46 +191,35 @@ class ScatterBatchExportPanel(BatchExportPanel):
         # mode is still reachable.
         if self._scatter_mode == "cells":
             self._sc_cells_x_cb, self._sc_cells_metric_x_cb = self._build_axis_row(
-                layout, axis_label="X", include_fraction=False,
+                plot, axis_label="X", include_fraction=False,
             )
             self._sc_cells_y_cb, self._sc_cells_metric_y_cb = self._build_axis_row(
-                layout, axis_label="Y", include_fraction=False,
+                plot, axis_label="Y", include_fraction=False,
             )
             self._init_scatter_cells_axes()
         else:
             self._sc_agg_x_cb, self._sc_agg_metric_x_cb = self._build_axis_row(
-                layout, axis_label="X", include_fraction=True,
+                plot, axis_label="X", include_fraction=True,
             )
             self._sc_agg_y_cb, self._sc_agg_metric_y_cb = self._build_axis_row(
-                layout, axis_label="Y", include_fraction=True,
+                plot, axis_label="Y", include_fraction=True,
             )
             self._init_scatter_agg_axes()
 
-        # After the two axis rows: the AXES block's "X:" is a range on the
-        # channel those rows just chose, and above them the panel showed two
-        # rows called "X:" that meant different things. See
-        # ``_AXES_FOLLOW_HEADER``.
-        self._build_output_tail(layout)
+        # After the two axis rows: the Axes block's X row is a range on the
+        # channel those rows just chose (``_build_output_tail``).
+        self._build_output_tail(plot)
 
-        self._build_timepoints_section(layout)
+        self._build_timepoints_section(plot)
         self._init_timepoint_dropdown()
 
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         self._scatter_split_tp_cb = QCheckBox(
             "Separate file per selected timepoint (otherwise combine all selected timepoints per group)"
         )
         self._scatter_split_tp_cb.setChecked(True)
-        mode_row.addWidget(self._scatter_split_tp_cb)
-        mode_row.addStretch(1)
-        layout.addLayout(mode_row)
+        form_wide(plot, self._scatter_split_tp_cb)
 
-        self._build_scatter_display_options(layout)
-
-        layout.addWidget(build_hline_separator(None))
-
-        self._build_summary_label(layout)
-        self._build_run_row(layout, button_text="Run batch export")
+        self._build_scatter_display_options(plot)
 
     # \u2500\u2500 the run summary \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     _SUMMARY_FIGURE_NOTE = ""
@@ -249,7 +237,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _summary_footnotes(self) -> list[str]:
         return ["Groups are selected with the same Batch Export group picker."]
 
-    def _build_scatter_display_options(self, layout: QVBoxLayout) -> None:
+    def _build_scatter_display_options(self, form: FormGrid) -> None:
         """Display-option controls mirroring the on-tab Scatter plot.
 
         Cells mode exposes the full set (density shading, X/Y log, overlay vs
@@ -259,7 +247,6 @@ class ScatterBatchExportPanel(BatchExportPanel):
         the tab's own ``render_scatter_points`` / ``draw_gates`` (single source
         of truth), so a batch figure looks like the tab."""
         row = QHBoxLayout()
-        row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
         if self._scatter_mode == "cells":
             self._sc_density_cb = QCheckBox("Color by density")
             self._sc_xlog_cb = QCheckBox("X log"); self._sc_xlog_cb.setChecked(True)
@@ -282,7 +269,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             row.addWidget(self._sc_agg_xlog_cb)
             row.addWidget(self._sc_agg_ylog_cb)
         row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, "Display", row)
 
     def _init_timepoint_dropdown(self) -> None:
         timepoints = sorted(set(self._ctx.state.dataset.all_timepoints_cache or []))
@@ -303,9 +290,9 @@ class ScatterBatchExportPanel(BatchExportPanel):
         self._tp_select_all()
 
     def _build_axis_row(
-        self, layout: QVBoxLayout, *, axis_label: str, include_fraction: bool,
+        self, form: FormGrid, *, axis_label: str, include_fraction: bool,
     ) -> tuple:
-        """Add a "{axis}: Channel <combo>  Property <combo>" row.
+        """Add a "{axis} axis" row: Channel <combo>  Property <combo>.
 
         The Property combo gets full ``METRIC_ORDER`` plus optional
         ``Fraction above threshold`` / ``Events above threshold`` entries; it dynamically collapses to
@@ -315,11 +302,6 @@ class ScatterBatchExportPanel(BatchExportPanel):
         Returns ``(channel_combo, property_combo)``.
         """
         row = QHBoxLayout()
-        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        lbl = QLabel(f"{axis_label}:")
-        f = lbl.font(); f.setBold(True); lbl.setFont(f)
-        row.addWidget(lbl)
-
         ch_cb = QComboBox()
         ch_cb.setMinimumWidth(theme.Metrics.combo_min_w)
         row.addWidget(QLabel("Channel"))
@@ -330,7 +312,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         row.addWidget(QLabel("Property"))
         row.addWidget(prop_cb)
         row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, f"{axis_label} axis", row)
 
         # Stash both on the panel so `_refresh_scatter_axis_property` can
         # find them, then wire the channel→property refresh signal.

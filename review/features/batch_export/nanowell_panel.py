@@ -35,7 +35,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMessageBox,
-    QVBoxLayout,
     QWidget,
 )
 from PySide6.QtCore import Qt
@@ -49,7 +48,8 @@ from review.features.batch_export._common import (
 from review.features.batch_export._panels import Panel
 from review.features.batch_export.base_panel import BatchExportPanel, SkippedJob
 from ui import theme
-from widgets.separator import build_hline_separator
+from widgets.form_grid import FormGrid
+from review.features.batch_export._page import form_row, form_wide, hug
 from widgets.spin_box import SpinBox
 
 # Nanowells is a removable feature: every symbol comes through a lazy proxy, so a build without it still imports
@@ -90,7 +90,6 @@ _subset_figure_label = _lazy("review.features.nanowell.subset_compute", "figure_
 
 _logger = logging.getLogger("review")
 
-_FIELD_LABEL_W = 110
 #: Rows of the metric list shown before it scrolls; the list holds every page metric (eleven).
 _METRIC_ROWS = 6
 #: The list's frame is drawn above its first row and below its last.
@@ -119,7 +118,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
     _PANELS = (Panel("plot", "Plot"),)
     _SHARE_X = ()
     _X_PANELS = None
-    _AXES_FOLLOW_HEADER = False
+    _WRITES_CELL_ROWS = False
     _INCLUDES_SPREAD = False
     _INCLUDES_FOLD_CHANGE = False
     _CHANNEL_COMBO_ATTRS = ()
@@ -128,44 +127,40 @@ class NanowellBatchExportPanel(BatchExportPanel):
         return "nanowell"
 
     # ── UI ───────────────────────────────────────────────────────────────
-    def _build_output_panel(self, layout: QVBoxLayout) -> None:
-        # No AXES block: a Nanowells figure is several panels the page lays out itself, and a limit typed for "the"
-        # axis would govern whichever one came first. The base class reads these as "no axis control".
-        self._x_min_edit = self._x_max_edit = self._x_scale_cb = None
-        # No raw per-cell CSV either: a nanowell's cells are in the run's own cell table, and the figure's numbers
-        # are the summary CSV this mode always writes.
-        self._cell_rows_cb = None
-        self._build_output_header_and_io(layout, title="OUTPUT SETTINGS — NANOWELLS")
+    def _mode_title(self) -> str:
+        return "Nanowells"
 
-        self._view_cb = self._combo_row(layout, "View:", VIEWS,
+    def _build_output_panel(self, output: FormGrid, plot: FormGrid) -> None:
+        # No Axes block: a Nanowells figure is several panels the page lays out itself, and a limit typed for "the"
+        # axis would govern whichever one came first. The base class reads these as "no axis control". No raw
+        # per-cell CSV either (``_WRITES_CELL_ROWS``).
+        self._x_min_edit = self._x_max_edit = self._x_scale_cb = None
+        self._build_output_header_and_io(output)
+
+        self._view_cb = self._combo_row(plot, "View", VIEWS,
                                         "The Nanowells view each figure draws, as the page draws it.")
-        self._axis_cb = self._combo_row(layout, "Along x:", AXES,
+        self._axis_cb = self._combo_row(plot, "Along x", AXES,
                                         "Distribution only: timepoints along the axis, or wells at one timepoint.")
         self._baseline_cb = self._combo_row(
-            layout, "Baseline:", BASELINES,
+            plot, "Baseline", BASELINES,
             "What a fold change is measured from: the well's earliest timepoint, each nanowell's first "
             "measurable one, or one timepoint of the dataset for every nanowell (a well without it has no fold "
             "change).")
         self._tp_cb = self._combo_row(
-            layout, "Timepoint:", (),
+            plot, "Timepoint", (),
             "Position, Along x: Wells and the Array map draw one timepoint. Latest and Earliest are each well's.")
         self._refresh_timepoints()
-        row = QHBoxLayout()
-        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "", min_width=_FIELD_LABEL_W)
         self._cohort_box = QCheckBox("Fixed cohort")
         self._cohort_box.setToolTip("Distribution and Trajectories: only the nanowells with a value at every "
                                     "timepoint of their well, as the page's Fixed cohort box.")
-        row.addWidget(self._cohort_box)
+        form_wide(plot, hug(self._cohort_box))
         # The fields hold the bare number; the label beside each says what it counts (no text inside the box,
         # which Qt's spin box refuses to type over).
-        row.addWidget(QLabel("Moving average (timepoints, 1 = off)"))
         self._moving_spin = SpinBox()
         self._moving_spin.setRange(1, _moving_max())       # 1 is off, as on the page
         self._moving_spin.setToolTip("Distribution and Trajectories: each nanowell's value as the mean over this "
                                      "many timepoints ending at it, as the page's Moving average control. The "
                                      "summary CSV's moving_average column says the window each row used.")
-        row.addWidget(self._moving_spin)
         self._moving_kind_cb = QComboBox()
         self._moving_kind_cb.addItem("Trailing", False)
         self._moving_kind_cb.addItem("Centred", True)
@@ -175,8 +170,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
             "moving_average_window column says which each row used.")
         self._moving_kind_cb.currentIndexChanged.connect(
             lambda _i: self._moving_spin.setSingleStep(2 if self._moving_kind_cb.currentData() else 1))
-        row.addWidget(self._moving_kind_cb)
-        row.addWidget(QLabel("Baseline average (timepoints, 1 = off)"))
+        form_row(plot, "Moving average", hug(self._moving_spin, self._moving_kind_cb),
+                 help="Timepoints; 1 is off.")
         self._baseline_moving_spin = SpinBox()
         self._baseline_moving_spin.setRange(1, _moving_max())
         self._baseline_moving_spin.setToolTip(
@@ -184,13 +179,9 @@ class NanowellBatchExportPanel(BatchExportPanel):
             "the baseline timepoint, as the page's Baseline average control. Not used with the Earliest or First "
             "measurable baseline, which have no measured timepoint before them. The summary CSV's baseline_moving_average column says the window each "
             "row used.")
-        row.addWidget(self._baseline_moving_spin)
-        row.addStretch(1)
-        layout.addLayout(row)
+        form_row(plot, "Baseline average", hug(self._baseline_moving_spin), help="Timepoints; 1 is off.")
 
         row = QHBoxLayout()
-        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "Subset", min_width=_FIELD_LABEL_W)
         self._subset_box = QCheckBox("Use the page's subset")
         self._subset_box.setChecked(True)
         self._subset_box.setToolTip("Draw and summarise only the nanowells in the Nanowells page's Subset — its "
@@ -202,11 +193,8 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._subset_box.toggled.connect(lambda _on: self._seed_subset())
         row.addWidget(self._subset_box)
         row.addWidget(self._subset_label, 1)
-        layout.addLayout(row)
+        form_row(plot, "Subset", row)
 
-        row = QHBoxLayout()
-        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "Metrics", min_width=_FIELD_LABEL_W)
         self._metric_list = QListWidget()
         self._metric_list.setToolTip("One figure per ticked metric. Cell fluorescence and nanowell fluorescence use the channel "
                                      "chosen in the app's channel selector; each figure's axis names the "
@@ -219,19 +207,16 @@ class NanowellBatchExportPanel(BatchExportPanel):
             self._metric_list.addItem(item)
         self._metric_list.setMaximumHeight(self._metric_list.sizeHintForRow(0) * _METRIC_ROWS
                                            + _FRAME_EDGES * self._metric_list.frameWidth())
-        row.addWidget(self._metric_list, 1)
-        layout.addLayout(row)
+        # Under an eyebrow across the form, as the Timepoints list is: a label beside a list sits at its middle.
+        plot.add_eyebrow("Metrics")
+        form_wide(plot, self._metric_list)
 
         # One "responding above" cut per ticked metric, and every ticked metric must have one (tracker I9): the
         # summary CSV's fraction responding is computed at it, and there is no default cut to fall back on.
-        row = QHBoxLayout()
-        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "Responding above", min_width=_FIELD_LABEL_W)
         self._threshold_host = QWidget()
         self._threshold_form = QFormLayout(self._threshold_host)
         self._threshold_form.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self._threshold_host, 1)
-        layout.addLayout(row)
+        form_row(plot, "Responding above", self._threshold_host)
         self._threshold_edits: dict = {}
         self._threshold_text: dict = {}
         self._metric_list.itemChanged.connect(lambda _item: self._rebuild_thresholds())
@@ -239,22 +224,12 @@ class NanowellBatchExportPanel(BatchExportPanel):
         self._view_cb.currentIndexChanged.connect(lambda _i: self._refresh_view_controls())
         self._refresh_view_controls()
 
-        layout.addWidget(build_hline_separator(None))
-        self._build_summary_label(layout)
-        self._build_run_row(layout, button_text="Run batch export")
-        layout.addStretch(1)
-
-    def _combo_row(self, layout: QVBoxLayout, label: str, choices, tip: str) -> QComboBox:
-        row = QHBoxLayout()
-        row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, label, min_width=_FIELD_LABEL_W)
+    def _combo_row(self, form: FormGrid, label: str, choices, tip: str) -> QComboBox:
         combo = QComboBox()
         for key, text in choices:
             combo.addItem(text, key)
         combo.setToolTip(tip)
-        row.addWidget(combo)
-        row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, label, hug(combo))
         return combo
 
     def _rebuild_thresholds(self) -> None:

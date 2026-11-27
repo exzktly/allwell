@@ -43,6 +43,7 @@ from review.features.response.response_compute import (  # noqa: E402
     FIT_4PL, FIT_NONE,
 )
 from review.domain.batch_models import BarGroup  # noqa: E402
+from widgets.form_grid import FormGrid  # noqa: E402
 
 
 class _PanelStub:
@@ -118,7 +119,6 @@ def _channel_row_stub(cls):
         _CHANNEL_COMBO_ATTRS = cls._CHANNEL_COMBO_ATTRS
         _groups_for_export = cls._groups_for_export
         _draws_fraction = getattr(cls, "_draws_fraction", None)
-        _add_bold_label = cls._add_bold_label
         _fc_state = cls._fc_state
         _INCLUDES_FOLD_CHANGE = cls._INCLUDES_FOLD_CHANGE
         _FC_NONE_LABEL = cls._FC_NONE_LABEL
@@ -310,16 +310,14 @@ def test_the_mode_offers_no_fold_change_controls_of_its_own(qapp):
     it is right. Asserted on the **built row**, not on the flag: a flag the
     builder never consults is a decision that was written down and not made.
     """
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
     from review.features.batch_export.base_panel import BatchExportPanel
 
     assert BatchExportPanel._INCLUDES_FOLD_CHANGE is True
     assert ResponseBatchExportPanel._INCLUDES_FOLD_CHANGE is False
 
     panel = _channel_row_stub(ResponseBatchExportPanel)
-    host = QWidget()
-    QVBoxLayout(host)
-    panel._build_channel_row(host.layout(), attr="_response_channel_cb")
+    host = FormGrid()
+    panel._build_channel_row(host, attr="_response_channel_cb")
     # The Control combo the other modes carry is the thing that must not exist.
     assert not hasattr(panel, "_fc_ctrl_combo")
 
@@ -327,13 +325,11 @@ def test_the_mode_offers_no_fold_change_controls_of_its_own(qapp):
 def test_the_other_modes_still_build_their_fold_change_row(qapp):
     """The paired half of the test above — otherwise a builder that dropped the
     row for *every* mode would pass it."""
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
     from review.features.batch_export.base_panel import BatchExportPanel
 
     panel = _channel_row_stub(BatchExportPanel)
-    host = QWidget()
-    QVBoxLayout(host)
-    panel._build_channel_row(host.layout(), attr="_line_channel_cb")
+    host = FormGrid()
+    panel._build_channel_row(host, attr="_line_channel_cb")
     assert hasattr(panel, "_fc_ctrl_combo")
 
 
@@ -357,15 +353,13 @@ def test_the_property_row_offers_the_fraction_and_resolves_its_key(qapp):
     label to ``fraction_above_threshold``, left the whole batch-export lane
     green when this test read source text instead.
     """
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
     from review.data.metric_labels import (
         EVENTS_LABEL, EVENTS_METRIC_KEY, FRACTION_LABEL, FRACTION_METRIC_KEY,
     )
 
     panel = _channel_row_stub(ResponseBatchExportPanel)
-    host = QWidget()
-    QVBoxLayout(host)
-    panel._build_channel_row(host.layout(), attr="_response_channel_cb",
+    host = FormGrid()
+    panel._build_channel_row(host, attr="_response_channel_cb",
                              include_fraction=True)
 
     combo = panel._response_channel_cb_metric
@@ -396,14 +390,12 @@ def test_the_property_row_offers_the_fraction_and_resolves_its_key(qapp):
 
 def test_a_row_that_did_not_ask_for_the_fraction_is_not_offered_it(qapp):
     """The flag is read per row, so the line mode's Property list is unchanged."""
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
     from review.data.metric_labels import FRACTION_LABEL
     from review.features.batch_export.base_panel import BatchExportPanel
 
     panel = _channel_row_stub(BatchExportPanel)
-    host = QWidget()
-    QVBoxLayout(host)
-    panel._build_channel_row(host.layout(), attr="_line_channel_cb")
+    host = FormGrid()
+    panel._build_channel_row(host, attr="_line_channel_cb")
     combo = panel._line_channel_cb_metric
     items = [combo.itemText(i) for i in range(combo.count())]
     assert FRACTION_LABEL not in items, items
@@ -418,13 +410,11 @@ def test_the_fraction_survives_a_channel_repopulate(qapp):
     list; a flag only the build path knew would give the row the fraction once
     and drop it the first time the channel moved.
     """
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
     from review.data.metric_labels import FRACTION_LABEL
 
     panel = _channel_row_stub(ResponseBatchExportPanel)
-    host = QWidget()
-    QVBoxLayout(host)
-    panel._build_channel_row(host.layout(), attr="_response_channel_cb",
+    host = FormGrid()
+    panel._build_channel_row(host, attr="_response_channel_cb",
                              include_fraction=True)
     panel._ctx.state.channel.fluor_channels = ["gfp", "mcherry"]
     panel._refresh_channel_combos()

@@ -51,12 +51,6 @@ KNOWN: dict[tuple[str, str, str, str], str] = {}
 #: of the language breaks it wherever it is drawn. Only shrinks: ``test_the_design_pending_findings_still_fire``
 #: fails on an entry no case finds any more.
 DESIGN_PENDING: dict[tuple[str, str], str] = {
-    ("Batch Export/Bar", "empty band"): "D26",
-    ("Batch Export/Line", "empty band"): "D26",
-    ("Batch Export/Nanowells", "empty band"): "D26",
-    ("Batch Export/Response", "empty band"): "D26",
-    ("Batch Export/Scatter (aggregate)", "empty band"): "D26",
-    ("Batch Export/Scatter (cells)", "empty band"): "D26",
     ("Image Browser/Image Table", "empty band"): "D18",
     ("Image Browser/Playground", "empty band"): "D18",
     ("Image Browser/Segmentation", "band rows"): "D18",

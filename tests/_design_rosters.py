@@ -10,10 +10,6 @@ TEXT_ROLE: dict[str, int] = {
     # The active well row set in bold by a per-row sheet: the selected-item weight, restyled with the
     # Datasets pages (D24).
     "datasets/concatenate/dashboard.py": 1,
-    # Bold row labels with colons in the Output and Plot forms: the page becomes form grids in D26.
-    "review/features/batch_export/base_panel.py": 7,
-    # The same, on the scatter page of Batch Export (D26).
-    "review/features/batch_export/scatter_panel.py": 1,
     # Group rows of the parameter tree set bold: tree items, which the text roles do not reach; the page
     # becomes label/value rows in D27.
     "review/features/home/pipeline_info/tab_view.py": 3,
@@ -36,8 +32,8 @@ STYLE_SHEET: dict[str, int] = {
     "review/core/selection_controller.py": 2,
     # Menu buttons' own menu-indicator hides (CLAUDE.md §7.12)
     "review/core/ui_helpers.py": 2,
-    # Group cards and chips in their group colours (data), the progress line's outcome colour and a menu-indicator hide: the page is rebuilt in D26
-    "review/features/batch_export/base_panel.py": 9,
+    # Each export group's dot, name tag, well chips, solo-well tags and selected border in the group's own colour (data)
+    "review/features/batch_export/base_panel.py": 5,
     # Severity colours of Home's step and QC lines and the plate legend's state swatches (data): Home is D27
     "review/features/home/controller.py": 5,
     # Sample Map's active-group value: Home is D27

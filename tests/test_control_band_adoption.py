@@ -23,7 +23,8 @@ place. The design language adds one more, decided per page by its row in
 ``_Docs/Markdowns/DESIGN_LANGUAGE_TRACKER.md``: a page that is a form or a
 dashboard rather than a plot carries its controls in a card's heading, not in a
 band (§6) — Analyze's output pane became the Run card that way (row D22), and
-the Datasets tool pages, whose band held nothing, lost it (row D24).
+the Datasets tool pages, whose band held nothing, lost it (row D24), as did
+Batch Export's modes, whose title row carries Sync from app and Export (row D26).
 Removing an entry any other way is the regression this file exists to catch, so
 a commit that does it says which page went away and which module inherited the
 row, or which tracker row made it a card.
@@ -54,7 +55,6 @@ ADOPTED = (
     "review/features/multivariate/tab_view.py",
     "review/features/scatter/agg_tab_view.py",
     "review/features/scatter/cells_tab_view.py",
-    "review/features/batch_export/tab_view.py",
     "review/features/image_browser/cell_browser/tab_view.py",
     "review/features/image_browser/playground/tab_view.py",
     "review/features/preview/panel_view.py",          # Segmentation

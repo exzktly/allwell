@@ -341,7 +341,7 @@ def test_problem_chooses_one_class_and_each_opens_where_it_is_fixed(qc_page, qtb
     assert isinstance(ctx.widgets.get("_nw_qc_walk_partial"), QRadioButton)
     assert (problem.text(), queue_btn.text()) == ("Problem: not addressed ›", "Resolve: 2 timepoints")
     walk_partial = ctx.widgets.get("_nw_qc_walk_partial")
-    assert walk_partial.text() == "partial — some nanowells left out (1)"
+    assert walk_partial.text() == "partial (1)"
     ctx.widgets.get("_nw_qc_walk_inconclusive").click()
     assert (problem.text(), queue_btn.text()) == ("Problem: inconclusive ›", "Resolve: 1 timepoint")
     assert st.anchor_queue_states == ("inconclusive",) and not walk_partial.isChecked()

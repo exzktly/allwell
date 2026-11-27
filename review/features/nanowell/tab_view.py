@@ -1270,11 +1270,20 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
     caption.setObjectName("Muted")
     lay.addWidget(caption)
     for key, label in _PRESETS:
-        preset = QPushButton(label, page)
+        # The preset's name on the button and what it shows on a wrapped line under it: as one button text the
+        # longest was 664 px, wider than a phone's Controls sheet, which then scrolled sideways.
+        name, _sep, said = label.partition(" — ")
+        preset = QPushButton(name, page)
         preset.setProperty("variant", "secondary")
+        preset.setToolTip(label)
         preset.clicked.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
         reg.register(f"_nw_preset_{key}", preset)
         lay.addWidget(preset)
+        if said:
+            note = QLabel(said[:1].upper() + said[1:], page)
+            note.setObjectName("Muted")
+            note.setWordWrap(True)
+            lay.addWidget(note)
     reg.register("_nw_layers_btn", button)
     return button, layer_actions, colour_actions
 

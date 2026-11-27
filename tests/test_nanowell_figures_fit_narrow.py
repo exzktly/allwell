@@ -123,3 +123,32 @@ class SimpleNamespaceSeries:
         self.median = np.array([2.0, 4.0, 3.0, 1.0])
         self.q1, self.q3 = self.median - 0.5, self.median + 0.5
         self.excluded_share = np.array([0.0, 0.5, 0.0, 0.0])
+
+
+def test_crowded_labels_on_the_right_are_thinned_too():
+    """A colour bar writes its numbers on its right (each tick's second label): reading the first alone left them
+    running together on a phone on its side."""
+    fig = _figure(2.0, 0.8)
+    bar = fig.add_axes((0.4, 0.1, 0.1, 0.8))
+    bar.yaxis.tick_right()
+    bar.set_ylim(0, 30)
+    bar.set_yticks(range(31))
+    fig.canvas.draw()
+    renderer.thin_crowded_ticks(fig, fig.canvas.get_renderer())
+    r = fig.canvas.get_renderer()
+    shown = sorted((t.label2.get_window_extent(r) for t in bar.yaxis.get_major_ticks() if t.label2.get_visible()),
+                   key=lambda b: b.y0)
+    assert 1 < len(shown) < 31
+    assert all(a.y1 <= b.y0 + 1.0 for a, b in zip(shown, shown[1:]))
+
+
+def test_a_y_label_left_of_the_figure_moves_the_margin_until_it_is_on():
+    fig = _figure(3.0, 2.0)
+    ax = fig.add_subplot(1, 1, 1)
+    fig.subplots_adjust(left=0.01)
+    ax.set_ylabel("Cell count", fontsize=14)
+    fig.canvas.draw()
+    assert renderer.keep_labels_on_figure(fig, fig.canvas.get_renderer())
+    fig.canvas.draw()
+    assert ax.yaxis.label.get_window_extent(fig.canvas.get_renderer()).x0 >= -0.5
+    assert not renderer.keep_labels_on_figure(fig, fig.canvas.get_renderer()), "it did not settle"

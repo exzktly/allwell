@@ -79,3 +79,16 @@ def test_a_band_draws_a_segmented_control_at_its_row_height(qtbot):
     QApplication.processEvents()
     assert seg.sizeHint().height() <= ControlBand.ROW_H, seg.sizeHint().height()
     assert band.heightForWidth(800) <= band.band_height() + 1
+
+
+def test_segmentation_band_is_one_row_with_its_editing_tools_under_the_image(qtbot, mini_dataset):
+    """The zoom, Delete cell, Crop cells (each with its scope control) and Edit are a tool row under the image (the
+    user's decision, tracker §9.1 step 15)."""
+    ctx, window, bands, found = _one_row(qtbot, "Segmentation", mini_dataset)
+    assert found == {w: [] for w in WIDTHS}
+    row = ctx.widgets.get("_review_image_tools_row")
+    for name in ("_review_image_delete_btn", "_review_image_crop_btn", "_review_image_edit_btn",
+                 "_review_image_zoom_lbl"):
+        widget = ctx.widgets.get(name)
+        assert row.isAncestorOf(widget), f"{name} is not in the tool row under the image"
+        assert not any(band.isAncestorOf(widget) for band in bands), f"{name} is back on the band"

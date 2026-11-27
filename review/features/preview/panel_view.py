@@ -145,7 +145,16 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     zoom_in_btn.setToolTip("Zoom in (scroll wheel works on the image too)")
     zoom_fit_btn = btn_secondary(ctrl, "Fit", lambda: review_image_zoom_fit(ctx))
     zoom_fit_btn.setToolTip("Fit the whole image in the view (100%) and recentre")
-    ctrl.add_scope("", zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn)
+    # The zoom and the editing tools below are a tool row under the image, not band items: the band keeps what is
+    # shown on one row (the user's decision, tracker §9.1 step 15). Still on screen and grouped, never in a popover.
+    tools_row = QWidget()
+    tools_lay = QHBoxLayout(tools_row)
+    tools_lay.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    tools_lay.setSpacing(theme.Spacing.xs)
+    for w in (zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn):
+        tools_lay.addWidget(w)
+    tools_lay.addSpacing(theme.Spacing.md)
+    reg.register("_review_image_tools_row", tools_row)
 
     # A tool: pressed in while the next click or drag deletes (``ui.buttons.mode_tool``).
     delete_btn = buttons.mode_tool("Delete cell", ctrl)
@@ -161,11 +170,11 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     delete_btn.clicked.connect(
         lambda _=False: toggle_selected_review_cell(ctx)
     )
-    ctrl.add_action(delete_btn)
+    tools_lay.addWidget(delete_btn)
 
     # Which frames the next drag-delete reaches. Sits next to the button it
     # modifies, and carries the armed scope in its own label.
-    ctrl.add_action(build_delete_scope_control(ctx, ctrl))
+    tools_lay.addWidget(build_delete_scope_control(ctx, tools_row))
 
     # Crop cells: drag a rectangle to keep only cells whose centroid is inside.
     # Every FOV/timepoint/channel/well by default; the Crop scope control beside
@@ -191,13 +200,13 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     crop_btn.clicked.connect(
         lambda _=False: toggle_crop_edit_mode(ctx)
     )
-    ctrl.add_action(crop_btn)
+    tools_lay.addWidget(crop_btn)
 
     # Which frames the crop filters. Same control as the Delete scope above, and
     # for the same reason it sits next to the button it modifies and carries the
     # armed scope in its own label — an off-screen scope silently deciding which
     # cells count is exactly what this readout exists to prevent.
-    ctrl.add_action(build_crop_scope_control(ctx, ctrl))
+    tools_lay.addWidget(build_crop_scope_control(ctx, tools_row))
 
     # ── Edit ▾ menu — the one-shot crop / reset actions ─────────────────
     edit_btn, edit_menu = make_action_menu_button(
@@ -208,7 +217,8 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     add_menu_action(edit_menu, "Reset crop + curation",
                     lambda: reset_crop_and_overrides(ctx))
     reg.register("_review_image_edit_btn", edit_btn)
-    ctrl.add_action(edit_btn)
+    tools_lay.addWidget(edit_btn)
+    tools_lay.addStretch(1)
 
     # ── View ▾ popover — image stage · zoom · overlay toggles ───────────
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
@@ -404,6 +414,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     label.setMouseTracking(True)
     canvas.setWidget(label)
     il.addWidget(canvas, 1)
+    il.addWidget(tools_row)
 
     # Re-fit the image whenever the scroll area is (re)sized. The lazy first
     # build draws before Qt has laid out the canvas, so the initial

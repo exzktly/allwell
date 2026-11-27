@@ -84,6 +84,15 @@ def _dataset_button(win, parent):
     _fill_dataset_menu(win, menu)
     btn.setMenu(menu)
     win._dataset_menu = menu
+    # The second line (window style W1, design language §3.1): how many wells and timepoints the dataset holds,
+    # in the help role under the name. A label on the button, placed by ``_DatasetDetailPlacement``; the button's
+    # ``detail`` property gives the line its room.
+    from ui import text_roles
+    detail = text_roles.help_text("", btn)
+    detail.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    detail.hide()
+    win._dataset_detail = detail
+    btn.installEventFilter(_DatasetDetailPlacement(btn, detail))
     # Assign before refreshing: ``refresh_dataset_button`` reads the button off
     # ``win``, so refreshing here would silently no-op and leave it text-less
     # until the first dataset load.
@@ -168,9 +177,11 @@ def refresh_dataset_button(win) -> None:
     state = getattr(win, "_app_state", None)
     dataset = getattr(state, "dataset", None) if state is not None else None
     path = str(getattr(dataset, "data_dir", "") or "")
+    detail = getattr(win, "_dataset_detail", None)
     if not path:
         btn.setText("No dataset — open one")
         btn.setToolTip("No dataset loaded. Choose a folder to review.")
+        _show_dataset_detail(btn, detail, "")
         return
     # ``dataset_display_name`` holds the rule: the standard Analyze-pipeline
     # layout loads ``<dataset_root>/out`` as ``data_dir``, so the folder's own
@@ -182,6 +193,48 @@ def refresh_dataset_button(win) -> None:
     room = max(btn.width() - 64, 80)
     btn.setText(metrics.elidedText(name, Qt.ElideMiddle, room))
     btn.setToolTip(path)
+    _show_dataset_detail(btn, detail, dataset_detail_text(dataset))
+
+
+def dataset_detail_text(dataset) -> str:
+    """"4 wells · 3 timepoints" for the loaded *dataset*; "" when it holds no wells yet."""
+    wells = len(getattr(dataset, "well_paths", None) or {})
+    if not wells:
+        return ""
+    points = len(set(getattr(dataset, "all_timepoints_cache", None) or ()))
+    parts = [f"{wells} well{'s' if wells != 1 else ''}"]
+    if points:
+        parts.append(f"{points} timepoint{'s' if points != 1 else ''}")
+    return " \u00b7 ".join(parts)
+
+
+def _show_dataset_detail(btn, detail, text: str) -> None:
+    if detail is None:
+        return
+    detail.setText(text)
+    detail.setVisible(bool(text))
+    if bool(btn.property("detail")) != bool(text):
+        btn.setProperty("detail", bool(text))
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        btn.updateGeometry()
+
+
+class _DatasetDetailPlacement(QObject):
+    """Keeps the dataset button's second line under its name as the button resizes."""
+
+    def __init__(self, btn, detail) -> None:
+        super().__init__(btn)
+        self._btn, self._detail = btn, detail
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.Resize, QEvent.Show, QEvent.StyleChange):
+            b, d = self._btn, self._detail
+            d.adjustSize()
+            x = theme.Spacing.sm + theme.Spacing.md + b.iconSize().width() + theme.Spacing.xs
+            y = b.height() - theme.Spacing.sm - theme.Spacing.sm - d.height()
+            d.move(x, max(0, y))
+        return False
 
 
 class _RailTogglePlacement(QObject):

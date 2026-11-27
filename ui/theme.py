@@ -940,6 +940,8 @@ QToolButton#DatasetButton {{
     font-weight: {t.semibold};
 }}
 QToolButton#DatasetButton:hover {{ border-color: {c.button_edge}; }}
+/* With its second line (wells and timepoints), the name moves up to make room for it. */
+QToolButton#DatasetButton[detail="true"] {{ padding-bottom: {s.sm + t.caption_size + s.md}px; }}
 QToolButton#DatasetButton::menu-indicator {{
     subcontrol-position: right center;
     subcontrol-origin: padding;

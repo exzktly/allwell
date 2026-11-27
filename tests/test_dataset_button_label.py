@@ -74,3 +74,24 @@ def test_no_dataset_loaded_shows_placeholder(qapp):
     refresh_dataset_button(win)
 
     assert win._dataset_btn.text() == "No dataset — open one"
+
+
+def test_the_second_line_says_how_many_wells_and_timepoints(qapp, tmp_path):
+    """Window style W1 (design language §3.1): the button may carry a second line, wells and timepoints."""
+    from PySide6.QtWidgets import QLabel
+
+    from review.core.app_shell_view import dataset_detail_text
+
+    win = _FakeWin(tmp_path)
+    win._dataset_detail = QLabel()
+    win._app_state.dataset.well_paths = {"A01": "a", "A02": "b", "B01": "c", "B02": "d"}
+    win._app_state.dataset.all_timepoints_cache = [0.0, 24.0, 48.0]
+    refresh_dataset_button(win)
+    assert win._dataset_detail.text() == "4 wells · 3 timepoints"
+    assert not win._dataset_detail.isHidden() and win._dataset_btn.property("detail") is True
+    win._app_state.dataset.well_paths = {"A01": "a"}
+    win._app_state.dataset.all_timepoints_cache = []
+    assert dataset_detail_text(win._app_state.dataset) == "1 well"
+    win._app_state.dataset.data_dir = ""
+    refresh_dataset_button(win)
+    assert win._dataset_detail.isHidden() and win._dataset_btn.property("detail") is False

@@ -18,8 +18,6 @@ from tests import _surface_guards as scan
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
 #: starting ``kept`` is permanent and says why.
 WIDGET_ACTIONS: dict[tuple[str, str], str] = {
-    ('review/features/barplot/controller.py', 'open_bar_timepoint_selector'):
-        'pending S12: one of the multi-select builds',
     ('review/features/home/cell_gating/fov_view.py', 'open_fov_menu'):
         'pending S12: one of the multi-select builds',
     ('review/features/home/cell_gating/tab_view.py', '_open_gate_filter_menu'):
@@ -30,12 +28,6 @@ WIDGET_ACTIONS: dict[tuple[str, str], str] = {
         'pending S12: one of the multi-select builds',
     ('review/features/nanowell/popout_view.py', '_check_entry'):
         'pending S21: the crops pop-out takes the multi-select component',
-    ('review/features/response/controller.py', 'open_series_selector'):
-        'pending S12: one of the multi-select builds',
-    ('review/features/response/controller.py', 'open_timepoint_selector'):
-        'pending S12: one of the multi-select builds',
-    ('review/features/scatter/tp_selector_view.py', 'open_timepoint_selector'):
-        'pending S12: one of the multi-select builds',
     ('ui/phone_shell.py', 'PhoneShell._menu_caption'):
         "kept: a caption label over a group of the phone menu's entries — text, not a control, and QMenu has no caption of its own that the phone's touch styling can size",
     ('ui/phone_shell.py', 'PhoneShell._text_size_row'):

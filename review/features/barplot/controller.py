@@ -13,7 +13,6 @@ from review.features.barplot import _per_cell_mode as pcm
 from review.domain.numeric import is_number
 from review.domain.plot_members import plot_replicate_sets
 from review.domain.viewer_state import parse_rc
-from widgets import menu_exec
 
 import logging
 import math
@@ -410,62 +409,31 @@ def sync_hidden_bar_tp_combo(ctx) -> None:
 
 
 def open_bar_timepoint_selector(ctx) -> None:
-    """Pop up a QMenu of checkboxes below the bar tab's Timepoints button.
+    """Show the bar tab's timepoints as a multi-select page of the inspector.
 
-    Mirrors ``features/scatter/cells_tab_view.py:_open_timepoint_selector``
-    so the bar plot can show bars / violins / beeswarms over multiple
-    timepoints simultaneously. Lives in the controller rather than the
-    tab builder so all bar-tab behaviour stays in one module (§5.5).
+    The bar plot can show bars / violins / beeswarms over several timepoints
+    at once. The page applies as a box is ticked; All and None repaint once.
+    Lives in the controller rather than the tab builder so all bar-tab
+    behaviour stays in one module (§5.5).
     """
-    from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+    from review.core.inspector_pages import open_multi_select
     from review.features.barplot.renderer import redraw_bars
 
-    menu = QMenu(ctx.runtime.barplot.tp_button)
-
     sels = ctx.state.bar.tp_selections
-    checkboxes: dict[str, QCheckBox] = {}
-    for tp_str in sorted(sels.keys(), key=float):
-        cb = QCheckBox(tp_str, menu)
-        cb.setChecked(bool(sels[tp_str]))
-        checkboxes[tp_str] = cb
+    order = sorted(sels.keys(), key=float)
 
-        def _make_handler(tp=tp_str, checkbox=cb):
-            def on_toggled(checked: bool) -> None:
-                ctx.state.bar.tp_selections[tp] = bool(checked)
-                sync_hidden_bar_tp_combo(ctx)
-                update_bar_tp_selection_display(ctx)
-                redraw_bars(ctx)
-            return on_toggled
-
-        cb.toggled.connect(_make_handler())
-        wa = QWidgetAction(menu)
-        wa.setDefaultWidget(cb)
-        menu.addAction(wa)
-
-    menu.addSeparator()
-
-    def _set_all(value: bool) -> None:
-        for tp_str, cb in checkboxes.items():
-            cb.blockSignals(True)
-            try:
-                cb.setChecked(value)
-            finally:
-                cb.blockSignals(False)
-            ctx.state.bar.tp_selections[tp_str] = value
+    def _apply(chosen: list) -> None:
+        picked = set(chosen)
+        for tp in list(ctx.state.bar.tp_selections):
+            ctx.state.bar.tp_selections[tp] = tp in picked
         sync_hidden_bar_tp_combo(ctx)
         update_bar_tp_selection_display(ctx)
         redraw_bars(ctx)
 
-    all_action = QAction("All", menu)
-    all_action.triggered.connect(lambda _=False: _set_all(True))
-    menu.addAction(all_action)
-    none_action = QAction("None", menu)
-    none_action.triggered.connect(lambda _=False: _set_all(False))
-    menu.addAction(none_action)
-
-    btn = ctx.runtime.barplot.tp_button
-    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+    open_multi_select(ctx, ctx.runtime.barplot.tp_button, key="bar/timepoints",
+                      title="Timepoints", items=order,
+                      checked=[tp for tp in order if sels[tp]], on_change=_apply,
+                      empty_text="No timepoints in this dataset.")
 
 
 def refresh_bar_layout_btn_state(ctx) -> None:

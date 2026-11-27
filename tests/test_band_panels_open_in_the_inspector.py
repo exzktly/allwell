@@ -184,3 +184,35 @@ def test_a_style_control_changed_on_its_page_restyles_the_figure(qtbot, mini_dat
     insp.back_button.click()
     assert insp.currentWidget() is panel and grid.body().isHidden()
     svc.close(ctx)
+
+
+# ── picking several: one page, applied as a box is ticked ─────────────────────
+
+def test_bar_timepoints_is_a_multi_select_page_and_a_tick_reaches_the_bar_state(qtbot, mini_dataset):
+    """The Timepoints button, pressed for real: a page of the inspector, not
+    a menu of checkboxes — and unticking a box changes
+    ``state.bar.tp_selections`` at once, with the button reading the count."""
+    from widgets.multi_select import MultiSelect
+    ctx, window, _frame, _bands = build_page(qtbot, "Bar Plots", mini_dataset)
+    button = ctx.widgets.get("_bar_tp_button")
+    # Seeded out of numeric order, so "sorted as numbers" and "as given" differ.
+    ctx.state.bar.tp_selections.clear()
+    ctx.state.bar.tp_selections.update({"24": True, "0": True, "6": True})
+    sels = ctx.state.bar.tp_selections
+    button.click()
+    QApplication.processEvents()
+    insp = svc.inspector(ctx)
+    picker = insp.currentWidget()
+    assert isinstance(picker, MultiSelect) and picker.isVisibleTo(window)
+    assert insp.title_label.text() == "Timepoints"
+    assert surf.depth(window) == 0, "a menu or popup opened as well: " + surf.describe(surf.open_transients(window))
+    order = sorted(sels, key=float)
+    assert picker.keys() == order and picker.checked() == order
+    picker.boxes()[0].click()
+    QApplication.processEvents()
+    assert sels[order[0]] is False and all(sels[tp] for tp in order[1:])
+    picker.none_button.click()
+    assert not any(sels.values())
+    button.click()                                     # the button is a toggle
+    QApplication.processEvents()
+    assert not insp.holds(picker), "a second press on the button did not leave the page"

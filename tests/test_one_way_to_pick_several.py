@@ -32,8 +32,6 @@ OLD_PICKER_IMPORTERS: dict[tuple[str, str], str] = {
 CHECK_LIST_BUILDS: dict[tuple[str, str], str] = {
     ('datasets/job_queue/row.py', 'JobRow._add_sources'):
         "pending S26: the job row's menu",
-    ('review/features/barplot/controller.py', 'open_bar_timepoint_selector'):
-        'pending S12: one of the multi-select builds',
     ('review/features/home/cell_gating/fov_view.py', 'open_fov_menu'):
         'pending S12: one of the multi-select builds',
     ('review/features/home/cell_gating/tab_view.py', '_open_gate_filter_menu'):
@@ -50,12 +48,6 @@ CHECK_LIST_BUILDS: dict[tuple[str, str], str] = {
         'pending S19: becomes a row and a multi-select page',
     ('review/features/nanowell/tab_view.py', '_layers_button'):
         'pending S19: becomes a row and a multi-select page',
-    ('review/features/response/controller.py', 'open_series_selector'):
-        'pending S12: one of the multi-select builds',
-    ('review/features/response/controller.py', 'open_timepoint_selector'):
-        'pending S12: one of the multi-select builds',
-    ('review/features/scatter/tp_selector_view.py', 'open_timepoint_selector'):
-        'pending S12: one of the multi-select builds',
     ('ui/phone_shell.py', 'PhoneShell._text_size_row'):
         "pending S23: the phone's text-size choice becomes three plain commands",
     ('widgets/checkable_dropdown.py', 'CheckableDropdown._open_menu'):

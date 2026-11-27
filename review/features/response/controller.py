@@ -148,49 +148,26 @@ def open_series_selector(ctx) -> None:
     split by is the number of variables it has, and a control that offers two
     of them is the single-select combo this replaced wearing a wider coat.
     """
-    from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
-
-    from widgets import menu_exec
+    from review.core.inspector_pages import open_multi_select
 
     button = _widget(ctx, "_response_series_btn")
     if button is None:
         return
     on_x = selected_variable_id(ctx)
-    chosen = set(selected_series_ids(ctx))
-    menu = QMenu(button)
     offered = [v for v in series_variables(ctx) if v.id != on_x]
-    for variable in offered:
-        label = (f"{variable.name} ({variable.unit})" if variable.unit
-                 else variable.name)
-        box = QCheckBox(label, menu)
-        box.setChecked(variable.id in chosen)
+    items = [(v.id, f"{v.name} ({v.unit})" if v.unit else v.name) for v in offered]
 
-        def _handler(checked: bool, vid=variable.id) -> None:
-            toggle_series_variable(ctx, vid, checked)
-            refresh_series_control(ctx)
-            redraw_response(ctx)
+    def _apply(chosen: list) -> None:
+        wanted, have = set(chosen), set(selected_series_ids(ctx))
+        for variable in offered:
+            if (variable.id in wanted) != (variable.id in have):
+                toggle_series_variable(ctx, variable.id, variable.id in wanted)
+        refresh_series_control(ctx)
+        redraw_response(ctx)
 
-        box.toggled.connect(_handler)
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(box)
-        menu.addAction(action)
-    if not offered:
-        menu.addAction("No other variable to split by").setEnabled(False)
-    else:
-        menu.addSeparator()
-
-        def _clear() -> None:
-            slice_ = ctx.state.feature_slice("response")
-            if slice_ is not None:
-                slice_.series_variable_ids = []
-            refresh_series_control(ctx)
-            redraw_response(ctx)
-
-        action = QAction(NO_SERIES_LABEL, menu)
-        action.triggered.connect(lambda _=False: _clear())
-        menu.addAction(action)
-    menu_exec.exec_transient_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
+    open_multi_select(ctx, button, key="response/series", title="Series", items=items,
+                      checked=list(selected_series_ids(ctx)), on_change=_apply,
+                      empty_text="No other variable to split by.")
 
 
 #: The Property label that is not a column, re-exported from the shared metric
@@ -499,56 +476,26 @@ def open_timepoint_selector(ctx) -> None:
     offers both — a picker that is the same control minus two actions reads as
     the one that is broken.
     """
-    from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
-
-    from widgets import menu_exec
+    from review.core.inspector_pages import open_multi_select
 
     button = _widget(ctx, "_response_tp_button")
     if button is None:
         return
     sync_timepoint_menu(ctx)
-    menu = QMenu(button)
-    boxes: dict[str, QCheckBox] = {}
-    for tp_str in sorted(_tp_state(ctx).keys(), key=float):
-        box = QCheckBox(tp_str, menu)
-        box.setChecked(bool(_tp_state(ctx).get(tp_str)))
-        boxes[tp_str] = box
+    order = sorted(_tp_state(ctx).keys(), key=float)
 
-        def _handler(checked: bool, tp=tp_str) -> None:
-            _tp_state(ctx)[tp] = bool(checked)
-            update_timepoint_button(ctx)
-            redraw_response(ctx)
+    def _apply(chosen: list) -> None:
+        # One repaint per change, from the state the user asked for: All and
+        # None arrive here once, not once per timepoint.
+        picked = set(chosen)
+        for tp in list(_tp_state(ctx)):
+            _tp_state(ctx)[tp] = tp in picked
+        update_timepoint_button(ctx)
+        redraw_response(ctx)
 
-        box.toggled.connect(_handler)
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(box)
-        menu.addAction(action)
-    if not boxes:
-        menu.addAction("No timepoints in this dataset").setEnabled(False)
-    else:
-        menu.addSeparator()
-
-        def _set_all(value: bool) -> None:
-            # The checkboxes are set with their signals blocked and the state
-            # written directly, so twelve toggles do not queue twelve redraws
-            # of the same figure. One repaint at the end, from the state the
-            # user asked for.
-            for tp_str, box in boxes.items():
-                blocked = box.blockSignals(True)
-                try:
-                    box.setChecked(value)
-                finally:
-                    box.blockSignals(blocked)
-                _tp_state(ctx)[tp_str] = value
-            update_timepoint_button(ctx)
-            redraw_response(ctx)
-
-        for label, value in (("All", True), ("None", False)):
-            action = QAction(label, menu)
-            action.triggered.connect(lambda _=False, v=value: _set_all(v))
-            menu.addAction(action)
-    menu_exec.exec_transient_menu(menu, button.mapToGlobal(button.rect().bottomLeft()))
+    open_multi_select(ctx, button, key="response/timepoints", title="Timepoints", items=order,
+                      checked=[tp for tp in order if _tp_state(ctx).get(tp)], on_change=_apply,
+                      empty_text="No timepoints in this dataset.")
 
 
 def update_timepoint_button(ctx) -> None:

@@ -6098,3 +6098,61 @@ def test_button_kind_guard_clears_the_four(tmp_path, monkeypatch):
                   '    set_variant(b, "destructive" if x else "quiet")\n    set_kind(b, "default")\n')
     assert _run_scan(monkeypatch, "tests.test_buttons_have_one_of_four_kinds",
                      "test_every_button_is_given_one_of_the_four_kinds", [good]) is None
+
+
+# ── the design-language guards (DESIGN_LANGUAGE_TRACKER.md §5.2) ────────────
+
+DESIGN_GUARD_CASES = {
+    # (module, test, a violating file, a clean file)
+    "text_role_name": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                       'def build(lbl, bad):\n    lbl.setObjectName("Notice" if bad else "Muted")\n',
+                       'def build(p):\n    return text_roles.help_text("Hint", p)\n'),
+    "text_role_font": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                       'def build(lbl):\n    lbl.setStyleSheet("font-weight: 600;")\n',
+                       'def build(lbl):\n    lbl.setStyleSheet("color: red;")\n'),
+    "text_role_property": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                           'def build(lbl):\n    lbl.setProperty("muted", True)\n',
+                           'def build(lbl):\n    lbl.setProperty("textRole", "label")\n'),
+    "style_sheet": ("tests.test_no_style_sheet_outside_the_theme", "test_no_style_sheet_is_set_outside_the_theme",
+                    'def build(w):\n    w.setStyleSheet(QSS)\n', 'def build(w):\n    w.setObjectName("Card")\n'),
+    # A literal wrapped in arithmetic on a token is still a literal.
+    "spacing": ("tests.test_spacing_comes_from_tokens", "test_spacing_comes_from_the_scale",
+                'def build(lay):\n    lay.setSpacing(theme.Spacing.sm + 2)\n',
+                'def build(lay):\n    lay.setContentsMargins(0, theme.Spacing.sm, 0, 0)\n'),
+    "sentence_case": ("tests.test_labels_are_sentence_case",
+                      "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                      'def build(p, x):\n    return QPushButton("Run Pipeline" if x else "Stop", p)\n',
+                      'def build(p):\n    return QPushButton("Run pipeline", p)\n'),
+    "sentence_case_colon": ("tests.test_labels_are_sentence_case",
+                            "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                            'def build(band, w):\n    band.add_scope("Channel:", w)\n',
+                            'def build(band, w):\n    band.add_scope("Channel", w)\n'),
+    "state_label": ("tests.test_no_state_in_a_button_label", "test_no_button_carries_its_state",
+                    'def build(b):\n    b.setText("Pooled: Off")\n', 'def build(b):\n    b.setText("Pool replicates")\n'),
+    "checkable_push": ("tests.test_no_state_in_a_button_label", "test_no_button_carries_its_state",
+                       'def build(p):\n    self._sem = QPushButton("SEM", p)\n    self._sem.setCheckable(True)\n',
+                       'def build(p):\n    box = QCheckBox("Show SEM", p)\n    box.setCheckable(True)\n'),
+    "unset": ("tests.test_unset_reads_not_set", "test_an_unset_value_reads_not_set_through_one_constant",
+              'def build(edit):\n    edit.setPlaceholderText("(not set)")\n',
+              'def build(lbl):\n    text_roles.show_value(lbl, None)\n'),
+    "button_by_hand": ("tests.test_buttons_have_one_of_four_kinds",
+                       "test_a_pane_builds_its_buttons_through_ui_buttons",
+                       'def build(p):\n    return QPushButton("Run", p)\n',
+                       'def build(p):\n    return buttons.primary("Run", p)\n'),
+}
+
+
+@pytest.mark.parametrize("case", sorted(DESIGN_GUARD_CASES))
+def test_design_guard_catches_its_violation(tmp_path, monkeypatch, case):
+    module, test, bad_src, _good = DESIGN_GUARD_CASES[case]
+    # Under a pane's path, so the button guard (which reads panes only) reads it too.
+    bad = _write(tmp_path, f"review/bad_{case}.py", bad_src)
+    exc = _run_scan(monkeypatch, module, test, [bad])
+    assert exc is not None and f"bad_{case}.py" in str(exc)
+
+
+@pytest.mark.parametrize("case", sorted(DESIGN_GUARD_CASES))
+def test_design_guard_clears_the_right_way(tmp_path, monkeypatch, case):
+    module, test, _bad, good_src = DESIGN_GUARD_CASES[case]
+    good = _write(tmp_path, f"review/good_{case}.py", good_src)
+    assert _run_scan(monkeypatch, module, test, [good]) is None

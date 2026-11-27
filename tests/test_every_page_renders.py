@@ -46,6 +46,16 @@ from tests._screens import SCREENS, is_phone
 #: ``test_the_known_findings_are_all_still_found``, so this only shrinks.
 KNOWN: dict[tuple[str, str, str, str], str] = {}
 
+#: ``(page, check)`` -> the tracker row that converts the page, for the design language's measured checks
+#: (``tests._layout_checks.DESIGN_CHECKS``). Held across every dataset and screen, because a page that breaks a rule
+#: of the language breaks it wherever it is drawn. Only shrinks: ``test_the_design_pending_findings_still_fire``
+#: fails on an entry no case finds any more.
+DESIGN_PENDING: dict[tuple[str, str], str] = {}
+
+def _design_key(page: str, check: str) -> tuple[str, str]:
+    return page.removesuffix(SHEET_SUFFIX), check
+
+
 _NO_NANOWELLS = "the dataset has no nanowell record, so the Nanowells pages show their empty state"
 _NANOWELL_PAGES = ("Distribution", "Array", "Trajectories", "Position", "Extremes", "Identity", "Statistics")
 _NO_SMFISH = "the dataset carries no smFISH spot counts ('No smFISH data was generated during the processing pipeline.')"
@@ -145,7 +155,8 @@ def test_the_tour_reaches_every_page_the_screen_offers(rendered):
 def test_no_page_has_a_layout_defect_beyond_the_known_ones(rendered):
     (kind, screen), result = rendered
     unexpected = [f"{page}: {finding}" for page, (findings, _empty) in result.items() for finding in findings
-                  if (kind, screen, page, finding.check) not in KNOWN]
+                  if (kind, screen, page, finding.check) not in KNOWN
+                  and _design_key(page, finding.check) not in DESIGN_PENDING]
     assert not unexpected, f"{kind} on {screen}: {len(unexpected)} layout defect(s):\n  " + "\n  ".join(unexpected)
 
 
@@ -154,6 +165,12 @@ def test_the_known_findings_are_all_still_found(rendered):
     found = {(kind, screen, page, finding.check) for page, (findings, _e) in result.items() for finding in findings}
     stale = [key for key in KNOWN if key[:2] == (kind, screen) and key not in found]
     assert not stale, f"these KNOWN cases no longer fire — delete them: {stale}"
+
+
+def test_the_design_pending_findings_still_fire(all_cases):
+    found = {_design_key(p["page"], f[0]) for pages in all_cases.values() for p in pages for f in p["findings"]}
+    stale = sorted(key for key in DESIGN_PENDING if key not in found)
+    assert not stale, f"these DESIGN_PENDING entries no longer fire on any page — delete them: {stale}"
 
 
 def test_the_pages_that_should_show_data_do(rendered):

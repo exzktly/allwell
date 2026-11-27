@@ -32,7 +32,7 @@ from typing import NamedTuple
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
-    QAbstractButton, QAbstractItemView, QAbstractScrollArea, QLabel, QScrollArea, QWidget,
+    QAbstractButton, QAbstractItemView, QAbstractScrollArea, QComboBox, QLabel, QScrollArea, QWidget,
 )
 
 #: Pixels of slack before a measurement counts: font rounding, margins, a frame.
@@ -334,8 +334,62 @@ def double_carets(window: QWidget) -> list[Finding]:
     return found
 
 
+# ── the design language's measured checks (DESIGN_LANGUAGE_TRACKER.md §5.2) ──
+
+def one_primary(window: QWidget) -> list[Finding]:
+    """At most one visible primary button on the page: the one action that produces its result."""
+    primaries = [w for w in visible_widgets(window)
+                 if isinstance(w, QAbstractButton) and w.property("variant") == "primary"]
+    if len(primaries) <= 1:
+        return []
+    return [Finding("primary", "page", f"{len(primaries)} primary buttons: "
+                    + ", ".join(repr(_plain(b.text())[:24]) for b in primaries))]
+
+
+def _bands(window: QWidget):
+    from widgets.control_band import ControlBand
+
+    return [w for w in visible_widgets(window) if isinstance(w, ControlBand)]
+
+
+def band_is_one_row(window: QWidget) -> list[Finding]:
+    """At the desk, a page's control band is one row high at the window's width."""
+    found = []
+    for band in _bands(window):
+        if band.form() is None and band.height() > band.band_height() + 1:
+            found.append(Finding("band rows", _name(band),
+                                 f"{band.height()} px tall, one row is {band.band_height()}"))
+    return found
+
+
+def labels_outside_controls(window: QWidget) -> list[Finding]:
+    """No visible combo box draws its own label inside it ("Channel: GFP")."""
+    found = []
+    for w in visible_widgets(window):
+        label = getattr(w, "label", None)
+        if (isinstance(w, QComboBox) and callable(label) and isinstance(label(), str) and label()
+                and getattr(w, "_label_shown", False)):
+            found.append(Finding("label inside", _name(w), f"{label()!r} is painted inside the box"))
+    return found
+
+
+def no_empty_band(window: QWidget) -> list[Finding]:
+    """A page with no band controls shows no band strip."""
+    found = []
+    for band in _bands(window):
+        items = [w for w in band.scope_host().findChildren(QWidget) if w.isVisibleTo(band)]
+        if band.form() is None and not items and band.action_count() == 0:
+            found.append(Finding("empty band", _name(band), "a band strip with no controls in it"))
+    return found
+
+
 CHECKS = (clipped_text, clipped_scroll_content, off_window, figure_text_outside, figure_text_overlap,
-          figure_tick_overlap, scroll_slivers, wide_tables, double_carets)
+          figure_tick_overlap, scroll_slivers, wide_tables, double_carets,
+          one_primary, labels_outside_controls, no_empty_band)
+
+#: The design language's checks: a finding of one of these is held by ``DESIGN_PENDING`` in
+#: ``tests/test_every_page_renders.py`` until its tracker row converts the page.
+DESIGN_CHECKS = {"primary", "band rows", "label inside", "empty band"}
 
 
 def check_window(window: QWidget, shell=None) -> list[Finding]:
@@ -344,4 +398,6 @@ def check_window(window: QWidget, shell=None) -> list[Finding]:
     if shell is not None:
         found += stale_page_menu(window, shell)
         found += sideways_sheet(window, shell)
+    else:
+        found += band_is_one_row(window)
     return found

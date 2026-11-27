@@ -17,6 +17,8 @@ from __future__ import annotations
 import ast
 from collections import Counter
 
+from tests._design_rosters import BUTTON_CONSTRUCTOR
+from tests._design_scan import call_name, count_sites, over_roster, stale_roster
 from tests._repo_scan import parse_source, python_sources, rel
 
 KINDS = {"primary", "default", "quiet", "destructive"}
@@ -112,3 +114,34 @@ def test_the_pending_roster_only_describes_real_sites():
                    for (path, value), (n, _why) in PENDING.items() if seen.get((path, value), 0) < n)
     assert not stale, "these PENDING entries are larger than what is left — lower or delete them:\n  " + \
         "\n  ".join(stale)
+
+
+# ── buttons built past ui.buttons ────────────────────────────────────────────
+
+#: The panes and the app-level UI, where a button is a command a person presses and so one of the four kinds.
+#: ``widgets/`` is left out: a reusable widget builds its own parts and knows nothing of the kinds.
+_PANES = ("analyze/", "datasets/", "review/", "ui/", "allwell.py")
+
+
+def _built_by_hand(_path: str, tree: ast.Module):
+    yield from (c for c in ast.walk(tree)
+                if isinstance(c, ast.Call) and call_name(c) in ("QPushButton", "QToolButton"))
+
+
+def _in_a_pane(r: str) -> bool:
+    return (r.startswith(_PANES) or any(f"/{p}" in r for p in _PANES)) and not r.endswith("ui/buttons.py")
+
+
+def _hand_built():
+    return count_sites(_built_by_hand, python_sources(), rel, skip=lambda r: not _in_a_pane(r))
+
+
+def test_a_pane_builds_its_buttons_through_ui_buttons():
+    bad = over_roster(_hand_built(), BUTTON_CONSTRUCTOR)
+    assert not bad, ("a QPushButton or QToolButton built by hand in a pane — build it with ui.buttons:\n  "
+                     + "\n  ".join(bad))
+
+
+def test_the_hand_built_roster_only_describes_sites_that_remain():
+    stale = stale_roster(_hand_built(), BUTTON_CONSTRUCTOR)
+    assert not stale, "lower these roster entries:\n  " + "\n  ".join(stale)

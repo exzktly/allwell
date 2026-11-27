@@ -25,8 +25,6 @@ KINDS = {"primary", "default", "quiet", "destructive"}
 
 #: ``(file, value)`` → how many sites there set that value, and why it is not one of the four yet.
 PENDING: dict[tuple[str, str], tuple[int, str]] = {
-    ("widgets/selection_chip.py", "accent"): (1, "SelectionChip's own variant parameter: a chip, not a button. "
-                                                  "It is the rail's count, which only reports: row D21 makes it plain text"),
 }
 
 _SETTERS = {"set_variant", "set_kind", "_set_variant"}

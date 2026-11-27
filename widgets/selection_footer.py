@@ -36,7 +36,7 @@ class SelectionFooter(QWidget):
         super().__init__(parent)
         self.setObjectName("SelectionFooter")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
+        lay.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
         lay.setSpacing(theme.Spacing.sm)
 
         self._count = QLabel("No wells selected", self)

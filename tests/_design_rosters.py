@@ -70,8 +70,6 @@ STYLE_SHEET: dict[str, int] = {
     "widgets/run_dashboard.py": 1,
     # A saved selection's dot in its own colour (data)
     "widgets/saved_selections_list.py": 1,
-    # The chip's look follows its accent or muted variant (per instance): the rail count chip becomes plain text in D21
-    "widgets/selection_chip.py": 2,
     # The toast's own sheet appended to the app's when it is shown over another window
     "widgets/toast.py": 1,
     # Resets the app's checkbox indicator for the switch it paints itself (scoped to itself)

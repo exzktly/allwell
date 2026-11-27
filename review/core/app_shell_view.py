@@ -656,7 +656,9 @@ def build_ui(win) -> None:
     # the tab contributes no section and no well picker here.
     for _sec in win._ctx.features.rail_sections():
         _frame = win._ctx.widgets.register(_sec.key, QWidget())
-        QVBoxLayout(_frame).setContentsMargins(0, 0, 0, 0)
+        # Inset as the rail's rows are (window style W1): a frame's cards and lists sit inside the rail, not
+        # against its edges.
+        QVBoxLayout(_frame).setContentsMargins(theme.Spacing.sm, 0, theme.Spacing.sm, 0)
         sidebar_layout.addWidget(_frame, _sec.stretch)
         _frame.hide()
     win._ctx.widgets.get("_sidebar_main_frame").setVisible(True)

@@ -98,8 +98,8 @@ FREE_VALUES = frozenset({0, 16777215})
 #     close beside other work. New modules name their size instead, as the
 #     Playground's nanowell window does (``_POPUP_W`` / ``_POPUP_H``).
 #   * ``font-size`` inside QSS strings — the guard reads the AST, so a size
-#     written into a stylesheet f-string is invisible to it. ``selection_chip``
-#     had one and it was found by reading, not by this.
+#     written into a stylesheet f-string is invisible to it. The rail's count
+#     chip had one and it was found by reading, not by this.
 #
 # Both are real gaps. Widening the roster is the fix; doing it means converting
 # the sites first, exactly as the pixel setters were converted.

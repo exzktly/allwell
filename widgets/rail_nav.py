@@ -45,7 +45,6 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from widgets import icons
-from widgets.selection_chip import SelectionChip
 
 
 #: The active row's accent strip is never thinner than this, whatever the font.
@@ -122,7 +121,10 @@ class _RailNavRow(QFrame):
         self._label.setProperty("active", False)
         self._label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        self._chip = SelectionChip("", variant="muted", parent=body)
+        # The trailing count, plain text in the number role (design language D21): a count only reports, and a
+        # chip round it read as something to press.
+        self._chip = QLabel("", body)
+        self._chip.setProperty("textRole", "number")
         self._chip.setVisible(False)
 
         bl.addWidget(self._glyph, 0, Qt.AlignVCenter)

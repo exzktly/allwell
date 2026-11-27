@@ -39,6 +39,8 @@ grows one, and the guard against that kind of drift is not to keep the list.
 """
 from __future__ import annotations
 
+from ui import theme
+
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 #: Registry key for the slot widget itself.
@@ -49,7 +51,8 @@ def build_rail_plate_slot(parent) -> QWidget:
     """The container every rail plate is mounted into. Built once, by the shell."""
     slot = QWidget(parent)
     lay = QVBoxLayout(slot)
-    lay.setContentsMargins(0, 0, 0, 0)
+    # Inset as the rail's rows are (window style W1): the plate sits inside the rail, not against its edges.
+    lay.setContentsMargins(theme.Spacing.sm, 0, theme.Spacing.sm, 0)
     lay.setSpacing(0)
     return slot
 

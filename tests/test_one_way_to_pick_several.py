@@ -22,9 +22,8 @@ OLD_PICKER_IMPORTERS: dict[tuple[str, str], str] = {}
 #: starting ``kept`` is permanent and says why.
 CHECK_LIST_BUILDS: dict[tuple[str, str], str] = {
     ('review/features/nanowell/tab_view.py', '_layers_button'):
-        'pending S19: becomes a row and a multi-select page',
-    ('ui/phone_shell.py', 'PhoneShell._text_size_row'):
-        "pending S23: the phone's text-size choice becomes three plain commands",
+        'kept: the Layers page — a switch per layer, each with its own meaning and its own enabled state (two are '
+        'greyed on a lattice well), not a list of like items picked together',
 }
 
 

@@ -1700,23 +1700,30 @@ def test_scroll_bars_are_a_thumb_wide_in_phone_layout(monkeypatch):
     assert "min-width: 122px" in _qss_rule(sheet, "QScrollBar::handle:horizontal")
 
 
-def test_the_text_size_buttons_follow_the_named_touch_sizes(
-        qapp, app_sheet, monkeypatch):
-    """The ⋯ menu's Text size buttons are TOUCH_ROW_PT × TOUCH_MIN_PT, spaced
-    TOUCH_GAP_PT apart — read from the constants, not restated beside them."""
-    from PySide6.QtWidgets import QPushButton
-    monkeypatch.setattr(phone_layout, "TOUCH_MIN_PT", 50)
-    monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
-    monkeypatch.setattr(phone_layout, "TOUCH_GAP_PT", 11)
+def test_text_size_is_three_plain_commands_with_the_one_in_use_marked(qapp, app_sheet):
+    """The ⋯ menu's Text size is three commands, not a row of buttons inside the
+    menu; the size in use is marked, and choosing one applies it once the menu
+    has closed."""
+    from PySide6.QtWidgets import QMenu
+
+    from widgets.menu_marks import is_current
     win = _window()
     QVBoxLayout(win)
     shell = _shell(win)
-    row = shell._text_size_row().defaultWidget()
-    buttons = row.findChildren(QPushButton, "PhoneTextSizeButton")
-    assert len(buttons) == len(phone_layout.TEXT_SIZES)
-    for b in buttons:
-        assert (b.minimumWidth(), b.minimumHeight()) == (shell.pt(61), shell.pt(50))
-    assert row.layout().spacing() == shell.pt(11)
+    menu = QMenu()
+    actions = shell._add_text_sizes(menu)
+    assert [a.text() for a in actions] == [f"Text size: {phone_layout.TEXT_SIZE_LABEL[s]}"
+                                           for s in phone_layout.TEXT_SIZES]
+    assert not any(a.isCheckable() for a in actions)
+    current = [phone_layout.TEXT_SIZES[i] for i, a in enumerate(actions) if is_current(a)]
+    assert current == [shell._text_size]
+    chosen = []
+    shell.set_text_size = chosen.append
+    other = next(i for i, s in enumerate(phone_layout.TEXT_SIZES) if s != shell._text_size)
+    actions[other].trigger()
+    assert chosen == [], "applied inside the menu's own event loop"
+    _pump(qapp)
+    assert chosen == [phone_layout.TEXT_SIZES[other]]
 
 
 def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):

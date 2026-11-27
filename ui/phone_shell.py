@@ -2786,28 +2786,19 @@ class PhoneShell(QObject):
         self.close_sheets(now=True)
         self.page_changed()
 
-    def _text_size_row(self):
-        """The ⋯ menu's first item: Text size, as three buttons in one row."""
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidgetAction
-        act = QWidgetAction(self._menu)
-        row = QWidget()
-        row.setObjectName("PhoneTextSizeRow")
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(self.pt(16), self.pt(4), self.pt(12), self.pt(4))
-        lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
-        lay.addWidget(QLabel("Text size", row), 1)
+    def _add_text_sizes(self, menu) -> list:
+        """The ⋯ menu's first three entries: *Text size: Small / Medium / Large*, plain commands with the size in
+        use marked (``widgets.menu_marks``) — not a row of buttons inside the menu. The size is applied once the menu
+        has closed, from the event loop's top level, for the reason :meth:`_leave_from_menu` gives."""
+        from widgets.owned_action import owned_action
+        actions = []
         for size in phone_layout.TEXT_SIZES:
-            b = QPushButton(phone_layout.TEXT_SIZE_LABEL[size][0], row)
-            b.setObjectName("PhoneTextSizeButton")
-            b.setCheckable(True)
-            b.setChecked(size == self._text_size)
-            b.setFixedSize(self.pt(phone_layout.TOUCH_ROW_PT),
-                           self.pt(phone_layout.TOUCH_MIN_PT))
-            b.clicked.connect(lambda _c=False, s=size: (self._menu.close(),
-                                                        self.set_text_size(s)))
-            lay.addWidget(b)
-        act.setDefaultWidget(row)
-        return act
+            act = mark_current(owned_action(menu, ""), f"Text size: {phone_layout.TEXT_SIZE_LABEL[size]}",
+                               size == self._text_size)
+            act.triggered.connect(lambda _c=False, s=size: (self._menu.close(),
+                                                            QTimer.singleShot(0, lambda: self.set_text_size(s))))
+            actions.append(act)
+        return actions
 
     def _leave_from_menu(self) -> None:
         """**Desktop layout**, from the ⋯ menu: close the menu, then leave phone layout once the menu and the button
@@ -2838,7 +2829,7 @@ class PhoneShell(QObject):
         from widgets.owned_action import owned_action
         m = self._menu
         m.clear()
-        m.addAction(self._text_size_row())
+        self._add_text_sizes(m)
         m.addSeparator()
         if self._h.reload is not None and self._h.mode() == "review":
             owned_action(m, "Reload dataset").triggered.connect(self._h.reload)

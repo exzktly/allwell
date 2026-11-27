@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import shiboken6
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
+    QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
     QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -60,7 +60,6 @@ from review.features.nanowell.statistics_view import (
 from widgets.control_band import ControlBand
 from widgets.delayed_tooltip import DelayedToolTip
 from widgets.labeled_combo import LabeledComboBox
-from widgets.owned_action import owned_action
 from widgets.spin_box import SpinBox
 
 #: The views the page draws, in the order the switch lists them.
@@ -894,17 +893,16 @@ def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
 
 
 def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
-    """The Extremes view's **Timepoints** menu: which of the well's timepoints the montage shows as columns, each
-    named by its hours as the Timepoint control names it. Fewer columns give larger crops. The ranking timepoint is
-    always shown, so its entry is checked and greyed; *All timepoints* clears the choice."""
+    """The Extremes view's **Timepoints**: which of the well's timepoints the montage shows as columns, each named by
+    its hours as the Timepoint control names it, ticked on the application's one multi-select page in the inspector.
+    Fewer columns give larger crops. The ranking timepoint is always shown, so its row is ticked and greyed; **All**
+    clears the choice."""
+    from review.core import inspector_pages
+
     button = QToolButton(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(_EXTREMES_TPS_TIP)
     button.setProperty("variant", "secondary")
-    button.setProperty("hasMenu", True)
-    menu = QMenu(button)
-    button.setMenu(menu)
     ctx.widgets.register("_nw_extremes_tps_btn", button)
 
     def state():
@@ -912,36 +910,32 @@ def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
         tps, ranked = nwc.shown_timepoint(ctx) if st is not None and st.data is not None else ([], "")
         return st, list(tps), ranked
 
-    def toggle(tp: str, on: bool) -> None:
-        st, tps, ranked = state()
-        shown = set(nwc.extremes_columns(tps, ranked, st.extremes_tps))
-        shown = shown | {tp} if on else shown - {tp}
+    def chosen(keys) -> None:
+        _st, tps, ranked = state()
+        shown = set(keys) | ({ranked} if ranked else set())
         nwc.set_extremes_timepoints(ctx, [] if shown >= set(tps) else [t for t in tps if t in shown])
+        refresh()
 
-    def rebuild() -> None:
+    def open_page() -> None:
         st, tps, ranked = state()
-        menu.clear()
-        every = owned_action(menu, "All timepoints")
-        every.triggered.connect(lambda _=False: nwc.set_extremes_timepoints(ctx, []))
-        menu.addSeparator()
         shown = set(nwc.extremes_columns(tps, ranked, st.extremes_tps if st is not None else []))
         times = st.data.times_h if st is not None and st.data is not None else {}
-        for tp in tps:
-            action = owned_action(menu, timepoint_text(tp, times) + (" (ranked)" if tp == ranked else ""))
-            action.setCheckable(True)
-            action.setChecked(tp in shown)
-            action.setEnabled(tp != ranked)
-            action.setData(tp)
-            action.toggled.connect(lambda on, tp=tp: toggle(tp, on))
+        picker = inspector_pages.open_multi_select(
+            ctx, button, key="nanowell/extremes_timepoints", title="Timepoints",
+            items=[(tp, timepoint_text(tp, times) + (" (ranked, always shown)" if tp == ranked else "")) for tp in tps],
+            checked=[tp for tp in tps if tp in shown], on_change=chosen)
+        if picker is not None:
+            for key, box in zip(picker.keys(), picker.boxes()):
+                box.setEnabled(key != ranked)
 
     def refresh() -> None:
         st, tps, ranked = state()
         shown = nwc.extremes_columns(tps, ranked, st.extremes_tps if st is not None else [])
-        button.setText("Timepoints: all" if len(shown) >= len(tps) else f"Timepoints: {len(shown)} of {len(tps)}")
+        text = "Timepoints: all" if len(shown) >= len(tps) else f"Timepoints: {len(shown)} of {len(tps)}"
+        button.setText(f"{text} ›")
 
-    menu.aboutToShow.connect(rebuild)
-    ctx.widgets.register("_nw_extremes_tps_menu", menu)
-    ctx.widgets.register("_nw_extremes_tps_rebuild", rebuild)
+    button.clicked.connect(lambda _=False: open_page())
+    ctx.widgets.register("_nw_extremes_tps_open", open_page)
     return SimpleNamespace(button=button, refresh=refresh)
 
 
@@ -1104,8 +1098,10 @@ def _popout_window(ctx):
     card.canvas.mpl_connect("motion_notify_event", lambda event: wnc.on_popout_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: wnc.on_popout_scroll(ctx, event))
     ctx.widgets.register("_nw_popout_hover_tip", DelayedToolTip(card.canvas))
+    # Timepoints and Channels open their lists as small windows of the pop-out's own, which hand activation back
+    # to it when they close; the two menus are what the main window took it from.
     window.keep_above_after_choices([ctx.widgets.get_or_none(n) for n in (
-        "_nw_popout_tps_menu", "_nw_popout_channels_menu", "_nw_popout_grid_menu", "_nw_popout_save_menu")])
+        "_nw_popout_grid_menu", "_nw_popout_save_menu")])
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings

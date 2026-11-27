@@ -98,18 +98,26 @@ def _fig_texts(ctx, gid):
 def test_the_montage_shows_only_the_timepoints_chosen_and_always_the_ranked_one(page, qtbot):  # noqa: F811
     _choose_extremes(qtbot, page)
     assert _fig_texts(page, "nw-extremes-tp")[:3] == ["0 h", "5 h", "10 h · ranked"]
-    menu = page.widgets.get("_nw_extremes_tps_menu")
-    page.widgets.get("_nw_extremes_tps_rebuild")()                             # what opening the menu does
-    actions = {a.data(): a for a in menu.actions() if a.isCheckable()}
-    assert all(a.isChecked() for a in actions.values()) and not actions["t_d"].isEnabled()
-    actions["t_a"].setChecked(False)                                           # as a click on it does
+    from tests import _panels
+
+    button = page.widgets.get("_nw_extremes_tps_btn")
+    assert button.menu() is None
+    button.click()                                                             # the one multi-select page
+    picker = _panels.picker(button)
+    boxes = dict(zip(picker.keys(), picker.boxes()))
+    assert all(b.isChecked() for b in boxes.values()) and not boxes["t_d"].isEnabled()
+    boxes["t_a"].setChecked(False)                                             # as a click on it does
     assert page.state.feature_slice("nanowell").extremes_tps == ["t_c", "t_d"]
     assert _fig_texts(page, "nw-extremes-tp")[:2] == ["0 h", "10 h · ranked"]
-    assert page.widgets.get("_nw_extremes_tps_btn").text() == "Timepoints: 2 of 3"
+    assert button.text() == "Timepoints: 2 of 3 ›"
+    picker.none_button.click()                                                 # None still keeps the ranked one
+    assert page.state.feature_slice("nanowell").extremes_tps == ["t_d"]
+    assert _fig_texts(page, "nw-extremes-tp")[:1] == ["10 h · ranked"]
+    nwc.set_extremes_timepoints(page, ["t_c", "t_d"])
     assert any("Timepoints not shown: t_a." in " ".join(t.split()) for t in _fig_texts(page, "nw-extremes-caption"))
     nwc.set_extremes_timepoints(page, [])
     assert _fig_texts(page, "nw-extremes-tp")[:3] == ["0 h", "5 h", "10 h · ranked"]
-    assert page.widgets.get("_nw_extremes_tps_btn").text() == "Timepoints: all"
+    assert page.widgets.get("_nw_extremes_tps_btn").text() == "Timepoints: all ›"
 
 
 def test_each_crop_is_captioned_with_its_nanowell_s_metrics_at_that_timepoint(page, qtbot):  # noqa: F811

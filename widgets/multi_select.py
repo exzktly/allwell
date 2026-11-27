@@ -207,6 +207,11 @@ class MultiSelectButton(QWidget):
         self._opener: Callable[[MultiSelectButton], None] | None = None
         self._page: MultiSelect | None = None
         self._window: QDialog | None = None
+        #: ``face(checked, total) -> str``: what the button reads, when the
+        #: caller words it itself (:meth:`setFaceFormatter`).
+        self._face = None
+        #: Keys always ticked and not to be unticked (a channel always drawn).
+        self._locked: list = []
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -251,6 +256,10 @@ class MultiSelectButton(QWidget):
     def title(self) -> str:
         return self._title
 
+    def text(self) -> str:
+        """What the button reads now."""
+        return self._button.text()
+
     def checkedIndices(self) -> list[int]:
         return [i for i, on in enumerate(self._checked) if on]
 
@@ -267,6 +276,16 @@ class MultiSelectButton(QWidget):
     def applyChecked(self, keys) -> None:
         """The page's ticks changed to *keys*: one ``changed`` for the lot."""
         self.setCheckedData(keys)
+
+    def setFaceFormatter(self, face) -> None:
+        """Word the button through ``face(checked_data, all_data) -> str``."""
+        self._face = face
+        self._refresh_summary()
+
+    def setLocked(self, keys) -> None:
+        """Keep *keys* ticked and their rows disabled: options that are always on."""
+        self._locked = list(keys or [])
+        self._sync_page()
 
     def setOpener(self, opener: Callable[[MultiSelectButton], None] | None) -> None:
         """Show the page through *opener* (an inspector's push) instead of in
@@ -295,6 +314,10 @@ class MultiSelectButton(QWidget):
         self._button.setText(f"{text} {CHEVRON}")
 
     def _refresh_summary(self) -> None:
+        if self._face is not None:
+            self._set_face(self._face(self.checkedData(), list(self._data)))
+            self._button.setToolTip(", ".join(self.checkedLabels()))
+            return
         total = len(self._labels)
         n = sum(self._checked)
         if n == 0:
@@ -361,6 +384,9 @@ class MultiSelectButton(QWidget):
         page._sync_bulk()
         for button in (page.all_button, page.none_button):
             button.setEnabled(self._bulk_enabled())
+        for key, box in zip(page.keys(), page.boxes()):
+            if key in self._locked:
+                box.setEnabled(False)
 
     def _bulk_enabled(self) -> bool:
         """Whether All and None have anything to act on."""

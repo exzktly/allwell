@@ -11,8 +11,12 @@ from PySide6.QtWidgets import QAbstractButton, QApplication
 
 from tests._minimal_shell import build_page
 
-#: Desk widths: the every-page render test's desk screens leave the page about these.
-WIDTHS = (1400, 1284)
+#: The window width measured: with the minimal shell's rail the band gets 1258 px, close to the 1284 px the
+#: every-page render test's desk screen gives these bands. A 1284 px *window* (band ~1140) was measured too, and
+#: Statistics fitted there by about 2 px — so inside the lane, where a worker's earlier tests leave the font a
+#: pixel wider, it failed: that width is narrower than any desk screen gives these pages, and a test that fails on a
+#: pixel of drift measures the drift.
+WIDTHS = (1400,)
 
 
 def _one_row(qtbot, name, dataset):

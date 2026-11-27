@@ -1108,6 +1108,13 @@ _SWEEP_MS = 300
 _P_WATCHED = "_awPhoneWatched"
 #: Dynamic property marking a widget a sweep has already looked at.
 _P_SEEN = "_awPhoneSeen"
+
+#: The phone Share slot's label: worded in the bar (sideways), its glyph alone in
+#: the upright strip, where the page button needs the room.
+SHARE_TEXT = "Share ▾"
+SHARE_GLYPH = "⇪"
+
+
 class PhoneShell(QObject):
     """Owns phone layout's controls and drives the switch both ways."""
 
@@ -1355,7 +1362,9 @@ class PhoneShell(QObject):
         # so the one arrow is the caret in its label (CLAUDE.md §7.12).
         self.share_button = QToolButton()
         self.share_button.setObjectName("PhoneShareButton")
-        self.share_button.setText("Share ▾")
+        self.share_button.setText(SHARE_TEXT)
+        self.share_button.setToolTip("Share: save the figure, copy it, or save its data")
+        self.share_button.setAccessibleName("Share")
         self.share_button.clicked.connect(self.open_share)
 
         self._band_spacer = QWidget()
@@ -1482,6 +1491,12 @@ class PhoneShell(QObject):
             strip_lay.addWidget(self.wells_button)
             strip_lay.addWidget(self.controls_button)
             strip_lay.addWidget(self.share_button)
+        # Upright the strip holds four slots on a screen ~430 px wide, and a page
+        # named "Response Curves" needs ~150 px of it: measured, a worded Share
+        # squeezed the page button to ~105 px. Upright, Share is its glyph alone
+        # (its name in the tooltip and accessible name); sideways, in the bar,
+        # it is worded.
+        self.share_button.setText(SHARE_TEXT if landscape else SHARE_GLYPH)
 
     def strip_buttons(self) -> list[QWidget]:
         """The four permanent slots, in order: page, Wells, Controls, Share."""

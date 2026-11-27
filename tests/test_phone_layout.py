@@ -2386,7 +2386,10 @@ def test_share_pops_the_page_s_own_menu_and_an_entry_reaches_its_command(qapp, a
     shell.set_on(True)
     _pump(qapp)
     shell.refresh()
-    assert shell.share_button.isEnabled() and shell.share_button.text() == "Share ▾"
+    from ui.phone_shell import SHARE_GLYPH
+    # Upright the slot is the glyph alone, named in its tooltip and accessible name: the page button needs the room.
+    assert shell.share_button.isEnabled() and shell.share_button.text() == SHARE_GLYPH
+    assert shell.share_button.accessibleName() == "Share"
     assert shell.share_button.menu() is None, "one arrow: the caret in the label, no Qt indicator"
     shell.open_controls()
     QTest.qWait(250)
@@ -2440,3 +2443,17 @@ def test_the_more_menu_reaches_dataset_tools_and_manage_remote_servers(qapp, app
     _pump(qapp)
     assert ran == ["remotes", "reveal"]
     lists[0].deleteLater()
+
+
+def test_upright_share_is_its_glyph_and_sideways_it_is_worded(qapp, app_sheet):
+    """Measured on a 432 px phone: with Share worded, the page button had 106 px
+    for "Response Curves ▾", which needs 147. Upright, Share is its glyph; the
+    every-page tour measures the page button itself."""
+    from ui.phone_shell import SHARE_GLYPH, SHARE_TEXT
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win)
+    shell._place_page_controls(landscape=False)
+    assert shell.share_button.text() == SHARE_GLYPH
+    shell._place_page_controls(landscape=True)
+    assert shell.share_button.text() == SHARE_TEXT

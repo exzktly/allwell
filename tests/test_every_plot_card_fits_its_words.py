@@ -154,3 +154,23 @@ def test_a_key_with_nowhere_clear_stays_where_its_renderer_put_it():
     fig.canvas.draw()
     box0 = legend.get_window_extent(r)
     assert covered <= sum(figure_fit._overlaps(box0, t.get_window_extent(r)) for t in ax.texts)
+
+
+def test_values_too_crowded_to_read_are_hidden_and_the_panel_says_so_and_they_return():
+    from review.core import figure_fit
+
+    fig = _agg(0.6, 0.6)
+    ax = fig.add_axes((0.1, 0.1, 0.8, 0.8))
+    for i in range(5):
+        for j in range(5):
+            ax.text(i / 5 + 0.1, j / 5 + 0.1, "1.00", fontsize=12, ha="center", va="center", transform=ax.transAxes)
+    values = list(ax.texts)
+    fig.canvas.draw()
+    assert figure_fit.keep_values_apart(fig, fig.canvas.get_renderer())
+    assert not any(t.get_visible() for t in values)
+    assert [t.get_gid() for t in ax.texts].count(figure_fit.HIDDEN_GID) == 1
+    fig.set_size_inches(8.0, 8.0)                   # large enough again
+    fig.canvas.draw()
+    figure_fit.keep_values_apart(fig, fig.canvas.get_renderer())
+    assert all(t.get_visible() for t in values)
+    assert figure_fit.HIDDEN_GID not in [t.get_gid() for t in ax.texts]

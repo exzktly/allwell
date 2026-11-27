@@ -1887,7 +1887,9 @@ class PhoneShell(QObject):
         self._place_page_controls(landscape=on and land)
         if on:
             strip_lay = self._strip.layout()
-            strip_lay.setContentsMargins(self.pt(8), self.pt(4), self.pt(8), self.pt(4))
+            # A narrow edge, not a touch gap: upright, four slots share ~430 px, and 8 pt each side left
+            # "Response Curves ▾" elided to "Respo…ves".
+            strip_lay.setContentsMargins(self.pt(2), self.pt(4), self.pt(2), self.pt(4))
             strip_lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
             self._strip.setFixedHeight(self.pt(phone_layout.TOP_BAR_PT))
             for b in self.strip_buttons():

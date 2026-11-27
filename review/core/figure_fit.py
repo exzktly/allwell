@@ -243,23 +243,51 @@ def keep_values_apart(fig, renderer) -> bool:
     renderer gave it as the size it is fitted from."""
     changed = False
     for ax in fig.axes:
-        texts = [t for t in ax.texts if t.get_visible() and t.get_text().strip() and not hasattr(t, "_aw_source")]
+        texts = [t for t in ax.texts if (t.get_visible() or getattr(t, "_aw_crowd_hidden", False))
+                 and t.get_text().strip() and not hasattr(t, "_aw_source") and t.get_gid() != HIDDEN_GID]
         if len(texts) < 4:
             continue
+        for t in texts:
+            t.set_visible(True)
         for t in texts:
             if getattr(t, "_aw_crowd_out", None) != t.get_fontsize():
                 t._aw_crowd_src = t.get_fontsize()
             t.set_fontsize(t._aw_crowd_src)
+        apart = False
         for share in (1.0, 0.85, 0.7, _SMALLEST):
             for t in texts:
                 t.set_fontsize(t._aw_crowd_src * share)
             boxes = [t.get_window_extent(renderer) for t in texts]
             if not any(_overlaps(a, b) for i, a in enumerate(boxes) for b in boxes[i + 1:]):
+                apart = True
                 break
+        # Cells too small for their values at any size that can be read: the values are hidden and the panel says
+        # so, never left as a blot nor dropped without a word; they come back when the panel is large enough.
+        changed = _say_hidden(ax, texts, not apart) or changed
         for t in texts:
             changed = changed or getattr(t, "_aw_crowd_out", t._aw_crowd_src) != t.get_fontsize()
             t._aw_crowd_out = t.get_fontsize()
     return changed
+
+
+#: The artist id of a panel's note that its values are hidden.
+HIDDEN_GID = "fit-values-hidden"
+
+
+def _say_hidden(ax, texts, hide: bool) -> bool:
+    """Hide *texts* and write the panel's note, or show them and take the note away. Whether anything changed."""
+    was = any(getattr(t, "_aw_crowd_hidden", False) for t in texts)
+    for t in texts:
+        t.set_visible(not hide)
+        t._aw_crowd_hidden = hide
+    notes = [t for t in ax.texts if t.get_gid() == HIDDEN_GID]
+    if hide and not notes:
+        ax.text(0.0, -0.02, "Values not written: the cells are too small at this size.", transform=ax.transAxes,
+                ha="left", va="top", fontsize=7, gid=HIDDEN_GID, clip_on=False, color=texts[0].get_color())
+    elif not hide:
+        for note in notes:
+            note.remove()
+    return was != hide
 
 
 def fit_words(fig, renderer) -> bool:
@@ -267,7 +295,7 @@ def fit_words(fig, renderer) -> bool:
     changed."""
     changed = False
     # A panel's cell values are fitted together by ``keep_values_apart``, not one at a time.
-    values = {id(t) for ax in fig.axes if len(ax.texts) >= 4 for t in ax.texts}
+    values = {id(t) for ax in fig.axes if len(ax.texts) >= 4 for t in ax.texts if t.get_gid() != HIDDEN_GID}
     for t in figure_texts(fig):
         if hasattr(t, "_aw_source") or id(t) in values:    # fits itself as it draws (Nanowells), or a cell value
             continue

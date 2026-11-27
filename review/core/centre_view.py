@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QLabel, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 from review.core.tab_controller import on_tab_change
 from review.core.group_by_controller import (
@@ -226,6 +226,14 @@ def build_centre(win, parent: QWidget) -> None:
         from widgets.control_band import ControlBand
         band = ControlBand(plotting_container)
         win._plotting_band = win._ctx.widgets.register("_plotting_band", band)
+        # The band's sentences — what Group by did, why a plot has no nanowell view — are a help line under it, not
+        # band items: they state rather than choose, and on the band they took a quarter of the row (the user's
+        # decision, tracker §9.1 step 20). Laid out under the band below; empty, it takes no height.
+        notes = QWidget(plotting_container)
+        notes_lay = QHBoxLayout(notes)
+        notes_lay.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, 0)
+        notes_lay.setSpacing(theme.Spacing.md)
+        win._ctx.widgets.register("_plotting_notes", notes)
         # First in the row: Observations (cells | nanowells) changes what every other control lists.
         from review.core.observation_band import build_observation_controls
         build_observation_controls(win._ctx, band)
@@ -379,8 +387,8 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_grouping_note = win._ctx.widgets.register(
             "_plotting_grouping_note", _QLabel(""))
         win._plotting_grouping_note.setProperty("textRole", "help")
-        win._plotting_grouping_grp = band.add_scope(
-            "", win._plotting_grouping_note)
+        notes_lay.addWidget(win._plotting_grouping_note)
+        win._plotting_grouping_grp = win._plotting_grouping_note
         win._plotting_grouping_grp.setVisible(False)
 
         # Colour by / Split by, in a popover rather than beside Group by. They
@@ -477,6 +485,8 @@ def build_centre(win, parent: QWidget) -> None:
         # invoke it without re-importing centre_view.
 
         plotting_container.layout().addWidget(band, 0)
+        notes_lay.addStretch(1)
+        plotting_container.layout().addWidget(notes, 0)
 
         # ── renderer pages (per-tab views in a NamedPageStack — Phase 15) ─
         plotting_nb = NamedPageStack(plotting_container)

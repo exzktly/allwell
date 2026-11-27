@@ -571,9 +571,21 @@ Step log (newest last):
     in the fast lane leaves wrappers the reaper deletes twice — a segfault in the next test — so the fast-lane test
     measures the bands `build_page` returns. `DESIGN_PENDING` entries removed. Commit `69f2700`.
 18. Fast lane on `69f2700`: 14,549 passed, 2 failed — `test_a_page_has_the_three_fixed_actions.py` still held
-    Spatial and Multivariate with a disabled Display; the roster now says they have one. Commit `86…` (next).
+    Spatial and Multivariate with a disabled Display; the roster now says they have one. Commit `f600e66`.
 19. D18 closed: Segmentation's tool row under the image. Next: D14 Plotting bands (prototype: Channel, Property,
-    Timepoints ›, Fold change ›, Color & split ›, then Display · Style · Share), then D16 Nanowells (§6).
+    Timepoints ›, Fold change ›, Color & split ›, then Display · Style · Share), then D16 Nanowells (§6). Commit `5c750e8`.
+20. D14 measured in a full app (mini dataset, 1400 px window, band 801 px): every page carries Channel 129,
+    Property 193, a help sentence 238 (the Group-by note / "Observations: cells — no nanowell view…"), ON threshold
+    175 and the fixed actions 173 before its own controls. **The user's decisions:** ON threshold becomes a row of
+    the inspector's Data tab (as the prototype has it), the band's help sentences become a help line under the band,
+    and every page-specific control — Heat Map's Aggregation, Timepoint, Layout; Distribution's Mode, Bins, Layout,
+    log x, log y, Pool replicates; Scatter's axis channels and properties, Subset, Baseline; Response's X and
+    Series — becomes an inspector row, leaving Channel, Property, Timepoints ›, Fold change ›, Color & split › and
+    Display · Style · Share on the band.
+21. D14 shared step 1: the Plotting band's two sentences — the Group-by note (`_plotting_grouping_note`) and the
+    "Observations: cells — no nanowell view" line (`_plotting_observations_static`) — are in a help line under the
+    band (`_plotting_notes`, built in `centre_view`; `observation_band` falls back to the band only where a harness
+    builds no notes line). 64 tests of those controls green. Next: ON threshold as a Data row.
 
 ## 10. Rows
 

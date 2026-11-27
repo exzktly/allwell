@@ -73,8 +73,15 @@ def build_observation_controls(ctx, band) -> None:
     group = band.add_scope("Observations", toggle)
     group.setVisible(False)
     ctx.widgets.register("_plotting_observations_grp", group)
+    # A sentence, so a help line under the band (``_plotting_notes``) rather than a band item, where a page has one.
     static = QLabel(CELLS_ONLY_TEXT)
-    static_group = band.add_scope("", static)
+    static.setProperty("textRole", "help")
+    notes = ctx.widgets.get_or_none("_plotting_notes")
+    if notes is not None and notes.layout() is not None:
+        notes.layout().addWidget(static)
+        static_group = static
+    else:
+        static_group = band.add_scope("", static)
     static_group.setVisible(False)
     ctx.widgets.register("_plotting_observations_static", static_group)
     # Under Nanowells, one Metric picker stands in for Channel / Property / ON threshold (they describe a cell).

@@ -79,6 +79,10 @@ HOME_ACTIONS = (
 #: fourth pane cannot leave this mapping behind.
 _PANE_INDEX = {"analyze": 1, "datasets": 2}
 
+#: A receipt value's tone for the severity its row carries (``text_roles`` tones: amber, red).
+_RECEIPT_TONE = {"warn": text_roles.ATTENTION, "warning": text_roles.ATTENTION,
+                 "danger": text_roles.FAILURE, "error": text_roles.FAILURE}
+
 _SEVERITY_COLORS = {
     "ok": theme.Colors.success,
     "info": theme.Colors.text_secondary,
@@ -458,14 +462,18 @@ def _paint_masthead(ctx) -> None:
     _widget(ctx, "_home_run_meta").setText("   ·   ".join(bits))
 
 
+#: The notice's severity for each of ``collect.next_step``'s: amber only for what the reader should look at, red
+#: only for what went wrong, and the rest — no dataset, a nudge, nothing to do — information (design language §2.6).
+_NOTICE_SEVERITY = {"warn": "attention", "danger": "failure"}
+
+
 def _paint_next_step(ctx) -> None:
     step = hc.next_step(ctx)
-    label = _widget(ctx, "_home_next_text")
-    label.setText(step["text"])
-    label.setStyleSheet(
-        f"color:{_SEVERITY_COLORS.get(step['severity'], theme.Colors.text_primary)};")
-    button = _widget(ctx, "_home_next_button")
-    button.setText(step["label"])
+    notice = _widget(ctx, "_home_next_step")
+    notice.setSeverity(_NOTICE_SEVERITY.get(step["severity"], "information"))
+    lead, text = step["lead"], step["text"]
+    notice.setMessage(lead, text[len(lead):].strip() if text.startswith(lead) else text)
+    notice.action_button().setText(step["label"])
 
 
 def _plate_has_focus(ctx) -> bool:
@@ -617,15 +625,12 @@ def _tile_widget(parent: QWidget, tile) -> QWidget:
     column.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
                               theme.Spacing.md, theme.Spacing.sm)
     column.setSpacing(theme.Spacing.xs)
-    label = QLabel(tile.label, card)
-    label.setObjectName("HomeTileLabel")
-    column.addWidget(label)
+    column.addWidget(text_roles.field_label(tile.label, card))
     value = QLabel(format_value(tile.value), card)
     if tile.available:
         value.setObjectName("HomeTileValue")
     else:
-        text_roles.set_role(value, text_roles.HELP)
-    if not tile.available:
+        text_roles.show_not_recorded(value)
         value.setToolTip(tile.value.reason)
     column.addWidget(value)
     sub = QLabel(tile.sub, card)
@@ -642,9 +647,7 @@ def _channel_widget(parent: QWidget, chips) -> QWidget:
     column.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
                               theme.Spacing.md, theme.Spacing.sm)
     column.setSpacing(theme.Spacing.xs)
-    label = QLabel("Channels", card)
-    label.setObjectName("HomeTileLabel")
-    column.addWidget(label)
+    column.addWidget(text_roles.field_label("Channels", card))
     row = QHBoxLayout()
     row.setSpacing(theme.Spacing.xs)
     for chip in chips:
@@ -833,19 +836,21 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
         return host
 
     if kind == "receipt":
-        label = QLabel(str(row.get("label") or ""), host)
-        label.setObjectName("HomeTileLabel")
-        line.addWidget(label)
-        value = QLabel(str(row.get("value") or ""), host)
+        line.addWidget(text_roles.field_label(str(row.get("label") or ""), host))
+        value = QLabel(host)
         value.setWordWrap(True)
+        if row.get("value") is None:
+            text_roles.show_not_recorded(value)
+        else:
+            value.setText(str(row["value"]))
         # A receipt line is normally a plain statement of what was set, but a
         # setting can record that a step did not run — a reference-well
         # correction with no well named leaves every frame untouched, and the
         # output is bit-for-bit identical to a corrected one. That reads as
         # ordinary text unless it is coloured like the warning it is.
-        if row.get("severity"):
-            value.setStyleSheet(
-                f"color:{_SEVERITY_COLORS.get(row['severity'], theme.Colors.text_secondary)};")
+        tone = _RECEIPT_TONE.get(row.get("severity") or "")
+        if tone:
+            text_roles.set_role(value, text_roles.BODY, tone=tone)
         line.addWidget(value, 1)
         if row.get("is_default"):
             chip = QLabel("default", host)

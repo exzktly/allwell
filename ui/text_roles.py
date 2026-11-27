@@ -34,6 +34,10 @@ NOT_SET = "not set"
 #: bound a quantity does not have. Not :data:`NOT_SET`, which says a value could be given and has not been: this one
 #: cannot be. Drawn in the same quiet ink, through :func:`show_not_applicable`.
 NOT_APPLICABLE = "n/a"
+#: A value the dataset's own record does not hold — a run parameter an older pipeline did not write, a figure the
+#: record cannot give. Not :data:`NOT_SET` (nobody was asked for it) and not :data:`NOT_APPLICABLE` (it would apply).
+#: Drawn in the same quiet ink, through :func:`show_not_recorded`.
+NOT_RECORDED = "not recorded"
 
 #: The role names, as the ``textRole`` property spells them.
 PAGE_TITLE = "pageTitle"
@@ -125,7 +129,16 @@ def show_value(label: QLabel, value) -> None:
 
 def show_not_applicable(label: QLabel) -> None:
     """Write :data:`NOT_APPLICABLE` into *label*, in the disabled ink an unset value takes."""
-    label.setText(NOT_APPLICABLE)
+    _show_quiet(label, NOT_APPLICABLE)
+
+
+def show_not_recorded(label: QLabel) -> None:
+    """Write :data:`NOT_RECORDED` into *label*, in the disabled ink an unset value takes."""
+    _show_quiet(label, NOT_RECORDED)
+
+
+def _show_quiet(label: QLabel, text: str) -> None:
+    label.setText(text)
     if not label.property("unset"):
         label.setProperty("unset", True)
         label.style().unpolish(label)

@@ -12,7 +12,7 @@ what a layer *does* moved; what moved is that only one of them is on screen.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from ui import theme
 from review.features.home.sample_map._phone import (
@@ -40,7 +40,15 @@ def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     switch = reg.register(SWITCH_KEY, SegmentedControl(frame))
     for layer in LAYERS:
         switch.addSegment(layer, data=layer)
-    outer.addWidget(switch)
+    # Import (groups from a JSON file) beside the switch, quiet: the one command Home's band held, and the groups
+    # it brings in are this tab's (``home.tab_view.build_import_button``).
+    from review.features.home.tab_view import build_import_button
+
+    head = QHBoxLayout()
+    head.setSpacing(theme.Spacing.sm)
+    head.addWidget(switch, 1)
+    head.addWidget(build_import_button(ctx, frame))
+    outer.addLayout(head)
 
     # The role strip is rebuilt per layer rather than three strips being
     # stacked and hidden: the sentence is about what the plate below it means

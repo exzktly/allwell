@@ -10,8 +10,8 @@ TEXT_ROLE: dict[str, int] = {
     # The active well row set in bold by a per-row sheet: the selected-item weight, restyled with the
     # Datasets pages (D24).
     "datasets/concatenate/dashboard.py": 1,
-    # Group rows of the parameter tree set bold: tree items, which the text roles do not reach; the page
-    # becomes label/value rows in D27.
+    # Group rows of the parameter tree set bold: tree items, which the text roles do not reach, in a tree that
+    # shows the whole raw pipeline_info.json (D27 kept it a tree).
     "review/features/home/pipeline_info/tab_view.py": 3,
     # The active stage row set bold by a per-row sheet: the selected-item weight, restyled with the Run card
     # (D22).
@@ -28,17 +28,13 @@ STYLE_SHEET: dict[str, int] = {
     "datasets/concatenate/dashboard.py": 2,
     # The Plotting band's chip-styled Channel, Property and Group-by combos: the band is rebuilt in D14
     "review/core/centre_view.py": 3,
-    # The rail's active-group value, accent while a group is active: the rail is D21
-    "review/core/selection_controller.py": 2,
     # Menu buttons' own menu-indicator hides (CLAUDE.md §7.12)
     "review/core/ui_helpers.py": 2,
     # Each export group's dot, name tag, well chips, solo-well tags and selected border in the group's own colour (data)
     "review/features/batch_export/base_panel.py": 5,
-    # Severity colours of Home's step and QC lines and the plate legend's state swatches (data): Home is D27
-    "review/features/home/controller.py": 5,
-    # Sample Map's active-group value: Home is D27
-    "review/features/home/groups/tab_view.py": 1,
-    # Home › Labels' own sheet: a pane's page, which ui/ may not import to include its rules (D27)
+    # The plate legend's state swatches and markers and each health row's severity dot, in their state colours (data)
+    "review/features/home/controller.py": 3,
+    # Home › Labels' own sheet: a pane's page, which ui/ may not import to include its rules
     "review/features/home/labels/tab_view.py": 1,
     # A channel button filled with the channel's own colour (data)
     "review/features/image_browser/cell_browser/tab_view.py": 1,

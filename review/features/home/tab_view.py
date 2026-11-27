@@ -33,13 +33,12 @@ from review.core.app_shell_view import mirror_tab_widget
 from review.core.selection_controller import import_selections_from_json
 from review.core.ui_helpers import notes_schedule_save
 from widgets.empty_state import entry_row_text
-from widgets.icon_button import IconButton
-from widgets.page_body import build_page_body
 
 from . import collect as hc
 from ._phone import SIDE_BY_SIDE, HomeScroll, watch_layout
 from .plate_panel import build_home_plate, state_color, state_label
 from ui import buttons
+from ui import text_roles
 
 #: The em-dash a figure the page could not obtain renders as.
 DASH = "—"
@@ -98,18 +97,11 @@ def definition_subtabs(ctx) -> tuple[str, ...]:
 
 
 def _card(parent: QWidget, title: str = "") -> tuple[QFrame, QVBoxLayout]:
-    """A titled panel. Returns the frame and the layout its body goes in."""
-    frame = QFrame(parent)
-    frame.setObjectName("HomeCard")
-    outer = QVBoxLayout(frame)
-    outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.md,
-                             theme.Spacing.lg, theme.Spacing.md)
-    outer.setSpacing(theme.Spacing.sm)
-    if title:
-        label = QLabel(title, frame)
-        label.setObjectName("HomeCardTitle")
-        outer.addWidget(label)
-    return frame, outer
+    """A titled card (``widgets.card.Card``). Returns the card and the layout its body goes in."""
+    from widgets.card import Card
+
+    card = Card(title, parent)
+    return card, card.body()
 
 
 def _muted(parent: QWidget, text: str) -> QLabel:
@@ -120,7 +112,7 @@ def _muted(parent: QWidget, text: str) -> QLabel:
 
 
 def build_home_tab(ctx, parent: QWidget) -> None:
-    """Build the page shell: the control band, then the sub-tab notebook.
+    """Build the page shell: the sub-tab notebook, with no band above it.
 
     Overview is built here because it is what the app opens on. The definition
     tabs are built one per event-loop tick by ``controller.drain_home_subtabs``
@@ -131,20 +123,12 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     the user having opened anything. Building them inline instead would put all
     of it on the startup path, which the landing page cannot pay.
     """
-    band, body = build_page_body(parent)
-
-    # Every definition on this page autosaves to the data folder on edit, so
-    # there is no Save button to pair this with: Import merely merges an
-    # external JSON in. It is an action on the page rather than on any one tab,
-    # but it means nothing beside the report, so it is hidden on Overview.
-    import_btn = ctx.widgets.register(
-        IMPORT_KEY, IconButton("plus", band, text="Import"))
-    import_btn.setToolTip(
-        "Import groups from a JSON file. When this dataset already has groups "
-        "you choose whether to add the file's groups beside them or replace "
-        "them.")
-    import_btn.clicked.connect(lambda _=False: import_selections_from_json(ctx))
-    band.add_action(import_btn)
+    # No band: Home's tabs are a report and editors, each carrying its own commands (design language §6), and the
+    # one command the band held — Import, which brings in groups — sits beside Sample Map's layer switch
+    # (``build_import_button``). Left in a band it was an empty strip across every tab but that one.
+    layout = parent.layout() or QVBoxLayout(parent)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
 
     sub_tabs = QTabWidget(parent)
     # One ui/theme.py rule names every nested sub-tab bar in the pane — this one,
@@ -153,7 +137,7 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     sub_tabs.tabBar().setExpanding(False)
     sub_tabs.tabBar().setElideMode(Qt.ElideNone)
     sub_tabs.tabBar().setUsesScrollButtons(True)
-    body.layout().addWidget(sub_tabs, 1)
+    layout.addWidget(sub_tabs, 1)
     ctx.runtime.home.subtabs = sub_tabs
     ctx.runtime.home.built = {}
 
@@ -192,12 +176,23 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     mirror_tab_widget(ctx.window, "Home", sub_tabs)
 
     build_home_overview(ctx, sub_tabs.widget(0))
-    # Decide the band's and the rail plate's state here rather than leaving it to
-    # the activate hook: Home is page 0 and already current when this runs, so no
-    # currentChanged fires and on_tab_change has returned early — the opening
-    # screen would otherwise show an Import button belonging to tabs it is not on.
+    # Decide the page's chrome here rather than leaving it to the activate hook: Home is page 0 and already
+    # current when this runs, so no currentChanged fires and on_tab_change has returned early.
     sync_home_sidebar(ctx)
     drain_home_subtabs(ctx)
+
+
+def build_import_button(ctx, parent: QWidget) -> QWidget:
+    """Import: groups from a JSON file, merged in. Every definition on Home autosaves to the data folder on edit,
+    so there is no Save to pair it with. Sample Map puts it beside its layer switch, and ``sync_home_sidebar``
+    hides it on the Variables layer, since a file's groups are not what a page of variables would take."""
+    button = ctx.widgets.register(IMPORT_KEY, buttons.quiet("Import\u2026", parent))
+    button.setToolTip(
+        "Import groups from a JSON file. When this dataset already has groups "
+        "you choose whether to add the file's groups beside them or replace "
+        "them.")
+    button.clicked.connect(lambda _=False: import_selections_from_json(ctx))
+    return button
 
 
 def build_home_overview(ctx, parent: QWidget) -> None:
@@ -261,6 +256,8 @@ def build_home_overview(ctx, parent: QWidget) -> None:
 # ── masthead ────────────────────────────────────────────────────────────────
 
 def _build_masthead(ctx, page: QWidget, reg) -> QWidget:
+    """The dataset's name as the page title, its path in the number role, the schema and run lines as help, and
+    a quiet Reload at the right."""
     host = QWidget(page)
     row = QHBoxLayout(host)
     row.setObjectName(SIDE_BY_SIDE)
@@ -269,9 +266,10 @@ def _build_masthead(ctx, page: QWidget, reg) -> QWidget:
 
     left = QVBoxLayout()
     left.setSpacing(theme.Spacing.xs)
-    left.addWidget(reg.register("_home_title", QLabel("", host)))
-    reg.get("_home_title").setObjectName("HomeTitle")
-    left.addWidget(reg.register("_home_path", _muted(host, "")))
+    left.addWidget(reg.register("_home_title", text_roles.page_title("", host)))
+    path = reg.register("_home_path", text_roles.number("", host))
+    path.setWordWrap(True)
+    left.addWidget(path)
     left.addWidget(reg.register("_home_schema", _muted(host, "")))
     row.addLayout(left, 1)
 
@@ -283,8 +281,7 @@ def _build_masthead(ctx, page: QWidget, reg) -> QWidget:
     actions.setSpacing(theme.Spacing.xs)
     from .controller import HOME_ACTIONS
     for key, label in HOME_ACTIONS:
-        button = buttons.default(label, host)
-        button.setObjectName("HomeAction")
+        button = buttons.quiet(label, host)
         button.clicked.connect(_action_handler(ctx, key))
         actions.addWidget(button)
         reg.register(f"_home_action_{key}", button)
@@ -303,21 +300,14 @@ def _action_handler(ctx, key: str):
 # ── next step ───────────────────────────────────────────────────────────────
 
 def _build_next_step(ctx, page: QWidget, reg) -> QWidget:
-    frame, layout = _card(page)
-    frame.setObjectName("HomeNextStep")
-    row = QHBoxLayout()
-    row.setObjectName(SIDE_BY_SIDE)
-    row.setSpacing(theme.Spacing.md)
-    # Wraps: the sentence is the page's longest line, and unwrapped it held the
-    # whole page 770 px wide in phone layout.
-    text = reg.register("_home_next_text", QLabel("", frame))
-    text.setWordWrap(True)
-    row.addWidget(text, 1)
-    button = reg.register("_home_next_button", buttons.default("", frame))
-    button.clicked.connect(lambda _c=False: _run_next_step(ctx))
-    row.addWidget(button)
-    layout.addLayout(row)
-    return frame
+    """The one notice on the page, with the one button that does what it asks (design language §6). Its severity
+    follows the step (``controller._paint_next_step``); its sentence wraps and the button moves under it when the
+    page is narrow, so it holds no phone page wider than the screen."""
+    from widgets.notice import Notice
+
+    notice = reg.register("_home_next_step", Notice("", "", page, action_text=" "))
+    notice.actionTriggered.connect(lambda: _run_next_step(ctx))
+    return notice
 
 
 def _run_next_step(ctx) -> None:
@@ -464,8 +454,8 @@ def _build_health_and_receipt(ctx, page: QWidget, reg) -> QHBoxLayout:
 
     health_card, health_layout = _card(page, "Health")
     health_layout.addWidget(reg.register("_home_health", _rows_host(health_card)), 1)
-    validate = buttons.default("Check this dataset now", health_card)
-    validate.setObjectName("HomeAction")
+    # Quiet: the page's one button for this is the notice's, while the record is missing; this one re-checks at any time.
+    validate = buttons.quiet("Check this dataset now", health_card)
     validate.clicked.connect(_action_handler(ctx, "validate"))
     health_layout.addWidget(validate, 0, Qt.AlignLeft)
     reg.register("_home_validate_btn", validate)

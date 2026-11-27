@@ -24,7 +24,8 @@ place. The design language adds one more, decided per page by its row in
 dashboard rather than a plot carries its controls in a card's heading, not in a
 band (§6) — Analyze's output pane became the Run card that way (row D22), and
 the Datasets tool pages, whose band held nothing, lost it (row D24), as did
-Batch Export's modes, whose title row carries Sync from app and Export (row D26).
+Batch Export's modes, whose title row carries Sync from app and Export (row D26),
+and Home, whose one band command, Import, went beside Sample Map's layer switch (row D27).
 Removing an entry any other way is the regression this file exists to catch, so
 a commit that does it says which page went away and which module inherited the
 row, or which tracker row made it a card.
@@ -50,7 +51,6 @@ ADOPTED = (
     "review/features/barplot/tab_view.py",
     "review/features/distribution/tab_view.py",
     "review/features/heatmap/tab_view.py",
-    "review/features/home/tab_view.py",     # Home — the page band + its tabs
     "review/features/lineplot/tab_view.py",
     "review/features/multivariate/tab_view.py",
     "review/features/scatter/agg_tab_view.py",

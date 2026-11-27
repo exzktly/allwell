@@ -326,7 +326,6 @@ def _build_groups(ctx, host: QWidget, column, reg) -> None:
 
 def _action(parent: QWidget, text: str) -> QPushButton:
     button = ui_buttons.default(text, parent)
-    button.setObjectName("HomeAction")
     return button
 
 

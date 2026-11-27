@@ -62,4 +62,6 @@ QTreeWidget#PipelineInfoTree::item:selected {{ background: {c.selected}; color: 
 #DockedSheet {{ background-color: {c.rail}; border-right: 1px solid {c.border_subtle}; }}
 #PhoneBusyOverlay {{ background-color: {c.canvas}; }}
 #PhoneBusyOverlay QLabel {{ color: {c.text_primary}; font-size: {t.h2_size}px; }}
+QLabel#ActiveGroupValue {{ color: {c.text_secondary}; font-size: {t.small_size}px; font-weight: {t.semibold}; }}
+QLabel#ActiveGroupValue[active="true"] {{ color: {c.accent}; font-weight: {t.bold}; }}
 """

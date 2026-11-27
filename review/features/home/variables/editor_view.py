@@ -81,7 +81,6 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     column.addWidget(listing)
 
     add = reg.register("_var_add", ui_buttons.default("Add variable", host))
-    add.setObjectName("HomeAction")
     column.addWidget(add)
 
     body = reg.register("_var_body", QWidget(host))
@@ -150,7 +149,6 @@ def _build_value_list(ctx, body: QWidget, column, reg) -> None:
     entry.setPlaceholderText("0, 0.1, 1 — commas add several")
     add_row.addWidget(entry, 1)
     add = reg.register("_var_value_add", ui_buttons.default("Add", body))
-    add.setObjectName("HomeAction")
     add_row.addWidget(add)
     column.addLayout(add_row)
 
@@ -172,7 +170,6 @@ def _build_value_list(ctx, body: QWidget, column, reg) -> None:
          "Drop this value. Wells holding it become unassigned."),
     ):
         button = reg.register(name, ui_buttons.default(text, body))
-        button.setObjectName("HomeAction")
         button.setToolTip(tip)
         buttons.addWidget(button)
     buttons.addStretch(1)

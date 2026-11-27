@@ -129,9 +129,10 @@ def test_every_side_by_side_row_reads_top_to_bottom_on_a_phone(
 
     _ctx, scroll = _overview(shell_ctx, qtbot)
     rows = scroll.widget().findChildren(QBoxLayout, SIDE_BY_SIDE)
-    # Masthead, next step, plate + notes, plate + legend, health + receipt.
-    assert len(rows) == 5, f"expected the five side-by-side rows, found {len(rows)}"
-    assert [r.direction() for r in rows] == [QBoxLayout.TopToBottom] * 5
+    # Masthead, plate + notes, plate + legend, health + receipt. The next step is a notice, which moves its button
+    # under its sentence by itself when the page is narrow (``widgets.notice``), so it is no row of this kind.
+    assert len(rows) == 4, f"expected the four side-by-side rows, found {len(rows)}"
+    assert [r.direction() for r in rows] == [QBoxLayout.TopToBottom] * 4
 
 
 def test_the_tiles_are_one_row_at_the_desk_and_one_column_on_a_phone(
@@ -163,7 +164,7 @@ def test_leaving_phone_layout_gives_the_desk_back(shell_ctx, qtbot, phone):
     phone_layout.set_on(False)
     apply(ctx)
     rows = scroll.widget().findChildren(QBoxLayout, SIDE_BY_SIDE)
-    assert [r.direction() for r in rows] == [QBoxLayout.LeftToRight] * 5
+    assert [r.direction() for r in rows] == [QBoxLayout.LeftToRight] * 4
     grid = ctx.widgets.get("_home_tiles").layout()
     cells = [grid.getItemPosition(i)[:2] for i in range(grid.count())]
     assert cells == [(0, i) for i in range(grid.count())]
@@ -177,11 +178,11 @@ def test_turning_phone_layout_on_reaches_a_built_overview(shell_ctx, qtbot):
 
     _ctx, scroll = _overview(shell_ctx, qtbot)
     rows = scroll.widget().findChildren(QBoxLayout, SIDE_BY_SIDE)
-    assert [r.direction() for r in rows] == [QBoxLayout.LeftToRight] * 5
+    assert [r.direction() for r in rows] == [QBoxLayout.LeftToRight] * 4
     phone_layout.set_on(True)
     try:
         qtbot.waitUntil(
-            lambda: [r.direction() for r in rows] == [QBoxLayout.TopToBottom] * 5,
+            lambda: [r.direction() for r in rows] == [QBoxLayout.TopToBottom] * 4,
             timeout=2000)
     finally:
         phone_layout.set_on(False)

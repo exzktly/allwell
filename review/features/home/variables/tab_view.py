@@ -169,7 +169,6 @@ def _build_header(ctx, parent: QWidget, reg) -> QWidget:
     row.addStretch(1)
 
     undo = reg.register("_var_undo", buttons.default("↶  Undo", host))
-    undo.setObjectName("HomeAction")
     undo.setToolTip("Put the variables back the way they were before the last "
                     "change on this tab.")
     row.addWidget(undo)

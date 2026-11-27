@@ -1028,7 +1028,7 @@ QLabel#NanowellComputing {{
 QScrollArea#HomeScroll, QScrollArea#HomeScroll > QWidget > QWidget {{
     background: {c.canvas};
 }}
-QFrame#HomeCard, QWidget#HomeTile {{
+QWidget#HomeTile {{
     background: {c.card};
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
@@ -1054,26 +1054,6 @@ QFrame#StatsGroupCard[state="selected"] {{
     border: 1px solid {c.border_subtle};
     border-left: 3px solid {c.accent};
 }}
-QLabel#HomeTitle {{
-    font-size: {t.h2_size}px;
-    font-weight: {t.semibold};
-    color: {c.text_primary};
-}}
-QLabel#HomeCardTitle {{
-    font-size: {t.h3_size}px;
-    font-weight: {t.semibold};
-    color: {c.text_primary};
-}}
-/* The one-line "what needs doing next" row. A left rule rather than a filled
-   background: the severity has to be legible without the row competing with
-   the plate beneath it, and a tinted panel at this width reads as an alert
-   banner even when it is saying that nothing is wrong. */
-QFrame#HomeNextStep {{
-    background: {c.card};
-    border: 1px solid {c.border_subtle};
-    border-left: 3px solid {c.border_strong};
-    border-radius: {r.md}px;
-}}
 /* The two-line strip at the top of Home's Sample Map tab: what this layer of
    the plate means, and where to go when the answer is one of the others. The
    sentence carries the page's ordinary text weight and the frame a hairline
@@ -1084,11 +1064,6 @@ QWidget#HomeRoleStrip {{
 }}
 QLabel#HomeRoleText {{
     font-size: {t.small_size}px;
-    color: {c.text_secondary};
-}}
-QLabel#HomeTileLabel {{
-    font-size: {t.caption_size}px;
-    font-weight: {t.medium};
     color: {c.text_secondary};
 }}
 QLabel#HomeTileValue {{
@@ -1122,16 +1097,6 @@ QPushButton#HomeWellChip {{
     border: none;
     text-decoration: underline;
     padding: 0px;
-}}
-QPushButton#HomeAction {{
-    background: {c.control};
-    border: 1px solid {c.button_edge};
-    border-radius: {r.sm}px;
-    color: {c.text_primary};
-}}
-QPushButton#HomeAction:hover {{
-    background: {c.hover};
-    border-color: {c.border_strong};
 }}
 /* The notes box is styled as prose, not as a form field: no fill and no
    border at rest, so the page reads as something you look at, and a lift on

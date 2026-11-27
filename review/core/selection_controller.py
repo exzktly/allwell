@@ -1090,30 +1090,18 @@ def update_active_group_label(ctx) -> None:
     sel_state = ctx.state.selection
     sid = sel_state.current_selection_id
     sel = next((s for s in sel_state.selections if s.get("id") == sid), None) if sid else None
-    try:
-        from ui import theme as _theme
-    except Exception:
-        _theme = None
     if sel is None:
         lbl.setText("None selected — click a group below to start")
-        if _theme is not None:
-            lbl.setStyleSheet(
-                f"QLabel#ActiveGroupValue {{ "
-                f"color: {_theme.Colors.text_secondary}; "
-                f"font-size: {_theme.Typography.small_size}px; "
-                f"font-weight: 600; }}"
-            )
-        return
-    name = str(sel.get("name") or "(unnamed)")
-    n_wells = sum(1 for w in (sel.get("wells") or []) if w in ctx.state.dataset.well_paths)
-    lbl.setText(f"{name}  ·  {n_wells} well(s)")
-    if _theme is not None:
-        lbl.setStyleSheet(
-            f"QLabel#ActiveGroupValue {{ "
-            f"color: {_theme.Colors.accent}; "
-            f"font-size: {_theme.Typography.small_size}px; "
-            f"font-weight: 700; }}"
-        )
+    else:
+        name = str(sel.get("name") or "(unnamed)")
+        n_wells = sum(1 for w in (sel.get("wells") or []) if w in ctx.state.dataset.well_paths)
+        lbl.setText(f"{name}  ·  {n_wells} well(s)")
+    # The theme's ``QLabel#ActiveGroupValue[active="true"]`` rule draws it in the accent; a dynamic property is
+    # read only on a polish.
+    if bool(lbl.property("active")) != (sel is not None):
+        lbl.setProperty("active", sel is not None)
+        lbl.style().unpolish(lbl)
+        lbl.style().polish(lbl)
 
 
 

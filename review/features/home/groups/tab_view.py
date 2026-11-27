@@ -142,13 +142,9 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     active_lbl = ctx.widgets.register(
         "_rep_active_group_lbl",
         QLabel("None selected — click a group below to start", active_row))
+    # Its rule is in the theme (``ui/component_qss``): the secondary ink, and the accent while a group is active
+    # (``selection_controller.update_active_group_label`` sets ``active``).
     active_lbl.setObjectName("ActiveGroupValue")
-    active_lbl.setStyleSheet(
-        f"QLabel#ActiveGroupValue {{ "
-        f"color: {_theme.Colors.text_secondary}; "
-        f"font-size: {_theme.Typography.small_size}px; "
-        f"font-weight: 600; }}"
-    )
     active_l.addWidget(active_lbl)
     active_l.addStretch(1)
     layout.addWidget(active_row)

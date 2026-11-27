@@ -632,8 +632,10 @@ def run_parameters(ctx) -> list:
     qc = info.get("qc_options") if isinstance(info.get("qc_options"), dict) else {}
     execution = (info.get("execution_options")
                  if isinstance(info.get("execution_options"), dict) else {})
+    # ``None`` where the record holds no value: the page writes "not recorded" (``text_roles.NOT_RECORDED``).
+    method = info.get("segmentation_method")
     rows = [{"label": "Segmentation",
-             "value": str(info.get("segmentation_method") or "—").replace("_", " ")}]
+             "value": str(method).replace("_", " ") if method else None}]
 
     for label, key in (("Object probability", "stardist_prob_thresh"),
                        ("Overlap (NMS)", "stardist_nms_thresh")):
@@ -652,7 +654,7 @@ def run_parameters(ctx) -> list:
 
     background = str(qc.get("background") or "—")
     rows.append({"label": "Background subtraction",
-                 "value": background.replace("_", " ")})
+                 "value": background.replace("_", " ") if qc.get("background") else None})
     rows.extend(_correction_parameter_rows(background, qc, execution,
                                            which="background"))
 
@@ -964,22 +966,21 @@ def next_step(ctx) -> dict:
     reader's sense of where things are.
     """
     if not has_dataset(ctx):
-        return {"severity": "accent", "text": "No dataset open.",
+        return {"severity": "accent", "lead": "No dataset open.", "text": "No dataset open.",
                 "action": "open", "label": "Open a dataset"}
 
     state = record_state(ctx)
     if state == "none":
-        return {"severity": "warn",
-                "text": "This dataset has no completeness record — it was "
-                        "produced before the check existed, or the check could "
-                        "not run.",
+        return {"severity": "warn", "lead": "No completeness record.",
+                "text": "This dataset was produced before the check existed, "
+                        "or the check could not run.",
                 "action": "validate", "label": "Check it now"}
     if state == "skipped":
-        return {"severity": "info",
+        return {"severity": "info", "lead": "Not checked.",
                 "text": "The completeness check was turned off for this run.",
                 "action": "validate", "label": "Check it now"}
     if state == "partial":
-        return {"severity": "warn",
+        return {"severity": "warn", "lead": "Check unfinished.",
                 "text": "The completeness check did not finish, so some wells "
                         "were never read.",
                 "action": "validate", "label": "Check it now"}
@@ -996,21 +997,21 @@ def next_step(ctx) -> dict:
     unstarted = sum(1 for s in cells.values() if s == CELL_INPUT_ONLY)
     no_measurements = sum(1 for s in cells.values() if s == CELL_NO_MEASUREMENTS)
     if failed:
-        return {"severity": "danger",
+        return {"severity": "danger", "lead": "Failures recorded.",
                 "text": f"{failed} well(s) recorded failures during the run.",
                 "action": "complete", "label": "Finish this run"}
     if partial:
-        return {"severity": "warn",
+        return {"severity": "warn", "lead": "Partial wells.",
                 "text": f"{partial} well(s) cover fewer field groups than their "
                         "input held.",
                 "action": "complete", "label": "Finish this run"}
     if no_measurements:
-        return {"severity": "warn",
+        return {"severity": "warn", "lead": "No measurements.",
                 "text": f"{no_measurements} well(s) have images but no "
                         "measurements — an ordinary re-run skips them.",
                 "action": "complete", "label": "Finish this run"}
     if unstarted:
-        return {"severity": "warn",
+        return {"severity": "warn", "lead": "Wells not processed.",
                 "text": (f"{unstarted} well(s) were not reached — the run ended before it processed them."
                          if run_ended_early(ctx) else
                          f"{unstarted} well(s) were staged and never processed."),
@@ -1026,13 +1027,13 @@ def next_step(ctx) -> dict:
     # than no nudge, because the reader who follows it undoes work they have
     # already done.
     if not wells_named_on_figures(ctx):
-        return {"severity": "accent",
+        return {"severity": "accent", "lead": "No sample labels yet.",
                 "text": "No sample labels yet. Naming wells makes every plot "
                         "legible.",
                 "action": "samples", "label": "Define samples"}
     if not work.get("replicates") and not work.get("variables"):
-        return {"severity": "accent",
+        return {"severity": "accent", "lead": "No replicate sets yet.",
                 "text": "No replicate sets yet.",
                 "action": "samples", "label": "Set them up"}
-    return {"severity": "ok", "text": "Nothing needs attention.",
+    return {"severity": "ok", "lead": "Nothing needs attention.", "text": "Nothing needs attention.",
             "action": "plot", "label": "Open Plotting"}

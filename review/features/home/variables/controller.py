@@ -741,7 +741,6 @@ def _paint_chips(ctx, variable) -> None:
         # ``no value``, and "Clear" beside a "Delete this variable" and a
         # "Remove value" was a third destructive word for a third scope.
         clear = buttons.default("No value", host)
-        clear.setObjectName("HomeAction")
         clear.setToolTip("Unassign the selected wells — they go back to being "
                          "ringed and uncounted.")
         clear.clicked.connect(lambda: assign_selected(ctx, None))

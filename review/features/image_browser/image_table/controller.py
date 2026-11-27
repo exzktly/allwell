@@ -955,7 +955,7 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
             cell_widget = QWidget()
             cl = QVBoxLayout(cell_widget)
             cl.setContentsMargins(*[_facet.CELL_MARGIN_PX] * 4)
-            cl.setSpacing(2)
+            cl.setSpacing(_facet.CELL_GAP_PX)
 
             img_label = QLabel(cell_widget)
             img_label.setToolTip(_cell_title(ctx, cell, overlay_chans))

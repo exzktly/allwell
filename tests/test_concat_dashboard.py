@@ -63,7 +63,7 @@ def test_run_dashboard_still_exposes_every_test_facing_attribute(qapp):
     # well is deliberately absent from this list: the per-well rail is gone,
     # its information having moved onto the plate's dials.
     for attr in ("_plate", "_body",
-                 "_toggle", "_rail", "_headline", "_bar"):
+                 "_rail", "_headline", "_bar"):
         assert hasattr(d, attr), f"RunDashboard lost attribute {attr!r}"
     assert callable(d._count)
     assert callable(d._well_color)

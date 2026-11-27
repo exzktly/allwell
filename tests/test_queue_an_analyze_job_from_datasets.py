@@ -1,4 +1,4 @@
-"""Datasets → Job Queue → "+ Add job" → Analyze must reach a form you can fill.
+"""Datasets → Job Queue → "Add job" → Analyze must reach a form you can fill.
 
 Reported: clicking it did nothing. The session opened and a banner was put on
 the Analyze form, but the Analyze form lives in a different pane and nothing
@@ -99,7 +99,7 @@ def test_saving_the_banner_queues_the_whole_form_and_returns_to_the_queue(
 
 
 def test_a_form_run_would_refuse_is_not_queued_and_stays_open(panes, monkeypatch):
-    """The banner's Save is the same act as "+ Queue", so it takes the same
+    """The banner's Save is the same act as "Add to queue", so it takes the same
     gate. Without it a mistyped number was queued and failed at dequeue."""
     import analyze.run_problems as rp
 

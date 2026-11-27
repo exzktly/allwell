@@ -78,7 +78,7 @@ def test_replacing_a_new_job_setup_says_so(qtbot, tmp_path):
     v.shutdown()
 
 
-# ── N2: the page's own "+ Queue" during a setup ──────────────────────────────
+# ── N2: the page's own "Add to queue" during a setup ──────────────────────────────
 
 def test_analyze_s_own_queue_button_keeps_the_setup_s_link(analyze_queue):
     jq, tab, tmp = analyze_queue

@@ -58,7 +58,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -66,6 +66,7 @@ from services import run_journal
 from services.run_detect import DetectionError, add_detected_channels, resolve_detection
 from pipeline import completeness
 from core.safe import swallow, swallowed
+from ui import buttons
 
 #: How long the input field must stay still before anything touches the disk.
 #: ``textChanged`` fires on every keystroke, so a path typed rather than picked
@@ -142,7 +143,7 @@ class AnalyzePreflightMixin:
         It is the quieter of the two by design. The resume strip carries an
         action the user can take right now and is bordered in ``accent``; this
         one states what is already true of the folder and is bordered in
-        ``border``. Their fills are the same, so they read as one family of
+        ``hairline``. Their fills are the same, so they read as one family of
         report rather than as two unrelated pieces of chrome.
         """
         banner = QWidget(parent)
@@ -165,13 +166,13 @@ class AnalyzePreflightMixin:
         actions.setContentsMargins(0, theme.Spacing.xs, 0, 0)
         actions.setSpacing(theme.Spacing.sm)
         actions.addStretch(1)
-        dismiss = QPushButton("Dismiss", row)
+        dismiss = buttons.default("Dismiss", row)
         dismiss.setToolTip(
             "Close this report for the folder in the form. It comes back if "
             "you point somewhere else, or once a run has written here again.")
         dismiss.clicked.connect(self._dismiss_preflight)
         actions.addWidget(dismiss)
-        self._preflight_load_btn = QPushButton("Load these settings", row)
+        self._preflight_load_btn = buttons.default("Load these settings", row)
         self._preflight_load_btn.setToolTip(
             "Fill the form with the settings that produced the output already "
             "in this folder. Reprocessing options are left as you have them.")
@@ -615,10 +616,14 @@ class AnalyzePreflightMixin:
         ``RunSpec`` — every form field, exactly as the user set it — while the
         sidecar carries what the pipeline was passed, which is most of it and
         is all a dataset produced before the journal existed can offer.
+
+        What it loaded, and any field it could not, is written to the raw log and nowhere else, so the log is
+        opened for it (``force_raw_log_open``) — it starts behind Show log.
         """
         out_dir = Path(self._preflight_dir) if self._preflight_dir else None
         if out_dir is None:
             return
+        self.force_raw_log_open()
         info, source = _previous_settings(out_dir)
         if not info:
             self._log_line(

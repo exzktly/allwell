@@ -26,6 +26,29 @@ def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-")
 
 
+def start_window(qapp):
+    """Build the window as ``allwell.main`` does: the figure settings (``startup.mpl_rc``), the bundled fonts,
+    then the shipped theme, then the window.
+
+    The fonts, so the pages are measured in the face the app ships rather than in whatever this machine's
+    fontconfig makes of "Sans Serif" — DejaVu Sans on the CI runner. The theme, because the token classes in
+    ``ui/theme.py`` hold the *blue* baseline until a theme is applied, and only ``allwell.main`` applies one:
+    a window built without this call is painted in a palette no user starts in, and every screenshot taken
+    from it shows that palette. ``apply_startup_palette`` is the function ``allwell.main`` calls: it honours
+    ``ALLWELL_THEME``, so a run can render either palette, and then the palette stored in the run's own
+    settings file; with neither, it applies ``DEFAULT_THEME``, which is what a new user sees.
+    ``tests/test_the_render_harness_shows_the_shipped_theme.py`` holds both halves.
+    """
+    from allwell import AllWellApp, use_bundled_fonts
+    from startup import mpl_rc
+    from ui.palette_setting import apply_startup_palette
+
+    mpl_rc.pin()
+    use_bundled_fonts(qapp)
+    apply_startup_palette()
+    return AllWellApp(None)
+
+
 def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     from PySide6.QtWidgets import QApplication
 
@@ -36,11 +59,6 @@ def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     from widgets.empty_state import EmptyState
 
     qapp = QApplication.instance() or QApplication([])
-    from allwell import AllWellApp, use_bundled_fonts
-
-    # The fonts every launch uses (``allwell.main``), so the pages are measured in the face the app ships rather
-    # than in whatever this machine's fontconfig makes of "Sans Serif" — DejaVu Sans on the CI runner.
-    use_bundled_fonts(qapp)
 
     rect, phone = SCREENS[screen], is_phone(screen)
     shots = os.environ.get("ALLWELL_PAGE_SHOTS")
@@ -49,7 +67,7 @@ def run_case(kind: str, screen: str, workdir: Path) -> list[dict]:
     pages: list[dict] = []
     with FakeScreen(rect):
         data, wells = build(kind, workdir)
-        win = AllWellApp(None)
+        win = start_window(qapp)
         win.show()
         pump(qapp)
         win._review._load_path(data)

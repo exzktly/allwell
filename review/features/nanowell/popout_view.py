@@ -21,6 +21,7 @@ from review.features.nanowell.crop_grid_compute import POPOUT_MAX_COLS, POPOUT_R
 from widgets.menu_marks import mark_current
 from widgets.multi_select import MultiSelectButton
 from widgets.owned_action import owned_action
+from ui import buttons
 
 _TPS_TIP = ("Which of the timepoints the pop-out shows, one panel each (in the Hex layout, one composite each, side "
             "by side). Fewer panels are drawn larger. All shows every timepoint; None clears every tick, so a few can "
@@ -35,11 +36,11 @@ _SAVE_TIP = "Save the nanowell over time as it is drawn here: a figure file, the
 
 
 def _menu_button(parent, name: str, tip: str, ctx) -> tuple[QToolButton, QMenu]:
-    button = QToolButton(parent)
+    button = buttons.tool_button(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(tip)
-    button.setProperty("variant", "secondary")
+    button.setProperty("variant", "default")
     button.setProperty("hasMenu", True)
     menu = QMenu(button)
     button.setMenu(menu)
@@ -163,8 +164,9 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         shapes = [("auto", 0), ("row", 0), ("column", 0)] + [
             ("columns", n) for n in range(2, min(POPOUT_MAX_COLS, n_tps - 1) + 1)]
         for grid, cols in shapes:
-            action = mark_current(owned_action(grid_menu, ""),
-                                  grid_label(grid, cols).removeprefix("Grid: ").capitalize(),
+            # The menu is titled Grid already: its entries drop the label's own lead-in.
+            entry = grid_label(grid, cols).partition(":")[2].strip().capitalize()
+            action = mark_current(owned_action(grid_menu, ""), entry,
                                   st is not None and (st.popout_grid, st.popout_cols) == (grid, cols))
             action.setData((grid, cols))
             action.triggered.connect(lambda _=False, grid=grid, cols=cols: nwc.set_popout_grid(ctx, grid, cols))

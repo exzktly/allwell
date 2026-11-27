@@ -55,3 +55,4 @@ PERF_STATUS.md
 
 # check.py in _Docs/teaching/rare_responders works in a temporary copy here while it runs
 _Docs/teaching/.check_*/
+.claude/worktrees/

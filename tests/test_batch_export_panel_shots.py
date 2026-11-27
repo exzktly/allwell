@@ -1,4 +1,4 @@
-"""Every mode's OUTPUT SETTINGS builds and carries the shared controls — and a
+"""Every mode's Output and Plot forms build and carry the shared controls — and a
 picture of each, for showing someone the interface.
 
 Two things at once, and both are worth having. The **assertions** are the half
@@ -45,7 +45,7 @@ def _panel_for(app, mode):
 
 
 def _fill_axes_demo(panel):
-    """Type something into the AXES block so the shot shows it in use.
+    """Type something into the Axes block so the shot shows it in use.
 
     An empty form shows the controls; a filled one shows what they mean. The
     values are the ones the README uses as its example, so the picture and the
@@ -91,11 +91,11 @@ def test_render_batch_export_panel(loaded_app, mode, stem):
     panel = _panel_for(loaded_app, mode)
     _fill_axes_demo(panel)
 
-    # The right-hand OUTPUT SETTINGS column is what the controls live in; the
-    # left is the plate-map group editor, unchanged by this work.
+    # The right-hand card, the Output and Plot forms, is what the controls live
+    # in; the left is the Groups card with its plate map.
     target = getattr(panel, "_split_right", panel)
     # Wide and tall enough that no row has to overlap its neighbour: the
-    # stacked modes carry four AXES rows more than the single-panel ones, and
+    # stacked modes carry four Axes rows more than the single-panel ones, and
     # a target left at its own size squeezes them into each other.
     target.setMinimumWidth(820)
     target.setMinimumHeight(max(560, target.sizeHint().height() + 40))

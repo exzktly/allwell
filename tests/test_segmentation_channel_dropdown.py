@@ -48,14 +48,17 @@ def test_picking_a_listed_channel_sets_the_segmentation_channel_the_run_uses(tab
     combo.activated.emit(1)
     assert combo.text() == "mCherry"
     assert tab._seg_channel_known, "a picked channel is a real one, as a typed one is"
-    assert tab._seg_channel_note.text() == "mCherry is also one of the channels listed above."
+    assert tab._seg_channel_note.lead() == "mCherry is also one of the channels listed above."
+    assert tab._seg_channel_note.severity() == "information"
 
 
 def test_a_typed_name_that_no_row_lists_is_kept_and_called_a_separate_channel(tab):
     tab._fluor_rows[0][0].setText("GFP")
     tab._nuclear_token_edit.setText("DAPI")
     assert tab._nuclear_token_edit.text() == "DAPI"
-    assert tab._seg_channel_note.text().startswith("DAPI is not one of the channels listed above: it is a separate channel")
+    assert tab._seg_channel_note.lead() == "DAPI is not one of the channels listed above."
+    assert tab._seg_channel_note.text().startswith("It is a separate channel")
+    assert tab._seg_channel_note.severity() == "attention"           # a caution, not grey prose
     assert tab._seg_channel_note.isVisibleTo(tab)
 
 

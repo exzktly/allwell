@@ -20,7 +20,7 @@ friends) need no build-state guard.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
 from widgets.flow_layout import FlowLayout, flow_group
@@ -35,6 +35,7 @@ from review.features.home.cell_gating.controller import (
     cell_gating_optimize_thresh_frac_on,
 )
 from ui import theme
+from ui import buttons
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
 # written inline at a call site).
@@ -121,8 +122,7 @@ def build_optimizer_window(ctx, parent: QWidget) -> QDialog:
         "well under a second either way."
     )
     opt_row_layout.addWidget(flow_group(opt_row, "Max points:", opt_steps))
-    opt_btn = QPushButton("Optimize ThreshFracOn", opt_row)
-    opt_btn.setProperty("variant", "secondary")
+    opt_btn = buttons.default("Optimize ThreshFracOn", opt_row)
     opt_btn.setToolTip(
         "Scan every distinguishable threshold between Min and Max for the "
         "selected channel and apply the one whose separation between the two "
@@ -195,7 +195,7 @@ def build_optimizer_window(ctx, parent: QWidget) -> QDialog:
 
     opt_result_label = reg.register("_cell_gating_opt_result_label", QLabel(
         "Choose two wells and a threshold range, then optimize.", win))
-    opt_result_label.setObjectName("Muted")
+    opt_result_label.setProperty("textRole", "help")
     opt_result_label.setWordWrap(True)
     opt_layout.addWidget(opt_result_label)
     opt_layout.addStretch(1)

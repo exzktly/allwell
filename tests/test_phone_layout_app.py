@@ -116,7 +116,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     shell.menu_button.click()
     _pump(qapp)
     assert drawer.isOpen() and drawer.isVisible()
-    assert shell.menu_button.text() == "✕"
+    assert shell.menu_button.toolTip() == "Close the menu" and not shell.menu_button.text()
     assert drawer.width() == win._review.width() - round(56 * u)
     assert review._sidebar_root.parentWidget() is drawer.contentWidget()
     assert _visible(review._section_nav) and _visible(review._sidebar_plate_slot)
@@ -125,7 +125,9 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     # Right under the top bar, so ☰ and the mode bar stay in reach, and over
     # the strip, whose page menu and Controls belong to the page it hides.
     assert drawer.geometry().top() == review._top_bar.geometry().bottom() + 1
-    assert drawer.geometry().top() < review._h_pane.geometry().top()
+    # And no lower than the page area: with no hairline under the band (window style W1), the page begins
+    # directly under it, where the drawer does.
+    assert drawer.geometry().top() <= review._h_pane.geometry().top()
 
     # Code that used to put the desktop chrome back on its own: a resize
     # re-parks (and re-shows) the rail toggle, a mode switch re-shows Split.
@@ -187,7 +189,9 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     shell._page_menu.actions()[1].trigger()
     _pump(qapp)
     assert shell.page_button.text() == f"{PROGRESS} ▾"
-    assert not _visible(form) and not dash.isCompact() and _visible(analyze._log)
+    assert not _visible(form) and not dash.isCompact()
+    # The log waits behind Show log until a run starts (design language D22), on a phone as at the desk.
+    assert not _visible(analyze._log) and _visible(analyze._raw_log_cb)
     grid = dash._plate.findChild(QWidget)
     assert grid.height() == grid.heightForWidth(grid.width()), \
         "the plate kept the height it had while the strip was compact"
@@ -235,7 +239,8 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert analyze._left_sidebar.parentWidget() is not drawer.contentWidget()
     split = analyze._left_sidebar.parentWidget()
     assert split.orientation() == Qt.Horizontal and split.indexOf(form) == 0
-    assert form.width() == theme.Metrics.rail_w
+    # The desk's own width again: Analyze's form column (design language D22), wider than the rail.
+    assert form.width() == theme.Metrics.form_column_w
     assert run_bar.objectName() != "PhoneRunBar" and form.isAncestorOf(run_bar)
     assert not dash.isCompact()
     assert not drawer.isVisible()
@@ -307,8 +312,8 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         _pump(qapp)
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.text() == "⚙ Controls" and shell.controls_button.isChecked()
-        assert shell._inspector().close_button.text() == "Close"
+        assert shell.controls_button.accessibleName() == "Controls" and shell.controls_button.isChecked()
+        assert shell._inspector().close_button.accessibleName() == "Close"
         # At most 60 % of the window (Plotting's controls fill that on this
         # small screen), and no scrim: the plot above it is what the controls
         # are judged by.
@@ -505,7 +510,7 @@ def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
         assert controls is not None and not _visible(controls)
         assert _visible(shell.controls_button)
         empty = ctx.runtime.image_table.empty_state
-        assert "⚙ Controls" in empty._hint.text()       # not "above"
+        assert "Controls" in empty._hint.text()       # not "above"
         C.image_table_repopulate_dropdowns(ctx)
         review._app_state.image_table.active_channels = {"DAPI", "GFP"}
         C.image_table_apply_dims_preset(ctx, ["well"], ["channel"])
@@ -702,7 +707,7 @@ def test_wells_at_the_foot_opens_the_rail_s_plate_over_the_live_plot(qapp, win, 
         review._set_selected_wells({"A01", "B02"}, commit=True)
         QTest.qWait(500)
         _pump(qapp)
-        assert shell.wells_button.isChecked() and shell._wells_sheet._aw_close.text() == "Close"
+        assert shell.wells_button.isChecked() and shell._wells_sheet._aw_close.accessibleName() == "Close"
         shell.wells_button.click()
         QTest.qWait(400)
         _pump(qapp)

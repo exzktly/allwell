@@ -23,6 +23,6 @@ def draw_resolve_target(ax, region, size_px, point_um) -> None:
     rx = TARGET_RADIUS_PX * abs(right - left) / size_px[0]
     ry = TARGET_RADIUS_PX * abs(bottom - top) / size_px[1]
     x, y = point_um
-    for width, colour, z in ((4.0, Colors.surface, 8), (2.0, Colors.accent, 9)):
+    for width, colour, z in ((4.0, Colors.canvas, 8), (2.0, Colors.accent, 9)):
         ax.add_patch(Ellipse((x, y), 2 * rx, 2 * ry, fill=False, edgecolor=colour, linewidth=width,
                              linestyle=(0, (4, 3)) if z == 9 else "-", zorder=z, gid="nw-resolve-target"))

@@ -153,7 +153,7 @@ def test_close_asks_the_host_and_does_nothing_itself(insp, qtbot):
     insp.close_button.click()
     assert asked == [True]
     assert insp.holds(labels["b"]) and insp.currentKey() == "p"
-    assert insp.close_button.text() == "Close"
+    assert insp.close_button.accessibleName() == "Close" and not insp.close_button.text()
 
 
 def test_page_changed_names_the_page_on_show(insp, qtbot):

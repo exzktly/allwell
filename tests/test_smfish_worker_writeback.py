@@ -1,6 +1,6 @@
 """Regression tests for ``review.features.smfish.worker._write_counts_to_csvs``.
 
-Pins four writer bugs that made Apply Global Threshold appear to do nothing:
+Pins four writer bugs that made Apply global threshold appear to do nothing:
 
 1. **Column-case collision.** The writer wrote the column name as
    ``f"{channel.lower()}_smfish_count"``, but if the upstream CSV used

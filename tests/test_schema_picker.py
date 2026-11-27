@@ -176,7 +176,7 @@ def test_the_rows_share_one_left_edge(qapp):
     for _ in range(5):
         qapp.processEvents()
     widths = {lbl.width() for lbl in picker.findChildren(QLabel)
-              if lbl.objectName() == "Muted"}
+              if (lbl.property("textRole") == "help" and not lbl.property("textTone"))}
     assert len(widths) == 1, f"label column is ragged: {sorted(widths)}"
 
 

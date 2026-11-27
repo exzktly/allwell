@@ -53,7 +53,7 @@ import re
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
-    QAbstractButton, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel,
+    QAbstractButton, QBoxLayout, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel,
     QSizePolicy, QStyle, QStyleOptionButton, QStyleOptionToolButton,
     QStylePainter, QToolButton, QVBoxLayout, QWidget,
 )
@@ -329,10 +329,11 @@ class BandForm:
         prefix dropped, a button painted as its value only. ``""`` for an item
         that describes itself."""
         lay = item.layout()
-        if isinstance(lay, QHBoxLayout):
+        if isinstance(lay, QBoxLayout):
             first = lay.itemAt(0).widget() if lay.count() else None
             # The caption ``add_scope`` bundled, or one a page bundled itself
-            # (a row that starts with a label and holds a control after it).
+            # (a row that starts with a label and holds a control after it), or
+            # the label a ``LabelledField`` sets above its control.
             if isinstance(first, QLabel) and lay.count() > 1 and first.text():
                 stretches = [lay.stretch(i) for i in range(lay.count())]
                 for i in range(1, lay.count()):
@@ -406,14 +407,14 @@ class BandForm:
             w.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             self._undo.append(lambda i=w, s=style: (i.setText(""), i.setToolButtonStyle(s)))
         if isinstance(w, QToolButton) and w.objectName() == "IconButton":
-            # A flat icon button (``IconButton``, the Properties toggle) carries
-            # its own transparent stylesheet, which would leave it the one cell
-            # in the grid without a button's fill and edge. In the sheet it
-            # takes the application's button style like its neighbours; the
-            # band gets its own look back when the form is undone.
-            own = w.styleSheet()
-            w.setStyleSheet("")
-            self._undo.append(lambda i=w, s=own: i.setStyleSheet(s))
+            # A flat icon button (``IconButton``, the Properties toggle) is
+            # transparent, which would leave it the one cell in the grid
+            # without a button's fill and edge. In the sheet it carries
+            # ``sheetButton``, which the phone sheet draws as a button like its
+            # neighbours; the band gets its own look back when the form is undone.
+            w.setProperty("sheetButton", True)
+            self._repolish(w)
+            self._undo.append(lambda i=w: (i.setProperty("sheetButton", None), self._repolish(i)))
         self._watch(w)
 
     @staticmethod

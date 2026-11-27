@@ -22,6 +22,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from ui import text_roles
 
 WELL_STATES = ("pending", "copying", "done", "empty")
 
@@ -34,7 +35,7 @@ def well_color(stage: str) -> str | None:
     if stage == "copying":
         return theme.Colors.warn
     if stage == "pending":
-        return theme.Colors.text_muted
+        return theme.Colors.text_secondary
     return None
 
 
@@ -66,7 +67,6 @@ class SubsetDashboard(PlateProgress):
         self._bar.setValue(0)
         self._build_rail()
         self._headline.setText("Idle")
-        self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
         self._status.setText("")
 
@@ -88,8 +88,7 @@ class SubsetDashboard(PlateProgress):
 
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
-        head = QLabel("Wells", self._rail_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head = text_roles.eyebrow("Wells", self._rail_host)
         self._rail_lay.addWidget(head)
         for state, label in (("pending", "Pending"), ("copying", "Copying"),
                               ("done", "Done"), ("empty", "No match")):
@@ -97,10 +96,9 @@ class SubsetDashboard(PlateProgress):
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w)
             row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(7)
-            row.addWidget(status_dot(well_color(state) or theme.Colors.text_muted))
+            row.setSpacing(theme.Spacing.sm)
+            row.addWidget(status_dot(well_color(state) or theme.Colors.text_secondary))
             nm = QLabel(f"{label}: {n}", row_w)
-            nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)

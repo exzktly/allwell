@@ -349,11 +349,11 @@ def _draw_column_shapes(ctx, ax_mean, ax_frac, wells, colors, xlabels, target_t,
         if not math.isnan(fv):
             ax_frac.scatter([xi], [fv], c=color, s=30, zorder=3, linewidths=0)
         else:
-            ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+            ax_frac.scatter([xi], [0], c=theme.Colors.text_disabled, s=16,
                             marker="x", zorder=3, linewidths=1)
 
     if getattr(ctx.state.plot, "show_threshold_line", False):
-        ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--", alpha=0.5, zorder=1)
+        ax_frac.axhline(0.5, color=theme.Colors.hairline, lw=0.8, ls="--", alpha=0.5, zorder=1)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6
     xlim_hi = (max(xs) + 0.6) if xs else 0.4
     for ax in (ax_mean, ax_frac):
@@ -582,7 +582,7 @@ def draw_beeswarm(
                     cell_vals = cell_vals[np.isfinite(cell_vals)]
 
             if skipped_scale:
-                ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                ax_mean.scatter([xi], [0], c=theme.Colors.text_disabled, s=16,
                                 marker="x", zorder=3, linewidths=1)
             elif cell_vals.size:
                 jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
@@ -603,19 +603,19 @@ def draw_beeswarm(
                 # A mark of the mean, not a series: no line style or marker pref.
                 mean_tick._aw_no_style_override = True
             else:
-                ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                ax_mean.scatter([xi], [0], c=theme.Colors.text_disabled, s=16,
                                 marker="x", zorder=3, linewidths=1)
 
             if frac_val is not None:
                 ax_frac.scatter([xi], [frac_val], c=color, s=30,
                                 zorder=3, linewidths=0)
             else:
-                ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
+                ax_frac.scatter([xi], [0], c=theme.Colors.text_disabled, s=16,
                                 marker="x", zorder=3, linewidths=1)
     finally:
         finish_columns(ax_mean, columns)
     if getattr(ctx.state.plot, "show_threshold_line", False):
-        ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--",
+        ax_frac.axhline(0.5, color=theme.Colors.hairline, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)
     for ax in (ax_mean, ax_frac):
         ax.set_xticks(xs)
@@ -791,7 +791,7 @@ def _no_significance(ctx, ax, reason: str) -> None:
     substitution however many brackets it carries.
 
     Every way this renderer can decline to draw used to be a bare ``return``.
-    Six of them, and only one said anything — so with "Significance: On" showing
+    Six of them, and only one said anything — so with "Show significance" on
     on the toolbar, a plot with no asterisks looked identical whether no test had
     been run, the test was run on another channel, the bars had moved to another
     timepoint, or every comparison genuinely came back drawable and simply had
@@ -1224,8 +1224,8 @@ def draw_grouped_bar_mode(
         items=items,
         threshold=threshold,
         warn_color=theme.Colors.warn,
-        border_color=theme.Colors.border,
-        placeholder_color=theme.Colors.placeholder,
+        border_color=theme.Colors.hairline,
+        placeholder_color=theme.Colors.text_disabled,
         disabled_well_color=theme.Colors.plot_undefined_ink,
         err_bar_color=theme.Colors.err_bar,
         fc_active=bool(ctx.state.plot.fold_change_active),
@@ -1707,7 +1707,7 @@ def draw_per_cell_bar_mode(
     pool_reps = bool(getattr(plot, "bar_pool_replicates", True))
 
     # Build a base (well, color, well_label, cluster_label) sequence for
-    # one timepoint. When rsets are active and "Pooled" is on, collapse each
+    # one timepoint. When rsets are active and "Pool replicates" is on, collapse each
     # replicate set into ONE column with its cells pooled across the set's
     # wells (see ``pool_groups`` below); when off, expand wells inside each
     # rset (keeping the rset rank colour). The cluster_label is used as the
@@ -2004,7 +2004,7 @@ def draw_per_well_n_bars(
                 label_bar(ax_n, xi, bar_val, err_val, draw_err=_draw_err,
                           ci_scale=_ci_scale, fmt=_label_fmt)
         else:
-            ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
+            ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.text_disabled, linewidth=1, edgecolor=theme.Colors.plot_undefined_ink, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)
     ax_n.set_xticklabels(xlabels, rotation=45 if n > 8 else 0, ha="right" if n > 8 else "center", fontsize=7)
     own_xtick_angle(ax_n, 45 if n > 8 else 0, "right" if n > 8 else "center")

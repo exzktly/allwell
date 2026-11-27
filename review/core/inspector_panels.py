@@ -34,6 +34,9 @@ weakly-keyed record here.
 
 from __future__ import annotations
 
+from ui import buttons
+from ui import theme
+
 import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -41,7 +44,7 @@ from typing import Any
 
 import shiboken6
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QSizePolicy, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QSizePolicy, QVBoxLayout, QWidget
 
 from core.safe import swallowed
 from review.core import inspector_service
@@ -105,6 +108,12 @@ def clean_title(text: str) -> str:
     return str(text).replace("▾", "").replace(CHEVRON, "").strip()
 
 
+def short(text: str, limit: int = 16) -> str:
+    """*text* cut to *limit* characters with an ellipsis, for a row's summary: the row on the band is a reminder,
+    its page the detail."""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def make_popover_button(text: str, parent: QWidget, *, ctx=None, tab: str = "display",
                         root: bool = False, summary: Callable[[], str] | None = None,
                         large: bool = False):
@@ -116,9 +125,8 @@ def make_popover_button(text: str, parent: QWidget, *, ctx=None, tab: str = "dis
     current value, which the button shows; *large* asks for the inspector's
     full height (an editor)."""
     title = clean_title(text)
-    btn = QToolButton(parent)
+    btn = buttons.tool_button(parent)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "secondary")
     btn.setProperty(PANEL_PROPERTY, PANEL_ROOT if root else PANEL_ROW)
     btn.setProperty(ROLE_PROPERTY, tab if root else "panel")
     content = QWidget(btn)
@@ -126,7 +134,7 @@ def make_popover_button(text: str, parent: QWidget, *, ctx=None, tab: str = "dis
     content.hide()
     content_layout = QVBoxLayout(content)
     content_layout.setContentsMargins(0, 0, 0, 0)
-    content_layout.setSpacing(6)
+    content_layout.setSpacing(theme.Spacing.sm)
     setattr(btn, _RECORD, Panel(content, tab, bool(root), title, summary, bool(large), ctx))
     _buttons.add(btn)
     refresh(btn)

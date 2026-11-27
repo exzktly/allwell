@@ -15,9 +15,11 @@ shared ``ctx._fc_*`` state so the same selection applies to both tabs.
 
 from __future__ import annotations
 
+from ui import buttons
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QLabel, QWidget, QPushButton,
+    QComboBox, QLabel, QWidget,
 )
 
 
@@ -543,8 +545,8 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     A8: takes ``ctx``; the combos stash per-tab handles on the ctx and write the
     shared fold-change state, so it unwraps the handle once at this boundary.
     """
-    title = QLabel("Fold change:", parent)
-    f = title.font(); f.setBold(True); title.setFont(f)
+    title = QLabel("Fold change", parent)
+    title.setProperty("textRole", "label")
     layout.addWidget(title)
 
     layout.addWidget(QLabel("Control", parent))
@@ -631,9 +633,8 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
 
     # Per-sample control is a row you can see, not only the last entry of the
     # Control combo: pressing it turns the mode on and opens its page.
-    pairs_btn = QPushButton("Per-sample control ›", parent)
+    pairs_btn = buttons.default("Per-sample control ›", parent)
     pairs_btn.setObjectName("FoldChangePairsRow")
-    pairs_btn.setProperty("variant", "secondary")
     pairs_btn.setToolTip("Give each sample its own control, in a table.")
     layout.addWidget(pairs_btn)
 

@@ -12,6 +12,12 @@ API
 * ``setValueWidget(w)`` — put a small preview widget (swatch, label, ...) on the
   right of the header so a collapsed section still shows its state.
 * ``toggled(bool)`` — emitted on expand/collapse.
+* ``CollapsibleSection(title, parent, *, expanded=True, collapsible=True, animated=True)`` — a section that is
+  not *collapsible* is a titled card with no chevron and a header that ignores clicks; one not *animated* shows
+  and hides its body at once, for a caller that reads the body's visibility straight after a toggle.
+* ``addHeaderWidget(w, stretch=0)`` — a widget in the header after the title (an info marker, the section's own
+  switch, a line summarising what the fold hides); its clicks are its own and do not fold the section.
+* ``body()`` / ``chevron()`` — the content widget and the chevron label.
 
 Styled from ``theme`` tokens; chevron and paddings are font/spacing relative.
 """
@@ -97,13 +103,15 @@ class CollapsibleSection(QWidget):
     _CHEVRON_PAGE = "›"   # the header opens a page rather than unfolding
 
     def __init__(self, title: str = "", parent: QWidget | None = None,
-                 *, expanded: bool = True) -> None:
+                 *, expanded: bool = True, collapsible: bool = True, animated: bool = True) -> None:
         super().__init__(parent)
         self.setObjectName("CollapsibleSection")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
-        self._expanded = bool(expanded)
+        self._collapsible = bool(collapsible)
+        self._animated = bool(animated)
+        self._expanded = bool(expanded) or not self._collapsible
         self._opener = None
 
         root = QVBoxLayout(self)
@@ -112,6 +120,9 @@ class CollapsibleSection(QWidget):
 
         self._header = _SectionHeader(title, self)
         self._header.clicked.connect(self._on_header_clicked)
+        if not self._collapsible:
+            self._header.chevron.hide()
+            self._header.setCursor(Qt.ArrowCursor)
 
         self._body = QWidget(self)
         self._body.setObjectName("CollapsibleSectionBody")
@@ -124,13 +135,13 @@ class CollapsibleSection(QWidget):
 
         root.addWidget(self._header)
         root.addWidget(self._body)
+        self._header_extras = 0
 
         self._anim = QPropertyAnimation(self._body, b"maximumHeight", self)
         self._anim.setDuration(170)
         self._anim.setEasingCurve(QEasingCurve.InOutCubic)
         self._anim.finished.connect(self._on_anim_finished)
 
-        self.setStyleSheet(self._build_qss())
         self._apply_state(animate=False)
 
     # ── content API ──────────────────────────────────────────────────────
@@ -150,16 +161,33 @@ class CollapsibleSection(QWidget):
     def setValueWidget(self, widget: QWidget | None) -> None:
         self._header.set_value_widget(widget)
 
+    def addHeaderWidget(self, widget: QWidget, stretch: int = 0) -> None:
+        """Put *widget* in the header after the title and whatever was added before it."""
+        lay = self._header.layout()
+        at = lay.indexOf(self._header.title_label) + 1 + self._header_extras
+        widget.setParent(self._header)
+        lay.insertWidget(at, widget, stretch)
+        self._header_extras += 1
+
+    def body(self) -> QWidget:
+        return self._body
+
+    def chevron(self) -> QLabel:
+        return self._header.chevron
+
+    def header(self) -> QWidget:
+        return self._header
+
     # ── expand/collapse API ──────────────────────────────────────────────
     def isExpanded(self) -> bool:
         return self._expanded
 
     def setExpanded(self, expanded: bool) -> None:
-        expanded = bool(expanded)
+        expanded = bool(expanded) or not self._collapsible
         if expanded == self._expanded:
             return
         self._expanded = expanded
-        self._apply_state(animate=True)
+        self._apply_state(animate=self._animated)
         self.toggled.emit(expanded)
 
     def toggle(self) -> None:
@@ -205,7 +233,8 @@ class CollapsibleSection(QWidget):
         if self._opener is not None:
             self._opener(self)
             return
-        self.toggle()
+        if self._collapsible:
+            self.toggle()
 
     def _content_height(self) -> int:
         return max(0, self._body_layout.sizeHint().height())
@@ -238,37 +267,6 @@ class CollapsibleSection(QWidget):
         else:
             self._body.setVisible(False)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        #CollapsibleSection {{
-            background-color: {c.panel};
-            border: 1px solid {c.border_subtle};
-            border-radius: {r.md}px;
-        }}
-        #CollapsibleSectionHeader {{
-            background-color: transparent;
-            border: none;
-            border-top-left-radius: {r.md}px;
-            border-top-right-radius: {r.md}px;
-        }}
-        #CollapsibleSectionHeader:hover {{
-            background-color: {c.hover};
-        }}
-        #CollapsibleSectionTitle {{
-            color: {c.text_primary};
-            font-size: {t.h3_size}px;
-            font-weight: {t.semibold};
-            background: transparent;
-        }}
-        #CollapsibleSectionChevron {{
-            color: {c.text_secondary};
-            background: transparent;
-        }}
-        #CollapsibleSectionValue, #CollapsibleSectionBody {{
-            background: transparent;
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -304,7 +302,7 @@ if __name__ == "__main__":
     s2.addWidget(QLabel("Cutoff fraction"))
     s2.addWidget(QLineEdit("0.50"))
     vlabel = QLabel("0.50")
-    vlabel.setObjectName("Mono")
+    vlabel.setProperty("textRole", "number")
     s2.setValueWidget(vlabel)
 
     s3 = CollapsibleSection("Annotations", expanded=False)
@@ -317,3 +315,42 @@ if __name__ == "__main__":
     root.resize(340, 420)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    #CollapsibleSection {{
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.md}px;
+    }}
+    #CollapsibleSectionHeader {{
+        background-color: transparent;
+        border: none;
+        border-top-left-radius: {r.md}px;
+        border-top-right-radius: {r.md}px;
+    }}
+    #CollapsibleSectionHeader:hover {{
+        background-color: {c.hover};
+    }}
+    #CollapsibleSectionTitle {{
+        color: {c.text_primary};
+        font-size: {t.h3_size}px;
+        font-weight: {t.semibold};
+        background: transparent;
+    }}
+    #CollapsibleSectionChevron {{
+        color: {c.text_secondary};
+        background: transparent;
+    }}
+    #CollapsibleSectionValue, #CollapsibleSectionBody {{
+        background: transparent;
+    }}
+    /* The plain containers a body's rows are built from (exactly QWidget, not a subclass — a field or a
+       button keeps its own fill): left to the application's QWidget rule they paint the canvas, a dark band
+       across a card. */
+    #CollapsibleSectionBody .QWidget, #CollapsibleSectionHeader .QWidget {{
+        background: transparent;
+    }}
+    """

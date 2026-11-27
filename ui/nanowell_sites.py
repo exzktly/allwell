@@ -29,7 +29,7 @@ from ui.theme import Colors
 
 #: A site's outline colour by the state recorded (or, in Test detection, about to be recorded) for it.
 STATE_COLOURS = {"empty": Colors.success, "measured": Colors.accent, "occluded": Colors.warn,
-                 "clipped": Colors.danger, "unaddressed": Colors.text_muted, "uncounted": Colors.text_secondary}
+                 "clipped": Colors.danger, "unaddressed": Colors.text_secondary, "uncounted": Colors.text_secondary}
 #: The outline of a fused site (on a tile seam, measured from a blended crop), drawn dashed in place of its state's.
 FUSED_COLOUR = Colors.accent2
 #: An address is written only inside a nanowell drawn at least this many screen pixels across.
@@ -55,7 +55,7 @@ def outline_width_px(diameter_px: float) -> float:
 
 def state_colour(state: str) -> str:
     """The outline colour of *state*; the muted text colour for a state with none of its own."""
-    return STATE_COLOURS.get(state, Colors.text_muted)
+    return STATE_COLOURS.get(state, Colors.text_secondary)
 
 
 def paint_site(painter, centre: QPointF, radius: float, state: str, label: str = "", *,

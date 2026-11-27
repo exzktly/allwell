@@ -13,11 +13,14 @@ from review.data.data_loading import (
 )
 from core.safe import swallow
 from review.domain.significance import p_phrase, significance_stars
+from review.features.stats import _result_rows as _rows
+from review.features.stats import results_table_view as _tables
 from review.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
 )
 from review.domain.stats_compute import group_replicate_stats, on_cell_values
 from review.domain.size_classes import class_ratio_not_per_cell, is_class_ratio_column
+from ui import buttons
 
 
 #: Every entry the Test combo offers, in the order it offers them, with what
@@ -701,6 +704,9 @@ def _alternative_test_lines(ctx, *, kind, spec, groups, group_vals, target_t,
 def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     """Run the selected statistical test across all group pairs."""
     app = ctx.window  # transitional: widget-heavy body still reads app._stats_*
+    # A run starts from empty tables: one that declines (no timepoint, too few groups, …) must not leave the
+    # previous run's rows beside its reason.
+    _fill_result_tables(ctx, [], [], {}, False, None)
     tp_str = app._stats_tp_cb.currentText()
     if tp_str in ("—", ""):
         app._stats_write_result("No timepoint selected.")
@@ -829,6 +835,7 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             target_t=target_t, val_col=val_col, threshold=threshold,
             statistic=statistic, use_fov=use_fov)
         app._stats_write_result("\n".join(lines))
+        _fill_result_tables(app._ctx, group_vals, [], {}, False, None)
         stats_refresh_fov_indicator(app._ctx)
         app._stats_fig_frame.setVisible(False)
         return
@@ -850,6 +857,7 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     lines += _format_pairwise_lines(pair_results, adjusted, show_adjusted, effects)
 
     app._stats_write_result("\n".join(lines))
+    _fill_result_tables(app._ctx, group_vals, pair_results, adjusted, show_adjusted, effects)
 
     # N7: store structured pairwise results so the Bar plot can draw significance
     # brackets from the same comparison (text output above is unchanged). Built by
@@ -886,7 +894,7 @@ import copy as _copy
 
 from ui import theme
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MIN_WIDTH
 from review.features.stats.group_card_view import ElidingLabel
@@ -1006,12 +1014,12 @@ def stats_refresh_group_list(ctx) -> None:
     layout = container.layout()
     if layout is None:
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(4, 4, 4, 4)
-        layout.setSpacing(2)
+        layout.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
+        layout.setSpacing(theme.Spacing.xs)
     _clear_layout(layout)
     if not ctx.state.stats.groups:
-        lbl = QLabel("No groups.  Click + Add group to create one.")
-        lbl.setObjectName("Muted")
+        lbl = QLabel("No groups yet. Add one to start.")
+        lbl.setProperty("textRole", "help")
         layout.addWidget(lbl)
         # Floors reset, not left behind. They are derived from the cards a pass
         # builds, so a pass that builds none has no basis for either — and the
@@ -1029,7 +1037,7 @@ def stats_refresh_group_list(ctx) -> None:
         if is_sel:
             card.setProperty("state", "selected")
         hl = QHBoxLayout(card)
-        hl.setContentsMargins(6, 4, 6, 4)
+        hl.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
         dot = QLabel("●")
         dot.setStyleSheet(f"color: {color};")
         hl.addWidget(dot)
@@ -1043,7 +1051,7 @@ def stats_refresh_group_list(ctx) -> None:
         # The part of the card that gives when the column is narrower than the
         # card (``group_card_view``); the rest of the card keeps its size.
         meta = ElidingLabel(f"  ({', '.join(parts)})")
-        meta.setObjectName("Muted")
+        meta.setProperty("textRole", "help")
         hl.addWidget(meta)
         # A bounded gap, not ``addStretch(1)``. On the rail, where this list was
         # 330px wide, a stretch put the rename and delete buttons at the right
@@ -1052,12 +1060,10 @@ def stats_refresh_group_list(ctx) -> None:
         # the row they act on. The row's own width is now its content's.
         hl.addSpacing(theme.Spacing.lg)
         idx = gi
-        ren_btn = QPushButton("✎")
-        ren_btn.setFlat(True)
+        ren_btn = buttons.icon_button("pencil", "Rename this group")
         ren_btn.clicked.connect(lambda _=False, i=idx: stats_grp_rename(ctx, i))
         hl.addWidget(ren_btn)
-        del_btn = QPushButton("✕")
-        del_btn.setFlat(True)
+        del_btn = buttons.icon_button("x", "Delete this group")
         del_btn.clicked.connect(lambda _=False, i=idx: stats_grp_delete(ctx, i))
         hl.addWidget(del_btn)
 
@@ -1429,11 +1435,20 @@ def invalidate_stats_run(ctx) -> None:
     return None
 
 
+def _fill_result_tables(ctx, group_vals, pair_results, adjusted, show_adjusted, effects) -> None:
+    """The Groups and Comparisons tables of a run (``results_table_view``), from the values its report used."""
+    _tables.fill_table(ctx, _tables.GROUPS_KEY, _rows.group_rows(group_vals))
+    _tables.fill_table(ctx, _tables.PAIRS_KEY, _rows.pair_rows(pair_results, adjusted, show_adjusted, effects))
+
+
 def _stats_write_result(ctx, text: str) -> None:
-    """Write *text* into the registered stats result panel (no-op if absent)."""
+    """Write *text* into the registered stats result panel (no-op if absent). Clearing it clears the tables too,
+    so a cleared or declined run shows none of the previous run's rows."""
     txt = ctx.widgets.get_or_none("_stats_result_text")
     if txt is None:
         return
+    if not text:
+        _fill_result_tables(ctx, [], [], {}, False, None)
     txt.setReadOnly(False)
     txt.setPlainText(text or "")
     txt.setReadOnly(True)
@@ -1530,7 +1545,7 @@ def stats_refresh_colors(ctx) -> None:
     app = ctx.window  # transitional: figure handles still on app._stats_*
 
     if hasattr(app, "_stats_fig"):
-        app._stats_fig.set_facecolor(theme.Colors.surface)
+        app._stats_fig.set_facecolor(theme.Colors.canvas)
     if hasattr(app, "_stats_canvas_widget"):
         app._stats_canvas_widget.draw()
 

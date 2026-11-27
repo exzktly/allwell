@@ -72,7 +72,7 @@ _FALLBACK_STOPS: dict[str, list[str]] = {
     "hsv":      ["#ff0000", "#00ff00", "#0000ff"],
     "tab10":    ["#1f77b4", "#ff7f0e", "#2ca02c"],
 }
-_GENERIC_FALLBACK = [theme.Colors.surface, theme.Colors.accent, theme.Colors.accent_fg]
+_GENERIC_FALLBACK = [theme.Colors.canvas, theme.Colors.accent, theme.Colors.on_accent]
 
 
 def _cmap_stops(name: str, n: int = 24) -> list[QColor]:
@@ -121,7 +121,7 @@ class _LutRow(QWidget):
         strip.setMinimumWidth(_STRIP_MIN_W)
         strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lbl = QLabel(name, self)
-        lbl.setObjectName("Mono")
+        lbl.setProperty("textRole", "number")
         lbl.setMinimumWidth(max(80, self.fontMetrics().horizontalAdvance("twilight_shifted")))
         lay.addWidget(strip, 1)
         lay.addWidget(lbl, 0)
@@ -165,7 +165,7 @@ class LutSelector(QWidget):
         self._trigger.setObjectName("LutTrigger")
         self._trigger.setCursor(Qt.PointingHandCursor)
         tl = QHBoxLayout(self._trigger)
-        tl.setContentsMargins(theme.Spacing.xs, 2, theme.Spacing.xs, 2)
+        tl.setContentsMargins(theme.Spacing.xs, 0, theme.Spacing.xs, 0)
         tl.setSpacing(theme.Spacing.sm)
         self._trigger_strip = GradientStrip(_cmap_stops(self._lut), reversed=self._reversed)
         self._trigger_strip.setFixedHeight(max(12, round(self.fontMetrics().height() * 0.85)))
@@ -174,7 +174,7 @@ class LutSelector(QWidget):
         self._trigger_strip.setMinimumWidth(_TRIGGER_STRIP_MIN_W)
         self._trigger_strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._trigger_name = QLabel(self._lut, self._trigger)
-        self._trigger_name.setObjectName("Mono")
+        self._trigger_name.setProperty("textRole", "number")
         # Protect the name from shrinking below its text so it's always readable.
         self._trigger_name.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         tl.addWidget(self._trigger_strip, 1)
@@ -184,7 +184,8 @@ class LutSelector(QWidget):
 
         self._reverse_btn = QToolButton(self)
         self._reverse_btn.setObjectName("LutReverse")
-        self._reverse_btn.setText("⇄")
+        from widgets import icons
+        self._reverse_btn.setIcon(icons.make_icon("arrow-left-right", 14))
         self._reverse_btn.setCheckable(True)
         self._reverse_btn.setChecked(self._reversed)
         self._reverse_btn.setCursor(Qt.PointingHandCursor)
@@ -201,7 +202,6 @@ class LutSelector(QWidget):
         lay.addWidget(self._reset_btn)
 
         self._list: QWidget | None = None
-        self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
     def setLut(self, name: str, reversed: bool = False) -> None:
@@ -270,7 +270,7 @@ class LutSelector(QWidget):
         iv.setSpacing(theme.Spacing.xs)
         for cat, names in _CATEGORIES.items():
             hdr = QLabel(cat.upper())
-            hdr.setObjectName("Caption")
+            hdr.setProperty("textRole", "label")
             hdr.setProperty("lutCategory", True)
             iv.addWidget(hdr)
             self._cat_headers.append(hdr)
@@ -311,42 +311,6 @@ class LutSelector(QWidget):
         self.listPicked.emit()       # the host leaves the list's page
 
     # ── style ────────────────────────────────────────────────────────────
-    def _build_qss(self) -> str:
-        c, r, t = theme.Colors, theme.Radii, theme.Typography
-        return f"""
-        #LutSelector {{ background: transparent; }}
-        QPushButton#LutTrigger {{
-            background-color: {c.panel_elevated};
-            border: 1px solid {c.border};
-            border-radius: {r.sm}px;
-            padding: 2px 4px;
-            text-align: left;
-        }}
-        QPushButton#LutTrigger:hover {{ border-color: {c.border_strong}; }}
-        QPushButton#LutTrigger QLabel#Mono {{
-            color: {c.text_secondary};
-            font-family: {t.family_mono};
-            font-size: {t.small_size}px;
-        }}
-        QToolButton#LutReverse, QToolButton#LutReset {{
-            background-color: {c.panel_elevated};
-            border: 1px solid {c.border};
-            border-radius: {r.sm}px;
-            color: {c.text_secondary};
-            padding: 3px 8px;
-            font-size: {t.small_size}px;
-        }}
-        QToolButton#LutReverse:hover, QToolButton#LutReset:hover {{
-            background-color: {c.hover}; color: {c.text_primary};
-        }}
-        QToolButton#LutReverse:checked {{
-            background-color: {c.accent_dim}; border-color: {c.accent}; color: {c.text_primary};
-        }}
-        #LutRow {{ background: transparent; border-radius: {r.xs}px; }}
-        #LutRow:hover {{ background-color: {c.hover}; }}
-        #LutRow QLabel#Mono {{ color: {c.text_secondary}; font-family: {t.family_mono}; font-size: {t.small_size}px; }}
-        QLabel#Caption[lutCategory="true"] {{ color: {c.text_muted}; padding-top: {theme.Spacing.xs}px; }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -363,7 +327,7 @@ if __name__ == "__main__":
     outer.setContentsMargins(pad, pad, pad, pad)
     outer.setSpacing(theme.Spacing.md)
     title = QLabel("LutSelector")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -375,7 +339,7 @@ if __name__ == "__main__":
     outer.addLayout(form)
 
     echo = QLabel("(pick a LUT / toggle reverse)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     lut.lutChanged.connect(lambda n, rv: echo.setText(f"GFP LUT → {n}{' (reversed)' if rv else ''}"))
     lut2.lutChanged.connect(lambda n, rv: echo.setText(f"RFP LUT → {n}{' (reversed)' if rv else ''}"))
@@ -384,3 +348,41 @@ if __name__ == "__main__":
     root.resize(460, 220)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, r, t = theme.Colors, theme.Radii, theme.Typography
+    return f"""
+    #LutSelector {{ background: transparent; }}
+    QPushButton#LutTrigger {{
+        background-color: {c.control};
+        border: 1px solid {c.field_edge};
+        border-radius: {r.sm}px;
+        padding: 2px 4px;
+        text-align: left;
+    }}
+    QPushButton#LutTrigger:hover {{ border-color: {c.text_secondary}; }}
+    QPushButton#LutTrigger QLabel[textRole="number"] {{
+        color: {c.text_secondary};
+        font-family: {t.family_mono};
+        font-size: {t.small_size}px;
+    }}
+    QToolButton#LutReverse, QToolButton#LutReset {{
+        background-color: {c.control};
+        border: 1px solid {c.button_edge};
+        border-radius: {r.sm}px;
+        color: {c.text_secondary};
+        padding: 3px 8px;
+        font-size: {t.small_size}px;
+    }}
+    QToolButton#LutReverse:hover, QToolButton#LutReset:hover {{
+        background-color: {c.hover}; color: {c.text_primary};
+    }}
+    QToolButton#LutReverse:checked {{
+        background-color: {c.selected}; border-color: {c.accent}; color: {c.text_primary};
+    }}
+    #LutRow {{ background: transparent; border-radius: {r.xs}px; }}
+    #LutRow:hover {{ background-color: {c.hover}; }}
+    #LutRow QLabel[textRole="number"] {{ color: {c.text_secondary}; font-family: {t.family_mono}; font-size: {t.small_size}px; }}
+    QLabel[textRole="label"][lutCategory="true"] {{ color: {c.text_secondary}; padding-top: {theme.Spacing.xs}px; }}
+    """

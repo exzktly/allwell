@@ -172,7 +172,7 @@ def _gap_above_and_below(tab) -> tuple[int, int]:
     """Pixels between the visible widget above the parameter area and the area,
     and between the area and the visible row after it — laid out, as drawn.
     (Above it sits the Segmentation channel row, which Label-free hides, so the
-    nearest *visible* widget is the one that counts; it was "+ Add channel"
+    nearest *visible* widget is the one that counts; it was "Add channel"
     before the method settings moved into their own Segmentation section.)"""
     from PySide6.QtWidgets import QApplication
 
@@ -192,7 +192,7 @@ def _gap_above_and_below(tab) -> tuple[int, int]:
 
 
 def test_label_free_leaves_no_gap_below_add_channel(styled_tab):
-    """Reported: a tall blank gap below "+ Add channel" with Label-free chosen.
+    """Reported: a tall blank gap below "Add channel" with Label-free chosen.
     The stack was laid out at its tallest page's wrapped-text height (Cellpose's)
     with Label-free's short page centred in it: 45 px blank above and below.
     Visiting Cellpose first, since that is the page whose height it kept."""

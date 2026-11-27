@@ -6,16 +6,15 @@ budgets, and because these members are one job that is neither form-building
 nor run-driving. The form gathers the settings a run is launched with, the run
 mixins start it and drain its queue; this shows what the run then said.
 
-* ``_build_log`` — the "Pipeline Output" band (the raw-log toggle and Clear)
+* ``_build_log`` — the "Pipeline output" band (the raw-log toggle and Clear)
   over the log view itself.
-* ``_on_toggle_raw_log`` — reveal or hide that view. It is open at build; the
-  toggle is there to put it away.
+* ``_on_toggle_raw_log`` — reveal or hide that view. It starts hidden, behind
+  Show log, until a run starts.
 * ``force_raw_log_open`` / ``restore_raw_log`` — open that view on the user's
-  behalf when a run fails, since the sentence explaining why is written here
-  and nowhere else they can see, then hand the toggle back at the next run
-  unless they have since made the choice their own. Only reachable once the
-  user has closed the view themselves, which is the whole of what they are for
-  now that it starts open.
+  behalf when a run starts or fails, or when loading a run's settings reports
+  what it could not restore, since those sentences are written here and nowhere
+  else they can see; then hand the toggle back after a clean run unless the
+  user has since made the choice their own.
 * ``_surface_run_failure`` — the whole outcome path: the dashboard's failed or
   cancelled state, the raw log, and unfolding whichever form section the
   message names.
@@ -39,7 +38,7 @@ import sys as _sys
 from core.log_mirror import mirror_line
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QLabel, QPushButton, QTextEdit, QWidget,
+    QLabel, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from pipeline import completeness
@@ -48,6 +47,7 @@ from core.safe import swallowed
 from widgets.separator import build_hline_separator
 from widgets.run_dashboard import RunDashboard
 from analyze.slurm_job_view import SlurmJobIndicator
+from ui import buttons
 
 
 #: Longest failure text the dashboard headline takes before it is cut back.
@@ -159,46 +159,34 @@ class AnalyzeLogPaneMixin:
         card.setVisible(True)
 
     def _build_log(self, parent: QWidget) -> None:
-        # The same control band every Review page carries, so switching modes
-        # never moves the first row: the pane's title is scope, the raw-log
-        # toggle and Clear are actions.
-        from widgets.page_body import build_page_body
-        band, body = build_page_body(parent)
-        rl = body.layout()
-        rl.setSpacing(0)
-
-        title = QLabel("Pipeline Output", band)
-        band.add_scope("", title)
-        # The dashboard above is the summary; the log is where several things
-        # are said and nowhere else — why a run refused to start, the `errors/`
-        # folder a partial run points at, the scheduler's queue-wait
-        # breadcrumbs, the volume that filled. So it is open to begin with and
-        # the toggle is there to put it away, not to find it.
-        #
-        # Ticked before the signal is connected, deliberately: the handler
-        # below shows `self._log` and `self._log_sep`, neither of which exists
-        # until further down this method. It would survive that (both are read
-        # through `getattr`), but a build order that only works by accident is
-        # a trap for whoever moves these lines next.
-        self._raw_log_cb = QCheckBox("Show raw log", band)
-        self._raw_log_cb.setToolTip("Show the full per-image pipeline log beneath the progress dashboard")
-        self._raw_log_cb.setChecked(True)
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        band.add_action(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", band)
-        clear_btn.setProperty("variant", "secondary")
+        # The Run card (design language §6, *Analyze*): its title, a quiet Clear and the log's own toggle, then
+        # the last run's summary, the run dashboard and the raw log. The log is behind "Show log" until a run
+        # starts — the dashboard is the summary, and a run's start shows the log (``_set_running_ui_state``),
+        # as a failure does (``force_raw_log_open``).
+        from widgets.card import Card
+        outer = QVBoxLayout(parent)
+        outer.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+        outer.setSpacing(0)
+        # A command that names the state it moves to: "Show log", then "Hide log" (the prototype's own rule,
+        # Nielsen Norman Group). A checkable tool button, so its state is the log's and nothing else's.
+        self._raw_log_cb = buttons.tool_button(parent, buttons.QUIET)
+        self._raw_log_cb.setCheckable(True)
+        self._raw_log_cb.setToolTip("The full per-image pipeline log, beneath the run's progress")
+        clear_btn = buttons.quiet("Clear", parent)
         clear_btn.clicked.connect(self._clear_log)
-        band.add_action(clear_btn)
-        # No separator under the band — ``#ControlBand`` paints its own
-        # border-bottom hairline, so the rule that sat here was a second one.
+        card = Card("Run", parent, commands=(clear_btn, self._raw_log_cb))
+        outer.addWidget(card)
+        outer.addStretch(1)       # the card hugs the dashboard until the log is shown, then fills the pane
+        self._run_card, self._run_card_outer = card, outer
+        rl = card.body()
+        rl.setSpacing(theme.Spacing.sm)
 
         # Idle last-run summary (C4): a compact readout of the most recent run
         # so the pane isn't blank when nothing's running. Hidden during a run
         # and when there's no previous run to describe.
-        self._last_run_card = QLabel("", parent)
-        self._last_run_card.setObjectName("Muted")
+        self._last_run_card = QLabel("", card)
+        self._last_run_card.setProperty("textRole", "help")
         self._last_run_card.setWordWrap(True)
-        self._last_run_card.setContentsMargins(12, 6, 12, 6)
         self._last_run_card.setVisible(False)
         rl.addWidget(self._last_run_card)
         self._refresh_last_run_summary()
@@ -206,17 +194,17 @@ class AnalyzeLogPaneMixin:
         # Visual run dashboard — the single place run progress is reported:
         # status + ETA (header), overall % (headline + bar), per-stage rail and
         # the live per-well plate map. The raw log sits beneath it.
-        self._dashboard = RunDashboard(parent)
+        self._dashboard = RunDashboard(card, title="")    # the card is titled "Run"
         # Lit while this run holds an open Slurm job, its tooltip the node: in the run's own status line, which is
         # on screen for the whole run, rather than in the form above it.
         self._slurm_indicator = SlurmJobIndicator(self._dashboard)
         self._dashboard.add_header_widget(self._slurm_indicator)
         rl.addWidget(self._dashboard)
 
-        self._log_sep = build_hline_separator(parent)
+        self._log_sep = build_hline_separator(card)
         rl.addWidget(self._log_sep)
 
-        self._log = QTextEdit(parent)
+        self._log = QTextEdit(card)
         self._log.setReadOnly(True)
         self._log.setLineWrapMode(QTextEdit.NoWrap)
         # Cap the QTextDocument so a multi-hour pipeline can't grow it to
@@ -230,8 +218,9 @@ class AnalyzeLogPaneMixin:
         self._log.setFont(font)
         rl.addWidget(self._log, 1)
 
-        # Sync the widgets to the checkbox rather than to a second copy of the
-        # answer: the default is stated once, where the box is built.
+        # Connected after the log exists, then synced to the button's own state: the default (hidden) is stated
+        # once, where the button is built.
+        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
         self._on_toggle_raw_log(self._raw_log_cb.isChecked())
 
     def _on_toggle_raw_log(self, show: bool) -> None:
@@ -244,16 +233,23 @@ class AnalyzeLogPaneMixin:
         for w in (getattr(self, "_log", None), getattr(self, "_log_sep", None)):
             if w is not None:
                 w.setVisible(bool(show))
+        toggle = getattr(self, "_raw_log_cb", None)
+        if toggle is not None:
+            toggle.setText("Hide log" if show else "Show log")
+        card, outer = getattr(self, "_run_card", None), getattr(self, "_run_card_outer", None)
+        if card is not None and outer is not None:
+            outer.setStretch(outer.indexOf(card), 1 if show else 0)
+            outer.setStretch(outer.count() - 1, 0 if show else 1)
 
     def force_raw_log_open(self) -> bool:
         """Reveal the raw log on the user's behalf, remembering that we did.
 
-        Returns True when the toggle actually moved, which happens only when
-        the user had closed the view — it starts open. A failure writes its
-        reason into the log view and nowhere else, so re-opening it is the only
-        way that reason reaches the screen for someone who had put it away; but
-        closing it was their choice, so the change is recorded rather than
-        kept, and the next run calls ``restore_raw_log`` to hand it back.
+        Returns True when the toggle actually moved, which happens whenever the
+        view is hidden — it starts hidden. A failure, a run's progress and a
+        settings load write into the log view and nowhere else, so opening it
+        is the only way those reach the screen; the change is recorded rather
+        than kept, and a clean run's end calls ``restore_raw_log`` to hand it
+        back.
         """
         cb = getattr(self, "_raw_log_cb", None)
         if cb is None or cb.isChecked():
@@ -282,7 +278,7 @@ class AnalyzeLogPaneMixin:
             "WARNING": theme.Colors.warn,
             "ERROR":   theme.Colors.danger,
             "DONE":    theme.Colors.success,
-            "CMD":     theme.Colors.text_muted,
+            "CMD":     theme.Colors.text_secondary,
         }.get(tag, theme.Colors.text_primary)
 
     def _log_line(self, text: str, tag: str = "INFO") -> None:

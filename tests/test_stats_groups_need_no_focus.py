@@ -1,7 +1,7 @@
 """Defining a comparison group takes no click into the Statistics pane.
 
 Reported: in Split View with plots on the left and Statistics on the right, and
-no replicate sets defined on Home, ``+ Add`` made a group with no members and
+no replicate sets defined on Home, ``Add`` made a group with no members and
 paid no attention to the wells picked on the plate. The user had to click the
 Statistics pane first — a gesture unrelated to the task, on a panel they were
 already looking at.
@@ -11,7 +11,7 @@ picker (``review/core/rail_plate.py``) and it follows the focused pane, so
 the plate on screen was the shared one, which selects wells to plot. The plate
 that paints wells into a comparison group belonged to the Statistics rail
 section and was hidden. Two plates, identical to look at, opposite meanings, and
-nothing on screen naming which was which — so ``+ Add`` created a group the
+nothing on screen naming which was which — so ``Add`` created a group the
 visible selection could never reach.
 
 The fix is not a label. The comparison-group editor is part of the Statistics

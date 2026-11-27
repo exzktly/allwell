@@ -27,6 +27,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from ui import text_roles
 
 # Phase-name column in the rail, so every row's bar starts at one x.
 _PHASE_LABEL_W = 74
@@ -71,7 +72,6 @@ class ConcatDashboard(PlateProgress):
         self._plate.setEnabledWells([])
         self._build_rail(); self._build_legend()
         self._headline.setText("Idle")
-        self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText(""); self._status.setText("")
 
     def set_wells(self, well_ids) -> None:
@@ -132,7 +132,7 @@ class ConcatDashboard(PlateProgress):
         if stage == "merging":
             return theme.Colors.warn
         if stage == "pending":
-            return theme.Colors.text_muted
+            return theme.Colors.text_secondary
         return None
 
     def _well_tooltip(self, well_id: str) -> str:
@@ -151,16 +151,14 @@ class ConcatDashboard(PlateProgress):
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
         self._rail = {}
-        head = QLabel("Phase", self._rail_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head = text_roles.eyebrow("Phase", self._rail_host)
         self._rail_lay.addWidget(head)
         for key, label in _PHASES:
             row_w = QWidget(self._rail_host)
-            row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(7)
-            dot = status_dot(theme.Colors.text_muted)
+            row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(theme.Spacing.sm)
+            dot = status_dot(theme.Colors.text_secondary)
             row.addWidget(dot)
             nm = QLabel(label, row_w); nm.setFixedWidth(_PHASE_LABEL_W)
-            nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = cnt = None
             if key == "merge":
@@ -169,7 +167,7 @@ class ConcatDashboard(PlateProgress):
                 bar.setTextVisible(False); bar.setFixedSize(_PHASE_BAR_W, _PHASE_BAR_H)
                 row.addWidget(bar)
                 cnt = QLabel("0/0", row_w); cnt.setFixedWidth(_PHASE_COUNT_W)
-                cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
+                cnt.setProperty("textRole", "label")
                 row.addWidget(cnt)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)
@@ -194,7 +192,7 @@ class ConcatDashboard(PlateProgress):
             elif active:
                 color = theme.Colors.warn
             else:
-                color = theme.Colors.text_muted
+                color = theme.Colors.text_secondary
             dot.setStyleSheet(f"background:{color}; border-radius:5px;")
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};" + ("font-weight:700;" if active else ""))
             if key == "merge" and bar is not None:
@@ -203,7 +201,7 @@ class ConcatDashboard(PlateProgress):
 
     def _legend_items(self):
         return "Wells", [
-            (theme.Colors.text_muted, "pending"),
+            (theme.Colors.text_secondary, "pending"),
             (theme.Colors.warn, "merging"),
             (theme.Colors.success, "merged"),
             (theme.Colors.accent, "merged — no CSV on one side"),

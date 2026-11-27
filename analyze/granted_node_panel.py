@@ -22,7 +22,7 @@ import threading
 import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QVBoxLayout, QWidget
 
 from core.safe import swallow
 from services.remote_config import RemoteHost
@@ -38,6 +38,8 @@ from services.remote_hold import (
     step_launcher,
 )
 from services.remote_upload import DatasetCache
+from ui import buttons
+from ui import theme
 
 #: How often the selected host's node is read while the panel is on screen, in milliseconds.
 POLL_MS = 10_000
@@ -74,24 +76,23 @@ class GrantedNodePanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(theme.Spacing.xs)
         title = QLabel("Granted node", self)
-        title.setObjectName("SectionTitle")
+        title.setProperty("textRole", "sectionHeading")
         layout.addWidget(title)
         self._readout = QLabel("", self)
-        self._readout.setObjectName("Muted")
+        self._readout.setProperty("textRole", "help")
         self._readout.setWordWrap(True)
         layout.addWidget(self._readout)
         row = QHBoxLayout()
-        row.setSpacing(6)
-        self._request_btn = QPushButton("Request a node", self)
-        self._request_btn.setProperty("variant", "primary")
+        row.setSpacing(theme.Spacing.xs)
+        self._request_btn = buttons.primary("Request a node", self)
         self._request_btn.clicked.connect(self._on_request)
-        self._release_btn = QPushButton("Release", self)
+        self._release_btn = buttons.default("Release", self)
         self._release_btn.clicked.connect(self._on_release)
-        self._test_btn = QPushButton("Test the node", self)
+        self._test_btn = buttons.default("Test the node", self)
         self._test_btn.clicked.connect(self._on_test)
-        self._log_btn = QPushButton("Show log", self)
+        self._log_btn = buttons.default("Show log", self)
         self._log_btn.setToolTip("What was sent to the scheduler for this host's node and what it answered, and what "
                                  "the cluster holds about the job.")
         self._log_btn.clicked.connect(self._on_show_log)

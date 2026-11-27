@@ -375,12 +375,12 @@ class LabelGrid(QWidget):
         c, r, t = theme.Colors, theme.Radii, theme.Typography
         return f"""
         #LabelGridHost {{
-            background-color: {c.panel};
+            background-color: {c.card};
             border: 1px solid {c.border_subtle};
             border-radius: {r.md}px;
         }}
         QLabel#LabelGridHeader {{
-            color: {c.text_muted};
+            color: {c.text_secondary};
             font-family: {t.family_mono};
             font-size: {t.caption_size}px;
             font-weight: 600;
@@ -389,14 +389,14 @@ class LabelGrid(QWidget):
         }}
         QLabel#LabelGridHeader:hover {{
             color: {c.accent};
-            background-color: {c.panel_elevated};
+            background-color: {c.control};
         }}
         QLabel#LabelGridHeader[active="true"] {{
             color: {c.accent};
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
         }}
         QLineEdit#LabelCell {{
-            background-color: {c.panel_elevated};
+            background-color: {c.control};
             border: 1px solid {c.border_subtle};
             border-radius: {r.xs}px;
             color: {c.text_primary};
@@ -408,10 +408,10 @@ class LabelGrid(QWidget):
         }}
         QLineEdit#LabelCell[selected="true"] {{
             border-color: {c.accent};
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
         }}
         QLineEdit#LabelCell:disabled {{
-            color: {c.text_faint};
+            color: {c.text_disabled};
             background-color: {c.rail};
         }}
         """
@@ -451,14 +451,14 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     ctx.widgets.register(PAGE_KEY, parent)
     head = ctx.widgets.register(HEAD_KEY, QWidget(parent))
     hl = QHBoxLayout(head)
-    hl.setContentsMargins(0, 8, 0, 6)
+    hl.setContentsMargins(0, theme.Spacing.sm, 0, theme.Spacing.xs)
     hl.setSpacing(theme.Spacing.sm)
     help_lbl = QLabel(
         "Custom names used in legends + axis labels. Type into a cell to "
         "edit one well; click row/column headers or Shift-click cells to "
-        "select multiple, then use Add Prefix / Add Suffix.",
+        "select multiple, then use “Add prefix” or “Add suffix”.",
     )
-    help_lbl.setObjectName("Muted")
+    help_lbl.setProperty("textRole", "help")
     help_lbl.setWordWrap(True)
     hl.addWidget(help_lbl, 1)
 
@@ -471,7 +471,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     al.setSpacing(theme.Spacing.sm)
 
     prefix_btn = ctx.widgets.register("_lbl_add_prefix", btn_secondary(
-        affix, "Add Prefix", lambda: labels_apply_affix(ctx, where="prefix")))
+        affix, "Add prefix", lambda: labels_apply_affix(ctx, where="prefix")))
     prefix_btn.setToolTip(
         "Prepend text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "
@@ -480,7 +480,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     al.addWidget(prefix_btn)
 
     suffix_btn = ctx.widgets.register("_lbl_add_suffix", btn_secondary(
-        affix, "Add Suffix", lambda: labels_apply_affix(ctx, where="suffix")))
+        affix, "Add suffix", lambda: labels_apply_affix(ctx, where="suffix")))
     suffix_btn.setToolTip(
         "Append text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "

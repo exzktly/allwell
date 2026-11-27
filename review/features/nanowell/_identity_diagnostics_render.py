@@ -165,7 +165,7 @@ def _halo():
 
     from ui.theme import Colors
 
-    return [patheffects.withStroke(linewidth=3.2, foreground=Colors.surface)]
+    return [patheffects.withStroke(linewidth=3.2, foreground=Colors.canvas)]
 
 
 def _draw_top(pen: _Pen, lay: dl.Layout, pair, verdict) -> None:

@@ -277,21 +277,21 @@ class AnalyzeInputMixin:
         if pending is not None:
             # A queued job's output, not written yet: planning it would only
             # say the folder does not exist. Say whose output it is instead.
-            self._output_lbl.setText("—")
+            self._output_lbl.setText("")    # the row is hidden: there is no folder to name
             self._output_row.setVisible(False)
-            self._set_status(self._layout_lbl, pending[1], quiet="")
+            self._set_status(self._layout_lbl, pending[1], quiet=False)
             self._refresh_folder_banners(None, immediate=immediate)
             return
         if not raw_str:
-            self._output_lbl.setText("—"); self._set_status(self._layout_lbl, "", quiet="")
+            self._output_lbl.setText(""); self._set_status(self._layout_lbl, "", quiet=False)
             self._output_row.setVisible(False)
             self._refresh_folder_banners(None, immediate=immediate)
             return
         plan = plan_input_layout(Path(raw_str))
         self._output_lbl.setText(
-            str(plan.output_dir) if plan.output_dir is not None else "—")
+            str(plan.output_dir) if plan.output_dir is not None else "")
         self._output_row.setVisible(plan.output_dir is not None)
-        self._set_status(self._layout_lbl, plan.message, error=not plan.runnable, quiet="")
+        self._set_status(self._layout_lbl, plan.message, error=not plan.runnable, quiet=False)
         # The same planner that names the output folder is what makes a pre-run
         # report possible at all: it resolves that path without writing
         # anything, so what an earlier run left there can be read while the

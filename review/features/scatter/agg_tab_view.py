@@ -4,11 +4,12 @@ from __future__ import annotations
 
 
 from PySide6.QtWidgets import (
-    QComboBox, QPushButton, QVBoxLayout,
+    QComboBox, QVBoxLayout,
     QWidget,
 )
 
 from review.core.inspector_panels import make_popover_button
+from review.features.scatter._axes_page import AxesPage
 from review.core.ui_helpers import (
     make_band_controls,
     build_plot_save_menu, make_plot_area,
@@ -21,6 +22,7 @@ from review.features.export.service import (
     export_cell_data_from, export_scatter_agg_data)
 from review.features.scatter.cell_scope_compute import agg_cell_scope
 from review.features.scatter._observations import build_axis_controls
+from ui import buttons
 
 
 def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
@@ -42,6 +44,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Scatter Plot", "aggregate")
+    axes = AxesPage(ctx, ctrl)
 
     # Per-axis channel + property selectors mirror the cells scatter tab.
     # The previous monolithic stat-string combo ("Mean Fluorescence GFP")
@@ -60,27 +63,29 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     agg_ch_x_cb.addItems(["GFP"])
     agg_ch_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_ch_x_cb.currentIndexChanged.connect(lambda _i: on_scatter_agg_axis_change(ctx, "x"))
-    ctrl.add_scope("X-axis · channel", agg_ch_x_cb)
+    axes.add_scope("X channel", agg_ch_x_cb)
 
     agg_metric_x_cb = reg.register("_scatter_agg_metric_x_cb", QComboBox())
     agg_metric_x_cb.addItems(AGG_METRIC_ORDER)
     agg_metric_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx))
-    ctrl.add_scope("property", agg_metric_x_cb)
+    axes.add_scope("X property", agg_metric_x_cb)
 
     agg_ch_y_cb = reg.register("_scatter_agg_ch_y_cb", QComboBox())
     agg_ch_y_cb.addItems(["GFP"])
     agg_ch_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_ch_y_cb.currentIndexChanged.connect(lambda _i: on_scatter_agg_axis_change(ctx, "y"))
-    ctrl.add_scope("Y-axis · channel", agg_ch_y_cb)
+    axes.add_scope("Y channel", agg_ch_y_cb)
 
     agg_metric_y_cb = reg.register("_scatter_agg_metric_y_cb", QComboBox())
     agg_metric_y_cb.addItems(AGG_METRIC_ORDER)
     agg_metric_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx))
-    ctrl.add_scope("property", agg_metric_y_cb)
+    axes.add_scope("Y property", agg_metric_y_cb)
     # Under Observations: Nanowells these four give way to an X / Y nanowell-metric pair (well medians).
-    build_axis_controls(ctx, ctrl, "aggregate")
+    build_axis_controls(ctx, axes, "aggregate")
+    axes.finish()
+    ctrl.add_scope("", axes.button)
 
     # Legacy stat combos — hidden, kept in sync for back-compat. Export
     # / save-figure code still reads from these by name (+ ``_var`` aliases).
@@ -94,8 +99,8 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see update_tp_selection_display), so it needs no
     # separate caption or count label beside it.
-    agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Timepoints: 0 selected"))
-    agg_tp_button.setProperty("variant", "secondary")
+    agg_tp_button = reg.register("_scatter_agg_tp_button", buttons.default("Timepoints: none"))
+    agg_tp_button.setProperty("variant", "default")
     agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
     ctrl.add_scope("", agg_tp_button)
     ctx.runtime.scatter.agg_tp_selections = {}

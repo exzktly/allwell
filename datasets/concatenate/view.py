@@ -22,23 +22,21 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QRadioButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
 from widgets._support import set_variant
 from datasets.core.dataset_paths import preview_wells
 from datasets.core.equation_row import build_equation_row
 from datasets.core.pending_inputs import RUN_WAITS, any_pending, apply_pending
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from datasets.concatenate.concatenate_compute import (
     GapPreview,
     destination_has_unrecognized_content,
@@ -51,6 +49,8 @@ from util.zip_append import pending_journals
 from datasets.core.raw_dataset import unusable_reason
 from datasets.core.dataset_fields import is_free_destination
 from datasets.core.dataset_fields import promote_open_button
+from ui import text_roles
+from ui import buttons
 
 # Wide enough for "1d 6h 30m"; the gap is a short duration, not a path.
 _GAP_FIELD_W = 140
@@ -120,26 +120,8 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         # since its cell size derives from its actual allotted width/height
         # (well_plate_selector's _metrics()). Mirrors the pattern
         # analyze/tab.py already uses for its own form panel.
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Concatenate Datasets", self)
-        heading.setObjectName("Heading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Concatenate Datasets",
             "Append dataset 2 onto dataset 1. The two datasets should be the "
             "same plate imaged in separate sessions; dataset 2's timepoints are "
             "relabelled to continue after dataset 1's last timepoint. Both can be "
@@ -147,39 +129,22 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             "yet — merge those first, then analyse the plate once). Create a new "
             "dataset to write the merged result to a destination folder, leaving "
             "both originals untouched; or, when dataset 2 is raw, add it to "
-            "dataset 1 in place, which copies nothing.",
-            self,
-        )
-        blurb.setObjectName("Muted")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "dataset 1 in place, which copies nothing.")
 
         self._build_equation_row(outer)
         self._build_mode_row(outer)
         self._build_gap_row(outer)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Concatenate", self)
-        self._run_btn.setProperty("variant", "primary")
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
-        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(self, "Concatenate", on_run=self.runRequested,
+                                    on_queue=self.queueRequested, queue_tip="Add this run to the Job Queue instead of running it now.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folders", 1, 2), ("How to combine", 3, 5))
 
         self._build_status_section(outer)
 
-        self._open_btn = QPushButton("Open merged dataset in Review", self)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn = buttons.default("Open merged dataset in Review", self)
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
@@ -222,7 +187,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._mode_in_place.setEnabled(False)
         self._mode_in_place.toggled.connect(lambda _checked: self._on_mode_changed())
         self._mode_hint = QLabel("", box_widget)
-        self._mode_hint.setObjectName("Muted")
+        self._mode_hint.setProperty("textRole", "help")
         self._mode_hint.setWordWrap(True)
         for widget in (self._mode_new, self._mode_in_place, self._mode_hint):
             box.addWidget(widget)
@@ -233,11 +198,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         undo.setContentsMargins(0, 0, 0, 0)
         undo.setSpacing(theme.Spacing.sm)
         self._undo_note = QLabel("", self._undo_row)
-        self._undo_note.setObjectName("Warn")
+        text_roles.set_role(self._undo_note, text_roles.HELP, tone=text_roles.ATTENTION)
         self._undo_note.setWordWrap(True)
-        self._undo_btn = QPushButton("Undo the unfinished addition…", self._undo_row)
+        self._undo_btn = buttons.default("Undo the unfinished addition", self._undo_row)
         self._undo_btn.setObjectName("ConcatUndoAppend")
-        self._undo_btn.setProperty("variant", "secondary")
+        self._undo_btn.setProperty("variant", "default")
         self._undo_btn.clicked.connect(lambda: self.undoAppendRequested.emit(self._undo_root))
         undo.addWidget(self._undo_note, 1)
         undo.addWidget(self._undo_btn)
@@ -272,11 +237,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         row.addStretch(1)
         box.addLayout(row)
         self._gap_hint = QLabel("", self._gap_box)
-        self._gap_hint.setObjectName("Muted")
+        self._gap_hint.setProperty("textRole", "help")
         self._gap_hint.setWordWrap(True)
         box.addWidget(self._gap_hint)
         self._gap_labels = QLabel("", self._gap_box)
-        self._gap_labels.setObjectName("Muted")
+        self._gap_labels.setProperty("textRole", "help")
         self._gap_labels.setWordWrap(True)
         box.addWidget(self._gap_labels)
         self._gap_box.setVisible(False)
@@ -284,7 +249,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(
-            outer, "Concatenate Output",
+            outer, "Concatenate output",
             toggle_tooltip="Show the full per-file merge log beneath the progress dashboard")
 
         self.dashboard = ConcatDashboard(self)
@@ -413,7 +378,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if self._swap_btn is not None:
             self._swap_btn.setEnabled(not running)
-        self._run_btn.setText("Concatenating…" if running else "▶  Concatenate")
+        self._run_btn.setText("Concatenating…" if running else "Concatenate")
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
@@ -483,7 +448,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
     def set_undo_busy(self, busy: bool) -> None:
         """While an undo runs, its button is a status rather than a control."""
         self._undo_btn.setEnabled(not busy)
-        self._undo_btn.setText("Undoing…" if busy else "Undo the unfinished addition…")
+        self._undo_btn.setText("Undoing…" if busy else "Undo the unfinished addition")
 
     def datasets_changed_on_disk(self) -> None:
         """Re-read both datasets after something outside the fields changed them."""
@@ -555,7 +520,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             # which is what an untouched field already means in a queued spec.
             self._gap_preview = GapPreview()
             self._gap_box.setVisible(True)
-            self._gap_hint.setObjectName("Muted")
+            self._gap_hint.setProperty("textRole", "help")
             self._gap_hint.setText(_GAP_WHEN_IT_RUNS)
             self._gap_hint.style().unpolish(self._gap_hint)
             self._gap_hint.style().polish(self._gap_hint)
@@ -582,19 +547,19 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._gap_preview = preview
         self._gap_box.setVisible(True)
         if preview.error:
-            self._gap_hint.setObjectName("Error")
+            text_roles.set_role(self._gap_hint, text_roles.HELP, tone=text_roles.FAILURE)
             self._gap_hint.setText(preview.error)
         elif preview.warning:
-            self._gap_hint.setObjectName("Warn")
+            text_roles.set_role(self._gap_hint, text_roles.HELP, tone=text_roles.ATTENTION)
             self._gap_hint.setText(preview.warning)
         else:
-            self._gap_hint.setObjectName("Muted")
+            self._gap_hint.setProperty("textRole", "help")
             self._gap_hint.setText(preview.note)
         self._gap_hint.style().unpolish(self._gap_hint)
         self._gap_hint.style().polish(self._gap_hint)
         self._gap_hint.setVisible(bool(self._gap_hint.text()))
         self._gap_labels.setText(
-            "Dataset 2's timepoints become: " + ", ".join(preview.labels)
+            "Dataset 2's timepoints become " + ", ".join(preview.labels)
             if preview.labels else "")
         self._gap_labels.setVisible(bool(preview.labels))
 

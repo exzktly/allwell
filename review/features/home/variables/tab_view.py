@@ -27,10 +27,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from ui import theme
+from ui import buttons
 
 #: The definition column's width. A fixed rail, so the plate beside it does not
 #: reflow every time a variable is renamed.
@@ -113,7 +114,7 @@ def set_variables_phone_form(ctx, on: bool) -> None:
     the empty state's sentence ran down a column a few words wide. On a phone
     the two columns are one, **plate first** — the plate is what the layer is
     for (the module docstring's "a canvas with a form beside it"), and with no
-    variables yet its place holds the empty state and its *+ Variable*, which is
+    variables yet its place holds the empty state and its *Add variable*, which is
     the one thing to do — and the definition under it, at the full width, with
     no left inset of its own (the rail toggle it clears is hidden in phone
     layout). ``BottomToTop`` reverses the desk's left-to-right order without
@@ -167,8 +168,7 @@ def _build_header(ctx, parent: QWidget, reg) -> QWidget:
     row.addWidget(showing)
     row.addStretch(1)
 
-    undo = reg.register("_var_undo", QPushButton("↶  Undo", host))
-    undo.setObjectName("HomeAction")
+    undo = reg.register("_var_undo", buttons.default("↶  Undo", host))
     undo.setToolTip("Put the variables back the way they were before the last "
                     "change on this tab.")
     row.addWidget(undo)
@@ -187,7 +187,8 @@ def _caption(parent: QWidget, text: str) -> QLabel:
 
 
 def section_label(parent: QWidget, text: str) -> QLabel:
+    """A section heading (``ui/text_roles``) on the Variables layer."""
     label = QLabel(text, parent)
-    label.setObjectName("HomeCardTitle")
+    label.setProperty("textRole", "sectionHeading")
     label.setAlignment(Qt.AlignLeft)
     return label

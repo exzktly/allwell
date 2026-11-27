@@ -167,5 +167,5 @@ def test_a_figure_without_a_colour_scale_is_not_offered_the_row(qtbot, monkeypat
     from tests.test_properties_hides_what_it_cannot_do import _row_labels, _sidebar
 
     _app, sb = _sidebar(qtbot, monkeypatch, kind=kind)
-    assert "Colour limits" not in _row_labels(sb, "Limits & Scale")
+    assert "Color limits" not in _row_labels(sb, "Limits & Scale")
     assert not {"c_lim_min", "c_lim_max"} & set(sb._getters)

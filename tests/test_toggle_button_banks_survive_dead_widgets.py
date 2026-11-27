@@ -31,8 +31,12 @@ class _DeadButton:
 
 
 class _LiveButton:
+    """Enough of a switch and a segmented control for the banks: they set ``checked`` / ``current``."""
+
     def __init__(self):
         self.text = None
+        self.checked = None
+        self.current = None
         self.props: dict = {}
         self.min_width = None
         self.enabled = None
@@ -45,6 +49,15 @@ class _LiveButton:
 
     def setText(self, t):
         self.text = t
+
+    def setChecked(self, v):
+        self.checked = v
+
+    def setCurrentByData(self, v):
+        self.current = v
+
+    def blockSignals(self, _b):
+        return False
 
     def setToolTip(self, _t):
         pass
@@ -120,9 +133,9 @@ def test_a_dead_button_does_not_stop_the_live_ones_from_updating(no_side_effects
 
     plot_toggles.toggle_sem(ctx)
 
-    assert live_before.text == "SEM"
-    assert live_after.text == "SEM", (
-        "the button behind the dead one never got the new label"
+    assert live_before.current is True
+    assert live_after.current is True, (
+        "the control behind the dead one never got the new state"
     )
     assert "redraw" in ctx._calls, "toggle_sem returned before redrawing"
 
@@ -147,8 +160,8 @@ def test_the_fov_bank_is_guarded_the_same_way(no_side_effects, qapp):
 
     plot_toggles.refresh_fov_btn_state(ctx)
 
-    assert live_before.text == "FOV ✓"
-    assert live_after.text == "FOV ✓"
+    assert live_before.checked is True
+    assert live_after.checked is True
     assert bank == [live_before, live_after]
 
 

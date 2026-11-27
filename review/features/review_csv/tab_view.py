@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHeaderView, QLabel, QPushButton, QTableWidget, QWidget,
+    QHeaderView, QLabel, QTableWidget, QWidget,
 )
 from review.core.lazy import lazy as _lazy
 # Lazy so Review CSV imports without Image Browser present (keeps it deletable).
@@ -14,8 +14,10 @@ refresh_review_csv = _lazy(_RCSV, "refresh_review_csv")
 refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
 
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
+
 from widgets.page_body import build_page_body
+from ui import buttons
 
 #: The button that does what double-clicking a row does.
 OPEN_ROW_TEXT = "Open in Segmentation"
@@ -41,34 +43,28 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     layout = body.layout()
 
     well_lbl = reg.register("_review_well_lbl", QLabel("(select one well)"))
-    well_lbl.setObjectName("Muted")
+    well_lbl.setProperty("textRole", "help")
     ctrl.add_scope("Well", well_lbl)
 
-    fov_cb = reg.register("_review_fov_cb", LabeledComboBox("FOV"))
-    # No setFixedWidth — LabeledComboBox already sizes to exactly the painted
-    # "FOV: …" text.
+    fov_cb = reg.register("_review_fov_cb", unlabelled("FOV"))
     fov_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    ctrl.add_scope("", fov_cb)
+    ctrl.add_scope("FOV", fov_cb)
 
-    tp_cb = reg.register("_review_tp_cb", LabeledComboBox("Timepoint"))
-    # No setFixedWidth — LabeledComboBox already sizes to exactly the painted
-    # "Timepoint: …" text.
+    tp_cb = reg.register("_review_tp_cb", unlabelled("Timepoint"))
     tp_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    ctrl.add_scope("", tp_cb)
+    ctrl.add_scope("Timepoint", tp_cb)
 
-    refresh_btn = QPushButton("Refresh", ctrl)
-    refresh_btn.setProperty("variant", "secondary")
+    refresh_btn = buttons.default("Refresh", ctrl)
     refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))
     ctrl.add_action(refresh_btn)
 
     # What double-clicking a row does, as a button a user can see: open the
     # selected row's cell in Segmentation. Enabled while a row is selected.
-    open_btn = reg.register("_review_csv_open_btn", QPushButton(OPEN_ROW_TEXT, ctrl))
-    open_btn.setProperty("variant", "secondary")
+    open_btn = reg.register("_review_csv_open_btn", buttons.default(OPEN_ROW_TEXT, ctrl))
     open_btn.setToolTip("Show the selected row's cell in Segmentation "
                         "(double-clicking the row does the same)")
     open_btn.setEnabled(False)
@@ -103,7 +99,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     msg_lbl = reg.register("_review_csv_msg_lbl", QLabel(
         "Select a single well to inspect CSV rows.", parent,
     ))
-    msg_lbl.setObjectName("Muted")
+    msg_lbl.setProperty("textRole", "help")
     layout.addWidget(msg_lbl)
 
     # Stamp a live refresh callback on the review runtime scratch so cross-feature

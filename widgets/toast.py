@@ -80,7 +80,6 @@ class Toast(QWidget):
         shadow.setColor(with_alpha(theme.Colors.ink_dark, 0.35))
         card.setGraphicsEffect(shadow)
 
-        self.setStyleSheet(self._build_qss())
         self._fade = QPropertyAnimation(self, b"windowOpacity", self)
         self._fade.setEasingCurve(QEasingCurve.InOutCubic)
         self._dismiss_timer = QTimer(self)
@@ -209,21 +208,6 @@ class Toast(QWidget):
         self._dismiss_timer.stop()
         self._fade_out()
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        #Toast {{ background: transparent; }}
-        #ToastCard {{
-            background-color: {c.panel};
-            border: 1px solid {c.border};
-            border-radius: {r.lg}px;
-        }}
-        QLabel#ToastLabel {{
-            color: {c.text_primary};
-            font-size: {t.body_size}px;
-            background: transparent;
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -242,14 +226,14 @@ if __name__ == "__main__":
     lay.setContentsMargins(pad, pad, pad, pad)
     lay.setSpacing(theme.Spacing.md)
     title = QLabel("Toast")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
     row = QHBoxLayout()
     b_ok = QPushButton("Success")
-    b_ok.setObjectName("Primary")
+    b_ok.setProperty("variant", "primary")
     b_warn = QPushButton("Warning")
     b_err = QPushButton("Error")
-    b_err.setObjectName("Danger")
+    b_err.setProperty("variant", "destructive")
     row.addWidget(b_ok)
     row.addWidget(b_warn)
     row.addWidget(b_err)
@@ -264,3 +248,20 @@ if __name__ == "__main__":
     host.resize(480, 280)
     host.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    #Toast {{ background: transparent; }}
+    #ToastCard {{
+        background-color: {c.card};
+        border: 1px solid {c.button_edge};
+        border-radius: {r.lg}px;
+    }}
+    QLabel#ToastLabel {{
+        color: {c.text_primary};
+        font-size: {t.body_size}px;
+        background: transparent;
+    }}
+    """

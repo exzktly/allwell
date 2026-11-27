@@ -28,7 +28,7 @@ from services.job_kinds import (
 # same row the check was looking for, and the guard written for this defect
 # passed while the defect shipped: a queued job whose row read ``nd2_import``
 # with an empty second line, which could not be chained after anything, was
-# absent from the "+ Add" menu, and wore another tool's icon.
+# absent from the "Add" menu, and wore another tool's icon.
 #
 # ``datasets.tab._FEATURES`` is the thing these tables are a list *of*, which
 # is what makes it a guard rather than a restatement.

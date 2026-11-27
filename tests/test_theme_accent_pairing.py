@@ -3,8 +3,8 @@
 `accent2` is the *neighbouring* hue — the second series colour, the other half
 of a progress dial, the companion swatch — and what makes the pair read as one
 family is the relationship between them, not either absolute value. The `grey`
-theme overrode `accent`, `accent_hover`, `accent_pressed`, `accent_dim` and
-`accent_fg` and left `accent2` at the blue theme's value: the hue gap went from
+theme overrode `accent`, `accent_hover`, `accent_pressed`, `selected` and
+`on_accent` and left `accent2` at the blue theme's value: the hue gap went from
 38° to 55° and the saturations diverged (206 against 110), so on every
 remote-run plate the two stopped looking related.
 
@@ -25,17 +25,20 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 #: Overriding any of these means the theme has moved its accent family, so it
 #: owes an `accent2` that moved with it.
-_ACCENT_FAMILY = {"accent", "accent_hover", "accent_pressed", "accent_dim"}
+_ACCENT_FAMILY = {"accent", "accent_hover", "accent_pressed", "selected"}
 
 
 def _theme_overrides() -> dict[str, set[str]]:
-    """Every `_<NAME> = {"Colors": {...}}` override table in `ui/theme.py`."""
-    tree = parse_source((REPO_ROOT / "ui" / "theme.py"))
+    """Every `<NAME> = {"Colors": {...}}` palette table in `ui/palettes.py`."""
+    tree = parse_source((REPO_ROOT / "ui" / "palettes.py"))
     out: dict[str, set[str]] = {}
     for node in tree.body:
-        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+        if isinstance(node, ast.AnnAssign) and node.value is not None:
+            target = node.target
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        else:
             continue
-        target = node.targets[0]
         if not isinstance(target, ast.Name) or not isinstance(node.value, ast.Dict):
             continue
         for key, value in zip(node.value.keys, node.value.values):
@@ -52,7 +55,7 @@ def test_there_is_at_least_one_override_table():
     """The anchor: if the parse finds nothing, the test below passes on an
     empty dict and measures nothing."""
     tables = _theme_overrides()
-    assert tables, "no theme override tables found in ui/theme.py — has the shape changed?"
+    assert tables, "no palette tables found in ui/palettes.py — has the shape changed?"
 
 
 def test_a_theme_that_moves_its_accent_moves_accent2_too():

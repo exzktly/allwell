@@ -130,7 +130,7 @@ def marker_ink(fill: str | None) -> str:
     The previous rule was ``ink_dark if group_color is not None else
     text_primary`` — a *proxy* for "the fill is bright", and wrong for one of
     the colours this plate can paint. Against a mid grey such as
-    ``text_muted`` (#5F6B7C) a dark ink gives a contrast ratio of 3.88:1:
+    #5F6B7C, the muted ink the plate once filled neutral wells with, a dark ink gives a contrast ratio of 3.88:1:
     below AA for normal text and hopeless for a stroke this thin.
 
     So the fill is measured instead of guessed at. Relative luminance by the
@@ -1476,7 +1476,7 @@ class _PlateGrid(QWidget):
         at its group membership.
         """
         c = theme.Colors
-        # Wells sit on the ``panel_elevated`` plate surface; the recessed
+        # Wells sit on the ``control`` plate surface; the recessed
         # fill needs to be visibly darker so the eye reads it as below
         # that surface. Default base is the app's deepest token
         # (``rail``); when a group ``tint`` is provided we blend it with
@@ -1533,7 +1533,7 @@ class _PlateGrid(QWidget):
                 fill = QColor(c.accent)
                 pen_col = QColor(c.accent)
             else:
-                fill = QColor(c.panel)
+                fill = QColor(c.card)
                 pen_col = QColor(c.border_subtle)
             if self._hover_corner:
                 pen_col = QColor(c.accent)
@@ -1547,7 +1547,7 @@ class _PlateGrid(QWidget):
                     -cr.width() * 0.32, -cr.height() * 0.32,
                 )
                 p.setPen(Qt.NoPen)
-                p.setBrush(QColor(c.panel))
+                p.setBrush(QColor(c.card))
                 p.drawEllipse(inner)
 
         # Column numbers (1–12) along the top.
@@ -1555,14 +1555,14 @@ class _PlateGrid(QWidget):
         for ci in range(_N_COLS):
             rect = QRectF(ox + ci * cell, oy - lab, cell, lab)
             hot = self._rc_selectable and self._hover_col == ci
-            p.setPen(QColor(c.text_primary if hot else c.text_muted))
+            p.setPen(QColor(c.text_primary if hot else c.text_secondary))
             p.drawText(rect, int(Qt.AlignCenter), str(ci + 1))
 
         # Row letters (A–H) down the left.
         for ri in range(_N_ROWS):
             rect = QRectF(ox - lab, oy + ri * cell, lab, cell)
             hot = self._rc_selectable and self._hover_row == ri
-            p.setPen(QColor(c.text_primary if hot else c.text_muted))
+            p.setPen(QColor(c.text_primary if hot else c.text_secondary))
             p.drawText(rect, int(Qt.AlignCenter), _ROW_LETTERS[ri])
         p.setFont(self.font())
 
@@ -1575,7 +1575,7 @@ class _PlateGrid(QWidget):
                 key = (ri, ci)
                 wr = self._well_rect(ri, ci)
                 if not self._is_enabled(key):
-                    p.setBrush(QColor(c.panel))
+                    p.setBrush(QColor(c.card))
                     p.setPen(QPen(QColor(c.border_subtle), max(1.0, wr.width() * 0.04)))
                     p.drawEllipse(wr)
                     if key in self._rings:
@@ -1705,8 +1705,24 @@ class WellPlateSelector(QWidget):
         Clamped to ``maximumHeight`` so a capped plate cannot ask for more than
         its role allows, which would leave Qt reconciling a minimum above a
         maximum.
+
+        **Not while the floor is being applied.** ``setMinimumHeight`` relayouts
+        synchronously, and inside a resizable ``QScrollArea`` (the rail's) a
+        taller plate brings in the vertical scroll bar, which narrows the plate,
+        which lowers the floor, which takes the scroll bar away again. There are
+        widths at which neither state is stable — the plate needs the bar
+        without it and fits without it with it — and the re-entry never ended:
+        the stack overflowed and the process died (a rail 254 px wide and 240 px
+        tall, and the Review window when the label size moved to 12 px). A
+        resize that arrives while the floor is being set is the consequence of
+        that floor, not a new width to answer, so it is left alone; the plate
+        then keeps the floor of the width it was offered, a few pixels taller
+        than the narrower width needs, and the next real resize recomputes it.
+        ``tests/test_plate_floor_settles_in_a_scroll_area.py`` holds it.
         """
         super().resizeEvent(ev)
+        if self._applying_floor:
+            return
         floor = self.heightForWidth(self.width())
         ceiling = self.maximumHeight()
         if ceiling:
@@ -1714,10 +1730,15 @@ class WellPlateSelector(QWidget):
         # Only when it moves: setMinimumHeight relayouts, and a relayout that
         # resizes us re-enters here.
         if floor != self.minimumHeight():
-            self.setMinimumHeight(floor)
+            self._applying_floor = True
+            try:
+                self.setMinimumHeight(floor)
+            finally:
+                self._applying_floor = False
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._applying_floor = False   # see resizeEvent
         self.setObjectName("WellPlateSelector")
         self.setAttribute(Qt.WA_StyledBackground, True)
 
@@ -1748,7 +1769,8 @@ class WellPlateSelector(QWidget):
         self._btn_invert = QPushButton("Invert")
         self._btn_invert.setToolTip("Invert the current selection")
         self._btn_clear = QPushButton("Clear")
-        self._btn_clear.setObjectName("Danger")
+        # Quiet: clearing a selection loses nothing that cannot be selected again (ui/buttons.py's kinds).
+        self._btn_clear.setProperty("variant", "quiet")
         self._btn_clear.setToolTip("Clear the selection")
         for b in (self._btn_all, self._btn_invert, self._btn_clear):
             b.setCursor(Qt.PointingHandCursor)
@@ -1762,7 +1784,6 @@ class WellPlateSelector(QWidget):
         self._btn_invert.clicked.connect(self.invertSelection)
         self._btn_clear.clicked.connect(self.clearSelection)
 
-        self.setStyleSheet(self._build_qss())
 
     # ── selection API (enabled-aware) ────────────────────────────────────
     def selectAll(self) -> None:
@@ -1948,16 +1969,6 @@ class WellPlateSelector(QWidget):
     def _on_grid_changed(self) -> None:
         self.selectionChanged.emit(self._grid.selected_ids())
 
-    def _build_qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        #WellPlateSelector {{
-            background-color: {c.panel};
-            border: 1px solid {c.border_subtle};
-            border-radius: {r.md}px;
-        }}
-        #PlateGrid {{ background: transparent; }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -1977,7 +1988,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("WellPlateSelector")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     plate = WellPlateSelector()
@@ -2011,7 +2022,7 @@ if __name__ == "__main__":
     lay.addLayout(opts)
 
     echo = QLabel()
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     echo.setWordWrap(True)
 
     def _show(ids):
@@ -2027,3 +2038,15 @@ if __name__ == "__main__":
     root.resize(640, 520)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    #WellPlateSelector {{
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.md}px;
+    }}
+    #PlateGrid {{ background: transparent; }}
+    """

@@ -208,7 +208,7 @@ def test_the_section_summary_names_both_halves(qtbot, monkeypatch):
     sec = next(s for s in sb.findChildren(CollapsibleSection)
                if s.titleText() == "Time")
     preview = next(w for w in sec.findChildren(_QLabel)
-                   if w.objectName() == "Muted")
+                   if (w.property("textRole") == "help" and not w.property("textTone")))
 
     assert preview.text() == "Off"
     steppers["Offset"].setValue(-2.0)
@@ -239,7 +239,7 @@ def _time_summary(sidebar) -> str:
         if sec.titleText() != "Time":
             continue
         for lab in sec.findChildren(_QLabel):
-            if lab.objectName() == "Muted":
+            if (lab.property("textRole") == "help" and not lab.property("textTone")):
                 return lab.text()
     return ""
 

@@ -70,7 +70,7 @@ class _CellPage(QWidget):
         form = QFormLayout(self)
         form.setContentsMargins(0, 0, 0, 0)
         self.note = QLabel("", self)
-        self.note.setObjectName("Muted")
+        self.note.setProperty("textRole", "help")
         self.note.setWordWrap(True)
         form.addRow(self.note)
         self.row_cb, self.col_cb = QComboBox(self), QComboBox(self)

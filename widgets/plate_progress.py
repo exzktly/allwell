@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QBoxLayout, QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout,
+    QBoxLayout, QFrame, QHBoxLayout, QLabel, QProgressBar, QVBoxLayout,
     QWidget,
 )
 
@@ -181,6 +181,12 @@ def fraction_or_none(done: int, total: int) -> float | None:
     return max(0.0, min(1.0, max(0, int(done)) / int(total)))
 
 
+
+def _sentence(text: str) -> str:
+    """A legend row's words in sentence case — each row is a label of its own (design language §2.2, rule 7) — in
+    one place, so every dashboard's legend reads the same whatever case its rows were written in."""
+    return text[:1].upper() + text[1:]
+
 class PlateProgress(QWidget):
     """Header/headline/overall-bar/plate+legend chrome, shared by RunDashboard
     and ConcatDashboard. A subclass builds its own left-slot content (a stage
@@ -207,24 +213,20 @@ class PlateProgress(QWidget):
         # header, a plate and a group list into a fixed-width column, so either
         # scale step changes how much of the list fits, and that is a design
         # decision rather than a lint fix.
-        root.setSpacing(6)
+        root.setSpacing(theme.Spacing.xs)
 
-        # header: title + status + collapse toggle
+        # header: title + status (no fold: a run's progress is the one thing on its card that stays — design
+        # language §6, *Analyze*; ``tests/test_one_collapse_implementation.py``)
         hdr = QHBoxLayout(); hdr.setSpacing(theme.Spacing.sm)
         self._title_label = QLabel(title, self)
+        self._title_label.setVisible(bool(title))    # a host's card can carry the title instead
         hdr.addWidget(self._title_label)
-        self._status = QLabel("", self); self._status.setObjectName("Muted")
+        self._status = QLabel("", self); self._status.setProperty("textRole", "help")
         hdr.addWidget(self._status)
         self._header = hdr                       # `add_header_widget` inserts at the right end
         hdr.addStretch(1)
-        self._eta = QLabel("", self); self._eta.setObjectName("Muted")
+        self._eta = QLabel("", self); self._eta.setProperty("textRole", "help")
         hdr.addWidget(self._eta)
-        self._toggle = QToolButton(self)
-        self._toggle.setText("▾"); self._toggle.setAutoRaise(True)
-        self._toggle.setCheckable(True); self._toggle.setChecked(True)
-        self._toggle.setToolTip("Collapse / expand the run progress view")
-        self._toggle.clicked.connect(self._on_toggle)
-        hdr.addWidget(self._toggle)
         root.addLayout(hdr)
 
         self._headline = QLabel("Idle", self)
@@ -514,8 +516,8 @@ class PlateProgress(QWidget):
                 w.deleteLater()
 
     def add_header_widget(self, widget: QWidget) -> None:
-        """Show *widget* at the right end of the header, after the ETA and
-        before the collapse toggle.
+        """Show *widget* at the right end of the header, after the ETA,
+        last in the row.
 
         For a host's own run-state glyph — Analyze's Slurm-job icon — so it sits
         in the run's own header rather than in a form the user is no longer
@@ -523,7 +525,7 @@ class PlateProgress(QWidget):
         status text around as the text changes length; in phone layout, where
         the toggle is hidden, it is the last thing on the row.
         """
-        self._header.insertWidget(self._header.indexOf(self._toggle), widget)
+        self._header.addWidget(widget)
 
     def _build_legend(self) -> None:
         """Draw the legend: a heading, then one dot-and-label row per item.
@@ -540,8 +542,9 @@ class PlateProgress(QWidget):
         """
         title, items = self._legend_items()
         self._clear(self._legend_lay)
-        head = QLabel(title, self._legend_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        # An eyebrow (the eyebrow text role: capitals, the label size, the secondary ink).
+        head = QLabel(title.upper(), self._legend_host)
+        head.setProperty("textRole", "eyebrow")
         self._legend_lay.addWidget(head)
         for item in items:
             # ``(colour, label)``, or ``(colour, label, glyph, ink)`` for a state
@@ -553,8 +556,7 @@ class PlateProgress(QWidget):
             r.setContentsMargins(0, 0, 0, 0)
             r.setSpacing(_LEGEND_ROW_SPACING_PX)
             r.addWidget(status_dot(color, glyph=glyph, ink=ink))
-            label = QLabel(text, row)
-            label.setStyleSheet(f"color:{theme.Colors.text_primary};")
+            label = QLabel(_sentence(text), row)
             r.addWidget(label)
             r.addStretch(1)
             self._legend_lay.addWidget(row)
@@ -582,7 +584,7 @@ class PlateProgress(QWidget):
             c.setContentsMargins(0, 0, 0, 0)
             c.setSpacing(_LEGEND_ROW_SPACING_PX)
             c.addWidget(status_dot(color, glyph=glyph, ink=ink))
-            label = QLabel(text, chip)
+            label = QLabel(_sentence(text), chip)
             label.setStyleSheet(f"color:{theme.Colors.text_primary};{size}")
             c.addWidget(label)
             self._legend_flow.addWidget(chip)
@@ -610,19 +612,17 @@ class PlateProgress(QWidget):
         if legend is not None:
             legend.setVisible(not self._stacked)
         self.syncLegendChips()
-        # The header's title and collapse toggle are desk chrome: on a phone
+        # The header's title is desk chrome: on a phone
         # the dashboard *is* the page, and the headline under them says what
         # state the run is in — so it is set larger (``PlateHeadline[phone]``).
-        self._title_label.setVisible(not self._stacked)
-        self._toggle.setVisible(not self._stacked)
+        self._title_label.setVisible(not self._stacked and bool(self._title_label.text()))
         # The status word repeats the headline's first word on a phone, and
         # the "Stages" heading names what its rows already say.
         self._status.setVisible(not self._stacked)
         for head in self._rail_host.findChildren(QLabel, "StageRailHead"):
             head.setVisible(not self._stacked)
         if self._stacked and not self._body.isVisible() and not self.isCompact():
-            self._toggle.setChecked(True)
-            self._on_toggle()
+            self._body.setVisible(True)
         self._headline.setProperty("phone", self._stacked)
         self._headline.style().unpolish(self._headline)
         self._headline.style().polish(self._headline)
@@ -729,8 +729,7 @@ class PlateProgress(QWidget):
         if chips is None:
             return
         chips.setVisible(getattr(self, "_stacked", False)
-                         and not getattr(self, "_compact", False)
-                         and self._toggle.isChecked())
+                         and not getattr(self, "_compact", False))
 
     def _pin_rail_width(self) -> None:
         if self._stacked and self._rail_beside:
@@ -770,23 +769,16 @@ class PlateProgress(QWidget):
             self._build_legend()
         self._build_rail()
 
-    def _on_toggle(self) -> None:
-        show = self._toggle.isChecked()
-        self._body.setVisible(show and not getattr(self, "_compact", False))
-        self._toggle.setText("▾" if show else "▸")
-        self.syncLegendChips()
-
     def setCompact(self, compact: bool) -> None:
         """Only the header, headline and overall bar: the stage rail, plate,
         legend and well detail go.
 
         For phone layout's Analyze *Settings* view, where the run is a strip
         above the form rather than the page (``analyze/phone_view.py``). Undone
-        by ``setCompact(False)``, which shows the body again as the collapse
-        toggle has it.
+        by ``setCompact(False)``, which shows the body again.
         """
         self._compact = bool(compact)
-        self._body.setVisible(not self._compact and self._toggle.isChecked())
+        self._body.setVisible(not self._compact)
         if self._compact:
             self._well_detail.setVisible(False)
         else:

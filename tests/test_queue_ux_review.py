@@ -229,7 +229,7 @@ def test_p9_the_banner_says_that_job_for_one_source(qtbot, tmp_path):
 def test_p9_the_banner_buttons_have_no_box_of_their_own():
     from ui import theme
 
-    assert "QWidget#ContextBannerButtons" in theme.qss()
+    assert 'QWidget[noticePart="true"] { background: transparent; }' in theme.qss()
 
 
 # ── P2 / P3 / P4 / P6: the menus and the row ─────────────────────────────────
@@ -276,7 +276,10 @@ def test_p7_the_empty_queue_mentions_setting_up_a_next_step(qtbot):
 
     page = JobQueuePage()
     qtbot.addWidget(page)
-    assert "New job using this output" in page._empty_hint.text()
+    # The empty state's two lines: a ⋯ menu that sets up the next job on a job's output.
+    text = page._empty_text.text()
+    assert "⋯ menu" in text and "output" in text, text
+    assert page._empty_add_btn.text() == "Add job"
 
 
 def test_p8_enter_opens_the_job_and_the_menu_button_is_a_real_target(qtbot):

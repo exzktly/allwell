@@ -1,8 +1,8 @@
-"""Audit E8 / E18 — smFISH "Apply to All" robustness.
+"""Audit E8 / E18 — smFISH "Apply global threshold" robustness.
 
 * E8: a crash in the worker must route through done_cb so the UI gets a terminal
   signal instead of hanging forever.
-* E18: a second concurrent "Apply to All" is rejected (a double-click otherwise
+* E18: a second concurrent "Apply global threshold" is rejected (a double-click otherwise
   ran two workers over the same CSVs and clobbered the shared cancel event).
 """
 from __future__ import annotations

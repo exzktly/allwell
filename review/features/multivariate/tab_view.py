@@ -43,7 +43,7 @@ _AGGS = ("mean", "median", "count", "std")
 
 
 from widgets.control_band import ControlBand
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from ui import theme
 from widgets.spin_box import SpinBox
 
@@ -60,7 +60,7 @@ def _muted(text: str, parent) -> QLabel:
     different weight and punctuation from the ones beside them in the same row.
     """
     lbl = QLabel(text, parent)
-    lbl.setObjectName("Muted")
+    lbl.setProperty("textRole", "help")
     return lbl
 
 
@@ -114,13 +114,21 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_features_btn", feat_btn)
     band.add_action(feat_btn)
 
-    std_cb = QCheckBox("Standardize")
+    # On the page's Display page, not the band (the user's decision, tracker §9.1 step 15), so the band keeps the
+    # mode and the data choices on one row.
+    from review.core.inspector_panels import make_popover_button as _display_page
+    display_btn, display_panel, display_lay = _display_page("Display", band, ctx=ctx, root=True)
+    display_btn.setToolTip("How the features are prepared: standardize them before PCA or clustering")
+    reg.register("_mv_display_btn", display_btn)
+    std_cb = QCheckBox("Standardize", display_panel)
     std_cb.setChecked(bool(st.standardize))
     std_cb.setToolTip("Z-score each feature before PCA / clustering "
                       "(essential when features span different units)")
     std_cb.toggled.connect(lambda on: mv_ctrl.mv_set_standardize(ctx, on))
     reg.register("_mv_standardize_cb", std_cb)
-    band.add_scope("", std_cb)
+    display_lay.addWidget(std_cb)
+    display_lay.addStretch(1)
+    band.add_action(display_btn)
 
     from review.core.ui_helpers import (
         make_style_button,
@@ -136,8 +144,6 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
             unavailable="Tick at least one feature column first."),
     )
     band.add_action(export_btn)
-    from review.core.cell_lasso_view import make_lasso_button
-    band.add_action(make_lasso_button(ctx, band, "_mv_canvas", source="lasso · Multivariate"))
     band.add_action(make_style_button(ctx, band, "multivariate"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
@@ -268,13 +274,13 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # paints its own "Timepoint: …" prefix), so ``add_scope`` adds it alone —
     # no separate caption to strand on a different line when the wide Faceting
     # option group ahead of it wraps.
-    tp_cb = LabeledComboBox("Timepoint")
+    tp_cb = unlabelled("Timepoint")
     tp_cb.addItem("All timepoints", None)
     tp_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_timepoints(
             ctx, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
     reg.register("_mv_tp_cb", tp_cb)
-    band.add_scope("", tp_cb)
+    band.add_scope("Timepoint", tp_cb)
     layout.addWidget(band)
 
     # ── the figure ───────────────────────────────────────────────────────────
@@ -284,6 +290,10 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_card", card)
     reg.register("_mv_fig", card.figure)
     reg.register("_mv_canvas", card.canvas)
+    # Lasso cells draws on this figure, so it is a tool under it rather than a band button (the user's decision,
+    # tracker §9.1 step 15).
+    from review.core.cell_lasso_view import make_lasso_button
+    card.toolbar.add_group(make_lasso_button(ctx, card.toolbar, "_mv_canvas", source="lasso · Multivariate"))
     # A click on a projected cell focuses it; the focused cell is ringed.
     from review.core.cell_picking import wire_cell_picking
     wire_cell_picking(ctx, card.canvas, lambda: card.figure)

@@ -11,12 +11,13 @@ control writes the window through the controller; the strip reads it back throug
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton,
-                               QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget)
 
 from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell.state import POPOUT_LAYOUTS
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
+from ui import buttons
+from ui import theme
 
 _RANGE_TIP = ("The window's range of the metric, both ends inclusive. Type a number and press Enter. A window of "
               "several boxes (drawn with Shift held) edits its newest box here.")
@@ -48,7 +49,7 @@ def build_window_strip(ctx, parent) -> QWidget:
     # caption travels with its field, so a wrap never strands "Low" from its box.
     column = QVBoxLayout(strip)
     column.setContentsMargins(0, 0, 0, 0)
-    column.setSpacing(2)
+    column.setSpacing(theme.Spacing.xs)
     label = QLabel("", strip)
     label.setWordWrap(True)
     column.addWidget(label)
@@ -66,20 +67,17 @@ def build_window_strip(ctx, parent) -> QWidget:
     rule.setToolTip(_RULE_TIP)
     panel_only = QCheckBox("This panel only", controls_host)
     panel_only.setToolTip(_PANEL_TIP)
-    popout = QPushButton("Open in pop-out", controls_host)
-    popout.setProperty("variant", "secondary")
+    popout = buttons.default("Open in pop-out", controls_host)
     popout.setToolTip(_POPOUT_TIP)
-    use_subset = QPushButton("Use as Subset", controls_host)
-    use_subset.setProperty("variant", "secondary")
+    use_subset = buttons.default("Use as subset", controls_host)
     use_subset.setToolTip(_SUBSET_TIP)
-    clear = QPushButton("✕", controls_host)
-    clear.setProperty("variant", "secondary")
+    clear = buttons.icon_button("x", _CLEAR_TIP, controls_host)
     clear.setToolTip(_CLEAR_TIP)
     for caption, field in (("Low", low), ("High", high)):
         pair = QWidget(controls_host)
         inner = QHBoxLayout(pair)
         inner.setContentsMargins(0, 0, 0, 0)
-        inner.setSpacing(4)
+        inner.setSpacing(theme.Spacing.xs)
         inner.addWidget(QLabel(caption, pair))
         inner.addWidget(field)
         field.setParent(pair)
@@ -153,7 +151,7 @@ _ORDER_TIP = "Largest first (descending) or smallest first (ascending)."
 _LABEL_TIP = ("A metric written in each tile's top-left corner, at the timepoint of the panel it is in (a dash where "
               "the nanowell has no value). Zoom in to read it on a full page.")
 _COLOUR_TIP = ("What the stripe under each tile of the hex composite says, keyed under the title: the tile's source "
-               "well, its well's value of a sample variable (the same colours that variable has on every plot), or "
+               "well, its well's value of a sample variable (the same colors that variable has on every plot), or "
                "nothing.")
 
 
@@ -176,7 +174,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     layout.setToolTip(_LAYOUT_TIP)
     colour = QComboBox(window)
     colour.setToolTip(_COLOUR_TIP)
-    colour_caption = QLabel("Colour", window)
+    colour_caption = QLabel("Color", window)
     sort = QComboBox(window)
     sort.setToolTip(_SORT_TIP)
     for label, key in wnc.composite_sort_choices():
@@ -191,9 +189,9 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     for label, key in wnc.composite_label_choices():
         corner.addItem(label, key)
     corner_caption = QLabel("Corner", window)
-    prev, following = QToolButton(window), QToolButton(window)
-    prev.setText("◀")
-    following.setText("▶")
+    prev, following = buttons.tool_button(window), buttons.tool_button(window)
+    buttons.set_icon(prev, "chevron-left")
+    buttons.set_icon(following, "chevron-right")
     page = QLabel("", window)
     pager = (prev, page, following)
     row = QHBoxLayout()
@@ -287,13 +285,12 @@ def build_popout_chrome(ctx, window, rows, hidden: bool = False) -> QHBoxLayout:
     Registers ``_nw_popout_controls_btn``, ``_nw_popout_reset_zoom_btn`` and ``_nw_popout_zoom_refresh`` (the reset
     button shown for the hex layout in Window mode and enabled while the view is not whole — the controller calls it
     whenever the zoom, the layout or the source changes)."""
-    toggle = QToolButton(window)
+    toggle = buttons.tool_button(window)
     toggle.setCheckable(True)
     toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    toggle.setProperty("variant", "secondary")
+    toggle.setProperty("variant", "default")
     toggle.setToolTip(_HIDE_TIP)
-    reset = QPushButton("Reset zoom", window)
-    reset.setProperty("variant", "secondary")
+    reset = buttons.default("Reset zoom", window)
     reset.setToolTip(_RESET_ZOOM_TIP)
 
     def set_hidden(hidden: bool) -> None:

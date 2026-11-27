@@ -895,7 +895,7 @@ def export_scatter_data(ctx) -> None:
     fluor_gate_y = get_fluor_gate(ctx, ch_y_base)
 
     # This is the *tab's* Export CSV button, so it exports what the tab is
-    # drawing. With "Apply gates" on, the plot shows only the cells inside the
+    # drawing. With "Plot only the gated cells" on, the plot shows only the cells inside the
     # gate boxes and the CSV used to carry the whole cloud — the two disagreed
     # about which cells the figure is about, which is the one thing an export
     # beside a plot must not do. (Batch export deliberately does not inherit

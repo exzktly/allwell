@@ -194,3 +194,19 @@ def test_the_popup_is_as_wide_as_its_widest_row_needs_whatever_the_box_s_width(q
         assert view.minimumWidth() == combo.popup_width()
     finally:
         combo.hidePopup()
+
+
+def test_unlabelled_keeps_its_name_and_paints_no_prefix(qapp):
+    """``unlabelled`` is the box a band captions from outside: named, but drawing only its value."""
+    from tests._layout_checks import labels_outside_controls
+    from PySide6.QtWidgets import QWidget, QHBoxLayout
+    from widgets.labeled_combo import unlabelled
+
+    host = QWidget()
+    box = unlabelled("FOV", host)
+    QHBoxLayout(host).addWidget(box)
+    box.addItems(["F1", "F2"])
+    host.show()
+    assert box.label() == "FOV"
+    assert not box.labelShown()
+    assert labels_outside_controls(host) == []

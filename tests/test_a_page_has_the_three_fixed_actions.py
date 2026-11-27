@@ -113,9 +113,9 @@ PAGES = {
     "Line Graphs": (True, True, True),
     "Response Curves": (True, True, True),
     "Heat Map": (True, True, True),
-    "Distribution": (False, True, True),
-    "Multivariate": (False, True, True),
-    "Spatial": (False, True, True),
+    "Distribution": (True, True, True),   # Display holds Mode, Bins, Layout, the log axes, pooling
+    "Multivariate": (True, True, True),   # Display holds Standardize (tracker §9.1 step 17)
+    "Spatial": (True, True, True),        # Display holds Recompute
     "Nanowells": (False, True, True),
 }
 

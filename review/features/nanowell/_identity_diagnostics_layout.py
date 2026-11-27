@@ -24,7 +24,11 @@ Room the pictures cannot use (their edge is set by the width) goes between them 
 **A figure too small for all of it** gives up the reference text before the pictures. When no arrangement reaches
 :data:`MIN_SIDE` even without the panels' notes, the footer (the units and the zoom hint) is left out; when that is
 still not enough, the per-check lines are folded into one :func:`summary_check` line that counts them by state and
-says to enlarge the card to read them. The verdict and the three pictures are always drawn. Without this a phone-sized
+says to enlarge the card to read them; and when even that leaves no edge at which the pictures fit (a low window's
+card, about 5 × 2.8 in) the panels' axis labels are left out too, that line then saying the unit their ticks are in
+(:data:`UNITS_SENTENCE`). There the labels' words broke over two or three rows under each narrow picture, the
+pictures shrank to a point, and every text was drawn on top of the next. The verdict and the three pictures are
+always drawn. Without this a phone-sized
 card shrank the pictures towards nothing while every text kept its room, and the tick labels, checks and footer were
 drawn over one another.
 
@@ -34,7 +38,7 @@ draws at the places this returns. Positions are in points from the figure's lowe
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 #: The type sizes, in points. The verdict is the largest text on the figure; the per-check detail and the footer the
 #: smallest, because they are the reference a reader goes to after the verdict and the pictures.
@@ -72,6 +76,8 @@ MAX_PANEL_GAP = 40.0
 ROW_GAP = 8.0
 #: The image edge, in points, under which the panels' notes are left out to give the pictures their room.
 MIN_SIDE = 72.0
+#: The edge :func:`_fit_side` walks down to before it gives up: an edge no larger means no edge fitted at all.
+_NO_FIT = 1.0
 #: Room the measured widths are padded by: tick labels and axis labels take the plot font after the Properties pass,
 #: which may set a little wider than the font measured here.
 SLACK = 1.12
@@ -257,7 +263,7 @@ def _decor(ts: Typesetter, text: PanelText, side: float, plan: _Plan) -> tuple[f
     title = ts.wrap(text.title, PANEL_TITLE_PT, width, "semibold")
     note = ts.wrap(text.note, NOTE_PT, width) if plan.notes else []
     above = rows_height(len(title), PANEL_TITLE_PT) + rows_height(len(note), NOTE_PT) + 3.0
-    xlabel = ts.wrap(text.xlabel, TICK_PT, max(side / SLACK, 1.0))
+    xlabel = ts.wrap(text.xlabel, TICK_PT, max(side / SLACK, 1.0)) if text.xlabel else []
     below = _TICKS_BELOW + rows_height(len(xlabel), TICK_PT) * SLACK
     if not plan.shared and text.keys:
         below += _KEY_DROP + _flow_keys(ts, text.keys, width, 0.0, 0.0)[1]
@@ -422,12 +428,19 @@ class SummaryCheck:
     state: str = "info"
 
 
-def summary_check(checks: list) -> SummaryCheck:
+#: What the folded line adds once the pictures' axis labels have given way too, so the unit of their ticks is still
+#: said on the figure. Short, because a second row for it costs the pictures the room leaving the labels out made.
+UNITS_SENTENCE = "Axes in µm."
+
+
+def summary_check(checks: list, *, units: bool = False) -> SummaryCheck:
     """*checks* counted by state, in words, and where to read them: ``"Checks: 4 passed, 1 failed, 1 noted — make
-    the card larger to read each one."``"""
+    the card larger to read each one."`` With *units*, :data:`UNITS_SENTENCE` follows (the axis labels have been
+    left out); with no checks it is then that sentence alone."""
     counts = [f"{sum(c.state == state for c in checks)} {word}" for state, word in _STATE_WORDS
               if any(c.state == state for c in checks)]
-    return SummaryCheck(f"Checks: {', '.join(counts)} — make the card larger to read each one.")
+    said = [f"Checks: {', '.join(counts)} — make the card larger to read each one."] if checks else []
+    return SummaryCheck(" ".join(said + ([UNITS_SENTENCE] if units else [])))
 
 
 def layout(ts: Typesetter, width: float, height: float, *, title: str, headline: str, texts: dict, checks: list,
@@ -439,16 +452,26 @@ def layout(ts: Typesetter, width: float, height: float, *, title: str, headline:
     head = _headline(ts, headline, inner, title_y - rows_height(1, TITLE_PT) - 3.0)
     top = head.baselines()[-1] - REASON_PT * (LEADING - 1.0) - 2.0 - BLOCK_GAP
     # The reference text gives way before the pictures do (module docstring): the full figure, then without the
-    # footer, then with the checks folded into one line — the first that lets a picture reach MIN_SIDE, or the last.
+    # footer, then with the checks folded into one line — the first that lets a picture reach MIN_SIDE — and, when
+    # the folded figure has no edge at which the pictures fit, without the panels' axis labels as well (the folded
+    # line then saying their unit).
     folded = [summary_check(checks)] if checks else []
-    for footer_lines_, checks_ in ((footer, checks), ([], checks), ([], folded)):
+    unlabelled = {name: replace(text, xlabel="") for name, text in texts.items()}
+    stages = ((footer, checks, texts), ([], checks, texts), ([], folded, texts),
+              ([], [summary_check(checks, units=True)], unlabelled))
+    plan = None
+    for stage in stages:
+        # The axis labels go only when the folded figure has no edge at which the pictures fit at all.
+        if stage[2] is unlabelled and plan is not None and plan.side > _NO_FIT:
+            break
+        footer_lines_, checks_, texts_ = stage
         footer_rows = [row for line in footer_lines_ for row in ts.wrap(line, FOOTER_PT, inner)]
         footer_y = MARGIN * 0.6 + rows_height(len(footer_rows), FOOTER_PT)
         bottom = footer_y + BLOCK_GAP if footer_rows else MARGIN
-        plan = _choose(ts, texts, _plans(ts, checks_, inner=inner, top=top, bottom=bottom))
+        plan = _choose(ts, texts_, _plans(ts, checks_, inner=inner, top=top, bottom=bottom))
         if plan.side >= MIN_SIDE:
             break
-    checks = checks_
+    checks, texts = checks_, texts_
     columns, col_w, checks_h = plan.checks
     panels, keys, lowest = _place_panels(ts, texts, plan, top)
     # Room the pictures cannot use (their edge set by the width) goes between them and the checks, up to
@@ -464,5 +487,6 @@ def layout(ts: Typesetter, width: float, height: float, *, title: str, headline:
         placed = _set_checks(columns, col_w, MARGIN, lowest - BLOCK_GAP - extra)
     name = ", ".join([plan.grid, "beside" if plan.beside else "below"] + (["shared key"] if plan.shared else [])
                      + ([] if plan.notes else ["no notes"]) + ([] if footer_rows else ["no footer"])
-                     + (["checks folded"] if checks is folded and folded else []))
+                     + (["checks folded"] if (checks is folded and folded) or texts is unlabelled else [])
+                     + (["no axis labels"] if texts is unlabelled else []))
     return Layout(width, height, title_y, head, panels, keys, placed, footer_rows, footer_y, name)

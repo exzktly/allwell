@@ -48,23 +48,23 @@ def build_axis_controls(ctx, slot, page: str) -> None:
     **Subset** and **Baseline** are the Nanowells page's settings, not copies of them: choosing one here sets the
     page's (``nanowell.set_subset_by_name`` / ``nanowell.set_baseline``), so the page's views and this scatter stay
     about the same nanowells and the same fold changes, whichever of the two the choice was made on."""
-    from widgets.labeled_combo import LabeledComboBox
+    from widgets.labeled_combo import unlabelled
 
     for name, caption in zip(_combo_names(page), ("X", "Y")):
-        combo = ctx.widgets.register(name, LabeledComboBox(caption))
+        combo = ctx.widgets.register(name, unlabelled(caption))
         combo.setFitsWidest(True)                        # one width whatever metric is chosen
         combo.currentIndexChanged.connect(lambda _i, _p=page: _redraw_page(ctx, _p))
-        group = slot.add_scope("", combo)
+        group = slot.add_scope(caption, combo)
         group.setVisible(False)
         ctx.widgets.register(name + "_grp", group)
     tips = ("Which nanowells are drawn: the Nanowells page's Subset. Choosing one here makes it that page's Subset.",
             "What every fold change is measured from: the Nanowells page's Baseline. Choosing one here sets it there.")
     for name, caption, tip in zip(_scope_names(page), ("Subset", "Baseline"), tips):
-        combo = ctx.widgets.register(name, LabeledComboBox(caption))
+        combo = ctx.widgets.register(name, unlabelled(caption))
         combo.setToolTip(tip)
         combo.currentIndexChanged.connect(
             lambda _i, _c=combo, _k=caption, _p=page: _choose(ctx, _k, _c.currentData(), _p))
-        group = slot.add_scope("", combo)
+        group = slot.add_scope(caption, combo)
         group.setVisible(False)
         ctx.widgets.register(name + "_grp", group)
 

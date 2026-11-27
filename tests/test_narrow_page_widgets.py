@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import (
-    QApplication, QBoxLayout, QButtonGroup, QFrame, QHBoxLayout, QLabel, QLayout, QPushButton,
+    QApplication, QBoxLayout, QButtonGroup, QHBoxLayout, QLabel, QLayout, QPushButton,
     QVBoxLayout, QWidget,
 )
 
@@ -183,8 +183,8 @@ def test_the_playground_dock_follows_the_page_back_and_forth(qapp):
 # ── Batch Export's side-by-side decision ────────────────────────────────────
 
 def test_batch_export_stacks_when_the_explicit_left_minimum_does_not_fit(qapp):
-    """The group editor sets ``setMinimumWidth(420)``, which overrides its much
-    smaller size hint; counting the hint alone said the two halves fit in a
+    """The Groups card sets ``setMinimumWidth(420)``, which overrides its much
+    smaller size hint; counting the hint alone said the two cards fit in a
     viewport 114 px too narrow for them, and the page overflowed with no
     horizontal scroll bar."""
     from review.features.batch_export.base_panel import BatchExportPanel
@@ -193,18 +193,18 @@ def test_batch_export_stacks_when_the_explicit_left_minimum_does_not_fit(qapp):
     right = QWidget()
     right.setMinimumWidth(866)
     outer = QBoxLayout(QBoxLayout.LeftToRight)
-    sep = QFrame()
-    sep.setFixedWidth(1)
+    outer.setSpacing(12)
     panel = SimpleNamespace(
         _use_sidebar_groups=False, _split_outer=outer, _split_left=left,
-        _split_right=right, _split_sep=sep, _split_right_index=2,
+        _split_right=right, _split_right_index=1,
         _effective_min_width=BatchExportPanel._effective_min_width,
         _viewport_width=lambda: 1260)
-    # 420 + 866 + 1 = 1287 needed; 1260 is offered.
-    BatchExportPanel.apply_split_orientation(panel, 1260)
+    # 420 + 866 + the 12 px gap between the cards + 24 px of slack = 1322 needed; 1315 is offered, which would
+    # fit if the gap were not counted.
+    BatchExportPanel.apply_split_orientation(panel, 1315)
     assert outer.direction() == QBoxLayout.TopToBottom
     # And with room for both (plus the slack) it goes back beside.
-    BatchExportPanel.apply_split_orientation(panel, 1287 + 24 + 61)
+    BatchExportPanel.apply_split_orientation(panel, 1322 + 61)
     assert outer.direction() == QBoxLayout.LeftToRight
 
 

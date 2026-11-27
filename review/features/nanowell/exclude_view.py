@@ -9,9 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import QMenu, QPushButton, QToolButton
+from PySide6.QtWidgets import QMenu, QToolButton
 
 from review.features.nanowell import controller as nwc
+from ui import buttons
 
 _EXCLUDE_TIP = ("Leave this well out of every figure on this page — Distribution, Trajectories, Position, Extremes, "
                 "Array and Identity — and out of Save nanowell data. Each figure then says which wells are left out.\n"
@@ -37,12 +38,11 @@ class ExcludeControls:
 
 def build_exclude_controls(ctx, well_cb) -> ExcludeControls:
     """**Exclude**, acting on *well_cb*'s well, and the *Excluded* menu; the page places both on its band."""
-    exclude = QPushButton("Exclude")
-    exclude.setProperty("variant", "secondary")
+    exclude = buttons.default("Exclude")
     exclude.setToolTip(_EXCLUDE_TIP)
     exclude.clicked.connect(lambda _=False: nwc.set_well_excluded(ctx, well_cb.currentData() or "", True))
     ctx.widgets.register("_nw_exclude_well_btn", exclude)
-    excluded = QToolButton()
+    excluded = buttons.tool_button()
     excluded.setPopupMode(QToolButton.InstantPopup)
     # The theme's one shared chevron (``hasMenu``) is this button's only arrow, so its text carries no "▾": a caret in
     # the label beside the indicator Qt draws for any button with a menu is two arrows, one large and one small.

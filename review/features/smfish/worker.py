@@ -246,7 +246,7 @@ def _write_counts_to_csvs(
                     "atomic-write helper retried for ~3s and the file is "
                     "still locked; likely Excel / a viewer has the CSV open, "
                     "or antivirus is mid-scan. Other wells will still be "
-                    "written. Close the file and retry Apply Global Threshold.",
+                    "written. Close the file and retry Apply global threshold.",
                     csv_path, exc,
                 )
                 continue
@@ -362,15 +362,15 @@ def apply_global_threshold_async(
                     if progress_cb is not None:
                         progress_cb(completed, len(wells))
                     if _cancelled():
-                        status_cb("Apply to All cancelled.")
-                        done_cb("Apply to All cancelled before CSV write.")
+                        status_cb("Apply global threshold cancelled.")
+                        done_cb("Apply global threshold cancelled before CSV write.")
                         return
             finally:
                 executor.shutdown(wait=False, cancel_futures=True)
 
         if _cancelled():
-            status_cb("Apply to All cancelled.")
-            done_cb("Apply to All cancelled before CSV write.")
+            status_cb("Apply global threshold cancelled.")
+            done_cb("Apply global threshold cancelled before CSV write.")
             return
         # Verify the data directory hasn't changed under us. The
         # writer rewrites per-well CSVs in `out_dir`; if the caller
@@ -378,7 +378,7 @@ def apply_global_threshold_async(
         # running, those CSVs belong to the wrong dataset.
         if expected != out_dir or not out_dir.exists():
             done_cb(
-                "Apply to All aborted: target directory changed since "
+                "Apply global threshold aborted: target directory changed since "
                 "the run was started."
             )
             return
@@ -409,7 +409,7 @@ def apply_global_threshold_async(
         # ways to fall short: it breaks on an abort, and it skips a well whose
         # CSV could not be resolved or could not be written (Excel holding the
         # file, a read-only volume). Keying the message on the abort flag left
-        # the second, likelier case reported as "Apply to All complete" — the
+        # the second, likelier case reported as "Apply global threshold complete" — the
         # partial-run-as-clean-run shape this exists to close. It also
         # mis-reported a cancel that landed after the last write as wells
         # skipped, since the flag says nothing about what the loop did.
@@ -421,24 +421,24 @@ def apply_global_threshold_async(
             after_csv_cb(shortfall)
         if shortfall:
             done_cb(
-                f"Apply to All wrote {written} of {total} well(s). The other "
+                f"Apply global threshold wrote {written} of {total} well(s). The other "
                 f"{shortfall} still hold their previous counts — see the log "
                 "for which and why; re-run to finish them." + blank
             )
             return
-        done_cb("Apply to All complete. Line/Bar plots refreshed." + blank)
+        done_cb("Apply global threshold complete. Line/Bar plots refreshed." + blank)
 
     def _run_guarded() -> None:
         # A raise anywhere in _run (e.g. a pd.read_csv ParserError in
         # _write_counts_to_csvs) previously killed the daemon thread with
-        # done_cb never firing, so "Apply Global Threshold" hung forever
+        # done_cb never firing, so "Apply global threshold" hung forever
         # (audit E8). Route any unhandled failure through done_cb so the UI
         # always gets a terminal signal.
         try:
             _run()
         except Exception as exc:
-            logger.exception("smFISH Apply to All worker crashed")
-            done_cb(f"Apply to All failed: {exc}")
+            logger.exception("smFISH Apply global threshold worker crashed")
+            done_cb(f"Apply global threshold failed: {exc}")
 
     thread = threading.Thread(target=_run_guarded, daemon=True)
     thread.start()

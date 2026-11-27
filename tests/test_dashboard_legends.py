@@ -68,56 +68,56 @@ C = theme.Colors
 def test_concatenate_legend(qapp):
     from datasets.concatenate.dashboard import ConcatDashboard
 
-    assert _legend(ConcatDashboard()) == ("Wells", [
-        (C.text_muted, "pending"),
-        (C.warn, "merging"),
-        (C.success, "merged"),
-        (C.accent, "merged — no CSV on one side"),
+    assert _legend(ConcatDashboard()) == ("WELLS", [
+        (C.text_secondary, "Pending"),
+        (C.warn, "Merging"),
+        (C.success, "Merged"),
+        (C.accent, "Merged — no CSV on one side"),
     ])
 
 
 def test_import_loose_legend(qapp):
     from datasets.import_loose.dashboard import ImportLooseDashboard
 
-    assert _legend(ImportLooseDashboard()) == ("Legend", [
-        (C.text_muted, "pending"),
-        (C.warn, "zipping"),
-        (C.success, "zipped"),
+    assert _legend(ImportLooseDashboard()) == ("LEGEND", [
+        (C.text_secondary, "Pending"),
+        (C.warn, "Zipping"),
+        (C.success, "Zipped"),
     ])
 
 
 def test_merge_plates_legend(qapp):
     from datasets.merge_plates.dashboard import MergePlatesDashboard
 
-    assert _legend(MergePlatesDashboard()) == ("Wells", [
-        (C.text_muted, "pending"),
-        (C.warn, "merging"),
-        (C.success, "merged — dataset 1"),
-        (C.accent2, "merged — dataset 2 (marked “2”)"),
+    assert _legend(MergePlatesDashboard()) == ("WELLS", [
+        (C.text_secondary, "Pending"),
+        (C.warn, "Merging"),
+        (C.success, "Merged — dataset 1"),
+        (C.accent2, "Merged — dataset 2 (marked “2”)"),
     ])
 
 
 def test_validate_legend(qapp):
     from datasets.validate.dashboard import ValidateDashboard
 
-    assert _legend(ValidateDashboard()) == ("Legend", [
-        (C.success, "complete"),
-        (C.warn, "partial"),
-        (C.danger, "no measurements"),
-        (C.text_muted, "no output"),
+    assert _legend(ValidateDashboard()) == ("LEGEND", [
+        (C.success, "Complete"),
+        (C.warn, "Partial"),
+        (C.danger, "No measurements"),
+        (C.text_secondary, "No output"),
     ])
 
 
 def test_run_dashboard_legend_is_local_by_default(qapp):
     from widgets.run_dashboard import RunDashboard
 
-    assert _legend(RunDashboard()) == ("Wells", [
-        (C.run_pending, "pending"),
-        (C.run_processing, "processing"),
-        (C.run_on_server, "processed"),
-        (C.run_done, "complete"),
-        (C.run_problem, "partial / unfinished", "!", marker_ink(C.run_problem)),
-        (C.run_problem, "failed", "✕", C.run_failed_mark),
+    assert _legend(RunDashboard()) == ("WELLS", [
+        (C.run_pending, "Pending"),
+        (C.run_processing, "Processing"),
+        (C.run_on_server, "Processed"),
+        (C.run_done, "Complete"),
+        (C.run_problem, "Partial / unfinished", "!", marker_ink(C.run_problem)),
+        (C.run_problem, "Failed", "✕", C.run_failed_mark),
     ])
 
 
@@ -130,14 +130,14 @@ def test_run_dashboard_legend_names_the_transfer_stages_when_remote(qapp):
 
     dash = RunDashboard()
     dash.reset(remote=True)
-    assert _legend(dash) == ("Wells", [
-        (C.run_pending, "pending"),
-        (C.run_uploaded, "uploaded"),
-        (C.run_processing, "processing"),
-        (C.run_on_server, "on server"),
-        (C.run_done, "downloaded"),
-        (C.run_problem, "partial / unfinished", "!", marker_ink(C.run_problem)),
-        (C.run_problem, "failed", "✕", C.run_failed_mark),
+    assert _legend(dash) == ("WELLS", [
+        (C.run_pending, "Pending"),
+        (C.run_uploaded, "Uploaded"),
+        (C.run_processing, "Processing"),
+        (C.run_on_server, "On server"),
+        (C.run_done, "Downloaded"),
+        (C.run_problem, "Partial / unfinished", "!", marker_ink(C.run_problem)),
+        (C.run_problem, "Failed", "✕", C.run_failed_mark),
     ])
 
 

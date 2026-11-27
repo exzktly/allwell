@@ -44,6 +44,8 @@ _GROUP_GAP = 18          # px gap between facet groups (the non-uniform spacing)
 #: controller builds around a cell's image (``controller._render_cell``'s
 #: caller), and what phone layout's fit (``_phone_fit``) spends per column.
 CELL_MARGIN_PX = 2
+#: The gap between a tile's image and its caption, inside the figure's own grid.
+CELL_GAP_PX = 2
 
 # Scoped label styling — muted per-value labels, a subtle strip behind the
 # outer/group labels so they read as facet bands. Font sizes come from state
@@ -67,12 +69,12 @@ def _inner_qss(pt: int) -> str:
 
 def _group_qss(pt: int) -> str:
     return (f"color:{theme.Colors.text_primary}; font-size:{_on_screen(pt)}px;"
-            f" font-weight:600; background:{theme.Colors.panel_elevated};"
+            f" font-weight:600; background:{theme.Colors.control};"
             " border-radius:5px; padding:2px 6px;")
 
 
 def _corner_qss(pt: int) -> str:
-    return f"color:{theme.Colors.text_muted}; font-size:{_on_screen(max(8, pt - 1))}px;"
+    return f"color:{theme.Colors.text_secondary}; font-size:{_on_screen(max(8, pt - 1))}px;"
 
 
 def _cv(cell, dim: str) -> str:

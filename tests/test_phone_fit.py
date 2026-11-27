@@ -59,7 +59,7 @@ def _form(qtbot, width: int):
     buttons = QWidget()
     bh = QHBoxLayout(buttons)
     bh.addWidget(QPushButton("Concatenate"))
-    bh.addWidget(QPushButton("+ Queue"))
+    bh.addWidget(QPushButton("Add to queue"))
     lay.addWidget(buttons)
     area.setWidget(content)
     area.resize(width, 600)

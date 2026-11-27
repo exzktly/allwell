@@ -28,7 +28,7 @@ So in phone layout every such window takes a **phone form** (:func:`fit`):
   last row is nothing but buttons (a ``QDialogButtonBox``, or a row of push
   buttons such as *Open folder · Clear selected · Close*), so OK and Cancel
   stay on screen however far the content scrolls — and a touch-sized
-  **Close ✕** that does exactly what the title bar's ✕ does (``close()``,
+  **Close** that does exactly what the title bar's ✕ does (``close()``,
   which a dialog answers with ``reject``), unless the row brought down
   already holds the window's own Close or Cancel, or the window has no ✕ at
   all (a progress popup that cannot be cancelled).
@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
 
 from core import phone_layout
 from ui import phone_fit
+from ui import buttons as ui_buttons
 
 #: The property ``PhoneShell`` sets on the window it rearranges itself, which
 #: is never given a phone form here.
@@ -86,7 +87,7 @@ _WINDOW_TYPES = (Qt.Window, Qt.Dialog)
 #: own way out, so no second Close is added beside it.
 _CLOSER_TEXTS = frozenset({"close", "cancel", "done"})
 
-CLOSE_TEXT = "Close ✕"
+CLOSE_TEXT = "Close"   # a window's foot keeps the word, as a dialog's button row does (D13)
 
 _QWIDGETSIZE_MAX = 16_777_215
 
@@ -272,7 +273,7 @@ class _PhoneForm(QObject):
         closers = self._bring_down_buttons(avail.width(), unit)
         self.close_button: QPushButton | None = None
         if _closable(window) and not closers:
-            self.close_button = QPushButton(CLOSE_TEXT, self.foot)
+            self.close_button = ui_buttons.default(CLOSE_TEXT, self.foot)
             self.close_button.setObjectName("PhoneWindowClose")
             self.close_button.setToolTip("Close this window — what its title bar's ✕ does.")
             self.close_button.clicked.connect(lambda _=False: self._win.close())

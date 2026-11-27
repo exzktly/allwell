@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from ui import text_roles
 
 _WELL_STATES = ("pending", "merging", "merged")
 
@@ -41,7 +42,6 @@ class MergePlatesDashboard(PlateProgress):
         self._build_rail()
         self._build_legend()
         self._headline.setText("Idle")
-        self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
         self._status.setText("")
 
@@ -100,7 +100,7 @@ class MergePlatesDashboard(PlateProgress):
             # not one (see theme.Colors.accent2's own docstring).
             return theme.Colors.success if self._well_origin.get(w) == "ds1" else theme.Colors.accent2
         if stage == "pending":
-            return theme.Colors.text_muted
+            return theme.Colors.text_secondary
         return None
 
     def _well_tooltip(self, well_id: str) -> str:
@@ -114,18 +114,16 @@ class MergePlatesDashboard(PlateProgress):
 
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
-        head = QLabel("Wells", self._rail_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head = text_roles.eyebrow("Wells", self._rail_host)
         self._rail_lay.addWidget(head)
         merged = sum(1 for s in self._well_stage.values() if s == "merged")
         total = len(self._wells)
         row_w = QWidget(self._rail_host)
         row = QHBoxLayout(row_w)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(7)
+        row.setSpacing(theme.Spacing.sm)
         row.addWidget(status_dot(theme.Colors.success))
         nm = QLabel(f"Merged: {merged}/{total}", row_w)
-        nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
         row.addWidget(nm)
         row.addStretch(1)
         self._rail_lay.addWidget(row_w)
@@ -136,7 +134,7 @@ class MergePlatesDashboard(PlateProgress):
 
     def _legend_items(self):
         return "Wells", [
-            (theme.Colors.text_muted, "pending"),
+            (theme.Colors.text_secondary, "pending"),
             (theme.Colors.warn, "merging"),
             (theme.Colors.success, "merged — dataset 1"),
             (theme.Colors.accent2, "merged — dataset 2 (marked “2”)"),

@@ -93,11 +93,11 @@ def test_show_note_overrides_the_validator_hint_until_the_next_revalidate(qapp):
     )
     field.set_path("/tmp/dest")
     assert field.message() == "Already has content — choose an empty folder."
-    assert field._hint.objectName() == "Danger"
+    assert field._hint.property("textTone") == "failure"
 
     field.show_note("This destination now holds this run's output.")
     assert field._hint.text() == "This destination now holds this run's output."
-    assert field._hint.objectName() == "Muted"
+    assert (field._hint.property("textRole") == "help" and not field._hint.property("textTone"))
     # The validator's own verdict (is_valid()/message()) is untouched by the
     # note -- only the displayed hint text/style changes. The run gate must
     # still correctly refuse to run again into this same folder.
@@ -105,7 +105,7 @@ def test_show_note_overrides_the_validator_hint_until_the_next_revalidate(qapp):
     assert field.message() == "Already has content — choose an empty folder."
 
     field.revalidate()
-    assert field._hint.objectName() == "Danger"
+    assert field._hint.property("textTone") == "failure"
     assert field._hint.text() == "Already has content — choose an empty folder."
 
 

@@ -19,6 +19,11 @@ own business (a plot canvas wants a gutter, a table does not), but the top is
 what alignment is made of, so it is always zero and the band always sits against
 it. A page that sets its own top inset is the drift this helper exists to remove.
 
+A page with **no** control that scopes what it shows is the exception: an empty
+band reads as a row of missing controls (design language §6, the every-page
+``empty band`` check), so such a page is built with :func:`build_bandless_body`,
+whose content starts at the page's own inset instead.
+
 No All-Well coupling — a plain reusable helper, usable from the Review feature
 packages, ``analyze/log_pane.py`` and ``datasets/tab.py`` alike.
 """
@@ -66,3 +71,22 @@ def build_page_body(
     host_layout.setContentsMargins(left, 0, right, bottom)
     layout.addWidget(host, 1)
     return band, host
+
+
+def build_bandless_body(parent: QWidget, *, inset: int, horizontal: bool = False) -> QWidget:
+    """Lay *parent* out as a page body with no control band and return the content host.
+
+    For a page none of whose controls scope what it shows (its controls live in its content or a dock of its
+    own). The host is inset by *inset* on all four sides, the top included, since no band sits above it.
+    """
+    layout = parent.layout()
+    if layout is None:
+        layout = QVBoxLayout(parent)
+        parent.setLayout(layout)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+    host = QWidget(parent)
+    host_layout = QHBoxLayout(host) if horizontal else QVBoxLayout(host)
+    host_layout.setContentsMargins(inset, inset, inset, inset)
+    layout.addWidget(host, 1)
+    return host

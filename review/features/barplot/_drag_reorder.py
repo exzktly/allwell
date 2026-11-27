@@ -48,9 +48,7 @@ def bar_event_xdata(ctx, event) -> float | None:
 
 def bar_reset_order(ctx) -> None:
     ctx.state.plot.bar_order = None
-    ctx.runtime.barplot.reset_order_btn.setProperty("variant", "toggle_muted")
-    ctx.runtime.barplot.reset_order_btn.style().unpolish(ctx.runtime.barplot.reset_order_btn)
-    ctx.runtime.barplot.reset_order_btn.style().polish(ctx.runtime.barplot.reset_order_btn)
+    ctx.runtime.barplot.reset_order_btn.setEnabled(False)
     from review.features.barplot.renderer import redraw_bars
     redraw_bars(ctx)
 
@@ -129,8 +127,6 @@ def on_bar_drag_release(ctx, event) -> None:
     item = keys.pop(src)
     keys.insert(tgt, item)
     ctx.state.plot.bar_order = keys
-    ctx.runtime.barplot.reset_order_btn.setProperty("variant", "toggle_accent")
-    ctx.runtime.barplot.reset_order_btn.style().unpolish(ctx.runtime.barplot.reset_order_btn)
-    ctx.runtime.barplot.reset_order_btn.style().polish(ctx.runtime.barplot.reset_order_btn)
+    ctx.runtime.barplot.reset_order_btn.setEnabled(True)
     from review.features.barplot.renderer import redraw_bars
     redraw_bars(ctx)

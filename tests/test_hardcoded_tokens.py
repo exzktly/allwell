@@ -98,8 +98,8 @@ FREE_VALUES = frozenset({0, 16777215})
 #     close beside other work. New modules name their size instead, as the
 #     Playground's nanowell window does (``_POPUP_W`` / ``_POPUP_H``).
 #   * ``font-size`` inside QSS strings — the guard reads the AST, so a size
-#     written into a stylesheet f-string is invisible to it. ``selection_chip``
-#     had one and it was found by reading, not by this.
+#     written into a stylesheet f-string is invisible to it. The rail's count
+#     chip had one and it was found by reading, not by this.
 #
 # Both are real gaps. Widening the roster is the fix; doing it means converting
 # the sites first, exactly as the pixel setters were converted.
@@ -118,25 +118,26 @@ EXPRESSION_ALLOWLIST = {
     "widgets/color_picker_popover.py:237",
     "widgets/color_picker_popover.py:242",
     "widgets/empty_state.py:165",
-    "widgets/empty_state.py:166",
+    "widgets/empty_state.py:164",
     "widgets/lut_selector.py:120",
     "widgets/lut_selector.py:125",
     "widgets/lut_selector.py:171",
     "widgets/lut_selector.py:265",
     "widgets/lut_selector.py:266",
-    "widgets/stepper.py:291",
-    "widgets/stepper.py:392",
-    "widgets/styled_slider.py:41",
-    "widgets/styled_slider.py:44",
+    "widgets/stepper.py:293",
+    "widgets/stepper.py:394",
+    "widgets/styled_slider.py:40",
+    "widgets/styled_slider.py:43",
 }
 
-#: The modules that *define* the tokens, and so may write the literals. Same
+#: The modules that *define* the tokens, and so may write the literals: the token classes and the palettes
+#: applied onto them. Same
 #: shape as the well-token guard exempting ``util/well_token.py``.
 #:
 #: Matched on the repository-relative path, not the basename: `theme.py` as a
 #: basename exempts any file of that name anywhere in the tree, which is a
 #: standing invitation to add a second one and inherit the exemption for free.
-_TOKEN_HOMES = {"ui/theme.py"}
+_TOKEN_HOMES = {"ui/theme.py", "ui/palettes.py"}
 
 
 def _bare_ints(node: ast.AST) -> list[int]:

@@ -22,7 +22,7 @@ from types import SimpleNamespace
 
 from core.safe import swallow
 from review.features.nanowell import controller as nwc
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import LabeledComboBox, unlabelled
 
 #: The page's widget names for the three decoration combos, keyed by the ``PlotState`` field each writes.
 DECORATION_WIDGETS = {
@@ -34,7 +34,7 @@ DECORATION_WIDGETS = {
 _GROUP_BY_TIP = ("Pool the page's wells by a sample variable (Home → Sample Map → Variables) instead of by your "
                  "replicate sets: one group per value.\nThe same setting as Group by on the Plotting tabs — changing "
                  "it here changes every plot.")
-_DECORATE_TIP = "Colour and split the Distribution view by a sample variable"
+_DECORATE_TIP = "Color and split the Distribution view by a sample variable"
 
 #: What the page's *Colour by* calls "do not colour by a variable": its dots go back to the occupancy colours, not to
 #: the plate colours the band's combo names.
@@ -55,10 +55,10 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
     from review.core.inspector_panels import make_popover_button
 
     reg = ctx.widgets
-    group_cb = reg.register("_nw_groupby_cb", LabeledComboBox("Group by"))
+    group_cb = reg.register("_nw_groupby_cb", unlabelled("Group by"))
     group_cb.setToolTip(_GROUP_BY_TIP)
     group_cb.currentIndexChanged.connect(lambda _i: on_group_by(ctx, group_cb.currentData() or ""))
-    group_grp = reg.register("_nw_groupby_grp", band.add_scope("", group_cb))
+    group_grp = reg.register("_nw_groupby_grp", band.add_scope("Group by", group_cb))
     group_grp.setVisible(False)
 
     from review.core.group_by_controller import (
@@ -70,7 +70,7 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
     reg.register("_nw_decorate_btn", button)
     note = QLabel(NO_VARIABLES_NOTE, _panel)
     note.setWordWrap(True)
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     panel_layout.addWidget(note)
     combos = {}
     for field, _band_widget, _label in DECORATION_CONTROLS:

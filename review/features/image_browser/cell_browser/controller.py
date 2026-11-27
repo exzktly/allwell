@@ -41,11 +41,6 @@ class _CellThumb(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("CellThumb")
-        self.setStyleSheet(
-            f"#CellThumb {{ background: {theme.Colors.rail}; "
-            f"border: 1px solid {theme.Colors.border}; }}"
-            f"#CellThumb:hover {{ border: 1px solid {theme.Colors.border_strong}; }}"
-        )
 
     def mousePressEvent(self, ev) -> None:  # Qt override
         on_cell_clicked(self._ctx, self._desc)
@@ -59,7 +54,7 @@ def make_cell_thumb(ctx, rgb, desc) -> QWidget:
     thumb.setToolTip(
         f"{desc.well}  FOV {desc.fov}  {tp}\nnucleus {desc.nucleus_id}")
     if rgb is None:
-        thumb.setText("—")
+        thumb.setText("No image")
     else:
         pm = rgb_to_pixmap(rgb).scaled(
             THUMB_PX - 2, THUMB_PX - 2, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -70,10 +65,10 @@ def make_cell_thumb(ctx, rgb, desc) -> QWidget:
         container = QWidget()
         col = QVBoxLayout(container)
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(2)
+        col.setSpacing(theme.Spacing.xs)
         col.addWidget(thumb, 0, Qt.AlignHCenter)
         cap = QLabel(f"{spot} spot" + ("" if spot == 1 else "s"), container)
-        cap.setObjectName("Muted")
+        cap.setProperty("textRole", "help")
         cap.setAlignment(Qt.AlignCenter)
         col.addWidget(cap, 0, Qt.AlignHCenter)
         return container
@@ -99,8 +94,7 @@ def read_sort_keys(ctx) -> list[SortKey]:
         field = combo.currentData()
         if not field:
             continue
-        # dir_btn checked = descending.
-        out.append(SortKey(field, ascending=not dir_btn.isChecked()))
+        out.append(SortKey(field, ascending=dir_btn.currentData() != "desc"))
     return out
 
 

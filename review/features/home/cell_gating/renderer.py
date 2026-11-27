@@ -44,7 +44,7 @@ def _note_thinned(fig, counts: list[int]) -> None:
         return
     note = fig.text(0.01, 0.005, f"CDFs over {CDF_MAX_POINTS:,} cells are drawn through {CDF_MAX_POINTS:,} "
                     f"of their points (largest: {max(thinned):,}); every point drawn is on the full curve",
-                    ha="left", va="bottom", fontsize=7, color=theme.Colors.text_muted)
+                    ha="left", va="bottom", fontsize=7, color=theme.Colors.text_secondary)
     setattr(note, THINNED_NOTE_TAG, True)
 
 
@@ -99,25 +99,25 @@ def _cell_gating_plot_cdf(ctx) -> None:
         fig = ctx.runtime.cell_gating.figure
         if fig is not None:
             fig.clf()
-            fig.set_facecolor(theme.Colors.surface)
-            ax = fig.add_subplot(111, facecolor=theme.Colors.panel)
+            fig.set_facecolor(theme.Colors.canvas)
+            ax = fig.add_subplot(111, facecolor=theme.Colors.card)
             ax.set_axis_off()
             ax.text(
                 0.5, 0.5,
                 "No dataset loaded.\nOpen a results folder to view cell-gating "
                 "distributions.",
                 transform=ax.transAxes, ha="center", va="center",
-                color=theme.Colors.text_muted, fontsize=11, wrap=True,
+                color=theme.Colors.text_secondary, fontsize=11, wrap=True,
             )
             canvas = ctx.runtime.cell_gating.canvas
             if canvas is not None:
                 canvas.draw_idle()
         return
 
-    bg_app = theme.Colors.surface
-    bg_panel = theme.Colors.panel
+    bg_app = theme.Colors.canvas
+    bg_panel = theme.Colors.card
     txt_pri = theme.Colors.text_primary
-    txt_mut = theme.Colors.text_muted
+    txt_mut = theme.Colors.text_secondary
     accent = theme.Colors.accent
     warn = theme.Colors.warn
 

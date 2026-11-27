@@ -362,19 +362,19 @@ def test_a_stacked_run_dashboard_keeps_a_key_to_its_well_colours(qapp):
     d.show()
     d.setStacked(True)
     assert d._legend_chips.isVisible()
-    assert _chip_labels(d) == ["pending", "processing", "processed", "complete",
-                               "partial / unfinished", "failed"]
+    assert _chip_labels(d) == ["Pending", "Processing", "Processed", "Complete",
+                               "Partial / unfinished", "Failed"]
     d.reset(remote=True, total=4)                # a remote run renames and adds rows
-    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
-                               "partial / unfinished", "failed"]
+    assert _chip_labels(d) == ["Pending", "Uploaded", "Processing", "On server", "Downloaded",
+                               "Partial / unfinished", "Failed"]
     assert d._legend_chips.isVisible()
     d.hide()
 
 
 def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp):
     """The chips show only while the plate they explain does: not in the
-    compact strip Analyze's Settings view shows above its form, and not in a
-    collapsed dashboard."""
+    compact strip Analyze's Settings view shows above its form. (The dashboard
+    no longer folds: tests/test_one_collapse_implementation.py.)"""
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard()
     d.show()
@@ -384,12 +384,6 @@ def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp)
     d.setCompact(True)
     assert not chips.isVisible()
     d.setCompact(False)
-    assert chips.isVisible()
-    d._toggle.setChecked(False)
-    d._on_toggle()
-    assert not chips.isVisible()
-    d._toggle.setChecked(True)
-    d._on_toggle()
     assert chips.isVisible()
     d.hide()
 
@@ -421,8 +415,8 @@ def test_sideways_the_colour_key_sits_above_the_plate_inside_the_dashboard(qapp)
     assert chips.isVisible()
     assert label_qss() == {f"color:{theme.Colors.text_primary}; "
                            f"font-size:{theme.Typography.caption_size}px;"}
-    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
-                               "partial / unfinished", "failed"]
+    assert _chip_labels(d) == ["Pending", "Uploaded", "Processing", "On server", "Downloaded",
+                               "Partial / unfinished", "Failed"]
     d.setRailBeside(True)                        # idempotent
     assert root.indexOf(chips) == root.indexOf(d._body) - 1
     d.setRailBeside(False)
@@ -464,14 +458,24 @@ def test_compact_mode_bar_widths_follow_labels_enlarged_by_a_restyle(qapp):
     before = bar._segments[2].minimumWidth()
     from PySide6.QtWidgets import QWidget
 
+    from ui import theme
     from ui.phone_shell import rescale_widgets
-    tree = [bar, *bar.findChildren(QWidget)]
-    rescale_widgets(1.0, 2.0, tree)       # the restyle's own pass
-    for seg in bar._segments:
-        seg.layout().activate()
-    widest = max(s.sizeHint().width() for s in bar._segments)
-    assert widest > before                    # the fixture can tell them apart
-    assert [s.minimumWidth() for s in bar._segments] == [widest] * 3
+    # The restyle as ``PhoneShell._restyle`` runs it: the tokens scaled, the application sheet re-applied — a
+    # segment's label takes its size from that sheet — then the rescale pass.
+    before_sheet = qapp.styleSheet()
+    try:
+        theme.apply_ui_scale(2.0)
+        qapp.setStyleSheet(theme.qss())
+        tree = [bar, *bar.findChildren(QWidget)]
+        rescale_widgets(1.0, 2.0, tree)       # the restyle's own pass
+        for seg in bar._segments:
+            seg.layout().activate()
+        widest = max(s.sizeHint().width() for s in bar._segments)
+        assert widest > before                    # the fixture can tell them apart
+        assert [s.minimumWidth() for s in bar._segments] == [widest] * 3
+    finally:
+        theme.apply_ui_scale(1.0)
+        qapp.setStyleSheet(before_sheet)
     bar.setCompact(False)
     bar._aw_rescale()
     assert [s.minimumWidth() for s in bar._segments] == [0] * 3
@@ -749,7 +753,7 @@ def test_a_stacked_dashboard_is_the_page_and_says_what_a_tapped_well_is(qapp):
     d.show()
     cap = d._plate.maximumWidth()
     d.setStacked(True)
-    assert d._title_label.isHidden() and d._toggle.isHidden()
+    assert d._title_label.isHidden()
     assert d._plate.maximumWidth() > cap        # the desk cap is lifted
     d._plate.wellActivated.emit("C05")
     assert d._well_detail.text() == "C05: failed" and not d._well_detail.isHidden()
@@ -1506,7 +1510,7 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     # The button keeps its name and shows it is open by being checked; the
     # sheet closes by a button reading Close at its top right, like every panel.
     assert shell.wells_button.text() == "Wells · 3" and shell.wells_button.isChecked()
-    assert sheet._aw_close.text() == "Close" and sheet._aw_close.isVisibleTo(win)
+    assert sheet._aw_close.accessibleName() == "Close" and sheet._aw_close.isVisibleTo(win)
     strip_top = strip.mapTo(win, strip.rect().topLeft()).y()
     assert sheet.geometry().bottom() < strip_top, "the sheet covers the button that opened it"
     assert sheet._backdrop._alpha == 0, "a scrim would dim the plot the wells change"
@@ -2124,7 +2128,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
             shell.refresh()
             _pump(qapp)
             assert shell._sheet.isOpen() and shell.controls_button.isVisibleTo(win)
-            assert shell.controls_button.text() == "⚙ Controls" and shell.controls_button.isChecked()
+            assert shell.controls_button.accessibleName() == "Controls" and shell.controls_button.isChecked()
             # ⚙ Controls hides it, and a refresh (a page change) does not bring it back.
             shell.toggle_controls()
             _pump(qapp)
@@ -2233,7 +2237,7 @@ def test_the_controls_sheet_holds_the_inspector_with_the_band_as_its_data_tab(qa
     assert insp.tabWidget("data") is band and insp.currentTab() == "data"
     assert [t for _k, t in insp.tabs()] == ["Data", "Display", "Style", "Detail"]
     assert not insp.isTabEnabled("display"), "a tab the page has nothing for is disabled, not gone"
-    assert insp.close_button.isVisibleTo(win) and insp.close_button.text() == "Close"
+    assert insp.close_button.isVisibleTo(win) and insp.close_button.accessibleName() == "Close"
     insp.close_button.click()
     QTest.qWait(300)
     assert not sheet.isOpen()

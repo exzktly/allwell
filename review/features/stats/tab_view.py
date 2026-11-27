@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 
 from review.core.ui_helpers import btn_primary, btn_secondary
 from widgets.canvas import make_canvas
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from widgets.page_body import build_page_body
 from review.features.stats.controller import stats_active_group
 from review.features.stats.controller import stats_apply_drag
@@ -29,6 +29,7 @@ from review.features.stats.controller import stats_grp_clear_all
 from review.features.stats.controller import stats_resync_from_sample_defs
 from review.core.channel_state_controller import refresh_stats_property_combo
 from core.safe import swallowed
+from ui import theme
 
 
 
@@ -93,7 +94,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     A mode on a shared instrument is invisible, and in Split View it was also
     unreachable. The slot showed whichever plate belonged to the focused pane,
     so with Plots beside Statistics the plate on screen selected wells to plot
-    while the ``+ Add`` button below it created comparison groups those wells
+    while the ``Add`` button below it created comparison groups those wells
     never reached: the group came out empty, and nothing on screen said why.
     The only way to reach the plate that fills a group was to click into the
     Statistics pane first — a gesture unrelated to the task, and one the user
@@ -137,7 +138,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # section the user has to open to find out whether they need it open.
     section = CollapsibleSection("Comparison groups", expanded=True)
     count_lbl = QLabel("", section)
-    count_lbl.setObjectName("Muted")
+    count_lbl.setProperty("textRole", "help")
     section.setValueWidget(count_lbl)
     ctx.widgets.register("_stats_group_count_lbl", count_lbl)
     outer.addWidget(section)
@@ -202,7 +203,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # the time. The hint sits inside the editor, where the only map is this one.
     hint = QLabel("Select a group below, then drag wells on the map to "
                   "assign them to it.", side)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
     col.addWidget(hint)
 
@@ -217,7 +218,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     ctx.widgets.register("_stats_grp_inner", inner)
 
     # The actions sit at the foot of the list they act on. On the rail they were
-    # in the section header, which put "+ Add" at the far end of the panel from
+    # in the section header, which put "Add" at the far end of the panel from
     # the cards it appends to — and in a split pane the title then wrapped to
     # two lines underneath them.
     # A wrapping row, not a QHBoxLayout: a box layout's minimum width is the
@@ -229,12 +230,12 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # thing that looks like a control row.
     from widgets.button_row import ButtonRow
     actions = ButtonRow(side)
-    actions.add(btn_primary(actions, "+ Add group", partial(stats_grp_add, ctx)))
-    actions.add(btn_secondary(actions, "Clear All",
+    actions.add(btn_secondary(actions, "Add group", partial(stats_grp_add, ctx)))
+    actions.add(btn_secondary(actions, "Clear all",
                               partial(stats_grp_clear_all, ctx)))
     # Pull the comparison groups straight from the shared Sample-Definition
     # sets (S1).
-    actions.add(btn_secondary(actions, "↻ Load from Replicates",
+    actions.add(btn_secondary(actions, "Load from replicates",
                               partial(stats_resync_from_sample_defs, ctx)))
     col.addWidget(actions)
     ctx.widgets.register("_stats_group_actions", actions)
@@ -348,14 +349,14 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     )
     stats_ctrl.add_scope("Statistic", statistic_cb)
 
-    tp_cb = reg.register("_stats_tp_cb", LabeledComboBox("Timepoint"))
+    tp_cb = reg.register("_stats_tp_cb", unlabelled("Timepoint"))
     tp_cb.addItems(["—"])
     # The timepoint is a test parameter like any other, and it was the one
     # control that changed what would be tested without invalidating what had
     # been: the previous run's results stayed on screen, and its significance
     # brackets stayed on the Bar plot, describing a different timepoint.
     tp_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", tp_cb)
+    stats_ctrl.add_scope("Timepoint", tp_cb)
 
     test_cb = reg.register("_stats_test_cb", QComboBox())
     # From the controller's roster and nowhere else. A second hand-written list
@@ -373,29 +374,29 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # the unit field on the Variables tab: greying a control out states a rule
     # the user can act on, and there is no rule here — a Welch t-test has no
     # control group, and a picker for one is not a thing they could satisfy.
-    control_cb = reg.register("_stats_control_cb", LabeledComboBox("Control"))
+    control_cb = reg.register("_stats_control_cb", unlabelled("Control"))
     control_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", control_cb)
+    stats_ctrl.add_scope("Control", control_cb)
 
-    var_a_cb = reg.register("_stats_var_a_cb", LabeledComboBox("Pair by"))
+    var_a_cb = reg.register("_stats_var_a_cb", unlabelled("Pair by"))
     var_a_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", var_a_cb)
+    stats_ctrl.add_scope("Pair by", var_a_cb)
 
-    var_b_cb = reg.register("_stats_var_b_cb", LabeledComboBox("and"))
+    var_b_cb = reg.register("_stats_var_b_cb", unlabelled("and"))
     var_b_cb.currentIndexChanged.connect(lambda _i: stats_on_test_change(ctx))
-    stats_ctrl.add_scope("", var_b_cb)
+    stats_ctrl.add_scope("and", var_b_cb)
 
     refresh_stats_test_inputs(ctx)
 
     # Acknowledge the replicate mode the test will use (driven by the shared
     # per-FOV toggle) so the tab is explicit about the unit of replication.
-    # No word-wrap: inside a flow a wrapped label reports its longest-word width
-    # as its minimum, so the row allocates it narrow and the single-line
-    # "Replicates: …" caption wraps into a tall stack even with the whole row
-    # free. Left un-wrapped it keeps one line and the flow places it whole.
+    # A help line under the band, not one of its items: it states the unit of replication rather than choosing
+    # anything, and on the band it took a third of the row (the user's decision, tracker §9.1 step 15).
     fov_indicator = reg.register("_stats_fov_indicator", QLabel(""))
-    fov_indicator.setObjectName("MutedCaption")
-    stats_ctrl.add_scope("", fov_indicator)
+    fov_indicator.setProperty("textRole", "help")
+    fov_indicator.setWordWrap(True)                 # a line of its own under the band, so it may wrap on a phone
+    fov_indicator.setContentsMargins(0, 0, 0, theme.Spacing.sm)
+    body_layout.insertWidget(0, fov_indicator)
 
     stats_ctrl.add_action(btn_primary(stats_ctrl, "Run test", ctx.runtime.stats.run))
     stats_refresh_fov_indicator(ctx)
@@ -418,8 +419,15 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
 
     res_frame = reg.register("_stats_res_frame", QWidget(page))
     rl = QVBoxLayout(res_frame)
-    rl.setContentsMargins(0, 6, 0, 6)
-    result_text = reg.register("_stats_result_text", QTextEdit(res_frame))
+    rl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+    # The results as tables first — Groups, then Comparisons — and the full text report under them, folded
+    # (design language row D15): the tables are what a reader scans, the report is the whole record to copy.
+    from review.features.stats.results_table_view import build_results_tables
+    from widgets.collapsible_section import CollapsibleSection
+
+    rl.addWidget(build_results_tables(ctx, res_frame))
+    report = reg.register("_stats_report_section", CollapsibleSection("Full report", res_frame, expanded=False))
+    result_text = reg.register("_stats_result_text", QTextEdit(report))
     result_text.setReadOnly(True)
     result_text.setLineWrapMode(QTextEdit.WidgetWidth)
     # Hint in the otherwise-blank results panel before the first run.
@@ -431,7 +439,8 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         "Define two comparison groups above, choose a test, then click "
         "Run test to see results here."
     )
-    rl.addWidget(result_text)
+    report.addWidget(result_text)
+    rl.addWidget(report)
     # Not selection-gated: this tab compares groups, and a group is built from
     # wells rather than being the plate selection. But its empty state was a
     # sentence in a QTextEdit placeholder, top-left of a large empty box, while
@@ -450,12 +459,12 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         if n == 1:
             return EmptyReason(
                 "One comparison group so far.",
-                "Add a second group to run a test — + Add group under "
+                "Add a second group to run a test — Add group under "
                 "Comparison groups above.",
             )
         return EmptyReason(
             "No comparison groups yet.",
-            "Click + Add group under Comparison groups above, select the card "
+            "Click Add group under Comparison groups above, select the card "
             "it makes, then drag wells on the map.",
         )
 

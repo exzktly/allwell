@@ -11,8 +11,7 @@ from util.fov import sort_key as fov_sort_key
 from review.data.data_loading import get_rows
 
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from core.safe import swallowed
@@ -26,6 +25,7 @@ from review.features.image_browser.cell_browser.sort_view import (
     cell_browser_sort_refresh,
 )
 from ui import theme
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -57,8 +57,8 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     if lay is None:
         lay = QVBoxLayout(parent)
         parent.setLayout(lay)
-    lay.setContentsMargins(8, 8, 8, 8)
-    lay.setSpacing(6)
+    lay.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    lay.setSpacing(theme.Spacing.xs)
 
     from review.core.ui_helpers import build_section_header
     lay.addWidget(build_section_header(parent, "Cell filters"))
@@ -71,7 +71,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     srl = QHBoxLayout(src_row)
     srl.setContentsMargins(0, 0, 0, 0)
     src_lbl = QLabel("Source", src_row)
-    src_lbl.setObjectName("Muted")
+    src_lbl.setProperty("textRole", "help")
     srl.addWidget(src_lbl)
     source_cb = _SourceCombo(ctx, src_row)
     source_cb.setToolTip(
@@ -91,14 +91,13 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     ctx.runtime.cell_browser.gate_choices = None
     gate_pick_row = QWidget(parent)
     gpl = QHBoxLayout(gate_pick_row)
-    gpl.setContentsMargins(16, 0, 0, 0)
-    gate_pick_btn = QPushButton("Gate", gate_pick_row)
-    gate_pick_btn.setProperty("variant", "secondary")
+    gpl.setContentsMargins(theme.Spacing.lg, 0, 0, 0)
+    gate_pick_btn = buttons.default("Gate", gate_pick_row)
     gate_pick_btn.setToolTip("Choose which scatter gate(s) define the cells.")
     gate_pick_btn.clicked.connect(lambda _=False: _open_gate_select(ctx))
     gpl.addWidget(gate_pick_btn)
     gate_pick_lbl = QLabel("(all)", gate_pick_row)
-    gate_pick_lbl.setObjectName("Muted")
+    gate_pick_lbl.setProperty("textRole", "help")
     gpl.addWidget(gate_pick_lbl)
     gpl.addStretch(1)
     lay.addWidget(gate_pick_row)
@@ -110,7 +109,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     gate_hint = QLabel(
         "Cells inside the selected gate, from the wells the gate was drawn on. "
         "Timepoints / FOVs below narrow further (optional).", parent)
-    gate_hint.setObjectName("Muted")
+    gate_hint.setProperty("textRole", "help")
     gate_hint.setWordWrap(True)
     lay.addWidget(gate_hint)
     ctx.runtime.cell_browser.gate_hint = gate_hint
@@ -126,7 +125,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     rows_host = QWidget()
     rows_lay = QVBoxLayout(rows_host)
     rows_lay.setContentsMargins(0, 0, 0, 0)
-    rows_lay.setSpacing(4)
+    rows_lay.setSpacing(theme.Spacing.xs)
     rows_lay.addStretch(1)
     rows_scroll.setWidget(rows_host)
     lay.addWidget(rows_scroll)
@@ -134,8 +133,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     ctx.runtime.cell_browser.criteria_rows_host = rows_host
     ctx.runtime.cell_browser.criteria_rows = []
 
-    add_btn = QPushButton("+ Add criterion", parent)
-    add_btn.setProperty("variant", "secondary")
+    add_btn = buttons.default("Add criterion", parent)
     add_btn.clicked.connect(lambda _=False: _add_row(ctx))
     lay.addWidget(add_btn)
     ctx.runtime.cell_browser.add_criterion_btn = add_btn
@@ -143,10 +141,10 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     # Why the criteria editor above is greyed out. "From scatter gate" is a
     # sticky choice — it survives tab switches and dataset loads — so without
     # this line a user who ticked it earlier meets a permanently dead
-    # "+ Add criterion" button with nothing on screen explaining it.
+    # "Add criterion" button with nothing on screen explaining it.
     criteria_off_hint = QLabel(
-        "Criteria apply only when Source is Criteria.", parent)
-    criteria_off_hint.setObjectName("Muted")
+        "Criteria apply only when the source is “Criteria”.", parent)
+    criteria_off_hint.setProperty("textRole", "help")
     criteria_off_hint.setWordWrap(True)
     criteria_off_hint.setVisible(False)
     lay.addWidget(criteria_off_hint)
@@ -159,13 +157,12 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     tp_row = QWidget(parent)
     trl = QHBoxLayout(tp_row)
     trl.setContentsMargins(0, 0, 0, 0)
-    tp_btn = QPushButton("Timepoints", tp_row)
-    tp_btn.setProperty("variant", "secondary")
+    tp_btn = buttons.default("Timepoints", tp_row)
     tp_btn.clicked.connect(lambda _=False: _open_multiselect(
         ctx, tp_btn, ctx.runtime.cell_browser.tp_selections, ctx.runtime.cell_browser.tp_label))
     trl.addWidget(tp_btn)
     tp_lbl = QLabel("(all)", tp_row)
-    tp_lbl.setObjectName("Muted")
+    tp_lbl.setProperty("textRole", "help")
     trl.addWidget(tp_lbl)
     trl.addStretch(1)
     lay.addWidget(tp_row)
@@ -175,13 +172,12 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     fov_row = QWidget(parent)
     frl = QHBoxLayout(fov_row)
     frl.setContentsMargins(0, 0, 0, 0)
-    fov_btn = QPushButton("FOVs", fov_row)
-    fov_btn.setProperty("variant", "secondary")
+    fov_btn = buttons.default("FOVs", fov_row)
     fov_btn.clicked.connect(lambda _=False: _open_multiselect(
         ctx, fov_btn, ctx.runtime.cell_browser.fov_selections, ctx.runtime.cell_browser.fov_label))
     frl.addWidget(fov_btn)
     fov_lbl = QLabel("(all)", fov_row)
-    fov_lbl.setObjectName("Muted")
+    fov_lbl.setProperty("textRole", "help")
     frl.addWidget(fov_lbl)
     frl.addStretch(1)
     lay.addWidget(fov_row)
@@ -346,7 +342,7 @@ def _add_row(ctx, column: str = "") -> None:
     row = QWidget()
     rl = QHBoxLayout(row)
     rl.setContentsMargins(0, 0, 0, 0)
-    rl.setSpacing(3)
+    rl.setSpacing(theme.Spacing.xs)
     combo = QComboBox(row)
     for col, label in enumerate_properties(ctx):
         combo.addItem(label, userData=col)
@@ -357,9 +353,8 @@ def _add_row(ctx, column: str = "") -> None:
     combo.setMinimumWidth(theme.Metrics.combo_min_w_sm)
     lo = QLineEdit(row); lo.setPlaceholderText("min"); lo.setFixedWidth(_LO_W)
     hi = QLineEdit(row); hi.setPlaceholderText("max"); hi.setFixedWidth(_HI_W)
-    rm = QPushButton("✕", row)
+    rm = buttons.icon_button("x", "Remove this criterion", row)
     rm.setFixedWidth(_RM_W)
-    rm.setObjectName("Ghost")
     rl.addWidget(combo, 1)
     rl.addWidget(lo)
     rl.addWidget(hi)

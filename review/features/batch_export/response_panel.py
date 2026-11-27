@@ -41,12 +41,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidgetItem,
     QMessageBox,
-    QVBoxLayout,
     QWidget,
 )
 
 from review.core.lazy import lazy as _lazy
-from widgets.separator import build_hline_separator
+from widgets.form_grid import FormGrid
+from review.features.batch_export._page import form_row, hug
 from review.features.batch_export._common import (
     BarGroup,
     _groups_with_loaded_wells,
@@ -82,7 +82,6 @@ _logger = logging.getLogger("review")
 
 #: Pixel geometry for this panel's controls, named rather than written inline
 #: (ARCHITECTURE §8).
-_FIELD_LABEL_W = 110
 _VAR_COMBO_MIN_W = 180
 _BOUND_EDIT_W = 90
 
@@ -116,8 +115,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
     #: One panel, so the X row governs it. ``None`` rather than naming the key,
     #: so a mode that renames its panel does not silently stop taking X.
     _X_PANELS = None
-    _X_ROW_LABEL = "X (dose):"
-    _AXES_FOLLOW_HEADER = False
+    _X_ROW_LABEL = "X (dose)"
     _CELL_SCOPE = "review.features.response.cell_scope_compute"
 
     #: The error band and the per-FOV replicate unit both reach the curves —
@@ -162,35 +160,27 @@ class ResponseBatchExportPanel(BatchExportPanel):
         return [plot.fc_control, *(plot.fc_control_map or {}).values()]
 
     # ── UI ───────────────────────────────────────────────────────────────
-    def _build_output_panel(self, layout: QVBoxLayout) -> None:
-        self._build_output_header_and_io(
-            layout, title="OUTPUT SETTINGS — RESPONSE CURVES")
+    def _mode_title(self) -> str:
+        return "Response"
+
+    def _build_output_panel(self, output: FormGrid, plot: FormGrid) -> None:
+        self._build_output_header_and_io(output)
         # ``include_fraction`` (which also offers the events count beside it):
         # the fraction above the ON cutoff is often the
         # readout a dose response is actually about, and an EC50 fitted to it is
         # well defined — which is why the tab offers it and why an export that
         # could not would be the tab's figure minus its point.
-        self._build_channel_row(layout, attr="_response_channel_cb",
+        self._build_channel_row(plot, attr="_response_channel_cb",
                                 include_fraction=True)
 
-        self._build_variable_rows(layout)
-        self._build_fit_rows(layout)
-        # After the variable rows, not before: "X (dose):" is a range on
-        # whatever "X variable:" was set to, and the block asking for it first
-        # asked about an axis the user had not chosen. See
-        # ``_AXES_FOLLOW_HEADER``.
-        self._build_output_tail(layout)
+        self._build_variable_rows(plot)
+        self._build_fit_rows(plot)
+        # After the variable rows, not before: "X (dose)" is a range on
+        # whatever "X variable" was set to (``_build_output_tail``).
+        self._build_output_tail(plot)
 
-        layout.addWidget(build_hline_separator(None))
-
-        self._build_timepoints_section(layout)
+        self._build_timepoints_section(plot)
         self._init_timepoints()
-
-        layout.addWidget(build_hline_separator(None))
-
-        self._build_summary_label(layout)
-        self._build_run_row(layout, button_text="▶  Run Response Batch Export")
-        layout.addStretch(1)
 
     # ── the run summary ──────────────────────────────────────────────────
     _SUMMARY_FIGURE_LEAD = "One response figure"
@@ -207,20 +197,16 @@ class ResponseBatchExportPanel(BatchExportPanel):
             "\u2014 set it on the plotting band.",
         ]
 
-    def _build_variable_rows(self, layout: QVBoxLayout) -> None:
-        """The x variable, the series split, and the x axis scale."""
-        row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(row, "X variable:", min_width=_FIELD_LABEL_W)
+    def _build_variable_rows(self, form: FormGrid) -> None:
+        """The x variable and the series split."""
         self._x_var_cb = QComboBox()
         self._x_var_cb.setMinimumWidth(_VAR_COMBO_MIN_W)
         self._x_var_cb.setToolTip(
             "The Number sample variable the curves are plotted against.\n"
-            "Text variables group and colour perfectly well but have nowhere to "
+            "Text variables group and color perfectly well but have nowhere to "
             "sit on a numeric axis, so they are not offered here.")
-        row.addWidget(self._x_var_cb)
+        form_row(form, "X variable", hug(self._x_var_cb))
 
-        self._add_bold_label(row, "Series:")
         self._series_var_cb = QComboBox()
         self._series_var_cb.setMinimumWidth(_VAR_COMBO_MIN_W)
         self._series_var_cb.setToolTip(
@@ -228,25 +214,21 @@ class ResponseBatchExportPanel(BatchExportPanel):
             "curves — one line per (timepoint, value).\n"
             "Without it, two conditions dosed on one plate are drawn as a "
             "single line doubling back at every dose.")
-        row.addWidget(self._series_var_cb)
-        row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, "Series", hug(self._series_var_cb))
         self._x_var_cb.currentIndexChanged.connect(
             lambda _i: self._refresh_series_combo())
         self._refresh_variable_combos()
 
-        # No "X scale:" row of its own. The AXES block above already carries
+        # No "X scale:" row of its own. The Axes block already carries
         # one control for this axis, and two controls for one setting is worse
         # than either: ``_save_figure`` pins the AXES answer *after* the render,
         # so the AXES combo silently won while this row went on showing whatever
         # it was left on. Its vocabulary moved into that combo instead — see
         # ``_scale_combo_labels``.
 
-    def _build_fit_rows(self, layout: QVBoxLayout) -> None:
+    def _build_fit_rows(self, form: FormGrid) -> None:
         """The fit model and its pinned plateaus, shared by every curve."""
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(row, "Fit:", min_width=_FIELD_LABEL_W)
         self._fit_model_cb = QComboBox()
         self._fit_models: list[str] = []
         for label, model in _fit_model_labels():
@@ -259,18 +241,18 @@ class ResponseBatchExportPanel(BatchExportPanel):
             "the figure and in the CSV.")
         row.addWidget(self._fit_model_cb)
 
-        row.addWidget(QLabel("Top:"))
+        row.addWidget(QLabel("Top"))
         self._fit_top_edit = QLineEdit()
         self._fit_top_edit.setFixedWidth(_BOUND_EDIT_W)
         self._fit_top_edit.setPlaceholderText("free")
         row.addWidget(self._fit_top_edit)
-        row.addWidget(QLabel("Bottom:"))
+        row.addWidget(QLabel("Bottom"))
         self._fit_bottom_edit = QLineEdit()
         self._fit_bottom_edit.setFixedWidth(_BOUND_EDIT_W)
         self._fit_bottom_edit.setPlaceholderText("free")
         row.addWidget(self._fit_bottom_edit)
         row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, "Fit", row)
 
     def _init_timepoints(self) -> None:
         """Fill the timepoint list from the dataset, everything selected.
@@ -520,7 +502,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
             jobs=groups_with_data,
             progress_text_fn=_progress,
             run_job_fn=_run_group,
-            success_text=f"✓ {len(groups_with_data)} group(s)",
+            success_text=f"Exported {len(groups_with_data)} group(s)",
             status_text=(f"Response batch export: {len(groups_with_data)} group(s)"),
             out_dir=out_dir,
         )

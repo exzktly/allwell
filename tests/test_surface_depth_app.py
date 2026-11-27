@@ -49,7 +49,7 @@ def test_no_press_on_the_image_table_opens_a_second_surface(loaded_app, monkeypa
     app = loaded_app
     assert show_image_browser_subtab(app._ctx, "Image Table")
     QApplication.processEvents()
-    frame = app._ctx.widgets.get("_image_table_band").window()
+    frame = app._ctx.widgets.get("_image_table_page").window()
     found = surf.crawl(app._ctx.widgets.get("_image_table_style_btn").parentWidget(), frame, skip=_skip)
     surf.close_transients(frame)
     assert len(found.pressed) >= 5, f"the crawl pressed only {found.pressed}, so it proved little"

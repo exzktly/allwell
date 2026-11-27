@@ -86,7 +86,6 @@ class Popover(QWidget):
         self._frame.setGraphicsEffect(shadow)
 
         self._content: QWidget | None = None
-        self.setStyleSheet(self._build_qss())
         self.hide()
 
     # ── content ──────────────────────────────────────────────────────────
@@ -196,16 +195,6 @@ class Popover(QWidget):
         self.closed.emit()
 
     # ── style ────────────────────────────────────────────────────────────
-    def _build_qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        #Popover {{ background: transparent; }}
-        #PopoverFrame {{
-            background-color: {c.panel};
-            border: 1px solid {c.border};
-            border-radius: {r.lg}px;
-        }}
-        """
 
 
 def _rect_fits(x: int, y: int, w: int, h: int, scr) -> bool:
@@ -230,7 +219,7 @@ if __name__ == "__main__":
     lay.setContentsMargins(pad, pad, pad, pad)
     lay.setSpacing(theme.Spacing.md)
     title = QLabel("Popover — click a button; click outside or Esc to dismiss")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     title.setWordWrap(True)
     lay.addWidget(title)
 
@@ -240,7 +229,7 @@ if __name__ == "__main__":
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(theme.Spacing.sm)
         h = QLabel(text)
-        h.setObjectName("Heading")
+        h.setProperty("textRole", "sectionHeading")
         v.addWidget(h)
         v.addWidget(QLabel("Some popover content."))
         v.addWidget(QPushButton("An action"))
@@ -263,7 +252,7 @@ if __name__ == "__main__":
     lay.addWidget(grid_host, 1)
 
     echo = QLabel("(open one)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     lay.addWidget(echo)
     # one shared popover wired to opened/closed for the echo line
     side_b = QPushButton("opened/closed signal demo")
@@ -277,3 +266,15 @@ if __name__ == "__main__":
     root.resize(560, 360)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    #Popover {{ background: transparent; }}
+    #PopoverFrame {{
+        background-color: {c.card};
+        border: 1px solid {c.button_edge};
+        border-radius: {r.lg}px;
+    }}
+    """

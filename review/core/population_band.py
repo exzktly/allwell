@@ -87,9 +87,9 @@ def stamp_population_footer(ctx, fig) -> str:
 
 def build_population_controls(ctx, band) -> None:
     """Add the Population picker to *band*'s scope zone, hidden until :func:`refresh` shows it."""
-    from widgets.labeled_combo import LabeledComboBox
+    from widgets.labeled_combo import unlabelled
 
-    combo = ctx.widgets.register("_plotting_population_cb", LabeledComboBox("Population"))
+    combo = ctx.widgets.register("_plotting_population_cb", unlabelled("Population"))
     combo.setToolTip("Draw every cell plot from one of the size classes set on Home ▸ Cell Gating, or from all "
                      "cells. Every plot, statistic, threshold count, fold change and export follows, and each figure "
                      "names the population in its footer.")
@@ -103,7 +103,7 @@ def build_population_controls(ctx, band) -> None:
         ctx.features.call("qc.set_population", ctx, choice)
 
     combo.currentIndexChanged.connect(_on_change)
-    group = band.add_scope("", combo)
+    group = band.add_scope("Population", combo)
     group.setVisible(False)
     ctx.widgets.register("_plotting_population_grp", group)
 

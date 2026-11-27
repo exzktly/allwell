@@ -408,7 +408,7 @@ def test_analyze_redirects_a_raw_czi_to_this_page(qapp, tmp_path):
         assert "Convert CZI" in hint
         # Not the other converter's page: it would refuse the file.
         assert "Convert OME-TIFF" not in hint
-        assert tab._output_lbl.text() == "—"
+        assert tab._output_lbl.text() == ""
         assert "Convert CZI" in tab._layout_lbl.text()
     finally:
         tab.deleteLater()
@@ -952,7 +952,7 @@ def test_a_stride_of_zero_is_refused_with_a_reason_the_page_can_show(
     _set_source(page, _bare_czi(tmp_path), tmp_path)
     page._stride_edit.setText("0")
     problems = page.raw_fields().problems()
-    assert any("Keep every Nth timepoint" in p for p in problems), problems
+    assert any("Keep every nth timepoint" in p for p in problems), problems
 
 
 def test_the_readout_says_how_many_timepoints_a_stride_keeps(

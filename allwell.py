@@ -49,14 +49,13 @@ _boot_diag.boot("PySide6 imported OK")
 from ui import help_topics
 from ui import theme as theme_v2
 from core.log_view import append_entry, entries_text, log_formatter
-from core.panes import pane_index, pane_mode
+from core.panes import pane_index
 from core import gui_busy as _gui_busy
 from core import user_activity as _user_activity
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
 from core.safe import swallow, swallowed
-from widgets.separator import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -388,13 +387,13 @@ class AllWellApp(QMainWindow):
         # Header bar — v2: BrandTile + wordmark + dataset chip + status dot +
         # action IconButtons (Open / Help). Per DECISIONS_NEEDED #4 we keep
         # the native frame, so this is the app-shell strip.
-        header = QWidget(objectName="Sidebar")
+        header = QWidget(objectName="ShellHeader")
         hl = QHBoxLayout(header)
-        hl.setContentsMargins(12, 7, 14, 7)
+        hl.setContentsMargins(theme_v2.Spacing.md, theme_v2.Spacing.sm, theme_v2.Spacing.md, theme_v2.Spacing.sm)
         hl.setSpacing(theme_v2.Spacing.sm)
         hl.addWidget(BrandTile(side=24))
         title = QLabel("All-Well")
-        title.setObjectName("Title")
+        title.setProperty("textRole", "pageTitle")
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
@@ -404,14 +403,6 @@ class AllWellApp(QMainWindow):
         # No registered theme overrides either today — both ``blue`` and the
         # default ``grey`` leave it a transparent pill with white text — but the
         # tokens exist so a theme can recolour it without touching this builder.
-        self._version_pill.setStyleSheet(
-            f"background-color: {theme_v2.Colors.brand}; "
-            f"color: {theme_v2.Colors.brand_fg}; "
-            f"font-family: {theme_v2.Typography.family_mono}; "
-            f"font-size: {theme_v2.Typography.caption_size}px; "
-            f"font-weight: 600; padding: 1px 6px; margin-left: 4px; "
-            f"border-radius: {theme_v2.Radii.xs}px;"
-        )
         hl.addWidget(self._version_pill)
         self._header = header
         self._header_layout = hl
@@ -436,7 +427,6 @@ class AllWellApp(QMainWindow):
         # The rail's width is only the starting value, for the first paint
         # before any panel has been laid out.
         self._mode_seg.setFixedWidth(theme_v2.Metrics.rail_w)
-        self._mode_seg.setFillHeight(True)
         hl.addWidget(self._mode_seg)
 
         hl.addStretch(1)
@@ -509,8 +499,6 @@ class AllWellApp(QMainWindow):
 
         rl.addWidget(header)
 
-        rl.addWidget(build_hline_separator(None))
-
         # Phase 11: the outer Review/Analyze QStackedWidget is gone — Analyze
         # now lives inside ReviewApp's central pane stack so that the
         # left rail (mode-seg + section nav + plate + saved) stays visible
@@ -545,6 +533,10 @@ class AllWellApp(QMainWindow):
         if review_topbar is not None and review_topbar.layout() is not None:
             review_topbar.layout().insertWidget(0, self._mode_seg)
         self._mount_review_actions(header)
+        # Window style W1 (design language §3.1): the shell's regions on the window's ground, the page a rounded
+        # panel beside them, no dividing lines.
+        from ui import shell_frame
+        shell_frame.install(self._review)
 
         self._analyze = AnalyzeTab(
             parent=None,
@@ -579,8 +571,8 @@ class AllWellApp(QMainWindow):
         statusbar = QWidget(objectName="StatusBar")
         self._statusbar = statusbar
         sb_layout = QHBoxLayout(statusbar)
-        sb_layout.setContentsMargins(theme_v2.Spacing.md, 4,
-                                     theme_v2.Spacing.md, 4)
+        sb_layout.setContentsMargins(theme_v2.Spacing.md, theme_v2.Spacing.xs,
+                                     theme_v2.Spacing.md, theme_v2.Spacing.xs)
         sb_layout.setSpacing(theme_v2.Spacing.sm)
         # The embedded Review widget builds its own status strip
         # (status_view.build_bottom) with a "Ready." label + progress bar. That
@@ -589,10 +581,7 @@ class AllWellApp(QMainWindow):
         # the inner strip, so status/progress show here and appear only once.
         self._status_lbl_app = getattr(self._review, "_status_lbl", None) \
             or QLabel("Ready.")
-        self._status_lbl_app.setStyleSheet(
-            f"color: {theme_v2.Colors.text_secondary}; "
-            f"font-size: {theme_v2.Typography.caption_size}px;"
-        )
+        self._status_lbl_app.setProperty("textRole", "label")
         sb_layout.addWidget(self._status_lbl_app)
         # The focused cell's chip, adopted for the same reason as the label.
         _focus_chip = getattr(self._review, "_focus_chip", None)
@@ -613,10 +602,7 @@ class AllWellApp(QMainWindow):
         self._status_hints: list[QWidget] = []
         for label, hint in (("Open", "⌘O"), ("Help", "⌘/"), ("Export", "⌘E")):
             l = QLabel(label)
-            l.setStyleSheet(
-                f"color: {theme_v2.Colors.text_muted}; "
-                f"font-size: {theme_v2.Typography.caption_size}px;"
-            )
+            l.setProperty("textRole", "label")
             sb_layout.addWidget(l)
             kbd = _KbdHint(hint)
             sb_layout.addWidget(kbd)
@@ -633,10 +619,6 @@ class AllWellApp(QMainWindow):
         # drawer is shut (_append_log_line), cleared when the drawer opens.
         from widgets.notice_badge import NoticeBadge
         self._log_badge = NoticeBadge(self._log_btn)
-        statusbar.setStyleSheet(
-            f"#StatusBar {{ background-color: {theme_v2.Colors.titlebar}; "
-            f"border-top: 1px solid {theme_v2.Colors.border_subtle}; }}"
-        )
         rl.addWidget(statusbar)
         self._log_drawer = None  # lazy
         self._log_ring: list[str] = []
@@ -645,6 +627,14 @@ class AllWellApp(QMainWindow):
         self._attach_log_ring_buffer()
         self._build_page_history(review_topbar)
         self._build_phone_shell(review_topbar)
+        # One top bar at the desk (window style W1): the mode switch and the ‹ › arrows beside the name, the
+        # band they sit in for phone layout hidden. After the phone shell, which counts its own insertions into
+        # the band from where these sit in it.
+        from ui import shell_frame
+        shell_frame.lend_to_header(
+            self._header_layout, self._header_layout.indexOf(self._version_pill) + 2, review_topbar,
+            [self._mode_seg, getattr(self, "_history_back_btn", None),
+             getattr(self, "_history_forward_btn", None)])
 
     # ── phone layout ─────────────────────────────────────────────────────
     def _build_phone_shell(self, band) -> None:
@@ -1188,7 +1178,7 @@ class AllWellApp(QMainWindow):
             # QTextBrowser, so the whole drawer is a single scrollable pane rather
             # than a fixed header band above a separately-scrolling document.
             _credit_style = (
-                f"color:{theme_v2.Colors.text_muted};font-style:italic;"
+                f"color:{theme_v2.Colors.text_secondary};font-style:italic;"
                 f"font-size:{theme_v2.Typography.caption_size}px;"
             )
             quick_help_html = (
@@ -1303,10 +1293,7 @@ class AllWellApp(QMainWindow):
                 manual_view.setHtml(combined if n else prefix + manual_html)
             else:
                 manual_view.setHtml(quick_help_html)
-            manual_view.setStyleSheet(
-                f"QTextBrowser {{ background: transparent; border: none; "
-                f"color: {theme_v2.Colors.text_primary}; }}"
-            )
+            manual_view.setObjectName("HelpManual")
             # One browser owns the scrolling and fills the drawer (stretch=1), so
             # anchor links scroll and there's no pinned-height trailing gap.
             manual_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -1474,38 +1461,13 @@ class AllWellApp(QMainWindow):
             return cur.parent
         return cur
 
-    # ── mode bar / left panel width ──────────────────────────────────────
-    def _mode_left_panel(self):
-        """The left panel of the mode currently on screen, or ``None``.
-
-        Each mode owns its own: Review's well-picker rail, and the scrolling
-        form both Analyze and Datasets put down their left edge.
-        """
-        idx = self._mode_seg.currentIndex()
-        mode = pane_mode(idx)
-        if mode == "review":
-            return getattr(self._review, "_sidebar_root", None)
-        pane = getattr(self, f"_{mode}", None)
-        return getattr(pane, "_left_sidebar", None)
-
+    # ── mode bar ─────────────────────────────────────────────────────────
     def _sync_mode_bar(self) -> None:
-        """Keep the mode bar in step with the left panel below it.
+        """Size the mode bar for where it is.
 
-        The bar and that panel are one column, so they collapse together. When
-        the rail is collapsed the bar goes with it and the page tabs run to the
-        window's left edge; leaving it behind stranded a rail-width band of
-        chrome above an empty column — the rail was gone but its header was
-        still there, squeezed down to a width its three labels do not fit.
-        Bringing the rail back brings the bar back with it, which is also the
-        only route back to Analyze and Datasets while collapsed.
-
-        Width matches the panel. All three modes' panels now pin to the same
-        `theme.Metrics.rail_w`, so this is a defensive
-        floor rather than reconciling genuinely different widths — it still runs
-        on every mode switch and panel resize in case that ever changes, or a
-        panel is momentarily narrower than the bar's own natural width. Floored
-        at the bar's natural width so a panel narrower than the three segments
-        elides their labels rather than the bar shrinking to fit.
+        At the desk it is the header's pill beside the application's name (window style W1, design language
+        §3.1): always shown, whatever the rail does, at the width its three segments need. In phone layout it is
+        one control on the phone's own bar, unpinned.
         """
         bar = getattr(self, "_mode_seg", None)
         if bar is None:
@@ -1522,14 +1484,10 @@ class AllWellApp(QMainWindow):
             bar.setMinimumWidth(0)
             bar.setMaximumWidth(16_777_215)   # Qt's QWIDGETSIZE_MAX
             return
-        collapsed = bool(getattr(getattr(self, "_review", None),
-                                 "_sidebar_collapsed", False))
-        if bar.isVisibleTo(bar.parentWidget() or self) == collapsed:
-            bar.setVisible(not collapsed)
-        panel = self._mode_left_panel()
-        natural = bar.sizeHint().width()
-        width = max(panel.width(), natural) if (
-            panel is not None and panel.isVisible()) else natural
+        # At the desk the bar is the header's pill beside the application's name (window style W1), not the head
+        # of the left column, so it stays when the rail collapses and is as wide as its three segments need.
+        bar.setVisible(True)
+        width = bar.sizeHint().width()
         if bar.width() != width:
             bar.setFixedWidth(width)
 
@@ -1807,7 +1765,7 @@ class AllWellApp(QMainWindow):
             bl.setContentsMargins(0, 0, 0, 0)
             bl.setSpacing(theme_v2.Spacing.sm)
             head = QLabel("Application log")
-            head.setObjectName("Heading")
+            head.setProperty("textRole", "sectionHeading")
             bl.addWidget(head)
             # Where the crash record lives. It sits in a hidden folder, and the
             # one time anybody needs it is after the app has died — so the path
@@ -1819,21 +1777,12 @@ class AllWellApp(QMainWindow):
             )
             where.setWordWrap(True)
             where.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            where.setStyleSheet(
-                f"color: {theme_v2.Colors.text_muted}; "
-                f"font-size: {theme_v2.Typography.caption_size}px;"
-            )
+            where.setProperty("textRole", "label")
             bl.addWidget(where)
             from PySide6.QtWidgets import QTextEdit as _QTextEdit
             self._log_view = _QTextEdit(body)
             self._log_view.setReadOnly(True)
-            self._log_view.setStyleSheet(
-                f"QTextEdit {{ background-color: {theme_v2.Colors.panel}; "
-                f"color: {theme_v2.Colors.text_secondary}; "
-                f"font-family: {theme_v2.Typography.family_mono}; "
-                f"font-size: {theme_v2.Typography.caption_size}px; "
-                f"border: 1px solid {theme_v2.Colors.border_subtle}; }}"
-            )
+            self._log_view.setObjectName("AppLogView")
             # A plain bar maps up to 500 entries onto the drawer's short track,
             # so a drag on it moved many lines per pixel; this one moves at
             # most one line per pixel of drag (widgets/fine_scroll_bar.py).
@@ -2095,7 +2044,7 @@ class AllWellApp(QMainWindow):
     def _reveal_datasets_pane(self) -> bool:
         """Switch to the Datasets pane and change nothing on it.
 
-        The return leg of an Analyze queue session: "+ Add job → Analyze" and
+        The return leg of an Analyze queue session: "Add job → Analyze" and
         a queued Analyze row's Edit… take the user to the Analyze pane, and
         saving or cancelling brings them back to the Job Queue they started
         from rather than leaving them on a form that no longer stands for a job.
@@ -2515,6 +2464,10 @@ def main() -> None:
     except Exception:
         swallowed()
     _boot_diag.boot("mpl_bootstrap done")
+    # The figure settings the plots are laid out against, over any matplotlibrc on the machine
+    # (startup/mpl_rc.py): a site file's figure.dpi of 200 doubled every figure's text.
+    from startup import mpl_rc
+    mpl_rc.pin()
 
     # faulthandler is already armed onto the boot log by startup.boot_diag at import
     # time; nothing more to do here.
@@ -2551,8 +2504,8 @@ def main() -> None:
     ap.add_argument("--data_dir", type=Path, default=None,
                     help="Pre-load a results directory into the Review tab on startup.")
     ap.add_argument("--theme", default=None, choices=theme_v2.available_themes(),
-                    help="UI theme (overrides the ALLWELL_THEME env var). "
-                         f"Unset uses {theme_v2.DEFAULT_THEME}.")
+                    help="Palette for this launch (overrides the ALLWELL_THEME env var and the "
+                         f"palette chosen in the app). Unset uses those, else {theme_v2.DEFAULT_THEME}.")
     args = ap.parse_args()
 
     _boot_diag.boot("creating QApplication (loads Qt platform plugin) …")
@@ -2563,10 +2516,11 @@ def main() -> None:
     _boot_diag.install_hang_recorder(app)
     _install_combobox_popup_widener()
     use_bundled_fonts(app)
-    # Select the UI theme (dev-facing ALLWELL_THEME env var) BEFORE building any
-    # widgets, so qss() and every widget's cached inline QSS pick up its tokens.
-    _active_theme = (theme_v2.apply_theme(args.theme) if args.theme
-                     else theme_v2.select_theme_from_env())
+    # Apply the palette BEFORE building any widgets, so qss() and every widget's
+    # cached inline QSS pick up its tokens: --theme, else ALLWELL_THEME, else the
+    # user's stored choice, else the default (ui/palette_setting.py).
+    from ui.palette_setting import apply_startup_palette
+    _active_theme = apply_startup_palette(args.theme)
     _boot_diag.boot(f"theme applied: {_active_theme}")
     _start_phone = _phone_layout_at_startup(app)
     app.setStyleSheet(theme_v2.qss())

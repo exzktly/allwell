@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QLabel,
-    QMenu, QProgressBar, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
+    QMenu, QProgressBar, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
 
@@ -30,7 +30,7 @@ from review.core.ui_helpers import btn_primary
 from widgets import form_registry
 from widgets.separator import build_hline_separator
 from widgets.flow_layout import FlowLayout
-from widgets.page_body import build_page_body
+from widgets.page_body import build_bandless_body
 from widgets.stepper import Stepper
 from review.features.image_browser.image_table.controller import (
     image_table_copy_png,
@@ -61,6 +61,7 @@ from review.features.image_browser.image_table.export import build_export_settin
 from review.features.image_browser.image_table.grid_ops import build_cell_row
 from ui import theme
 from widgets.owned_action import owned_action
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -76,10 +77,14 @@ _ZOOM_LBL_W = 60
 _ZOOM_OUT_W = 32
 
 
+#: The page body, registered: the inspector anchors the shelf's filter pages on it.
+PAGE_KEY = "_image_table_page"
+
+
 def _menu_button(parent, text, *, tooltip="") -> QToolButton:
     """A QToolButton that opens a QMenu on any click — styled to read like
     btn_secondary. The caller populates ``btn.menu()``."""
-    btn = QToolButton(parent)
+    btn = buttons.tool_button(parent)
     btn.setText(text)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     menu = QMenu(btn)
@@ -87,7 +92,7 @@ def _menu_button(parent, text, *, tooltip="") -> QToolButton:
     btn.setPopupMode(QToolButton.InstantPopup)
     if tooltip:
         btn.setToolTip(tooltip)
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
     return btn
 
@@ -113,7 +118,7 @@ class _TableControls(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         # The page's own spacing, so the three rows sit as they did in it.
-        lay.setSpacing(6)
+        lay.setSpacing(theme.Spacing.xs)
 
     def set_actions(self, actions: QWidget) -> None:
         self._actions = actions
@@ -148,14 +153,14 @@ def _build_style_panel(ctx, panel: QWidget, pl) -> None:
     grid.setColumnMinimumWidth(0, 104)
     grid.setColumnStretch(0, 0)
     grid.setColumnStretch(1, 1)
-    grid.setHorizontalSpacing(8)
-    grid.setVerticalSpacing(5)
+    grid.setHorizontalSpacing(theme.Spacing.sm)
+    grid.setVerticalSpacing(theme.Spacing.xs)
     its = ctx.state.image_table
     r = [0]
 
     def _cap(text: str) -> None:
         cap = QLabel(text, panel)
-        cap.setObjectName("Muted")
+        cap.setProperty("textRole", "help")
         grid.addWidget(cap, r[0], 0, 1, 2)
         r[0] += 1
 
@@ -254,13 +259,13 @@ def _build_style_panel(ctx, panel: QWidget, pl) -> None:
            "Bar thickness (px, relative to a 240 px cell). Increase it if the bar "
            "is too thin to see once cells are downscaled.")
     _check("Label the bar", "scale_bar_label",
-           "Write the bar's length (e.g. 50 µm) beside it, in the bar's colour.")
+           "Write the bar's length (e.g. 50 µm) beside it, in the bar's color.")
     _combo("Show on", "scale_bar_cells", _CELLS,
            "Which cell(s) show the scale bar: every cell, or one grid corner.")
     _combo("Position", "scale_bar_img_corner", _CORNERS,
            "Where in the image the bar sits.")
-    _combo("Colour", "scale_bar_color", _BAR_COLORS,
-           "Scale-bar colour. 'Auto' picks black or white per cell for contrast "
+    _combo("Color", "scale_bar_color", _BAR_COLORS,
+           "Scale-bar color. 'Auto' picks black or white per cell for contrast "
            "(so a white bar isn't lost on a light 'Greys' background).")
 
     _cap("Cell labels")
@@ -272,7 +277,7 @@ def _build_style_panel(ctx, panel: QWidget, pl) -> None:
            "Where in the image the label sits.")
     _propf("Font (px)", "label_font_px", 12, 6, 48, 1.0, 0,
            "Label font size (relative to a 240 px cell, so live and export match).")
-    _combo("Colour", "label_color", _COLORS, "Label text colour.")
+    _combo("Color", "label_color", _COLORS, "Label text color.")
     _check("Background box", "label_bg",
            "Draw a translucent dark box behind the label for legibility.")
 
@@ -280,7 +285,7 @@ def _build_style_panel(ctx, panel: QWidget, pl) -> None:
     # What the "Export settings…" dialog and the Saved Plots quality submenu
     # held: rows of this page, applied as they are changed.
     _cap_export = QLabel("Export", panel)
-    _cap_export.setObjectName("Muted")
+    _cap_export.setProperty("textRole", "help")
     pl.addWidget(_cap_export)
     pl.addWidget(build_export_settings(ctx, panel))
     pl.addStretch(1)
@@ -292,13 +297,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # readers resolve. State lists/dicts + the crop tool stay on app.
     reg = ctx.widgets
     """Construct the Image Table tab inside *parent*."""
-    # The band is empty here — this tab authors its grid through the builder
-    # shelf and acts on it through the action strip below, neither of which is a
-    # scope control — but it is still added, so the top of this page is drawn at
-    # the same height as every other page's (widgets/page_body.py).
-    band, body = build_page_body(parent)
+    # No control band: this tab authors its grid through the builder shelf and acts on it through the action
+    # strip below, neither of which is a scope control, and an empty band reads as a row of missing controls
+    # (``widgets.page_body.build_bandless_body``). The sides stay flush as before; only the top takes the inset
+    # the band used to stand in for.
+    body = build_bandless_body(parent, inset=0)
+    body.layout().setContentsMargins(0, theme.Spacing.md, 0, 0)
     body.layout().setSpacing(0)
-    reg.register("_image_table_band", band)
+    reg.register(PAGE_KEY, body)
 
     # State defaults — controller methods read these.
     # Image Table data/options/caches live on the typed ImageTableState
@@ -335,8 +341,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     inner = QWidget()
     il = QVBoxLayout(inner)
-    il.setContentsMargins(12, 12, 12, 12)
-    il.setSpacing(6)
+    il.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+    il.setSpacing(theme.Spacing.xs)
     scroll.setWidget(inner)
     body_layout.addWidget(scroll, 1)
 
@@ -430,7 +436,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Gating tab / plot tabs); the stepper edits that channel.
     _on_thr_lbl = reg.register(
         "_image_table_thresh_frac_lbl", QLabel("ON threshold", action_row))
-    _on_thr_lbl.setObjectName("Muted")
+    _on_thr_lbl.setProperty("textRole", "help")
     tr.addWidget(_on_thr_lbl)
     thresh_chan_cb = reg.register("_image_table_thresh_chan_cb", QComboBox(action_row))
     thresh_chan_cb.setToolTip("Which channel the ON threshold applies to.")
@@ -501,14 +507,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Zoom: − [level] +  (clicking the % resets to 100%). No "Zoom:" caption —
     # the readout in the middle already reads "100%", which says what the two
     # buttons either side of it do.
-    zoom_out = QPushButton("−", action_row)
-    zoom_out.setProperty("variant", "secondary")
+    zoom_out = buttons.icon_button("minus", "Zoom out", action_row, kind=buttons.DEFAULT)
     zoom_out.setFixedWidth(_ZOOM_OUT_W)
     zoom_out.setToolTip("Zoom out")
     zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1 / 1.25, relative=True))
     tr.addWidget(zoom_out)
 
-    zoom_lbl = QPushButton(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
+    zoom_lbl = buttons.default(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
     zoom_lbl.setFlat(True)
     # Wide enough for the max "400%" without clipping the trailing % (52 was tight).
     zoom_lbl.setFixedWidth(_ZOOM_LBL_W)
@@ -517,8 +522,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     reg.register("_image_table_zoom_lbl", zoom_lbl)
     tr.addWidget(zoom_lbl)
 
-    zoom_in = QPushButton("+", action_row)
-    zoom_in.setProperty("variant", "secondary")
+    zoom_in = buttons.icon_button("plus", "Zoom in", action_row, kind=buttons.DEFAULT)
     zoom_in.setFixedWidth(_ZOOM_IN_W)
     zoom_in.setToolTip("Zoom in")
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))
@@ -541,8 +545,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     controls.set_actions(action_row)
 
     # ── Rendered image table (drawn BELOW the action strip) ────────────────
-    render_lbl = QLabel("Image Table:", inner)
-    render_lbl.setProperty("role", "section")
+    render_lbl = QLabel("Image table", inner)
+    render_lbl.setProperty("textRole", "sectionHeading")
     il.addWidget(render_lbl)
 
     # EmptyState placeholder shown until the controller populates the grid.
@@ -567,7 +571,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Progress of a Generate that takes a while: the images being read, then
     # drawn. Hidden until a Generate has run for a moment (``_load_progress``).
     load_label = reg.register("_image_table_load_label", QLabel("", inner))
-    load_label.setObjectName("Muted")
+    load_label.setProperty("textRole", "help")
     load_label.setVisible(False)
     il.addWidget(load_label)
     load_bar = reg.register("_image_table_load_bar", QProgressBar(inner))
@@ -578,7 +582,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     render_host = QWidget(inner)
     render_grid = QGridLayout(render_host)
     render_grid.setContentsMargins(0, 0, 0, 0)
-    render_grid.setSpacing(2)
+    render_grid.setSpacing(theme.Spacing.xs)
     reg.register("_image_table_render_grid", render_grid)
     # Align the render host to the top-left of its slot (the trailing stretch
     # below already keeps it at its sizeHint; each cell is sized to its actual

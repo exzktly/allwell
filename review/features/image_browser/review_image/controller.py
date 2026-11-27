@@ -789,7 +789,7 @@ def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
             table.setColumnCount(0)
             msg_lbl.setText("No rows are available for the selected well(s)." + unreadable_note(unreadable, False))
             return
-        msg_lbl.setText("No exact Well/FOV/Timepoint match. Showing all selected rows instead."
+        msg_lbl.setText("No exact well, FOV and timepoint match. Showing all selected rows instead."
                         + unreadable_note(unreadable))
         lookup = ctx.runtime.review.csv_lookup_context or {}
         ctx_txt = (

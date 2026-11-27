@@ -44,6 +44,9 @@ def _pump() -> None:
 
 
 def test_phone_layout_makes_the_form_the_page_with_run_at_the_foot(tab):
+    # The log waits behind "Show log" until a run starts (the Run card); open it, as a user would, so the
+    # layout below is measured with it on screen.
+    tab._raw_log_cb.click()
     form = tab._left_sidebar
     splitter = form.parentWidget()
     run_row = tab._run_btn.parentWidget()
@@ -72,6 +75,9 @@ def test_phone_layout_makes_the_form_the_page_with_run_at_the_foot(tab):
 
 
 def test_progress_shows_the_run_and_hides_the_form(tab):
+    # The log waits behind "Show log" until a run starts (the Run card); open it, as a user would, so the
+    # layout below is measured with it on screen.
+    tab._raw_log_cb.click()
     view = tab._phone_view
     phone_layout.set_on(True)
     _pump()
@@ -153,6 +159,9 @@ def test_progress_on_a_short_screen_fits_the_page_without_scrolling(tab, hosted)
     log. Progress used to put the dashboard and log in a scroll area; now the
     page fits: the plate shrinks, at its own aspect, so the dashboard, a
     readable log and the run bar are all on screen at once."""
+    # The log waits behind "Show log" until a run starts (the Run card); open it, as a user would, so the
+    # layout below is measured with it on screen.
+    tab._raw_log_cb.click()
     from PySide6.QtWidgets import QScrollArea
     from analyze.phone_view import LOG_MIN_LINES
     view = tab._phone_view
@@ -231,6 +240,9 @@ def test_leaving_phone_layout_hands_back_the_log_and_plate_sizes(tab, hosted):
 
 
 def test_settings_keeps_the_strip_and_desk_gets_the_column_back(tab):
+    # The log waits behind "Show log" until a run starts (the Run card); open it, as a user would, so the
+    # layout below is measured with it on screen.
+    tab._raw_log_cb.click()
     view = tab._phone_view
     form = tab._left_sidebar
     splitter = form.parentWidget()

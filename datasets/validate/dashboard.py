@@ -15,6 +15,7 @@ from ui import theme
 from pipeline.completeness import HEALTH_STATES as _WELL_STATES
 from pipeline.completeness import NEEDS_ATTENTION as _NEEDS_ATTENTION
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from ui import text_roles
 
 
 class ValidateDashboard(PlateProgress):
@@ -47,7 +48,6 @@ class ValidateDashboard(PlateProgress):
         self._build_rail()
         self._build_legend()
         self._headline.setText("Idle")
-        self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
         self._status.setText("")
 
@@ -94,7 +94,7 @@ class ValidateDashboard(PlateProgress):
         if state == "missing":
             return theme.Colors.danger
         if state == "no_output":
-            return theme.Colors.text_muted
+            return theme.Colors.text_secondary
         return None
 
     def _well_tooltip(self, well_id: str) -> str:
@@ -119,8 +119,7 @@ class ValidateDashboard(PlateProgress):
 
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
-        head = QLabel("Wells", self._rail_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head = text_roles.eyebrow("Wells", self._rail_host)
         self._rail_lay.addWidget(head)
         counts = {state: sum(1 for s in self._well_state.values() if s == state) for state in _WELL_STATES}
         for state, label in (
@@ -130,10 +129,9 @@ class ValidateDashboard(PlateProgress):
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w)
             row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(7)
+            row.setSpacing(theme.Spacing.sm)
             row.addWidget(status_dot(self._state_color(state)))
             nm = QLabel(f"{label}: {counts[state]}", row_w)
-            nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)
@@ -147,7 +145,7 @@ class ValidateDashboard(PlateProgress):
             "complete": theme.Colors.success,
             "partial": theme.Colors.warn,
             "missing": theme.Colors.danger,
-            "no_output": theme.Colors.text_muted,
+            "no_output": theme.Colors.text_secondary,
         }[state]
 
     def _legend_items(self):

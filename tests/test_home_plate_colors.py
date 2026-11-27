@@ -90,7 +90,7 @@ def test_no_two_states_are_painted_in_indistinguishable_colours():
 def test_every_painted_colour_reads_against_the_panel():
     """A well painted in a near-background tone is a well the reader cannot see.
     3.0 is the WCAG floor for a non-text graphical object."""
-    panel = theme.Colors.panel
+    panel = theme.Colors.card
     unreadable = {
         state: (colour, round(_contrast(colour, panel), 2))
         for state, colour in state_colors().items()

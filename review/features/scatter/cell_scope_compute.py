@@ -181,7 +181,7 @@ def cell_scope(ctx, *, entry_x: str | None = None, entry_y: str | None = None,
             *((saved,) if (saved := saved_cells_marker(ctx)) else ()),
         ),
         drawn_subset="plot_x_above_floor=1 AND plot_y_above_floor=1 AND "
-                     "plot_axes_finite=1 (AND plot_in_gate=1 with Apply gates on)",
+                     "plot_axes_finite=1 (AND plot_in_gate=1 with Plot only the gated cells on)",
         notes=(
             ("axes", f"x={col_x}, y={col_y}"),
             ("gate layer",

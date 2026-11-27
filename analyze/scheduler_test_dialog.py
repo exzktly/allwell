@@ -21,13 +21,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPlainTextEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from core.safe import swallowed
 from services.scheduler_probe import ProbeResult, ProbeRun, summarize
+from ui import buttons
 
 
 class _Bridge(QObject):
@@ -49,14 +49,14 @@ class SchedulerTestDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self._status_lbl = QLabel("Sending the test job…", self)
-        self._status_lbl.setObjectName("SectionTitle")
+        self._status_lbl.setProperty("textRole", "sectionHeading")
         layout.addWidget(self._status_lbl)
         hint = QLabel(
             "The job goes through the same launch as a run — the scheduler "
             "command, the conda environment, the node — and only looks at "
             "where it landed. A node that has to start can take several "
             "minutes.", self)
-        hint.setObjectName("Muted")
+        hint.setProperty("textRole", "help")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self._log = QPlainTextEdit(self)
@@ -67,7 +67,7 @@ class SchedulerTestDialog(QDialog):
         layout.addWidget(self._summary_lbl)
         row = QHBoxLayout()
         row.addStretch(1)
-        self._close_btn = QPushButton("Cancel", self)
+        self._close_btn = buttons.default("Cancel", self)
         # reject, not close: shown as a page of the host form, this is a child
         # widget, and closing a child widget ends nothing (``done`` below).
         self._close_btn.clicked.connect(self.reject)

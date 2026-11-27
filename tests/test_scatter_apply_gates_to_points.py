@@ -2,7 +2,7 @@
 
 The per-cell scatter is the one view that does not filter by the scatter gates
 drawn on it: it shows the full cloud with the boxes over it, so you can see and
-resize what you selected. The **Apply gates** toggle opts in.
+resize what you selected. The **Plot only the gated cells** toggle opts in.
 
 The filter computes membership *here*, from the gate geometry this plot is
 drawing, rather than reading the ``Gate_Pass`` column. That column is written by

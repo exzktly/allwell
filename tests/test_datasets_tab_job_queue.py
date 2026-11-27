@@ -1,5 +1,5 @@
 """Smoke tests for DatasetsTab's wiring: the page builds with every tool
-controller plus a fake Analyze registered, "+ Queue" on a tool's page lands a
+controller plus a fake Analyze registered, "Add to queue" on a tool's page lands a
 job the Job Queue page can see, and the left rail carries the tools and
 nothing else.
 
@@ -125,7 +125,7 @@ def test_add_to_queue_from_a_tool_lands_a_job_in_the_bridge(qapp, tmp_path):
 
 
 def test_analyze_s_own_queue_button_lands_a_job(qapp, tmp_path):
-    """Analyze's page gained its own "+ Queue", wired through a sink the
+    """Analyze's page gained its own "Add to queue", wired through a sink the
     Datasets side injects — so neither module imports the other."""
     tab, fake_analyze = _make_tab(tmp_path)
     try:
@@ -432,10 +432,9 @@ def test_clearing_keeps_a_failed_job_that_others_wait_on_and_says_so(qapp, tmp_p
         tab.shutdown()
 
 
-def test_the_session_banner_uses_a_real_glyph(qapp, tmp_path):
-    """make_pixmap substitutes alert-triangle for an unknown name, so the edit
-    banner shipped with a warning triangle on it."""
-    from widgets.icons import has_glyph
+def test_the_session_banner_reads_as_information_not_a_warning(qapp, tmp_path):
+    """The edit banner once shipped with a warning triangle on it (an unknown glyph name fell back to one), so
+    editing a queued job read as an alarm. It is an information notice: the neutral rule and dot."""
 
     tab, _ = _make_tab(tmp_path)
     try:
@@ -443,12 +442,8 @@ def test_the_session_banner_uses_a_real_glyph(qapp, tmp_path):
         jq = tab._controllers["job_queue"]
         jq.begin_edit(jq.bridge.queue.jobs[0].id)
         assert tab._session_banner is not None
-        import inspect
-
-        from widgets.context_banner import ContextBanner
-
-        default = inspect.signature(ContextBanner.__init__).parameters["icon"].default
-        assert has_glyph(default), f"banner glyph {default!r} falls back to a warning triangle"
+        # The banner is an information notice: its rule and dot say so, never a warning triangle or amber.
+        assert tab._session_banner.severity() == "information"
     finally:
         tab.shutdown()
 
@@ -533,9 +528,10 @@ def test_current_help_page_is_safe_before_the_rail_exists(qapp, tmp_path):
 
 # ── the left rail ────────────────────────────────────────────────────────────
 
-def test_the_rail_lists_the_tools_and_carries_no_caption_above_them(qapp,
-                                                                    tmp_path):
-    """The left column is the tool list, with nothing restating the pane.
+def test_the_rail_lists_the_tools_under_their_groups_and_nothing_naming_the_pane(qapp,
+                                                                                  tmp_path):
+    """The left column is the tool list under the design language's three eyebrows — Combine, Convert, Maintain
+    (§6, *Datasets*, tracker row D24) — with nothing restating the pane.
 
     It carried a "DATASETS" caption above the rail, under a comment claiming
     it matched Review's sidebar. Review has no such thing — its rail head is
@@ -557,7 +553,14 @@ def test_the_rail_lists_the_tools_and_carries_no_caption_above_them(qapp,
         texts = [w.text().strip()
                  for w in tab._left_sidebar.findChildren(QLabel)
                  if w.text().strip()]
-        assert texts == [feat.name for feat in _FEATURES]
+        want, group = [], None
+        for feat in _FEATURES:
+            if feat.group != group:
+                group = feat.group
+                want.append(group.upper())           # an eyebrow, set in capitals
+            want.append(feat.name)
+        assert texts == want
+        assert [t for t in texts if t.isupper()] == ["COMBINE", "CONVERT", "MAINTAIN"]
     finally:
         tab.shutdown()
 

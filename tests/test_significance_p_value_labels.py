@@ -381,7 +381,7 @@ def test_a_restore_puts_the_toggle_and_the_picker_back_in_step(loaded_app, qtbot
 
     assert app._app_state.plot.show_significance is True
     assert btn.isChecked() is True
-    assert btn.text() == "Significance: On"
+    assert btn.text() == "Show significance"
     assert cb.isEnabled() is True
     assert cb.currentData() == "p"
     # The sync must not have fired the picker's own handler mid-restore.
@@ -409,9 +409,8 @@ def test_a_bar_tab_built_later_opens_on_the_mode_already_chosen(loaded_app, qtbo
     cb = app._bar_significance_label_cb
     assert cb.currentData() == "both"
     assert cb.isEnabled() is True
-    # The toggle beside it is seeded from the same state, caption included.
+    # The switch beside it is seeded from the same state.
     assert app._bar_significance_btn.isChecked() is True
-    assert app._bar_significance_btn.text() == "Significance: On"
 
 
 @pytest.mark.qt

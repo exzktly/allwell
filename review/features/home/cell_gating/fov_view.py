@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from review.data.fov_selection import (
     available_fovs,
@@ -30,6 +30,7 @@ from review.data.fov_selection import (
     fov_selection_status,
     selected_fovs,
 )
+from ui import buttons
 
 # Pixel geometry for this row, named rather than written at the call sites
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site). The vertical
@@ -60,10 +61,10 @@ def build_fov_selection_row(ctx, parent: QWidget, *, indent: int,
     row = QWidget(box)
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
-    label = QLabel("Fields of view:", row)
+    label = QLabel("Fields of view", row)
     label.setToolTip(_TOOLTIP)
     layout.addWidget(label)
-    btn = QPushButton("All FOVs", row)
+    btn = buttons.default("All FOVs", row)
     btn.setMinimumWidth(_FOV_BTN_MIN_W)
     btn.setToolTip(_TOOLTIP)
     btn.clicked.connect(lambda _=False: open_fov_menu(ctx, on_apply))
@@ -72,7 +73,7 @@ def build_fov_selection_row(ctx, parent: QWidget, *, indent: int,
     outer.addWidget(row)
 
     status = QLabel("", box)
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     status.setWordWrap(True)
     status.setVisible(False)
     outer.addWidget(status)

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from review.persistence.reset_scopes import ANALYSIS_SCOPES, clear_analysis, reset_view
+from ui import theme
 
 _logger = logging.getLogger("review")
 
@@ -79,15 +80,15 @@ class ResetAnalysisDialog(QDialog):
         for scope in ANALYSIS_SCOPES:
             row = QWidget(self)
             row_layout = QVBoxLayout(row)
-            row_layout.setContentsMargins(0, 6, 0, 0)
+            row_layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
             row_layout.setSpacing(0)
             box = QCheckBox(scope.title, row)
             box.setChecked(True)
             row_layout.addWidget(box)
             detail = QLabel(scope.detail, row)
-            detail.setObjectName("Muted")
+            detail.setProperty("textRole", "help")
             detail.setWordWrap(True)
-            detail.setContentsMargins(20, 0, 0, 0)
+            detail.setContentsMargins(theme.Spacing.lg, 0, 0, 0)
             row_layout.addWidget(detail)
             layout.addWidget(row)
             self._boxes[scope.key] = box

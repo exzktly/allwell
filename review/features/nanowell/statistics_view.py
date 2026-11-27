@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtWidgets import QComboBox, QPushButton
+from PySide6.QtWidgets import QComboBox
 
 from review.features.nanowell import _rare_controller as rc
 from review.features.nanowell import controller as nwc
 from review.features.nanowell import rare_donor_compute as donors
 from review.features.nanowell import statistics_compute as sc
+from ui import buttons
 
 _UNIT_TIP = ("What one value of a sample is.\n"
              "Wells: each well is a sample and its nanowells are the values — whether these wells' distributions\n"
@@ -64,6 +65,8 @@ class StatisticsControls:
     flagged: object = None
     direction: object = None
     donor: object = None
+    #: The Donor box with its label beside it: what is shown and hidden.
+    donor_field: object = None
 
     @property
     def signalling(self) -> tuple:
@@ -83,8 +86,7 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     test.setToolTip(_TEST_TIP)
     test.currentIndexChanged.connect(lambda _i: nwc.set_stats_test(ctx, test.currentData() or sc.TEST_KEYS[0]))
     ctx.widgets.register("_nw_stats_test_cb", test)
-    flagged = QPushButton("Review flagged crops")
-    flagged.setProperty("variant", "secondary")
+    flagged = buttons.default("Review flagged crops")
     flagged.setToolTip(_FLAGGED_TIP)
     flagged.clicked.connect(lambda _=False: rc.open_flagged_popout(ctx))
     ctx.widgets.register("_nw_stats_flagged_btn", flagged)
@@ -94,14 +96,16 @@ def build_statistics_controls(ctx, band) -> StatisticsControls:
     direction.setToolTip(_DIRECTION_TIP)
     direction.currentIndexChanged.connect(lambda _i: nwc.set_rare_direction(ctx, direction.currentData() or "higher"))
     ctx.widgets.register("_nw_rare_direction_cb", direction)
-    from widgets.labeled_combo import LabeledComboBox
+    from widgets.labeled_combo import unlabelled
+    from widgets.labelled_field import LabelledField
 
-    donor = LabeledComboBox("Donor")
+    donor = unlabelled("Donor")
     donor.setToolTip(_DONOR_TIP)
     donor.currentIndexChanged.connect(lambda _i: nwc.set_rare_donor(ctx, donor.currentData() or donors.OFF))
     ctx.widgets.register("_nw_rare_donor_cb", donor)
-    group = band.add_scope("Compare", unit, test, direction, donor, flagged)
-    return StatisticsControls(unit, test, group, flagged, direction, donor)
+    donor_field = LabelledField("Donor", donor, band, above=False)
+    group = band.add_scope("Compare", unit, test, direction, donor_field, flagged)
+    return StatisticsControls(unit, test, group, flagged, direction, donor, donor_field)
 
 
 def fill_donor_combo(combo, st, variables) -> None:
@@ -132,7 +136,7 @@ def refresh_statistics_controls(st, controls: StatisticsControls, on_view: bool,
     if controls.donor is not None:
         fill_donor_combo(controls.donor, st, variables)
         # Hidden while the plate has no variable: a combo whose only entry is "none" is not a choice.
-        controls.donor.setVisible(rare and bool(donors.donor_variables(variables)))
+        (controls.donor_field or controls.donor).setVisible(rare and bool(donors.donor_variables(variables)))
     if controls.flagged is not None:
         controls.flagged.setVisible(rare)
         ready = bool(st.rare_flagged)

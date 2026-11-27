@@ -28,13 +28,13 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from review.domain import plot_members as _members
 from review.domain import variable_pairing as _vp
+from ui import buttons
 
 
 def _vset(ctx):
@@ -88,7 +88,7 @@ def build_variable_pairing_row(ctx, scope: str, parent: QWidget) -> QWidget:
     row = QWidget(box)
     line = QHBoxLayout(row)
     line.setContentsMargins(0, 0, 0, 0)
-    line.addWidget(QLabel("Pair by variable — control:", row))
+    line.addWidget(QLabel("Pair by variable — control", row))
     variable_cb = QComboBox(row)
     variable_cb.setObjectName("fcPairVariable")
     line.addWidget(variable_cb)
@@ -96,26 +96,26 @@ def build_variable_pairing_row(ctx, scope: str, parent: QWidget) -> QWidget:
     value_cb = QComboBox(row)
     value_cb.setObjectName("fcPairValue")
     line.addWidget(value_cb)
-    line.addWidget(QLabel("within each:", row))
+    line.addWidget(QLabel("within each", row))
     within_box = QWidget(row)
     within_line = QHBoxLayout(within_box)
     within_line.setContentsMargins(0, 0, 0, 0)
     line.addWidget(within_box)
     line.addStretch(1)
-    pair_btn = QPushButton("Pair", row)
+    pair_btn = buttons.default("Pair", row)
     pair_btn.setObjectName("fcPairByVariable")
     line.addWidget(pair_btn)
     outer.addWidget(row)
 
     result = QLabel("", box)
-    result.setObjectName("Muted")
+    result.setProperty("textRole", "help")
     result.setWordWrap(True)
     result.setVisible(False)
     outer.addWidget(result)
 
     empty = QLabel("Pair by variable: define a sample variable on "
                    "Home → Variables to pair by condition.", box)
-    empty.setObjectName("Muted")
+    empty.setProperty("textRole", "help")
     empty.setWordWrap(True)
     outer.addWidget(empty)
 

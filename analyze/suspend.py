@@ -52,6 +52,7 @@ from services.suspend_record import (
     save,
 )
 from core.safe import swallow, swallowed
+from ui import buttons
 
 
 @dataclass(frozen=True)
@@ -332,7 +333,7 @@ class AnalyzeSuspendMixin:
         back — and Stop is the escape hatch beside it. Disabled until a run is
         going, in step with Stop.
         """
-        self._suspend_btn = QPushButton("⏸  Suspend", parent)
+        self._suspend_btn = buttons.default("Suspend", parent)
         self._suspend_btn.setEnabled(False)
         self._suspend_btn.setToolTip(
             "Wind the run down at the next field boundary and remember where it "
@@ -429,7 +430,7 @@ class AnalyzeSuspendMixin:
         lay.setSpacing(theme.Spacing.sm)
         lay.addStretch(1)
 
-        discard_btn = QPushButton("Discard", row)
+        discard_btn = buttons.default("Discard", row)
         discard_btn.setToolTip(
             "Stop offering this run. Nothing is deleted — every well that "
             "already finished keeps its CSV and its out.zip, and you can pick "
@@ -438,7 +439,7 @@ class AnalyzeSuspendMixin:
         discard_btn.clicked.connect(self._discard_suspended)
         lay.addWidget(discard_btn)
 
-        load_btn = QPushButton("Load settings", row)
+        load_btn = buttons.default("Load settings", row)
         load_btn.setToolTip(
             "Fill the form with this run's recorded settings without starting "
             "anything. The offer stays up, so you can still Resume or Discard; "
@@ -446,8 +447,7 @@ class AnalyzeSuspendMixin:
         load_btn.clicked.connect(self._load_resumable_settings)
         lay.addWidget(load_btn)
 
-        resume_btn = QPushButton("Resume", row)
-        resume_btn.setProperty("variant", "primary")
+        resume_btn = buttons.primary("Resume", row)
         resume_btn.setToolTip(_INCREMENTAL_NOTE)
         resume_btn.clicked.connect(self._resume_suspended)
         lay.addWidget(resume_btn)
@@ -992,6 +992,9 @@ class AnalyzeSuspendMixin:
         reports complete. The offer is left up and its record untouched — Load
         is not a decision about the run, and Resume or Discard remain available.
         """
+        # The settings it could not apply are reported in the raw log and nowhere else, and the log starts behind
+        # Show log: open it, as a failed run does.
+        self.force_raw_log_open()
         try:
             offer = self._resumable(self._card_scope())
             if offer is None:

@@ -16,7 +16,7 @@ from ui import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from widgets.control_band import ControlBand
@@ -30,6 +30,7 @@ from review.features.image_browser.cell_browser.collect import cell_browser_chan
 from review.features.image_browser.cell_browser.state import CellBrowserState
 from review.features.image_browser.cell_browser.worker import CellImageLoader
 from widgets.lut_cmaps import resolve_channel_tint
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -112,8 +113,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     _src_row = QWidget(disp_panel)
     _src_lay = QHBoxLayout(_src_row)
     _src_lay.setContentsMargins(0, 0, 0, 0)
-    _src_lay.setSpacing(6)
-    _src_lay.addWidget(QLabel("Source:", _src_row))
+    _src_lay.setSpacing(theme.Spacing.xs)
+    _src_lay.addWidget(QLabel("Source", _src_row))
     source_seg = _SegmentedControl(_src_row)
     for _lbl, _data in (("Raw", "raw"), ("Corrected", "corrected")):
         source_seg.addSegment(_lbl, data=_data)
@@ -132,12 +133,11 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_browser_pagesize_edit", pagesize_edit)
 
     count_lbl = QLabel("Showing 0 / 0 cells")
-    count_lbl.setObjectName("Muted")
+    count_lbl.setProperty("textRole", "help")
     ctrl.add_scope("", count_lbl)
     reg.register("_cell_browser_count_label", count_lbl)
 
-    load_more = QPushButton("Load next", ctrl)
-    load_more.setProperty("variant", "secondary")
+    load_more = buttons.default("Load next", ctrl)
     load_more.clicked.connect(lambda _=False: ctl.load_next_page(ctx))
     load_more.setEnabled(False)
     ctrl.add_action(load_more)
@@ -146,8 +146,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # Generate: the display controls (channels / LUT / color / source /
     # boundaries) only *stage* their state; pressing Generate re-composites the
     # gallery with everything staged (same gate as the sidebar "Apply filters").
-    generate_btn = QPushButton("Generate", ctrl)
-    generate_btn.setObjectName("Primary")
+    # The page's one primary action, as Generate is on the Image Table.
+    generate_btn = buttons.primary("Generate", ctrl)
     generate_btn.setToolTip(
         "Re-render the gallery with the current channels / LUT / colors / "
         "source. Display settings are staged until you press this.")
@@ -162,8 +162,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     grid_host = QWidget()
     grid = QGridLayout(grid_host)
-    grid.setContentsMargins(10, 10, 10, 10)
-    grid.setSpacing(6)
+    grid.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    grid.setSpacing(theme.Spacing.xs)
     grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     scroll.setWidget(grid_host)
     from review.core.ui_helpers import EmptyReason, wrap_with_empty_state
@@ -354,20 +354,19 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         row = QWidget(panel)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(4)
+        rl.setSpacing(theme.Spacing.xs)
 
         # Per-channel display colour: a swatch (opens a colour popover) + a reset
         # back to the default palette colour. Staged → applied on Generate.
         rl.addWidget(QLabel("color", row))
-        swatch = QPushButton("", row)
+        swatch = buttons.default("", row)
         swatch.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)
-        swatch.setToolTip("Display colour for this channel. Applied on Generate.")
+        swatch.setToolTip("Display color for this channel. Applied on Generate.")
         _paint_cb_swatch(swatch, _cb_effective_tint(iv, tok, i))
         rl.addWidget(swatch)
-        reset_c = QPushButton("✕", row)
+        reset_c = buttons.icon_button("x", "Reset this channel's color to the default.", row)
         reset_c.setFixedWidth(_RESET_C_W)
-        reset_c.setObjectName("Ghost")
-        reset_c.setToolTip("Reset this channel's colour to the default.")
+        reset_c.setToolTip("Reset this channel's color to the default.")
         rl.addWidget(reset_c)
 
         def _commit(low, high, _t=tok):

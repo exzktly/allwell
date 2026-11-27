@@ -35,7 +35,6 @@ class StyledSlider(QSlider):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCursor(Qt.PointingHandCursor)
         # Strip any inherited QSS sub-control rules; we paint everything.
-        self.setStyleSheet("QSlider#StyledSlider { background: transparent; }")
         if orientation == Qt.Horizontal:
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.setMinimumHeight(self._handle_d() + 6)
@@ -140,12 +139,12 @@ class StyledSlider(QSlider):
         # filled portion up to the handle
         fill_w = handle_cx - lo
         if fill_w > 0.5:
-            p.setBrush(QColor(c.accent if enabled else c.accent_dim))
+            p.setBrush(QColor(c.accent if enabled else c.selected))
             p.drawRoundedRect(QRectF(lo, cy - gh / 2.0, fill_w, gh), gh / 2.0, gh / 2.0)
 
         # handle
         handle_rect = QRectF(handle_cx - hd / 2.0, cy - hd / 2.0, hd, hd)
-        p.setBrush(QColor(c.panel_elevated if enabled else c.panel))
+        p.setBrush(QColor(c.control if enabled else c.card))
         p.setPen(QPen(QColor(c.rail if enabled else c.border_subtle), 2.0))
         p.drawEllipse(handle_rect)
 
@@ -175,7 +174,7 @@ if __name__ == "__main__":
     outer.setSpacing(theme.Spacing.md)
 
     title = QLabel("StyledSlider")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -193,7 +192,7 @@ if __name__ == "__main__":
     s3.setEnabled(False)
 
     val_lbl = QLabel("40")
-    val_lbl.setObjectName("Mono")
+    val_lbl.setProperty("textRole", "number")
     row = QHBoxLayout()
     row.addWidget(s1, 1)
     row.addWidget(val_lbl)

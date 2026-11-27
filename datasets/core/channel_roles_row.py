@@ -101,6 +101,7 @@ class ChannelRolesMixin:
             self._channels_lay.addWidget(row)
             self._channel_rows.append((name, combo))
         self._channels_caption.setVisible(bool(names))
+        self._channels_host.setVisible(bool(names))   # an empty host would hold its card open with nothing in it
         if self._pending_roles and set(self._pending_roles) & set(names):
             self._apply_roles(self._pending_roles)
             self._pending_roles = {}

@@ -60,7 +60,7 @@ def show_threshold_curve(ctx, curve, *, on_pick=None, picked=None) -> None:
         popup.setWindowTitle("Threshold curve")
         popup.resize(820, 460)
         layout = QVBoxLayout(popup)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
         fig = Figure(figsize=(7.8, 4.4), dpi=100)
         canvas = make_canvas(fig)
         layout.addWidget(canvas)
@@ -133,9 +133,9 @@ def draw_threshold_curve(fig, curve, *, picked=None) -> None:
     same as the line being there.
     """
     fig.clear()
-    bg = theme.Colors.panel
+    bg = theme.Colors.card
     txt_pri = theme.Colors.text_primary
-    txt_mut = theme.Colors.text_muted
+    txt_mut = theme.Colors.text_secondary
     fig.patch.set_facecolor(bg)
     ax = fig.add_subplot(111)
     ax.set_facecolor(bg)
@@ -169,7 +169,7 @@ def draw_threshold_curve(fig, curve, *, picked=None) -> None:
     if curve.model_default is not None:
         # The comparison the feature exists for. Without it the user can read
         # their own value off the curve and has nothing to read it against.
-        ax.axvline(float(curve.model_default), color=theme.Colors.text_muted,
+        ax.axvline(float(curve.model_default), color=theme.Colors.text_secondary,
                    lw=1.2, ls=":",
                    label=f"model default = {curve.model_default:.3g}")
 
@@ -200,7 +200,7 @@ def draw_threshold_curve(fig, curve, *, picked=None) -> None:
             transform=ax.transAxes, ha="center", va="top", fontsize=8.5,
             color=txt_mut)
     leg = ax.legend(loc="best", framealpha=0.85,
-                    facecolor=theme.Colors.panel, edgecolor=txt_mut,
+                    facecolor=theme.Colors.card, edgecolor=txt_mut,
                     fontsize=9)
     if leg is not None:
         for t in leg.get_texts():

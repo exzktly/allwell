@@ -153,7 +153,7 @@ class TimepointPicker(MultiSelectButton):
             self.blockSignals(False)
         self.setToolTip(
             "Which timepoints to convert. Everything ticked converts the whole "
-            "timelapse; the stride beside this then keeps every Nth of the "
+            "timelapse; the stride beside this then keeps every nth of the "
             "ticked ones. Each kept timepoint keeps its own name.")
 
     def _on_ticks_changed(self) -> None:

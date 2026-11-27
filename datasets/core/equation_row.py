@@ -31,6 +31,8 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWi
 
 from ui import theme
 from widgets.path_field import PathField, folder_picker
+from ui import text_roles
+from ui import buttons
 
 #: Width of the ``+`` / ``=`` column between the fields. Narrow enough that the
 #: three fields keep the width, wide enough that the glyph is not clipped.
@@ -91,7 +93,7 @@ def build_equation_row(
 
     def _operator(text: str) -> QLabel:
         lbl = QLabel(text, row)
-        lbl.setObjectName("Heading")
+        lbl.setProperty("textRole", "sectionHeading")
         lbl.setContentsMargins(0, theme.Spacing.lg, 0, 0)
         lbl.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
         lbl.setFixedWidth(_EQUATION_OP_W)
@@ -105,7 +107,7 @@ def build_equation_row(
     outer.addWidget(row)
 
     cross_hint = QLabel("", parent)
-    cross_hint.setObjectName("Danger")
+    text_roles.set_role(cross_hint, text_roles.HELP, tone=text_roles.FAILURE)
     cross_hint.setWordWrap(True)
     cross_hint.setVisible(False)
     outer.addWidget(cross_hint)
@@ -119,16 +121,18 @@ def build_equation_row(
         sl = QHBoxLayout(swap_row)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(theme.Spacing.sm)
-        swap = QPushButton("⇄  Swap dataset 1 and 2", swap_row)
+        swap = buttons.default("Swap dataset 1 and 2", swap_row)
         swap.setObjectName("EquationSwap")
-        swap.setProperty("variant", "secondary")
+        swap.setProperty("variant", "default")
         swap.clicked.connect(lambda _checked=False: on_swap())
         sl.addWidget(swap)
         if swap_note:
             note = QLabel(swap_note, swap_row)
-            note.setObjectName("Muted")
-            sl.addWidget(note)
-        sl.addStretch(1)
+            note.setProperty("textRole", "help")
+            note.setWordWrap(True)          # wraps beside the button in a tool page's column, rather than clipping
+            sl.addWidget(note, 1)
+        else:
+            sl.addStretch(1)
         outer.addWidget(swap_row)
 
     for field in (ds1, ds2, dest):

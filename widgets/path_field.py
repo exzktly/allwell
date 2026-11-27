@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
+from ui.text_roles import NOT_SET
 from widgets.icons import make_icon
 from widgets.owned_action import owned_action
 
@@ -64,7 +65,12 @@ def folder_picker(prompt: str) -> Picker:
 class PathField(QWidget):
     """Caption + path box + Browse button, with an optional inline hint."""
 
+    #: The user chose a path (Browse). Not emitted when the host sets one.
     changed = Signal()
+    #: The path, or what the field says about it, changed — by the user or the host (``set_path``,
+    #: ``set_pending``, ``revalidate``). For a reader of the field's state, such as a page's "why it cannot run yet"
+    #: line, which must not go stale when a swap or a restored job fills the field from code.
+    stateChanged = Signal()
 
     def __init__(
         self,
@@ -75,6 +81,7 @@ class PathField(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._title = title
         self._pick = pick
         self._validator = validator
         self._path = ""
@@ -88,7 +95,7 @@ class PathField(QWidget):
         col.setSpacing(theme.Spacing.xs)
 
         label = QLabel(title, self)
-        label.setObjectName("Muted")
+        label.setProperty("textRole", "help")
         label.setWordWrap(True)
         col.addWidget(label)
 
@@ -98,7 +105,7 @@ class PathField(QWidget):
         row_layout.setSpacing(theme.Spacing.xs)
         self._edit = QLineEdit(row)
         self._edit.setReadOnly(True)
-        self._edit.setPlaceholderText("(not set)")
+        self._edit.setPlaceholderText(NOT_SET)
         self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row_layout.addWidget(self._edit, 1)
         self._browse_btn = QToolButton(row)
@@ -110,7 +117,10 @@ class PathField(QWidget):
         col.addWidget(row)
 
         self._hint = QLabel("", self)
-        self._hint.setObjectName("Danger")
+        # Help text in the failure tone (``ui/text_roles.py``'s properties; a widget sets them rather than
+        # importing the app's module): a refusal under the field, or a neutral note in its place.
+        self._hint.setProperty("textRole", "help")
+        self._hint.setProperty("textTone", "failure")
         self._hint.setWordWrap(True)
         self._hint.setVisible(False)
         col.addWidget(self._hint)
@@ -206,14 +216,15 @@ class PathField(QWidget):
         or the host explicitly re-checking) always wins over a stale note.
         A pending path shows its note instead (:meth:`set_pending`)."""
         if self._pending_note:
-            self._set_hint_style("Muted")
+            self._set_hint_tone("")
             self._hint.setText(self._pending_note)
             self._hint.setVisible(True)
-            return
-        self._set_hint_style("Danger")
-        message = self._validity_message()
-        self._hint.setText(message)
-        self._hint.setVisible(bool(message))
+        else:
+            self._set_hint_tone("failure")
+            message = self._validity_message()
+            self._hint.setText(message)
+            self._hint.setVisible(bool(message))
+        self.stateChanged.emit()
 
     def show_note(self, text: str) -> None:
         """Show *text* as a neutral, non-error inline note in place of the
@@ -225,7 +236,7 @@ class PathField(QWidget):
         warning reads as "something went wrong" rather than "this destination
         is now spoken for; pick a new one to run again."
         """
-        self._set_hint_style("Muted")
+        self._set_hint_tone("")
         self._hint.setText(text)
         self._hint.setVisible(bool(text))
 
@@ -239,14 +250,15 @@ class PathField(QWidget):
         without somewhere to say it, the page's Run button goes dark with no
         reason attached.
         """
-        self._set_hint_style("Danger")
+        self._set_hint_tone("failure")
         self._hint.setText(text)
         self._hint.setVisible(bool(text))
 
-    def _set_hint_style(self, object_name: str) -> None:
-        if self._hint.objectName() == object_name:
+    def _set_hint_tone(self, tone: str) -> None:
+        """The hint's tone: ``"failure"`` for a refusal, ``""`` for a neutral note."""
+        if self._hint.property("textTone") == tone:
             return
-        self._hint.setObjectName(object_name)
+        self._hint.setProperty("textTone", tone)
         style = self._hint.style()
         style.unpolish(self._hint)
         style.polish(self._hint)
@@ -264,6 +276,10 @@ class PathField(QWidget):
         button that actually does something keeps the path fully legible.
         """
         self._browse_btn.setEnabled(not locked)
+
+    def title(self) -> str:
+        """The field's own caption — "Source dataset", "Destination folder"."""
+        return self._title
 
     def path(self) -> str:
         return self._path

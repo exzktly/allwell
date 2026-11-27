@@ -27,12 +27,13 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QWidget,
 )
 
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from ui import buttons
+from ui import text_roles
 
 #: How far through a well counts as "being converted" rather than "pending".
 #: Any fraction above zero: the first plane written is the tell, and a well
@@ -137,25 +138,26 @@ class ConverterDashboard(PlateProgress):
         row.setSpacing(theme.Spacing.sm)
 
         self._pick_note = QLabel("", self._pick_row)
-        self._pick_note.setObjectName("Muted")
+        self._pick_note.setProperty("textRole", "help")
         self._pick_note.setWordWrap(True)
         row.addWidget(self._pick_note, 1)
 
-        self._pick_all = QPushButton("Convert all", self._pick_row)
+        self._pick_all = buttons.default("Convert all", self._pick_row)
         self._pick_all.setToolTip(
             "Clear the selection, so every well the source holds is converted")
         self._pick_all.clicked.connect(lambda: self.set_selected_wells([]))
         row.addWidget(self._pick_all)
 
-        self._pick_invert = QPushButton("Invert", self._pick_row)
+        self._pick_invert = buttons.default("Invert", self._pick_row)
         self._pick_invert.setToolTip(
             "Convert the wells that are not picked, and skip the ones that are")
         self._pick_invert.clicked.connect(self._invert_selection)
         row.addWidget(self._pick_invert)
 
-        host = self._center_host.layout()
-        # Directly under the plate, before the stretch that holds it up.
-        host.insertWidget(host.indexOf(self._plate) + 1, self._pick_row)
+        # Under the dashboard's whole body rather than inside its centre column: in a tool page's column
+        # (Metrics.tool_page_w) the centre is too narrow for the note and both buttons beside each other.
+        root = self.layout()
+        root.insertWidget(root.indexOf(self._body) + 1, self._pick_row)
 
     def _invert_selection(self) -> None:
         """Swap the wells that convert for the ones that do not.
@@ -205,13 +207,12 @@ class ConverterDashboard(PlateProgress):
         self._bar.setValue(0)
         self._plate.clearWellMarkers()
         for well in self._wells:
-            self._plate.setWellColor(well, theme.Colors.text_muted)
+            self._plate.setWellColor(well, theme.Colors.text_secondary)
         self.set_overall_range(len(self._wells))
         self.set_overall(0)
         self._refresh_rail()
         self._refresh_pick_note()
         self._headline.setText("Idle")
-        self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
         self._status.setText("")
 
@@ -247,7 +248,7 @@ class ConverterDashboard(PlateProgress):
         self.clear_well_fractions()
         self._plate.clearWellMarkers()
         for well in wells:
-            self._plate.setWellColor(well, theme.Colors.text_muted)
+            self._plate.setWellColor(well, theme.Colors.text_secondary)
         self.set_overall_range(len(wells))
         self.set_overall(0)
         # The note quotes the well count, which has just changed.
@@ -291,7 +292,7 @@ class ConverterDashboard(PlateProgress):
             return theme.Colors.success
         if fraction > _STARTED:
             return theme.Colors.warn
-        return theme.Colors.text_muted
+        return theme.Colors.text_secondary
 
     def _well_tooltip(self, well_id: str) -> str:
         well = canon_well(well_id)
@@ -317,17 +318,15 @@ class ConverterDashboard(PlateProgress):
 
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
-        head = QLabel("Wells", self._rail_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head = text_roles.eyebrow("Wells", self._rail_host)
         self._rail_lay.addWidget(head)
         for state, label, count in self._counts():
             row_host = QWidget(self._rail_host)
             row = QHBoxLayout(row_host)
             row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(7)
+            row.setSpacing(theme.Spacing.sm)
             row.addWidget(status_dot(self._state_color(state)))
             text = QLabel(f"{label}: {count}", row_host)
-            text.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(text)
             row.addStretch(1)
             self._rail_lay.addWidget(row_host)
@@ -339,7 +338,7 @@ class ConverterDashboard(PlateProgress):
     @staticmethod
     def _state_color(state: str) -> str:
         return {
-            "pending": theme.Colors.text_muted,
+            "pending": theme.Colors.text_secondary,
             "converting": theme.Colors.warn,
             "converted": theme.Colors.success,
         }[state]

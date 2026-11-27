@@ -41,7 +41,7 @@ def build_role_strip(role: DeclarationRole, parent: QWidget) -> QWidget:
     host.setObjectName("HomeRoleStrip")
     column = QVBoxLayout(host)
     column.setContentsMargins(0, theme.Spacing.sm, 0, theme.Spacing.sm)
-    column.setSpacing(2)
+    column.setSpacing(theme.Spacing.xs)
 
     what = QLabel(role.role, host)
     what.setObjectName("HomeRoleText")
@@ -49,7 +49,7 @@ def build_role_strip(role: DeclarationRole, parent: QWidget) -> QWidget:
     column.addWidget(what)
 
     where = QLabel(role.cross_link, host)
-    where.setObjectName("Muted")
+    where.setProperty("textRole", "help")
     where.setWordWrap(True)
     column.addWidget(where)
     return host

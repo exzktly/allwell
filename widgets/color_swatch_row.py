@@ -63,7 +63,7 @@ class ColorSwatchRow(QWidget):
         self._allow_custom = bool(allow_custom)
         self._current = QColor(self._colors[0]) if self._colors else QColor()
         self._hover = -1            # index into self._tiles()
-        self.setStyleSheet("#ColorSwatchRow { background: transparent; }")
+
 
     # ── API ──────────────────────────────────────────────────────────────
     def setColors(self, colors) -> None:
@@ -234,7 +234,7 @@ class ColorSwatchRow(QWidget):
             grad.setColorAt(min(0.999, t), QColor.fromHsvF((i % 6) / 6.0, 0.75, 0.95))
         p.fillRect(rect, grad)
         p.restore()
-        p.setPen(QPen(QColor(c.border), 1.0))
+        p.setPen(QPen(QColor(c.hairline), 1.0))
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(rect, radius, radius)
         # a small white "+" on a dark disc in the centre
@@ -259,7 +259,7 @@ class ColorSwatchRow(QWidget):
             if kind == "custom":
                 self._paint_custom_tile(p, rect)
             else:
-                p.setPen(QPen(QColor(c.border), 1.0))
+                p.setPen(QPen(QColor(c.hairline), 1.0))
                 p.setBrush(QColor(payload))
                 p.drawRoundedRect(rect, radius, radius)
             is_current = payload is not None and payload.rgb() == self._current.rgb()
@@ -292,7 +292,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("ColorSwatchRow")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     form = QFormLayout()
@@ -306,7 +306,7 @@ if __name__ == "__main__":
     lay.addLayout(form)
 
     echo = QLabel("(pick a swatch)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     lay.addWidget(echo)
     traces.colorPicked.connect(lambda c: echo.setText(f"trace → {c.name()}"))
     custom.colorPicked.connect(lambda c: echo.setText(f"custom → {c.name()}"))

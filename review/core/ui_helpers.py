@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from review.data.metric_labels import spread_label
 
 from typing import Any
 from collections.abc import Callable
@@ -21,6 +20,7 @@ from review.core.plot_hold import HOLD_GATING
 from core.safe import swallow
 from domain.image_identity import normalize_tp
 from core.safe import swallowed
+from ui import buttons as ui_buttons
 
 
 def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
@@ -486,7 +486,7 @@ def build_section_header(
     title_row = QHBoxLayout()
     title_row.setContentsMargins(0, 0, 0, 0)
     lbl = SectionTitleLabel(title, hdr)
-    lbl.setProperty("role", "section")
+    lbl.setProperty("textRole", "sectionHeading")
     # The title takes the stretch so the buttons sit at the right edge; being the
     # stretchy item, it also absorbs the shrink and wraps only once the row is
     # genuinely too narrow for one line.
@@ -497,7 +497,7 @@ def build_section_header(
 
     if hint:
         hint_lbl = QLabel(hint, hdr)
-        hint_lbl.setObjectName("Muted")
+        hint_lbl.setProperty("textRole", "help")
         # Word-wrap so a long hint doesn't report its full text width as the
         # header's minimum — which forced the whole (non-h-scrolling) Cell Gating
         # pane wider than a narrow window and clipped its controls.
@@ -515,11 +515,9 @@ def make_style_button(ctx, parent: QWidget, figure_key: str, *,
     The band right-aligns its action zone itself, so a tab on the band adds this
     with ``band.add_action(...)``.
     """
-    from PySide6.QtWidgets import QToolButton
-    btn = QToolButton(parent)
+    btn = ui_buttons.tool_button(parent)
     btn.setText("Style")
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "secondary")
     btn.setToolTip(tooltip)
     # One of the band's three fixed buttons (``band_fixed_actions``).
     btn.setProperty("bandRole", "style")
@@ -606,18 +604,9 @@ def clear_layout(layout) -> None:
 
 def _btn(parent: QWidget | None, text: str, command: Callable[[], Any] | None,
          variant: str, *, icon: str | None = None) -> QPushButton:
-    b = QPushButton(text, parent)
-    b.setProperty("variant", variant)
-    if icon:
-        try:
-            from widgets import icons as _icons
-            dpr = b.devicePixelRatioF() if hasattr(b, "devicePixelRatioF") else 1.0
-            b.setIcon(_icons.make_icon(icon, 14, dpr=dpr or 1.0))
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    if command is not None:
-        b.clicked.connect(lambda _=False: command())
-    return b
+    """A button of one of the four kinds (``ui.buttons``), for the ``btn_*`` callers that predate it."""
+    from ui.buttons import button
+    return button(text, variant, parent, on_click=command, icon=icon)
 
 
 def btn_primary(parent: QWidget, text: str, command, *, padx: int = 8, pady: int = 2,
@@ -627,15 +616,15 @@ def btn_primary(parent: QWidget, text: str, command, *, padx: int = 8, pady: int
 
 def btn_secondary(parent: QWidget, text: str, command, *, padx: int = 6, pady: int = 2,
                   icon: str | None = None, **_kw) -> QPushButton:
-    return _btn(parent, text, command, "secondary", icon=icon)
+    return _btn(parent, text, command, "default", icon=icon)
 
 
 def btn_card(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> QPushButton:
-    return _btn(parent, text, command, "card")
+    return _btn(parent, text, command, "default")
 
 
 def btn_danger(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> QPushButton:
-    return _btn(parent, text, command, "danger")
+    return _btn(parent, text, command, "destructive")
 
 
 def make_scrollable_canvas(parent: QWidget, **_kw) -> tuple[QScrollArea, QWidget]:
@@ -693,11 +682,11 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     """
     from PySide6.QtWidgets import QToolButton, QMenu
 
-    btn = QToolButton(parent)
+    btn = ui_buttons.tool_button(parent)
     btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "secondary")
+    btn.setProperty("variant", "default")
     if tooltip:
         btn.setToolTip(tooltip)
     # The label carries the ▾ caret (added above if the caller left it off), so
@@ -870,40 +859,19 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     ctx-native ``core.plot_toggles`` handlers, and registers the buttons on the
     ``ctx.runtime.sem`` / ``ctx.runtime.fov`` banks (mirrors the batch-export
     controls row)."""
-    from review.core.plot_toggles import (
-        register_fov_button,
-        toggle_fov_replicates,
-        toggle_sem,
-    )
-    from widgets.reserved_width_button import ReservedWidthButton
+    from review.core.plot_toggles import make_fov_switch, make_spread_choice
     w = QWidget(parent)
     h = QHBoxLayout(w)
     h.setContentsMargins(0, 0, 0, 0)
-    h.setSpacing(8)
+    h.setSpacing(theme.Spacing.sm)
 
-    eb_lbl = QLabel("Error Band", w)
-    eb_lbl.setObjectName("Muted")
+    eb_lbl = QLabel("Error band", w)
+    eb_lbl.setProperty("textRole", "help")
     h.addWidget(eb_lbl)
-    initial = bool(ctx.state.plot.use_sem)
-    sem_btn = QPushButton(spread_label(initial), w)
-    sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
-    sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
-    h.addWidget(sem_btn)
-    if ctx.runtime.sem.btns is None:
-        ctx.runtime.sem.btns = []
-    ctx.runtime.sem.btns.append(sem_btn)
-    if not ctx.runtime.sem.btn:
-        ctx.runtime.sem.btn = sem_btn
+    h.addWidget(make_spread_choice(ctx, w))
 
     if with_fov:
-        sp_lbl = QLabel("Spread", w)
-        sp_lbl.setObjectName("Muted")
-        h.addWidget(sp_lbl)
-        fov_btn = ReservedWidthButton("FOV", w)
-        fov_btn.setProperty("variant", "toggle")
-        fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
-        h.addWidget(fov_btn)
-        register_fov_button(ctx, fov_btn)
+        h.addWidget(make_fov_switch(ctx, w))
 
     h.addStretch(1)
     return w
@@ -913,17 +881,17 @@ def multiselect_button_text(prefix: str, selections: dict) -> str:
     """Self-describing text for a checkbox-menu multi-select button.
 
     Folds *prefix* and the selection count into one string
-    ("Timepoints: 2/5 selected") for a band control whose button IS the
-    label — used in place of a button + separate "(2/5 selected)" QLabel
+    ("Timepoints: 2 of 5", the Nanowells page's own spelling) for a band control whose button IS the
+    label — used in place of a button + separate "(2 of 5)" QLabel
     pair, the pattern ``LabeledComboBox`` uses for a plain combo.
     """
     total = len(selections)
     count = sum(1 for v in selections.values() if v)
     if not total:
-        return f"{prefix}: 0 selected"
+        return f"{prefix}: none"
     if count == total:
-        return f"{prefix}: All {count} selected"
-    return f"{prefix}: {count}/{total} selected"
+        return f"{prefix}: all {count}"
+    return f"{prefix}: {count} of {total}"
 
 
 def apply_plot_card_decorators(ctx, card, tab_name: str, *, part: str = "") -> None:
@@ -1178,12 +1146,12 @@ def safe_int_or_none(value: object) -> int | None:
 
 
 def mute_color(hex_color: str, factor: float = 0.5) -> str:
-    """Blend *hex_color* 50% toward ``theme.Colors.text_muted``.
+    """Blend *hex_color* 50% toward ``theme.Colors.text_secondary``.
 
     Used to dim hidden rep-sets on the plate map so they are visually
     distinct from visible ones while still showing their hue.
     """
-    mh = theme.Colors.text_muted.lstrip("#")
+    mh = theme.Colors.text_secondary.lstrip("#")
     grey = (int(mh[0:2], 16), int(mh[2:4], 16), int(mh[4:6], 16))
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)

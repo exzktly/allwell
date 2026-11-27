@@ -20,25 +20,24 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QFrame,
     QLabel,
     QMenu,
-    QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import tool_page
 from ui import theme
 from widgets.flow_layout import FlowLayout
-from datasets.core.log_panel import hrule as _hrule
 from services.job_kinds import FOLDER_SOURCE_KINDS, KIND_LABEL, input_targets
 from services.job_queue import JobSpec, JobState, downstream_ids, lineage
 from datasets.job_queue.row import JobRow
 from widgets import menu_exec
 from widgets.owned_action import owned_action
+from ui import text_roles
+from ui import buttons
 
-# The order the "+ Add job" menu offers the tools in — Analyze first because
+# The order the "Add job" menu offers the tools in — Analyze first because
 # it is the run everything else exists to prepare for or tidy up after, then
 # the Datasets tools in the order their own rail lists them.
 ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import",
@@ -97,26 +96,8 @@ class JobQueuePage(QWidget):
         # for why. A long job list would otherwise be crushed into whatever
         # space is left, the same problem the other six pages were fixed
         # against.
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(self._scroll)
-
-        content = QWidget(self._scroll)
-        self._scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Job Queue", self)
-        heading.setObjectName("Heading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        self._scroll, outer = tool_page(
+            self, "Job Queue",
             "Line up Analyze runs and Datasets tools to work through "
             "unattended, in order. One job runs at a time — except that an "
             "Analyze run on a remote host, and a Watch Folder job, can each "
@@ -125,12 +106,7 @@ class JobQueuePage(QWidget):
             "own page would show, since there's no one there to ask. "
             "Pause winds the running job down and keeps what it has finished, "
             "so starting the queue again — even in a new session — carries on "
-            "from there. Stop discards whatever is in flight.",
-            self,
-        )
-        blurb.setObjectName("Muted")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "from there. Stop discards whatever is in flight.")
 
         outer.addWidget(self._build_header())
         outer.addWidget(self._build_summary())
@@ -139,14 +115,28 @@ class JobQueuePage(QWidget):
         # the list. Put inside, it had to bring the whole list with it — a
         # bordered box carrying a layout stretch, so one sentence rendered as
         # a page-height empty panel.
-        self._empty_hint = QLabel(
-            "No jobs queued yet — use “+ Add job” above, or “+ Queue” on any "
-            "tool's own page. Once a job is here, its ⋯ menu can set up the "
-            "next one to work on its output — “New job using this output” — "
-            "before it has run.", self,
-        )
-        self._empty_hint.setObjectName("Muted")
-        self._empty_hint.setWordWrap(True)
+        # The empty state (design language §6, *Datasets*): a card with a heading, two lines and one button.
+        from PySide6.QtCore import Qt as _Qt
+
+        from widgets.card import Card
+        self._empty_hint = Card(parent=self)
+        heading = QLabel("No jobs queued", self._empty_hint)
+        heading.setProperty("textRole", "sectionHeading")
+        lines = QLabel(
+            "Add a job here, or choose “Add to queue” on any Analyze run or Datasets tool. "
+            "Jobs run one at a time, in order, without stopping to ask; once one is here, "
+            "its ⋯ menu can set up the next to work on its output.", self._empty_hint)
+        lines.setProperty("textRole", "help")
+        lines.setWordWrap(True)
+        lines.setAlignment(_Qt.AlignHCenter)
+        self._empty_text = lines
+        self._empty_add_btn = buttons.default("Add job", self._empty_hint)
+        self._empty_add_btn.clicked.connect(self._open_add_menu)
+        body = self._empty_hint.body()
+        body.setContentsMargins(0, theme.Spacing.lg, 0, theme.Spacing.lg)
+        body.addWidget(heading, 0, _Qt.AlignHCenter)
+        body.addWidget(lines)
+        body.addWidget(self._empty_add_btn, 0, _Qt.AlignHCenter)
         outer.addWidget(self._empty_hint)
 
         self._list = QWidget(self)
@@ -169,48 +159,20 @@ class JobQueuePage(QWidget):
         # the right edge.
         hl = FlowLayout(header, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
 
-        # Primary action at the left edge, matching every other Datasets
-        # page's own Run/Check/Convert button.
-        self._start_btn = QPushButton("▶  Start queue", self)
-        self._start_btn.setProperty("variant", "primary")
-        self._start_btn.clicked.connect(self.startToggled)
-        hl.addWidget(self._start_btn)
 
-        # Pause winds the running job down and keeps its progress; this
-        # discards whatever is in flight. Two buttons because they are two
-        # different answers to "I want this to stop", and the destructive one
-        # should never be the one reached for by default.
-        self._stop_btn = QPushButton("■  Stop job", self)
-        self._stop_btn.setProperty("variant", "danger")
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.setToolTip(
-            "Cancel the running job outright, discarding whatever it has in "
-            "flight. Pause queue winds it down instead, keeping its progress.")
-        self._stop_btn.clicked.connect(self.stopRequested)
-        hl.addWidget(self._stop_btn)
 
-        # The page can now answer "how do I add one?" by itself. Previously
-        # the only thing here was a button for Analyze specifically, and every
-        # other kind had to be started from its own page.
-        self._add_btn = QPushButton("+  Add job", self)
-        self._add_btn.setProperty("variant", "secondary")
-        self._add_btn.setToolTip(
-            "Open a tool's page to set up a new queued job.")
-        self._add_btn.clicked.connect(self._open_add_menu)
-        hl.addWidget(self._add_btn)
 
-        # A plain button that opens a transient menu, as "+ Add job" does: it
+        # A plain button that opens a transient menu, as "Add job" does: it
         # has no QMenu attached, so Qt draws no indicator and the label needs
         # no caret (CLAUDE.md §7.12).
-        self._recipes_btn = QPushButton("Recipes", self)
-        self._recipes_btn.setProperty("variant", "secondary")
+        self._recipes_btn = buttons.default("Recipes", self)
         self._recipes_btn.setToolTip(
             "Queue a saved chain of jobs on a new folder or file. Save a chain "
             "from any of its jobs' ⋯ menu: “Save chain as recipe…”.")
         self._recipes_btn.clicked.connect(self._open_recipes_menu)
         hl.addWidget(self._recipes_btn)
 
-        self._clear_btn = QPushButton("Clear completed", self)
+        self._clear_btn = buttons.quiet("Clear completed", self)
         self._clear_btn.setToolTip(
             "Remove every finished job — succeeded, failed, cancelled or "
             "blocked. Pending and running jobs are left alone.")
@@ -219,28 +181,52 @@ class JobQueuePage(QWidget):
 
         # The blunt one, beside the careful one. Clear completed keeps what is
         # still waiting; this empties the queue, so the controller asks first.
-        self._clear_all_btn = QPushButton("Clear all", self)
+        self._clear_all_btn = buttons.quiet("Clear all", self)
         self._clear_all_btn.setEnabled(False)
         self._clear_all_btn.setToolTip(
             "Remove every job from the queue, waiting or finished, after "
             "asking. A job that is running is left alone — stop it first.")
         self._clear_all_btn.clicked.connect(self.clearAllRequested)
         hl.addWidget(self._clear_all_btn)
+        # The page can now answer "how do I add one?" by itself. Previously
+        # the only thing here was a button for Analyze specifically, and every
+        # other kind had to be started from its own page.
+        self._add_btn = buttons.default("Add job", self)
+        self._add_btn.setToolTip(
+            "Open a tool's page to set up a new queued job.")
+        self._add_btn.clicked.connect(self._open_add_menu)
+        hl.addWidget(self._add_btn)
+        # Pause winds the running job down and keeps its progress; this
+        # discards whatever is in flight. Two buttons because they are two
+        # different answers to "I want this to stop", and the destructive one
+        # should never be the one reached for by default.
+        self._stop_btn = buttons.destructive("Stop job", self)
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.setVisible(False)       # only while a job runs (set_job_running)
+        self._stop_btn.setToolTip(
+            "Cancel the running job outright, discarding whatever it has in "
+            "flight. Pause queue winds it down instead, keeping its progress.")
+        self._stop_btn.clicked.connect(self.stopRequested)
+        hl.addWidget(self._stop_btn)
+        # The primary action last, as on every Datasets tool page's foot row (datasets/core/tool_page.py).
+        self._start_btn = buttons.primary("Start queue", self)
+        self._start_btn.clicked.connect(self.startToggled)
+        hl.addWidget(self._start_btn)
         return header
 
     def _build_summary(self) -> QWidget:
         wrap = QWidget(self)
         col = QVBoxLayout(wrap)
         col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(2)
+        col.setSpacing(theme.Spacing.xs)
         self._summary = QLabel("", self)
-        self._summary.setObjectName("Muted")
+        self._summary.setProperty("textRole", "help")
         col.addWidget(self._summary)
         # What loading the queue had to repair. Silent before this: a queue
         # that came back from a crash with a job marked interrupted said so
         # nowhere the user could see.
         self._notes = QLabel("", self)
-        self._notes.setObjectName("Warn")
+        text_roles.set_role(self._notes, text_roles.HELP, tone=text_roles.ATTENTION)
         self._notes.setWordWrap(True)
         self._notes.setVisible(False)
         col.addWidget(self._notes)
@@ -252,7 +238,7 @@ class JobQueuePage(QWidget):
             menu, self._add_btn.mapToGlobal(self._add_btn.rect().bottomLeft()))
 
     def build_add_menu(self) -> QMenu:
-        """The "+ Add job" menu, returned rather than opened.
+        """The "Add job" menu, returned rather than opened.
 
         Same reason as ``JobRow.build_menu``: exec()ing a popup under the
         offscreen platform blocks, and pytest's signal timeout cannot
@@ -442,7 +428,7 @@ class JobQueuePage(QWidget):
         self._notes.setVisible(bool(notes))
 
     def set_started(self, started: bool) -> None:
-        self._start_btn.setText("⏸  Pause queue" if started else "▶  Start queue")
+        self._start_btn.setText("Pause queue" if started else "Start queue")
 
     def set_job_running(self, running: int) -> None:
         """Stop only means something while a job is actually in flight, and
@@ -451,4 +437,5 @@ class JobQueuePage(QWidget):
         own ⋯ ▸ Stop this job stops just that one."""
         n = int(running)
         self._stop_btn.setEnabled(n > 0)
-        self._stop_btn.setText("■  Stop both jobs" if n > 1 else "■  Stop job")
+        self._stop_btn.setVisible(n > 0)        # Stop appears only while a job runs (design language §6)
+        self._stop_btn.setText("Stop both jobs" if n > 1 else "Stop job")

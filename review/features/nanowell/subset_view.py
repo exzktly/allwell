@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout,
     QWidget,
 )
 
@@ -31,6 +31,8 @@ from review.features.nanowell import subset_compute as ss
 from ui import theme
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 from widgets.spin_box import DoubleSpinBox
+from ui import text_roles
+from ui import buttons
 
 #: The combo's entries: the Starting cells presets as the band names them, then the editor.
 _PRESET_LABELS = {"any": "All nanowells", "occupied": "Starting cells ≥1 (occupied)",
@@ -87,7 +89,7 @@ _VERDICTS_TIP = ("The identity check's verdicts the condition names. A verdict i
                  "inconclusive that the check could not decide (for one, the array's fitted rim centre disagreed "
                  "with the square's registration by more than the fit can be trusted to). Identity contradicted is "
                  "the per-nanowell answer.")
-_WINDOW_TIP = ("The nanowells a Distribution window held when it was turned into a subset (Use as Subset). The list is "
+_WINDOW_TIP = ("The nanowells a Distribution window held when it was turned into a subset (Use as subset). The list is "
                "frozen; choose inside to keep them or outside to keep the rest, and remove the row to bring the others back.")
 _GATE_TIP = ("A gate drawn on the Scatter Plot over two nanowell metrics (Observations: Nanowells, or the "
              "\"Nanowell ▸\" axes). Inside: the nanowell's point at the chosen timepoint lies in the box. The box "
@@ -158,9 +160,8 @@ class _ConditionRow(QWidget):
         self.op_cb.setToolTip(_OP_TIP)
         self.a_spin, self.b_spin = DoubleSpinBox(), DoubleSpinBox()
         self.and_label = QLabel("and")
-        self.tiles_btn = QToolButton()
+        self.tiles_btn = buttons.tool_button()
         self.tiles_btn.setToolTip(_TILES_TIP)
-        self.tiles_btn.setProperty("variant", "secondary")
         # The values are ticked on a page of the inspector (``inspector_pages.open_multi_select``), over the
         # editor's own page: the one way to pick several in the application.
         self.tiles_btn.clicked.connect(lambda _=False: self.open_tiles())
@@ -175,10 +176,10 @@ class _ConditionRow(QWidget):
         self._frozen = condition if ss.is_window(condition.field) else None
         self.window_label = QLabel()
         self.window_label.setToolTip(_WINDOW_TIP)
-        self.remove_btn = QToolButton()
-        self.remove_btn.setText("×")
+        self.remove_btn = buttons.tool_button()
+        buttons.set_icon(self.remove_btn, "x")
         self.remove_btn.setToolTip("Remove this condition")
-        self.remove_btn.setProperty("variant", "secondary")
+        self.remove_btn.setProperty("variant", "default")
         for combo in (self.field_cb, self.at_cb, self.gate_cb):     # the comparisons are short: they keep their width
             _narrow(combo)
         self.window_label.setWordWrap(True)
@@ -372,7 +373,7 @@ class SubsetEditor(QFrame):
         self.match_cb.setToolTip(_MATCH_TIP)
         self.match_cb.currentIndexChanged.connect(lambda _i: self.changed())
         head.addWidget(self.match_cb)
-        head.addWidget(QLabel("of these conditions:"))
+        head.addWidget(QLabel("of these conditions"))
         lay.addWidget(head_host)            # the inspector's header carries the page's title, Back and Close
         names_host = QWidget(body)
         names = _flow(names_host)
@@ -405,36 +406,32 @@ class SubsetEditor(QFrame):
         lay.addLayout(self.rows_box)
         foot_host = QWidget(body)
         foot = _flow(foot_host)
-        self.add_btn = QPushButton("+ Add condition")
-        self.add_btn.setProperty("variant", "secondary")
+        self.add_btn = buttons.default("Add condition")
         self.add_btn.clicked.connect(self.add)
-        self.clear_btn = QPushButton("Clear")
-        self.clear_btn.setProperty("variant", "secondary")
+        self.clear_btn = buttons.default("Clear")
         self.clear_btn.setToolTip("Remove every condition: every nanowell is used.")
         self.clear_btn.clicked.connect(self.clear)
         foot.addWidget(self.add_btn)
         foot.addWidget(self.clear_btn)
         # Edits change the conditions written here only; Apply draws them, Reset puts back the subset in use. A plate
         # redrawn on every keystroke recomputed every view for each half-typed bound.
-        self.reset_btn = QPushButton("Reset")
-        self.reset_btn.setProperty("variant", "secondary")
+        self.reset_btn = buttons.default("Reset")
         self.reset_btn.setToolTip(_RESET_TIP)
         self.reset_btn.clicked.connect(self.reset)
-        self.apply_btn = QPushButton("Apply")
+        self.apply_btn = buttons.default("Apply")
         self.apply_btn.setToolTip(_APPLY_TIP)
         self.apply_btn.clicked.connect(self.apply)
         foot.addWidget(self.reset_btn)
         foot.addWidget(self.apply_btn)          # beside Add condition and Clear: the row's four edits read together
         lay.addWidget(foot_host)
         self.status = QLabel("")
-        self.status.setObjectName("InfoHint")
+        self.status.setProperty("textRole", "help")
         self.status.setWordWrap(True)
         lay.addWidget(self.status)
         lay.addStretch(1)
 
     def _name_button(self, text: str, tip: str, slot) -> QPushButton:
-        button = QPushButton(text)
-        button.setProperty("variant", "secondary")
+        button = buttons.default(text)
         button.setToolTip(tip)
         button.clicked.connect(slot)
         return button
@@ -698,11 +695,7 @@ class SubsetEditor(QFrame):
 
     def _say(self, text: str, *, warn: bool = False) -> None:
         self.status.setText(text)
-        name = "Warn" if warn else "InfoHint"
-        if self.status.objectName() != name:
-            self.status.setObjectName(name)
-            self.status.style().unpolish(self.status)
-            self.status.style().polish(self.status)
+        text_roles.set_role(self.status, text_roles.HELP, tone=text_roles.ATTENTION if warn else None)
 
 
 def _fill_combo(combo, names: list, listed: list) -> None:

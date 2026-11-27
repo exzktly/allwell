@@ -9,12 +9,13 @@ from ui import theme
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
+    QHBoxLayout, QLabel, QProgressBar, QTextEdit,
     QVBoxLayout, QWidget,
 )
 from widgets.separator import build_hline_separator
 from core.log_view import append_entry, log_formatter
 from core.worker_bridge import GuiLogRelay
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -65,7 +66,7 @@ class _GUILogHandler(logging.Handler):
                 "ERROR":   theme.Colors.danger,
                 "WARNING": theme.Colors.warn,
                 "INFO":    theme.Colors.text_secondary,
-                "DEBUG":   theme.Colors.text_muted,
+                "DEBUG":   theme.Colors.text_secondary,
             }
             color = color_map.get(level, theme.Colors.text_secondary)
             # Escaped, so a message holding ``<`` (a path, a repr, ``<well>``) is shown rather than parsed, and
@@ -127,11 +128,11 @@ def build_bottom(win) -> None:
     # Status row
     status_row = QWidget(bottom)
     sr_l = QHBoxLayout(status_row)
-    sr_l.setContentsMargins(4, 2, 4, 2)
+    sr_l.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
     outer.addWidget(status_row)
 
     win._status_lbl = QLabel("Ready.", status_row)
-    win._status_lbl.setObjectName("Muted")
+    win._status_lbl.setProperty("textRole", "help")
     sr_l.addWidget(win._status_lbl, 1)
     # The focused cell, named wherever the user is (focus_view).
     from review.core.focus_view import build_focus_chip
@@ -153,8 +154,7 @@ def build_bottom(win) -> None:
     win._progress_bar.hide()
     sr_l.addWidget(win._progress_bar)
 
-    win._log_btn = QPushButton("Log \u25b4", status_row)
-    win._log_btn.setProperty("variant", "secondary")
+    win._log_btn = buttons.default("Log \u25b4", status_row)
     win._log_btn.clicked.connect(lambda _=False: win._toggle_log())
     sr_l.addWidget(win._log_btn)
 
@@ -162,19 +162,18 @@ def build_bottom(win) -> None:
     win._log_frame = QWidget(bottom)
     win._log_frame.setFixedHeight(_LOG_FRAME_H)
     lf_l = QVBoxLayout(win._log_frame)
-    lf_l.setContentsMargins(6, 4, 6, 2)
+    lf_l.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
     outer.addWidget(win._log_frame)
 
     log_hdr = QWidget(win._log_frame)
     lh_l = QHBoxLayout(log_hdr)
-    lh_l.setContentsMargins(0, 0, 0, 2)
+    lh_l.setContentsMargins(0, 0, 0, theme.Spacing.xs)
     lf_l.addWidget(log_hdr)
     hdr_lbl = QLabel("LOG", log_hdr)
-    hdr_lbl.setProperty("role", "section")
+    hdr_lbl.setProperty("textRole", "eyebrow")
     lh_l.addWidget(hdr_lbl)
     lh_l.addStretch(1)
-    clear_btn = QPushButton("Clear", log_hdr)
-    clear_btn.setProperty("variant", "secondary")
+    clear_btn = buttons.default("Clear", log_hdr)
     clear_btn.clicked.connect(lambda _=False: win._clear_log())
     lh_l.addWidget(clear_btn)
 

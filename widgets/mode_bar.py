@@ -4,17 +4,15 @@ These three are not tabs of one screen. They are three different applications
 sharing a window, and switching between them replaces the entire interface. The
 control has to say so at rest, not only once a mode is active.
 
-That is why **every segment is a filled control at all times**: the active one
-accent-filled, the inactive ones raised on ``panel_elevated`` with full-strength
-primary text and full-opacity icons. Nothing here is muted. Muting is how the
-rail's section list and the centre pane's tab bar express "not currently
-selected"; borrowing it here would demote a switch between applications to a
-third tab strip, which is exactly how an earlier revision of this control read.
-
-The segments are flush — no gutters, no corner radius — so the bar is one solid
-band rather than three floating chips, and the bar's default height is measured
-off a ``QTabBar`` so it and the centre pane's tab bar share a bottom edge
-whatever the theme does to tab padding.
+It is a pill (design language §3.1, window style W1): a rounded track in the
+canvas colour holding the three, the current one in the selected look —
+the selected fill and its ink — and the others in the secondary ink on the
+track. The selected fill, not a solid accent: the accent is kept for the one
+primary action on a page, and a mode switch drawn in it was a second loudest
+thing on every screen. The bar's default height is measured off a ``QTabBar``
+so it and the centre pane's tab bar share a bottom edge whatever the theme does
+to tab padding. Its look is :func:`qss`, keyed on each segment's ``active``
+property.
 
 No All-Well coupling — a plain reusable widget.
 """
@@ -32,6 +30,12 @@ from widgets import icons as _icons
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 
 _ICON_PX = 14
+#: The track round the segments, and its corners and theirs (§3.1: a 3-pixel track, radii 9 and 6).
+_TRACK_INSET = 3
+_TRACK_RADIUS = 9
+_SEGMENT_RADIUS = 6
+#: Room each side of a segment's label at the desk, where the pill is as wide as its segments need.
+_SEGMENT_PAD = theme.Spacing.md
 
 
 def tab_bar_height() -> int:
@@ -63,6 +67,7 @@ class _ModeSegment(QWidget):
 
     def __init__(self, text: str, icon: str | None, parent: QWidget | None) -> None:
         super().__init__(parent)
+        self.setObjectName("ModeSegment")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
         self._text = text
@@ -70,7 +75,8 @@ class _ModeSegment(QWidget):
         self._active = False
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        # Room each side of the label, so a pill sized to its natural width does not run its segments together.
+        row.setContentsMargins(_SEGMENT_PAD, 0, _SEGMENT_PAD, 0)
         row.setSpacing(theme.Spacing.xs + 2)
         row.addStretch(1)
 
@@ -79,6 +85,7 @@ class _ModeSegment(QWidget):
         row.addWidget(self._icon_lbl)
 
         self._text_lbl = QLabel(text, self)
+        self._text_lbl.setObjectName("ModeSegmentText")
         row.addWidget(self._text_lbl)
         row.addStretch(1)
 
@@ -86,19 +93,16 @@ class _ModeSegment(QWidget):
 
     def setActive(self, active: bool) -> None:
         self._active = bool(active)
-        c, t = theme.Colors, theme.Typography
-        fill = c.accent if self._active else c.panel_elevated
-        fg = c.accent_fg if self._active else c.text_primary
-        self.setStyleSheet(f"background-color: {fill};")
-        # Full weight in both states: an inactive mode is still a destination.
-        self._text_lbl.setStyleSheet(
-            f"color: {fg}; font-size: {t.caption_size}px; font-weight: {t.semibold};"
-        )
-        # The glyph is repainted in the segment's own foreground colour rather
-        # than handed in as a fixed QIcon. A QIcon's Normal pixmap is drawn in
-        # ``text_secondary``, which on the accent-filled active segment is a
-        # dark glyph on a saturated blue — the icon all but disappears exactly
-        # where the control is meant to read loudest.
+        c = theme.Colors
+        fg = c.selected_fg if self._active else c.text_secondary
+        # The property on the label too, not a descendant selector: Qt does not reliably re-evaluate a rule keyed
+        # on a parent's property when only the parent is repolished.
+        for w in (self, self._text_lbl):
+            w.setProperty("active", self._active)
+            w.style().unpolish(w)
+            w.style().polish(w)
+        # The glyph is repainted in the segment's own ink rather than handed in as a fixed QIcon, whose Normal
+        # pixmap is one colour in both states.
         if self._icon:
             self._icon_lbl.setPixmap(
                 _icons.make_pixmap(self._icon, fg, _ICON_PX,
@@ -131,13 +135,10 @@ class ModeBar(QWidget):
         self.setObjectName("ModeBar")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self.setStyleSheet(
-            f"#ModeBar {{ background-color: {theme.Colors.panel_elevated};"
-            f" border-bottom: 1px solid {theme.Colors.border}; }}"
-        )
         self._row = QHBoxLayout(self)
-        self._row.setContentsMargins(0, 0, 0, 0)
-        self._row.setSpacing(0)  # flush: one band, not three chips
+        inset = _TRACK_INSET
+        self._row.setContentsMargins(inset, inset, inset, inset)
+        self._row.setSpacing(0)
         self._segments: list[_ModeSegment] = []
         self._data: list[object] = []
         self._current = -1
@@ -208,12 +209,13 @@ class ModeBar(QWidget):
         The labels stay because they are the only thing that says what each
         segment is on a touch screen, where a tooltip never appears.
         """
-        pad = (theme.Spacing.sm if pad is None else int(pad)) if compact else 0
+        pad = (theme.Spacing.sm if pad is None else int(pad)) if compact else _SEGMENT_PAD
         self._compact = compact
+        # Compact, the pill gives its track's width to the band it shares with the page button.
+        inset = 0 if compact else _TRACK_INSET
+        self._row.setContentsMargins(inset, inset, inset, inset)
         for seg in self._segments:
             seg.setIconShown(not compact)
-            # Flush, the segments are as wide as the bar shares out; at its
-            # own width in a band, they need their own room around the label.
             seg.layout().setContentsMargins(pad, 0, pad, 0)
         self._equalise_widths()
 
@@ -242,3 +244,18 @@ class ModeBar(QWidget):
 
     def isSegmentActive(self, index: int) -> bool:
         return self._segments[index].isActive()
+
+
+def qss() -> str:
+    """The pill: the track in the canvas colour, the current segment in the selected look."""
+    c, t = theme.Colors, theme.Typography
+    return f"""
+    QWidget#ModeBar {{ background-color: {c.canvas}; border-radius: {_TRACK_RADIUS}px; }}
+    QWidget#ModeSegment {{ background-color: transparent; border-radius: {_SEGMENT_RADIUS}px; }}
+    QWidget#ModeSegment[active="true"] {{ background-color: {c.selected}; }}
+    QWidget#ModeSegment QLabel {{ background: transparent; }}
+    QLabel#ModeSegmentText {{
+        background: transparent; color: {c.text_secondary}; font-size: {t.caption_size}px; font-weight: {t.semibold};
+    }}
+    QLabel#ModeSegmentText[active="true"] {{ color: {c.selected_fg}; }}
+    """

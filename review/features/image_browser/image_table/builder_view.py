@@ -54,6 +54,8 @@ from review.features.image_browser.image_table.image_compose import (
     LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant, _is_nuc_seg,
 )
 from review.data.nanowell_images import display_token, is_metric_map as _is_metric_token
+from ui import buttons
+from widgets import icons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -102,27 +104,27 @@ QLabel#ITBShape { color: $text_secondary; font-size: ${fs_caption}px; }
 QLabel#ITBShape b { color: $text_primary; }
 
 QFrame#ITBZone {
-    border: 1px dashed $border; border-radius: 9px; background: $panel;
+    border: 1px dashed $hairline; border-radius: 9px; background: $card;
 }
-QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: $accent_dim; }
-QFrame#ITBFixed { border: 1px solid $border; border-radius: 9px; background: $panel; }
+QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: $selected; }
+QFrame#ITBFixed { border: 1px solid $hairline; border-radius: 9px; background: $card; }
 QFrame#ITBTray { border: 1px solid $border_subtle; border-radius: 9px; background: $rail; }
 
 QLabel#ITBHead { color: $text_primary; font-weight: 620; font-size: ${fs_small}px; }
-QLabel#ITBSub  { color: $text_muted; font-size: ${fs_xs}px; }
-QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: ${fs_caption}px; }
+QLabel#ITBSub  { color: $text_secondary; font-size: ${fs_xs}px; }
+QLabel#ITBHint { color: $text_secondary; font-style: italic; font-size: ${fs_caption}px; }
 
 QFrame#ITBRoot {
-    background: $accent_dim; border: 1px solid $accent; border-radius: 7px;
+    background: $selected; border: 1px solid $accent; border-radius: 7px;
 }
 QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: ${fs_small}px; }
 QToolButton#ITBRootBtn { color: $text_primary; font-weight: 640; font-size: ${fs_small}px;
     border: none; background: transparent; padding: 0; }
 
-QWidget#ITBNest { border-left: 2px solid $accent_dim; background: transparent; }
+QWidget#ITBNest { border-left: 2px solid $selected; background: transparent; }
 
 QFrame#ITBChan, QFrame#ITBChip {
-    background: $panel_elevated; border: 1px solid $border; border-radius: 7px;
+    background: $control; border: 1px solid $button_edge; border-radius: 7px;
 }
 QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: $accent; }
 /* Reorder cue: the edge a dragged channel would be inserted at. The rule is
@@ -133,55 +135,55 @@ QFrame#ITBChan[dropEdge="above"] { border-top: 2px solid $accent; }
 QFrame#ITBChan[dropEdge="below"] { border-bottom: 2px solid $accent; }
 QLabel#ITBChanLbl { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
 QLabel#ITBVar { color: $text_secondary; font-size: ${fs_var}px; }
-QLabel#ITBGrip { color: $text_muted; font-size: ${fs_caption}px; }
-QLabel#ITBNote { color: $text_muted; font-size: ${fs_xs}px; }
+QLabel#ITBGrip { color: $text_secondary; font-size: ${fs_caption}px; }
+QLabel#ITBNote { color: $text_secondary; font-size: ${fs_xs}px; }
 
 QToolButton#ITBOpt {
-    color: $text_secondary; background: $panel; border: 1px solid $border;
+    color: $text_secondary; background: $card; border: 1px solid $button_edge;
     border-radius: 5px; padding: 3px 8px; font-size: ${fs_small}px;
 }
 QToolButton#ITBOpt:hover { color: $text_primary; border-color: $accent; }
 QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }
 
 QToolButton#ITBX {
-    color: $text_muted; background: transparent; border: none;
+    color: $text_secondary; background: transparent; border: none;
     font-size: ${fs_h3}px; padding: 0px 4px;
 }
 QToolButton#ITBX:hover { color: $danger; }
 
 QToolButton#ITBSeg {
-    background: $panel; color: $text_secondary; border: 1px solid $border;
+    background: $card; color: $text_secondary; border: 1px solid $button_edge;
     padding: 3px 11px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBSeg:hover { color: $text_primary; }
-QToolButton#ITBSeg[on="true"] { background: $accent_dim; color: $accent_fg; }
+QToolButton#ITBSeg[on="true"] { background: $selected; color: $selected_fg; }
 QToolButton#ITBSeg[on="true"][ov="true"] { background: $threshold_dim; color: $threshold; }
 
 QComboBox#ITBCombo {
-    background: $panel_elevated; color: $text_primary; border: 1px solid $border;
+    background: $canvas; color: $text_primary; border: 1px solid $field_edge;
     border-radius: 6px; padding: 2px 6px; min-height: 20px;
 }
-QComboBox#ITBCombo:hover { border-color: $border_strong; }
+QComboBox#ITBCombo:hover { border-color: $text_secondary; }
 QLabel#ITBFixLbl { color: $text_primary; font-size: ${fs_small}px; }
-QLabel#ITBEq { color: $text_muted; font-size: ${fs_small}px; }
+QLabel#ITBEq { color: $text_secondary; font-size: ${fs_small}px; }
 
-QFrame#ITBLut { border: 1px solid $border; border-radius: 9px; background: $panel; }
+QFrame#ITBLut { border: 1px solid $hairline; border-radius: 9px; background: $card; }
 QFrame#ITBLutRow { background: transparent; border: none; }
 QLabel#ITBLutChan { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
-QLabel#ITBLutTag { color: $text_muted; font-size: ${fs_caption}px; }
+QLabel#ITBLutTag { color: $text_secondary; font-size: ${fs_caption}px; }
 QLineEdit#ITBLutEdit {
-    background: $panel_elevated; color: $text_primary; border: 1px solid $border;
+    background: $canvas; color: $text_primary; border: 1px solid $field_edge;
     border-radius: 6px; padding: 2px 6px; min-height: 18px; max-width: 66px;
 }
 QLineEdit#ITBLutEdit:focus { border-color: $accent; }
 QToolButton#ITBLutFit {
-    color: $text_secondary; background: $panel; border: 1px solid $border;
+    color: $text_secondary; background: $card; border: 1px solid $button_edge;
     border-radius: 5px; padding: 2px 9px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBLutFit:hover { color: $text_primary; border-color: $accent; }
 
 QToolButton#ITBClear {
-    color: $text_secondary; background: $panel; border: 1px solid $border;
+    color: $text_secondary; background: $card; border: 1px solid $button_edge;
     border-radius: 6px; padding: 3px 10px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBClear:hover { color: $danger; border-color: $danger; }
@@ -731,9 +733,9 @@ def _wrapping(lbl: QLabel) -> QLabel:
 
 
 def _x_btn(tip: str, on_click) -> QToolButton:
-    b = QToolButton()
+    b = buttons.tool_button()
     b.setObjectName("ITBX")
-    b.setText("✕")
+    buttons.set_icon(b, "x")
     b.setCursor(Qt.PointingHandCursor)
     b.setToolTip(tip)
     b.clicked.connect(lambda _=False: on_click())
@@ -881,12 +883,12 @@ def build_shelf(ctx, parent: QWidget) -> None:
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
-    layout.setContentsMargins(0, 2, 0, 2)
-    layout.setSpacing(9)
+    layout.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+    layout.setSpacing(theme.Spacing.sm)
 
     header = QHBoxLayout()
     header.setContentsMargins(0, 0, 0, 0)
-    header.setSpacing(10)
+    header.setSpacing(theme.Spacing.sm)
     title = QLabel("Build", parent)
     title.setObjectName("ITBTitle")
     header.addWidget(title)
@@ -899,7 +901,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # A–H, columns 1–12 — using the builder's first channel as the (fixed) image.
     # Correctly labels every plate row, unlike the Wrap-N band trick (which only
     # labels the first band). Wells come from the sidebar plate selection.
-    plate_btn = QToolButton(parent)
+    plate_btn = buttons.tool_button(parent)
     plate_btn.setObjectName("ITBClear")
     plate_btn.setText("Plate A–H × 1–12")
     plate_btn.setCheckable(True)
@@ -916,7 +918,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # first N wells across all channels, then the next N below. Writes the spec's
     # wrap; disabled only in plate mode, which pins both axes to the plate's own
     # row/column dims and so has nothing left to band.
-    wrap_lbl = QLabel("Wrap cols:", parent)
+    wrap_lbl = QLabel("Wrap cols", parent)
     wrap_lbl.setObjectName("ITBSub")
     header.addWidget(wrap_lbl)
     wrap = Stepper(parent, value=float(getattr(builder_spec(ctx), "wrap", 0) or 0),
@@ -930,7 +932,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     _rt(ctx).wrap_stepper = wrap
     header.addWidget(wrap)
 
-    clear_btn = QToolButton(parent)
+    clear_btn = buttons.tool_button(parent)
     clear_btn.setObjectName("ITBClear")
     clear_btn.setText("Clear builder")
     clear_btn.setCursor(Qt.PointingHandCursor)
@@ -946,8 +948,8 @@ def build_shelf(ctx, parent: QWidget) -> None:
     tray = _DropZone(lambda tok: _on_tray_drop(ctx, tok), _accept_tray, parent)
     tray.setObjectName("ITBTray")
     tl = QVBoxLayout(tray)
-    tl.setContentsMargins(11, 8, 11, 9)
-    tl.setSpacing(6)
+    tl.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)
+    tl.setSpacing(theme.Spacing.xs)
     tl.addWidget(_zone_head("Channels", "drag onto a root to nest it"))
     tbody = QWidget(tray)
     # A flow, so the chips wrap to the next line when the shelf is narrower than
@@ -955,7 +957,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # wider than the screen. With room for one line it lays out as a row did.
     tbl = FlowLayout(tbody)
     tbl.setContentsMargins(0, 0, 0, 0)
-    tbl.setSpacing(7)
+    tbl.setSpacing(theme.Spacing.sm)
     tl.addWidget(tbody)
     reg.register("_image_table_channels_tray", tray)
     _rt(ctx).channels_tray_body = tbody
@@ -965,7 +967,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     axes_row = QWidget(parent)
     ar = QHBoxLayout(axes_row)
     ar.setContentsMargins(0, 0, 0, 0)
-    ar.setSpacing(10)
+    ar.setSpacing(theme.Spacing.sm)
     for name, heading, sub in (("rows", "Rows", "root ↓ · channels nested"),
                                ("cols", "Columns", "root → · channels nested")):
         z = _DropZone(lambda tok, n=name: _on_zone_drop(ctx, n, tok),
@@ -975,13 +977,13 @@ def build_shelf(ctx, parent: QWidget) -> None:
         z.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         z.setMinimumHeight(_Z_MIN_H)
         zl = QVBoxLayout(z)
-        zl.setContentsMargins(11, 9, 11, 11)
-        zl.setSpacing(7)
+        zl.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.md)
+        zl.setSpacing(theme.Spacing.sm)
         zl.addWidget(_zone_head(heading, sub))
         body = QWidget(z)
         bl = QVBoxLayout(body)
         bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(6)
+        bl.setSpacing(theme.Spacing.xs)
         zl.addWidget(body)
         zl.addStretch(1)
         reg.register(f"_image_table_{name}_zone", z)
@@ -994,13 +996,13 @@ def build_shelf(ctx, parent: QWidget) -> None:
     fixed = _DropZone(lambda tok: _on_zone_drop(ctx, "fixed", tok), _accept_fixed, parent)
     fixed.setObjectName("ITBFixed")
     fl = QVBoxLayout(fixed)
-    fl.setContentsMargins(11, 8, 11, 9)
-    fl.setSpacing(7)
+    fl.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)
+    fl.setSpacing(theme.Spacing.sm)
     fl.addWidget(_zone_head("Fixed", "same value for every cell · drag a root here to pin it"))
     fbody = QWidget(fixed)
     fbl = QHBoxLayout(fbody)
     fbl.setContentsMargins(0, 0, 0, 0)
-    fbl.setSpacing(8)
+    fbl.setSpacing(theme.Spacing.sm)
     fl.addWidget(fbody)
     reg.register("_image_table_fixed_panel", fixed)
     _rt(ctx).fixed_panel_body = fbody
@@ -1011,13 +1013,13 @@ def build_shelf(ctx, parent: QWidget) -> None:
     lut = QFrame(parent)
     lut.setObjectName("ITBLut")
     lutl = QVBoxLayout(lut)
-    lutl.setContentsMargins(11, 8, 11, 9)
-    lutl.setSpacing(7)
+    lutl.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)
+    lutl.setSpacing(theme.Spacing.sm)
     lutl.addWidget(_zone_head("LUT", "display range per channel · shown once even if it repeats"))
     lbody = QWidget(lut)
     lbl_lay = QVBoxLayout(lbody)
     lbl_lay.setContentsMargins(0, 0, 0, 0)
-    lbl_lay.setSpacing(5)
+    lbl_lay.setSpacing(theme.Spacing.xs)
     lutl.addWidget(lbody)
     reg.register("_image_table_lut_panel", lut)
     _rt(ctx).lut_box_body = lbody
@@ -1073,7 +1075,7 @@ def _zone_head(name: str, sub: str) -> QWidget:
     w = QWidget()
     h = QHBoxLayout(w)
     h.setContentsMargins(0, 0, 0, 0)
-    h.setSpacing(8)
+    h.setSpacing(theme.Spacing.sm)
     lbl = QLabel(name)
     lbl.setObjectName("ITBHead")
     h.addWidget(lbl)
@@ -1212,15 +1214,15 @@ def _build_tree(ctx, spec, axis: str) -> None:
     if ax.root:
         lay.addWidget(_root_pill(ctx, spec, axis, ax.root))
     else:
-        lay.addWidget(_text("drop a Well / Timepoint / FOV root", "ITBHint"))
+        lay.addWidget(_text("drop a well, timepoint or FOV root", "ITBHint"))
 
     # nested channels (indented under a left accent rail)
     if ax.channels:
         nest = QWidget(body)
         nest.setObjectName("ITBNest")
         nl = QVBoxLayout(nest)
-        nl.setContentsMargins(11, 2, 0, 2)
-        nl.setSpacing(6)
+        nl.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, 0, theme.Spacing.xs)
+        nl.setSpacing(theme.Spacing.xs)
         for idx, cs in enumerate(ax.channels):
             nl.addWidget(_chan_pill(ctx, spec, axis, idx, cs))
         lay.addWidget(nest)
@@ -1234,8 +1236,8 @@ def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
     pill = _Chip(dim)
     pill.setObjectName("ITBRoot")
     h = QHBoxLayout(pill)
-    h.setContentsMargins(9, 4, 5, 4)
-    h.setSpacing(7)
+    h.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
+    h.setSpacing(theme.Spacing.sm)
     h.addWidget(_swatch(_DIM_SWATCH.get(dim, theme.Colors.text_secondary)))
     if dim == "well":
         # Wells come from the plate: there is no filter to open, so this is a
@@ -1246,7 +1248,7 @@ def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
         # A button, not a label that happens to take a press: it reads as
         # something to press, takes the keyboard, and has a touch target. It
         # opens the values as a page of ticks in the inspector.
-        lbl = QToolButton(pill)
+        lbl = buttons.tool_button(pill, buttons.QUIET)
         lbl.setObjectName("ITBRootBtn")
         lbl.setText(f"{_ROOT_LABEL[dim]} ›")
         lbl.setAutoRaise(True)
@@ -1265,17 +1267,19 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
                      lambda tok, after, a=axis, i=idx: _on_pill_drop(ctx, a, i, tok, after))
     pill.setObjectName("ITBChan")
     h = QHBoxLayout(pill)
-    h.setContentsMargins(8, 3, 5, 3)
-    h.setSpacing(7)
+    h.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
+    h.setSpacing(theme.Spacing.sm)
     h.addWidget(_grip())
     h.addWidget(_swatch(_cmap_swatch(cs.colormap)))
     h.addWidget(_text(display_token(cs.channel), "ITBChanLbl"))
     h.addStretch(1)
-    gear = QToolButton(pill)
+    gear = buttons.tool_button(pill)
     gear.setObjectName("ITBOpt")
-    gear.setText(f"⚙ {_render_label(cs)}")
+    gear.setText(_render_label(cs))
+    gear.setIcon(icons.make_icon("sliders", 12))       # the drawn set's settings icon, not a "⚙" in the text
+    gear.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
     gear.setCursor(Qt.PointingHandCursor)
-    gear.setToolTip("This channel's options: render, cells, outline, scale and colour")
+    gear.setToolTip("This channel's options: render, cells, outline, scale and color")
     # The options are a page of the inspector, built when the ⚙ is pressed —
     # not a menu of radio items and ticks.
     gear.clicked.connect(lambda _=False, c=cs, g=gear: open_channel_page(ctx, c, g))
@@ -1288,21 +1292,21 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
 def _overlay_toggle(ctx, ax) -> QWidget:
     wrap = QWidget()
     hl = QHBoxLayout(wrap)
-    hl.setContentsMargins(11, 2, 0, 0)
+    hl.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, 0, 0)
     hl.setSpacing(0)
     seg = QFrame(wrap)
     seg.setStyleSheet(
-        f"QFrame{{border:1px solid {theme.Colors.border};border-radius:7px;}}")
+        f"QFrame{{border:1px solid {theme.Colors.hairline};border-radius:7px;}}")
     sl = QHBoxLayout(seg)
     sl.setContentsMargins(0, 0, 0, 0)
     sl.setSpacing(0)
 
-    sep = QToolButton(seg)
+    sep = buttons.tool_button(seg)
     sep.setObjectName("ITBSeg")
     sep.setText("Separate")
     sep.setCursor(Qt.PointingHandCursor)
     sep.setProperty("on", "false" if ax.overlay else "true")
-    ovl = QToolButton(seg)
+    ovl = buttons.tool_button(seg)
     ovl.setObjectName("ITBSeg")
     ovl.setText("⧉ Overlay")
     ovl.setCursor(Qt.PointingHandCursor)
@@ -1336,8 +1340,8 @@ def _build_fixed(ctx, spec) -> None:
         chip = _Chip(dim)
         chip.setObjectName("ITBChip")
         cl = QHBoxLayout(chip)
-        cl.setContentsMargins(9, 3, 9, 3)
-        cl.setSpacing(7)
+        cl.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
+        cl.setSpacing(theme.Spacing.sm)
         cl.addWidget(_grip())
         cl.addWidget(_swatch(_DIM_SWATCH.get(dim, theme.Colors.text_secondary)))
         chip.setToolTip("Drag onto Rows or Columns to make it vary")
@@ -1500,11 +1504,11 @@ def _build_lut_box(ctx, spec) -> None:
     # than the screen). The panel is a column, so at the desk they keep its width.
     if inert:
         lay.addWidget(_wrapping(_text(
-            "no display range (unchanged by any LUT edit): " + ", ".join(inert),
+            "no display range (unchanged by any LUT edit) — " + ", ".join(inert),
             "ITBHint")))
     if hidden:
         lay.addWidget(_wrapping(_text(
-            "not shown in plate mode (one channel per plate): " + ", ".join(hidden),
+            "not shown in plate mode (one channel per plate) — " + ", ".join(hidden),
             "ITBHint")))
 
 
@@ -1516,7 +1520,7 @@ def _lut_row(ctx, token: str, specs: list) -> QFrame:
     row.setObjectName("ITBLutRow")
     h = QHBoxLayout(row)
     h.setContentsMargins(0, 0, 0, 0)
-    h.setSpacing(7)
+    h.setSpacing(theme.Spacing.sm)
     sw = _swatch(_cmap_swatch(cs0.colormap))
     h.addWidget(sw)
     h.addWidget(_text(display_token(cs0.channel), "ITBLutChan"))
@@ -1564,7 +1568,7 @@ def _lut_row(ctx, token: str, specs: list) -> QFrame:
     h.addWidget(_text("max", "ITBLutTag"))
     h.addWidget(_edit_field("max"))
 
-    fit = QToolButton(row)
+    fit = buttons.tool_button(row)
     fit.setObjectName("ITBLutFit")
     fit.setText("Auto")
     fit.setCursor(Qt.PointingHandCursor)
@@ -1609,7 +1613,7 @@ def _centre_checkbox(ctx, row, specs) -> QCheckBox | None:
     box = QCheckBox("centre on 0" if scale == "log" else "centre on 1", row)
     box.setObjectName("ITBLutCentre")
     box.setChecked(bool(cs0.centre_on_change))
-    box.setToolTip("Auto window centred on no change, so the diverging colours' middle means unchanged and a gain "
+    box.setToolTip("Auto window centred on no change, so the diverging colors' middle means unchanged and a gain "
                    "and a loss of the same size look alike. Off: Auto spans the data's own min and max.")
 
     def _toggled(on: bool):
@@ -1654,11 +1658,11 @@ def _build_tray(ctx, spec) -> None:
         lay.addWidget(_tray_chip(ctx, name))
     if metrics:
         open_ = bool(getattr(_rt(ctx), "metric_tray_open", False))
-        toggle = QToolButton(body)
+        toggle = buttons.tool_button(body)
         toggle.setObjectName("ITBOpt")
         toggle.setText(f"{'▾' if open_ else '▸'} Nanowell metrics ({len(metrics)})")
         toggle.setCursor(Qt.PointingHandCursor)
-        toggle.setToolTip("Each nanowell drawn as a disc in its metric's colour — show or hide the metrics")
+        toggle.setToolTip("Each nanowell drawn as a disc in its metric's color — show or hide the metrics")
 
         def _flip(_c=False):
             _rt(ctx).metric_tray_open = not bool(getattr(_rt(ctx), "metric_tray_open", False))
@@ -1675,12 +1679,12 @@ def _tray_chip(ctx, name: str) -> QWidget:
     chip = _Chip(f"newchan:{name}")
     chip.setObjectName("ITBChip")
     cl = QHBoxLayout(chip)
-    cl.setContentsMargins(9, 3, 10, 3)
-    cl.setSpacing(7)
+    cl.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
+    cl.setSpacing(theme.Spacing.sm)
     cl.addWidget(_grip())
     cl.addWidget(_swatch(_cmap_swatch(_default_colormap_for(ctx, name))))
     cl.addWidget(_text(display_token(name), "ITBChanLbl"))
-    tip = "Drag onto a root in Rows or Columns — it keeps this colour"
+    tip = "Drag onto a root in Rows or Columns — it keeps this color"
     if _is_metric_token(name):
         tip = f"{name}\n{tip}"
     chip.setToolTip(tip)
@@ -1740,14 +1744,14 @@ def channel_page(ctx, cs: ChannelSpec, parent: QWidget | None = None) -> QWidget
         return box
 
     colour_cells = check(
-        "ITBColourCells", "Colour cells", "label_colors",
-        "Give every cell its own colour instead of painting them all white — two nuclei that touch are otherwise one "
-        "white shape. Only a cell mask or a threshold has cells to colour.")
+        "ITBColorCells", "Color cells", "label_colors",
+        "Give every cell its own color instead of painting them all white — two nuclei that touch are otherwise one "
+        "white shape. Only a cell mask or a threshold has cells to color.")
     colour_cells.setEnabled(cs.render in ("mask", "threshold"))
     check("ITBBoundary", "Boundary outline", "boundary")
     check("ITBLog", "Log scale", "log")
     names = ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]
-    form.addRow("Colour / LUT", combo("ITBColormap", [(n, n) for n in names], cs.colormap,
+    form.addRow("Color / LUT", combo("ITBColormap", [(n, n) for n in names], cs.colormap,
                                       lambda n: _set_attr(cs, "colormap", n)))
     render = page.findChild(QComboBox, "ITBRender")
     render.currentIndexChanged.connect(
@@ -1842,10 +1846,10 @@ def _open_root_filter(ctx, dim: str, anchor: QWidget) -> None:
     """Show a root's value filter as a page of ticks in the inspector."""
     from review.core import inspector_pages
     all_vals, checked = root_filter_values(ctx, dim)
-    # Anchored on the page's band, not on the pill's button: the shelf rebuilds
+    # Anchored on the page, not on the pill's button: the shelf rebuilds
     # its pills on every edit, and a page whose owner was deleted under it
     # would go with it. One page per dimension, so the two do not share ticks.
-    anchor = ctx.widgets.get_or_none("_image_table_band") or anchor
+    anchor = ctx.widgets.get_or_none("_image_table_page") or anchor
     inspector_pages.open_multi_select(
         ctx, anchor, key=f"{ROOT_FILTER_KEY}/{dim}", title=_ROOT_FILTER_TITLE.get(dim, dim),
         items=all_vals, checked=checked,

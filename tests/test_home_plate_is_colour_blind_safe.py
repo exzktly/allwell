@@ -129,13 +129,13 @@ def test_a_partial_dial_shows_its_two_shares(theme_name, vision):
 @pytest.mark.parametrize("theme_name", theme.available_themes())
 def test_every_fill_reads_against_the_panel(theme_name):
     theme.apply_theme(theme_name)
-    panel = theme.Colors.panel
+    panel = theme.Colors.card
     weak = {s: round(contrast(h, panel), 2) for s, h in _palette().items() if contrast(h, panel) < MIN_CONTRAST}
     assert not weak, f"under {MIN_CONTRAST}:1 against the {theme_name} theme's panel: {weak}"
 
 
 #: What Home painted before, per theme — the ``success`` / ``warn`` / ``danger``
-#: / ``accent`` / ``stale`` / ``text_muted`` values each theme carried.
+#: / ``accent`` / ``stale`` / muted-text values each theme carried.
 _REPLACED = {
     "grey": {hc.CELL_COMPLETE: "#3FB950", hc.CELL_PARTIAL: "#FFB300", hc.CELL_FAILED: "#F04747",
              hc.CELL_NO_MEASUREMENTS: "#2D8CEB", hc.CELL_CSV_ONLY: "#22D3EE", hc.CELL_INPUT_ONLY: "#878D95"},

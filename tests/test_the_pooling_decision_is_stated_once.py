@@ -150,7 +150,7 @@ def test_the_bar_tabs_pooling_toggle_is_named_when_it_is_off():
     ctx.state.plot.bar_pool_replicates = False
     assert grouping_summary(ctx) == (
         "Plots are grouped by your 2 groups, though Bar Plots is drawing each "
-        "well separately (Pooled: Off).")
+        "well separately (“Pool replicates” is off).")
 
 
 def test_the_toggle_is_named_under_a_variable_grouping_too():
@@ -160,7 +160,7 @@ def test_the_toggle_is_named_under_a_variable_grouping_too():
     ctx.state.plot.bar_pool_replicates = False
     assert grouping_summary(ctx) == (
         "Plots are grouped by Dose (2 values), though Bar Plots is drawing each "
-        "well separately (Pooled: Off).")
+        "well separately (“Pool replicates” is off).")
 
 
 def test_the_toggle_is_not_named_when_nothing_is_pooled_anyway():

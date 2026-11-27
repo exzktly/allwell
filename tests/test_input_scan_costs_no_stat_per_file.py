@@ -227,7 +227,7 @@ def test_a_folder_the_scan_cannot_read_still_updates_the_readout(
         f"{tab._layout_lbl.text()!r}"
     )
     # Loose images are refused, so there is no output folder to name.
-    assert tab._output_lbl.text() == "—"
+    assert tab._output_lbl.text() == ""
 
 
 def test_a_scan_that_raises_still_leaves_the_readout_describing_this_folder(

@@ -72,23 +72,38 @@ def test_a_failed_run_puts_the_reason_on_the_dashboard(tab):
     assert "scratch space" in headline, headline
 
 
-def test_the_raw_log_is_open_before_anything_has_run(tab):
-    """The log carries things nothing else says — the reason a run refused to
-    start, the volume that filled, where the errors/ folder is — so it is open
-    and the toggle is there to put it away.
+def test_the_raw_log_is_behind_show_log_until_a_run_starts(tab):
+    """The design language's Run card (§6, *Analyze*): the dashboard is the summary, and the log waits behind a
+    command that names the state it moves to — "Show log", then "Hide log" — until a run starts and shows it.
 
     isVisibleTo, not isVisible: the tab is never shown in these tests, so
     isVisible() is False for every widget in it and an assertion built on it
     would hold whether the log were revealed or not.
     """
-    assert tab._raw_log_cb.isChecked() is True
-    assert tab._log.isVisibleTo(tab) is True
-    assert tab._log_sep.isVisibleTo(tab) is True
-
-    # And it is genuinely a toggle, not a fixture.
-    tab._raw_log_cb.setChecked(False)
+    assert tab._raw_log_cb.isChecked() is False
+    assert tab._raw_log_cb.text() == "Show log"
     assert tab._log.isVisibleTo(tab) is False
-    assert tab._log_sep.isVisibleTo(tab) is False
+
+    # And it is genuinely a toggle, not a fixture — pressed, as a user does.
+    tab._raw_log_cb.click()
+    assert tab._log.isVisibleTo(tab) is True and tab._log_sep.isVisibleTo(tab) is True
+    assert tab._raw_log_cb.text() == "Hide log"
+    tab._raw_log_cb.click()
+    assert tab._log.isVisibleTo(tab) is False
+
+    # A run's start shows it.
+    tab._set_running_ui_state()
+    assert tab._log.isVisibleTo(tab) is True
+
+
+def test_loading_a_folder_s_settings_shows_what_it_said(tab, tmp_path):
+    """Loading a previous run's settings reports what it could not restore in the raw log and nowhere else, and the
+    log starts hidden: the load opens it, or "Nothing to load" and "check the form before running" are never seen."""
+    assert tab._log.isVisibleTo(tab) is False
+    tab._preflight_dir = str(tmp_path)          # a folder that records no run
+    tab._load_previous_settings()
+    assert "Nothing to load" in tab._log.toPlainText()
+    assert tab._log.isVisibleTo(tab) is True
 
 
 def test_a_failed_run_reveals_the_raw_log(tab):
@@ -267,7 +282,9 @@ def test_the_next_run_hands_the_raw_log_toggle_back(tab):
     tab._raw_log_cb.setChecked(False)                # the user closed it
     _fail_run(tab)
     assert tab._raw_log_cb.isChecked() is True
-    tab._set_running_ui_state()
+    tab._set_running_ui_state()                      # the next run shows it for its own sake…
+    assert tab._raw_log_cb.isChecked() is True
+    tab.restore_raw_log()                            # …and a clean end hands the closed log back
     assert tab._raw_log_cb.isChecked() is False
 
 

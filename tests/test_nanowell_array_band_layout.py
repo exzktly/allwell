@@ -6,8 +6,9 @@ had three ragged rows, and a walk of the Anchor queue added its group in front. 
 ``test_nanowell_array_band.py`` holds the behaviour CI runs.
 
 Also here, because the redesign is what exposed them: ``MplToolbar.add_group``, which puts the zoom under the figure,
-and the stylesheet rule that makes a greyed ``secondary`` button look greyed — the ``[variant="secondary"]`` rule
-outranked the plain ``:disabled`` one, so every greyed secondary button in the app painted exactly as an enabled one.
+and the stylesheet rule that makes a greyed button look greyed — a variant rule outranks a plain ``:disabled`` one,
+so every greyed button of that variant once painted exactly as an enabled one; each of the four kinds in
+``ui/buttons.py`` now carries its own disabled rule.
 """
 
 from __future__ import annotations
@@ -42,14 +43,16 @@ def _band(ctx):
 
 
 def _rows(ctx) -> list[int]:
-    """The top of each row of the band's shown items. Items of different heights are centred in their row, so tops
-    a few pixels apart are one row; a new row starts more than half an item's height lower."""
+    """The bottom of each row of the band's shown items. Items of different heights — a control with its label above
+    it, a button with none — sit on their row's bottom edge (``FlowLayout.setAlignBottom``), so bottoms a few pixels
+    apart are one row; a new row ends more than half an item's height lower."""
     host = _band(ctx)._scope_host
-    items = [w for w in host.children() if getattr(w, "isWidgetType", lambda: False)() and w.isVisibleTo(host)]
+    items = [w for w in host.children() if getattr(w, "isWidgetType", lambda: False)() and w.isVisibleTo(host)
+             and w.height() > 0]                 # a line break (``flow_break``) has no height and is no row
     rows: list[int] = []
-    for top in sorted(w.y() for w in items):
-        if not rows or top - rows[-1] > 16:
-            rows.append(top)
+    for bottom in sorted(w.geometry().bottom() for w in items):
+        if not rows or bottom - rows[-1] > 16:
+            rows.append(bottom)
     return rows
 
 
@@ -65,8 +68,8 @@ def _row_of(ctx, name: str) -> int:
     widget = ctx.widgets.get(name)
     while widget.parentWidget() is not host:
         widget = widget.parentWidget()
-    tops = _rows(ctx)
-    return max(k for k, top in enumerate(tops) if widget.y() >= top - 16)
+    bottoms = _rows(ctx)
+    return min(k for k, bottom in enumerate(bottoms) if widget.geometry().bottom() <= bottom + 16)
 
 
 #: The band's rows, the same on every view, as the user laid them out: "Basic/central selectors need to go together
@@ -105,17 +108,18 @@ def test_every_view_keeps_the_same_three_rows(qc_page, themed, qtbot, view):
 
     ctx = qc_page
     nwc.set_view(ctx, view)
-    for width in (1700, 1500, 1200):
+    for width in (1720, 1500, 1200):
         _settle(qtbot, ctx, width)
         rows = [{_row_of(ctx, name) for name in names} for names in _ROWS_BY_VIEW[view]]
         # In order, and no two rows share a line: each row's last line is above the next row's first.
         assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), (view, width, rows)
-        # Wide enough for one line each from 1700 px. At 1500 the filter row ended 2 px short of the edge, and the
+        # Wide enough for one line each from 1720 px. At 1500 the filter row ended 2 px short of the edge, and the
         # moving average's Trailing / Centred choice (agreed beside the window it shapes) wraps Distribution's
         # *Responding above* onto a second line of that row there — within the row, which the check above holds.
         # The row's action zone ends in the three fixed buttons, in words — Display, Style, Share — where it held
-        # an icon and Save, so Distribution's filter row needs 1700 px for one line where 1600 did.
-        if width == 1700:
+        # an icon and Save, so Distribution's filter row needs 1700 px for one line where 1600 did — and 1720 in window
+        # style W1, whose page is a panel set 8 px in from the rail and from the window's right edge.
+        if width == 1720:
             assert rows == [{k} for k in range(len(rows))], (view, width, rows)
 
 
@@ -241,12 +245,18 @@ def test_a_greyed_secondary_button_is_painted_greyed(themed, qtbot):
 
     on, off = QPushButton("Clear anchor"), QPushButton("Clear anchor")
     for button in (on, off):
-        button.setProperty("variant", "secondary")
+        button.setProperty("variant", "default")
         qtbot.addWidget(button)
         button.resize(120, 30)
         button.show()
     off.setEnabled(False)
     qtbot.waitExposed(off)
-    middle = QPoint(4, 15)
-    assert off.grab().toImage().pixelColor(middle).name() == theme.Colors.panel.lower()
-    assert on.grab().toImage().pixelColor(middle).name() == theme.Colors.panel_elevated.lower()
+    # A disabled button of any kind keeps the control fill and greys its edge and its label
+    # (ui/buttons.py): read the edge off the grab, and the label's ink off the palette the sheet set.
+    from PySide6.QtGui import QPalette
+
+    edge = QPoint(0, 15)
+    assert off.grab().toImage().pixelColor(edge).name() == theme.Colors.hairline.lower()
+    assert on.grab().toImage().pixelColor(edge).name() == theme.Colors.button_edge.lower()
+    assert off.palette().color(QPalette.ButtonText).name() == theme.Colors.text_disabled.lower()
+    assert on.palette().color(QPalette.ButtonText).name() == theme.Colors.text_primary.lower()

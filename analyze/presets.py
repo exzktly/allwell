@@ -1,6 +1,6 @@
 """The Analyze form's **Presets** menu: save the form's settings by name, load them back.
 
-Beside *Use settings from a previous run…* at the top of the Data section. That
+Beside *Copy from a run…* at the top of the Data section. That
 button reads a dataset's own record of how it was produced; a preset is the
 user's own record of how a kind of plate is analysed, kept in the app's folder
 and offered on every dataset. What a preset holds, what it leaves out and where
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QInputDialog, QLineEdit, QMenu, QMessageBox, QTool
 from analyze.domain import presets as store
 from core.safe import swallowed
 from widgets.owned_action import owned_action
+from ui import buttons
 
 SAVE_ACTION = "Save current settings as…"
 DELETE_MENU = "Delete preset"
@@ -37,11 +38,10 @@ class AnalyzePresetsMixin:
         indicator, which drew a different arrow on every platform. (The
         factory Review uses, ``make_action_menu_button``, lives in a pane this
         one may not import.)"""
-        self._presets_btn = QToolButton(parent)
+        self._presets_btn = buttons.tool_button(parent)
         self._presets_btn.setText("Presets")
         self._presets_btn.setPopupMode(QToolButton.InstantPopup)
         self._presets_btn.setProperty("hasMenu", True)
-        self._presets_btn.setProperty("variant", "secondary")
         self._presets_btn.setToolTip(
             "Save this form's settings under a name, or fill the form from a saved preset. "
             "A preset never changes the input folder, the wells chosen for a run, or what to do "

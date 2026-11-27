@@ -8,9 +8,12 @@ height came from whichever control the page happened to put in it, and a 1 px
 pane border around the bodies nested in a ``QTabWidget``: the first row of a
 page's own chrome landed anywhere from level with the stack to 52 px below it.
 
-The contract (``widgets/page_body.py``): a main page body is a ``ControlBand``
-flush against the top of the page, one row tall, then the page's content. The
-band is present even on a page with nothing to put in it.
+The contract (``widgets/page_body.py``): a main page body that carries controls
+is a ``ControlBand`` flush against the top of the page, one row tall, then the
+page's content. A *form page* has no band (design language §6): its first row is
+its own page title, and its controls are in cards — Analyze and the Datasets
+tools (rows D22, D24), and in Review, Home and Batch Export (D26, D27). Those are
+named in :data:`FORM_PAGES`, each with its row, and must indeed carry no band.
 
 What this asserts, against a real window with every page and sub-tab built:
 
@@ -83,6 +86,13 @@ def shell(qapp, tmp_path_factory):
     win.close()
 
 
+#: Review's pages that are forms, with no band (design language §6), and the tracker row that made each one.
+FORM_PAGES = {
+    "Home": "D27 — the report and the editors carry their own commands; Import sits beside Sample Map's switch",
+    "Batch Export": "D26 — each mode's title row carries Sync from app and Export",
+}
+
+
 def _review_pages(shell) -> list[tuple[str, QWidget]]:
     nb = shell._review._notebook
     return [(name, nb._by_name[name]) for name in nb.pageNames() if name]
@@ -96,6 +106,10 @@ def test_every_review_page_starts_its_band_at_the_stack_top(shell, qapp):
         nb.setCurrentByName(name)
         _pump(qapp)
         bands = _bands(page)
+        if name in FORM_PAGES:
+            if bands:
+                offenders.append(f"{name}: listed as a form page but shows a band")
+            continue
         if not bands:
             offenders.append(f"{name}: no control band (page reserves no row)")
             continue
@@ -103,6 +117,11 @@ def test_every_review_page_starts_its_band_at_the_stack_top(shell, qapp):
         if top != stack_top:
             offenders.append(f"{name}: band top {top}, stack top {stack_top}")
     assert not offenders, "pages whose first row is not level:\n  " + "\n  ".join(offenders)
+
+
+def test_the_form_page_roster_names_real_pages(shell):
+    names = {name for name, _page in _review_pages(shell)}
+    assert set(FORM_PAGES) <= names, sorted(set(FORM_PAGES) - names)
 
 
 def test_nested_sub_tab_bodies_fill_their_host(shell, qapp):
@@ -148,7 +167,7 @@ def test_no_page_root_re_introduces_a_top_inset(shell, qapp):
     offenders = []
     for name, page in _review_pages(shell):
         layout = page.layout()
-        if layout is None:
+        if layout is None or name in FORM_PAGES:      # a form page's padding is its own (§6)
             continue
         top = layout.contentsMargins().top()
         if top:
@@ -172,15 +191,19 @@ def test_no_band_is_shorter_than_one_row(shell, qapp):
 
 
 @pytest.mark.parametrize("mode,index", [("review", 0), ("analyze", 1), ("datasets", 2)])
-def test_each_mode_starts_its_band_at_the_stack_top(shell, qapp, mode, index):
-    """Switching Review / Analyze / Datasets must not move the first row either."""
+def test_each_mode_starts_its_first_row_at_the_stack_top(shell, qapp, mode, index):
+    """Switching Review / Analyze / Datasets must not move the first row either: Review's page tabs, which head its
+    page panel (window style W1), and the two form panes' own first row, all at the centre stack's top."""
     stack: QStackedWidget = shell._review._central_pane_stack
     stack.setCurrentIndex(index)
     _pump(qapp)
     pane = stack.widget(index)
-    bands = _bands(pane)
-    assert bands, f"{mode} pane reserves no control-band row"
-    assert min(_top(shell, b) for b in bands) == _top(shell, stack), (
+    if mode == "review":
+        first = shell._review._page_tabs_host
+    else:
+        assert not _bands(pane), f"{mode} is a form pane and shows a band"
+        first = next(w for w in pane.findChildren(QWidget) if w.isVisible())
+    assert _top(shell, first) == _top(shell, stack), (
         f"{mode} pane's first row is not level with the centre stack's top"
     )
     stack.setCurrentIndex(0)

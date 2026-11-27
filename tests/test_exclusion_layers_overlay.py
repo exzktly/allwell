@@ -214,7 +214,7 @@ def test_the_toggle_is_off_by_default_and_flips():
     assert cls().show_exclusion_layers is False
 
 
-def test_the_toggle_reaches_the_state_and_the_button_text():
+def test_the_switch_reaches_the_state_and_carries_no_state_in_its_label():
     from review.features.image_browser.review_image.renderer import (
         refresh_review_image_layers_btn, toggle_review_image_exclusion_layers,
     )
@@ -241,7 +241,8 @@ def test_the_toggle_reaches_the_state_and_the_button_text():
 
     assert ctx.state.review_image.show_exclusion_layers is True
     assert seen["checked"] is True
-    assert "On" in seen["text"]
+    # A switch says its state by being on; its words name the setting and are never rewritten (§2.5).
+    assert "text" not in seen
     # The tooltip has to say the thing a user cannot discover by clicking:
     # that a click will not undo a verdict column.
     assert "CANNOT restore" in seen["tip"]
@@ -290,7 +291,7 @@ def _delta_e(a, b):
 
 def test_no_two_layers_share_a_colour():
     """**The defect.** "Outside the crop" and "outside the scatter gates" were
-    both ``text_muted`` — the same pixel value, ΔE exactly 0 — so the overlay
+    both the muted text ink (#5F6B7C) — the same pixel value, ΔE exactly 0 — so the overlay
     could not tell apart two of the six answers its own button promises.
 
     Asserting a *floor* rather than "they differ": two colours can differ by
@@ -315,7 +316,7 @@ def test_no_two_layers_share_a_colour():
 
 
 def test_every_layer_ink_is_bright_enough_to_see():
-    """A one-pixel stroke on a dark fluorescence frame. ``text_muted``, which
+    """A one-pixel stroke on a dark fluorescence frame. The muted text ink, which
     two layers used, sits at 0.144 — the two that shared a colour were also
     the two least visible."""
     from review.features.image_browser.review_image.renderer import (

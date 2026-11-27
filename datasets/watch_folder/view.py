@@ -1,7 +1,7 @@
 """Qt builder for the Watch folder page.
 
 A folder picker, the quiet period, whether the folder must change before the
-countdown starts, an optional give-up time, a **Start watching** / **+ Queue**
+countdown starts, an optional give-up time, a **Start watching** / **Add to queue**
 row and a one-line live status — the countdown a person checks on — above the
 usual raw log.
 
@@ -17,17 +17,14 @@ from pathlib import Path
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
-    QScrollArea,
-    QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from datasets.watch_folder.watch_folder_compute import DEFAULT_QUIET_MINUTES, WatchStatus
 from widgets.path_field import PathField, folder_picker
 from widgets.spin_box import DoubleSpinBox
@@ -57,35 +54,12 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Watch Folder", self)
-        heading.setObjectName("Heading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Watch Folder",
             "Wait for a folder to finish receiving files, then let the jobs "
-            "queued after this one run. Put it first in a chain — Watch, then "
-            "Convert, then Analyze — so an acquisition is processed as soon as "
-            "the microscope stops writing it.",
-            self,
-        )
-        blurb.setObjectName("Muted")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "queued after this one run. Put it first in a chain — a watch, then "
+            "a conversion, then an Analyze run — so an acquisition is processed as soon as "
+            "the microscope stops writing it.")
 
         self._folder_field = PathField(
             "Folder to watch", pick=folder_picker("Select a folder to watch"),
@@ -140,25 +114,13 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         gl.addStretch(1)
         outer.addWidget(give_up_row)
 
-        btn_row = QWidget(self)
-        bl = QHBoxLayout(btn_row)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Start watching", self)
-        self._run_btn.setProperty("variant", "primary")
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        bl.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
-        self._queue_btn.setToolTip(
-            "Add this watch to the Job Queue, to run ahead of the jobs that "
-            "should wait for the folder.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        bl.addWidget(self._queue_btn)
-        bl.addStretch(1)
-        outer.addWidget(btn_row)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(
+            self, "Start watching", on_run=self.runRequested, on_queue=self.queueRequested,
+            queue_tip="Add this watch to the Job Queue, to run ahead of the jobs that should wait for the folder.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folder", 1, 1), ("When the folder has settled", 2, 4))
 
         self.build_log_header(outer, "Status")
         self._status_label = QLabel("", self)
@@ -198,16 +160,19 @@ class WatchFolderPage(LogPanelMixin, QWidget):
     def show_status(self, status: WatchStatus) -> None:
         self.set_status_text(status.sentence())
 
-    def set_status_text(self, text: str) -> None:
+    def set_status_text(self, text: str, *, failed: bool = False) -> None:
+        """The outcome under the button: words, and the failure tone when it is one — no ✓ / ✗ in front."""
+        from ui import text_roles
         self._status_label.setText(text)
         self._status_label.setVisible(bool(text))
+        text_roles.set_role(self._status_label, text_roles.HELP, tone=text_roles.FAILURE if failed else None)
 
     def status_text(self) -> str:
         return self._status_label.text()
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._run_btn.setText("Watching…" if running else "▶  Start watching")
+        self._run_btn.setText("Watching…" if running else "Start watching")
         self._folder_field.setLocked(running)
         for widget in (self._quiet_spin, self._require_change_cb, self._give_up_spin):
             widget.setEnabled(not running)

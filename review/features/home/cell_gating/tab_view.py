@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QRadioButton,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QRadioButton,
     QScrollArea, QVBoxLayout, QWidget,
 )
 
@@ -74,6 +74,8 @@ from review.features.home.cell_gating.optimizer_view import (
     build_optimizer_window, show_optimizer_window,
 )
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
+from ui import buttons
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -81,6 +83,8 @@ from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 _GATING_PLOT_MIN_H = 420
 _GATE_BTN_MIN_W = 150
 _RADIO_INDENT = 20
+#: A hint under an option that is itself under a radio: two indents in.
+_NESTED_INDENT = 2 * _RADIO_INDENT
 #: The left inset a section's own lead-in lines take.
 #:
 #: ``build_section_header`` lays its title out inside a block with 8 px of
@@ -163,12 +167,12 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     content = QWidget()
     outer_scroll.setWidget(content)
     root = QVBoxLayout(content)
-    root.setContentsMargins(12, 12, 12, 12)
+    root.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
 
     control_frame = QWidget(parent)
     control_frame.setObjectName("TabCtrl")
     cf_layout = QVBoxLayout(control_frame)
-    cf_layout.setContentsMargins(6, 6, 6, 6)
+    cf_layout.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
 
     _build_inclusion_section(ctx, control_frame, cf_layout)
     build_saved_cells_section(ctx, control_frame, cf_layout)
@@ -186,7 +190,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # cleared on the Scatter Plot tab: refresh the summary AND recompute Included
     # immediately so every other view tracks the gates without waiting for a tab
     # switch. (Safe: the per-cell scatter shows the full cloud by default, and
-    # its opt-in "Apply gates" filter is suppressed mid-draw — see
+    # its opt-in "Plot only the gated cells" filter is suppressed mid-draw — see
     # scatter.collect.scatter_points_gated.)
     ctx.runtime.scatter.gates_changed_cb = lambda: cell_gating_sync_scatter_gates(ctx)
     _cell_gating_refresh_gate_filter(ctx)
@@ -209,8 +213,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
 def _jump_row(ctx, parent: QWidget, scroll: QScrollArea) -> QWidget:
     """A button at the top of the page that scrolls to the CDFs, which sit under every control they are read against —
     on a phone that is more than two screens down, and nothing at the top said the plot was there at all."""
-    button = QPushButton("Jump to the CDFs ↓", parent)
-    button.setProperty("variant", "secondary")
+    button = buttons.default("Jump to the CDFs ↓", parent)
     button.setToolTip("Scroll down to the cumulative distributions the thresholds below are read against.")
 
     def jump() -> None:
@@ -237,7 +240,7 @@ def _lead_in(parent: QWidget, text: str) -> QLabel:
     put a structural line below the muted hints it outranks.
     """
     lbl = QLabel(text, parent)
-    lbl.setObjectName("Secondary")
+    lbl.setProperty("textRole", "label")
     lbl.setWordWrap(True)
     lbl.setContentsMargins(_LEAD_IN_INDENT, 0, 0, 0)
     return lbl
@@ -280,7 +283,7 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
     radio = QRadioButton(label, row)
     radio.setToolTip(tooltip)
     layout.addWidget(radio)
-    btn = QPushButton("All gates", row)
+    btn = buttons.default("All gates", row)
     btn.setMinimumWidth(_GATE_BTN_MIN_W)
     btn.setToolTip(btn_tooltip)
     btn.clicked.connect(lambda _=False: _open_gate_filter_menu(ctx, mode))
@@ -291,9 +294,9 @@ def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
     # sit fully enabled over an empty menu whose only entry read "No gates drawn
     # yet".
     hint = QLabel("No gates drawn yet — draw one on the Scatter Plot tab.", parent)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
-    hint.setContentsMargins(_RADIO_INDENT * 2, 0, 0, 0)
+    hint.setContentsMargins(_NESTED_INDENT, 0, 0, 0)
     parent.layout().addWidget(hint)
 
     ctx.widgets.register(_GATE_BUTTON_HANDLE[mode], btn)
@@ -312,7 +315,7 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
 
     # The QC debris gate leads: it is applied to every cell no matter what the
     # rest of this section says, so it cannot be one of the alternatives below.
-    layout.addWidget(_lead_in(frame, "Always applied:"))
+    layout.addWidget(_lead_in(frame, "Always applied"))
     try:
         layout.addWidget(build_qc_gate_controls(ctx, frame))
     except Exception:
@@ -322,7 +325,7 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     layout.addWidget(build_fov_selection_row(
         ctx, frame, indent=_RADIO_INDENT, on_apply=apply_fov_selection_with_progress))
 
-    layout.addWidget(_lead_in(frame, "Then include cells by (choose one):"))
+    layout.addWidget(_lead_in(frame, "Then include cells by (choose one)"))
     per_channel = _source_radio(
         frame, layout, "Per-channel intensity minimum (table below)",
         "Exclude cells whose mean fluorescence intensity is at or below the "
@@ -358,7 +361,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
 
     # Mirrors the "Then include cells by" lead-in above: both sections offer the
     # same exclusive pair, so both name the choice before presenting it.
-    layout.addWidget(_lead_in(frame, "Count an included cell as ON by (choose one):"))
+    layout.addWidget(_lead_in(frame, "Count an included cell as ON by (choose one)"))
     per_channel = _source_radio(
         frame, layout, "Per-channel ON cutoff (table below)",
         "Count an included cell as 'on' when its mean fluorescence intensity "
@@ -384,9 +387,8 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
 
     auto_row = QWidget(frame)
     auto_row_layout = FlowLayout(auto_row)
-    auto_row_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 0)
-    auto_btn = QPushButton("Auto-threshold all channels", auto_row)
-    auto_btn.setProperty("variant", "secondary")
+    auto_row_layout.setContentsMargins(_RADIO_INDENT, theme.Spacing.xs, 0, 0)
+    auto_btn = buttons.default("Auto-threshold all channels", auto_row)
     auto_btn.setToolTip(
         "Compute a default ON cutoff per channel via Otsu on "
         "a per-cell + matched-background-pixel distribution sampled from "
@@ -396,8 +398,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
     )
     auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx))
     auto_row_layout.addWidget(auto_btn)
-    opt_btn = QPushButton("Optimize ON cutoff…", auto_row)
-    opt_btn.setProperty("variant", "secondary")
+    opt_btn = buttons.default("Optimize ON cutoff…", auto_row)
     opt_btn.setToolTip(
         "Open the optimizer: scan a range of cutoffs for one channel and apply "
         "the one that best separates two wells' fraction-on.")
@@ -449,7 +450,7 @@ def _mount_threshold_table(ctx, frame: QWidget, layout: QVBoxLayout,
     """
     host = ctx.widgets.register(handle, QWidget(frame))
     host_layout = QVBoxLayout(host)
-    host_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 4)
+    host_layout.setContentsMargins(_RADIO_INDENT, theme.Spacing.xs, 0, theme.Spacing.xs)
     layout.addWidget(host)
 
 
@@ -458,7 +459,7 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     layout.addWidget(build_hline_separator(frame))
 
     summary = ctx.widgets.register("_cell_gating_gate_summary", QLabel("", frame))
-    summary.setObjectName("Muted")
+    summary.setProperty("textRole", "help")
     summary.setWordWrap(True)
     layout.addWidget(summary)
 
@@ -466,7 +467,7 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     # it cannot say which gate, and a layer that was never applied is reported
     # as "not applied" rather than as a zero it did not measure.
     funnel = ctx.widgets.register("_cell_gating_funnel_label", QLabel("", frame))
-    funnel.setObjectName("Muted")
+    funnel.setProperty("textRole", "help")
     funnel.setWordWrap(True)
     funnel.setToolTip(
         "Each inclusion layer applied on top of the ones above it, in the order "
@@ -508,7 +509,7 @@ def _build_cdf_section(ctx, parent: QWidget, root: QVBoxLayout,
     toolbar = reg.register("_cell_gating_toolbar", MplToolbar(canvas, parent))
 
     status = reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     status.setWordWrap(True)
 
     root.addWidget(build_hline_separator(parent))

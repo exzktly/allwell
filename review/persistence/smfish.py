@@ -1,7 +1,7 @@
 """Per-channel smFISH threshold persistence (within ``pipeline_info.json``).
 
 The smFISH spot-detection threshold is the value that was last applied
-globally to the dataset (Apply Global Threshold). Persisting it makes
+globally to the dataset (Apply global threshold). Persisting it makes
 the spinbox's reading meaningful across sessions — the value the user
 sees matches the spot counts already baked into the per-well CSVs.
 

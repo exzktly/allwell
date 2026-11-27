@@ -18,6 +18,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QPushButton
 
 from review.features.nanowell import controller as nwc
+from ui import buttons
 
 #: The buttons that open the Display range, one per place the image channel is offered (``tab_view``'s
 #: ``_IMAGE_CHANNEL_COMBOS``): refreshed together by :func:`refresh_display_range_buttons`.
@@ -47,8 +48,7 @@ def button_text(ctx) -> str:
 
 def build_display_range_button(ctx, name: str) -> QPushButton:
     """One of the :data:`DISPLAY_RANGE_BUTTONS`; a click opens the *min* / *max* / **Auto** row under it."""
-    button = QPushButton(button_text(ctx))
-    button.setProperty("variant", "secondary")
+    button = buttons.default(button_text(ctx))
     button.setToolTip(RANGE_TIP)
     button.setObjectName(name)
     button.clicked.connect(lambda _=False: open_display_range(ctx, button))

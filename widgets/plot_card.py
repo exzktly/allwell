@@ -80,7 +80,7 @@ def plot_tokens(mode: str):
         p = theme.CPub
         return (p.bg, p.text, getattr(p, "text_muted", p.text), p.grid, p.spine)
     c = theme.Colors
-    return (c.plot_bg, c.text_primary, c.text_muted, c.plot_grid, c.plot_spine)
+    return (c.plot_bg, c.text_primary, c.text_secondary, c.plot_grid, c.plot_spine)
 
 
 #: Marks an artist as drawn in the plot's *ink* rather than in a data colour,
@@ -292,7 +292,6 @@ if _HAVE_MPL:
             root.addWidget(self.canvas, 1)
             root.addWidget(self.toolbar)
 
-            self.setStyleSheet(self._build_qss())
             # NB: a previous revision installed a `QEvent.StyleChange`
             # event filter here so the per-instance QSS would track a
             # future runtime-theme switcher. That filter routed *every*
@@ -901,7 +900,6 @@ if _HAVE_MPL:
             # to no axes, so the per-axes pass above never reaches it.
             _, _fig_fg, _fig_muted, _, _ = _plot_tokens(mode)
             repaint_theme_ink(self.figure, _fig_fg, _fig_muted)
-            self.setStyleSheet(self._build_qss())
             self._sync_theme_ui()
             self.draw()
             if not getattr(self, "_theme_signal_suppressed", False):
@@ -978,43 +976,6 @@ if _HAVE_MPL:
             """Re-derive a figure pin's chrome at the new UI scale."""
             self._apply_figure_pin()
 
-        def _build_qss(self) -> str:
-            c, t, r = theme.Colors, theme.Typography, theme.Radii
-            return f"""
-            QFrame#Panel {{
-                background-color: {c.panel};
-                border: 1px solid {c.border_subtle};
-                border-radius: {r.md}px;
-            }}
-            QWidget#PlotCardHeader, QWidget#PlotCardControls,
-            QWidget#PlotCardLeftSlot {{ background: transparent; }}
-            QLabel#PlotCardTitle {{
-                color: {c.text_primary};
-                font-size: {t.emph_size}px;
-                font-weight: {t.semibold};
-                background: transparent;
-            }}
-            QLabel#PlotCardPreviewChip {{
-                color: {c.text_muted};
-                background-color: {c.panel_elevated};
-                border: 1px solid {c.border_subtle};
-                border-radius: {r.pill}px;
-                padding: 1px 8px;
-                font-size: {t.small_size}px;
-            }}
-            QPushButton#PlotCardStatsChip {{
-                color: {c.text_secondary};
-                background-color: {c.panel_elevated};
-                border: 1px solid {c.border_subtle};
-                border-radius: {r.pill}px;
-                padding: 2px 10px;
-                font-size: {t.small_size}px;
-            }}
-            QPushButton#PlotCardStatsChip:hover {{
-                color: {c.text_primary};
-                border-color: {c.border};
-            }}
-            """
 
 else:  # pragma: no cover - matplotlib unavailable
     PlotCard = None  # type: ignore
@@ -1034,7 +995,7 @@ if __name__ == "__main__":
     lay.setContentsMargins(pad, pad, pad, pad)
     lay.setSpacing(theme.Spacing.md)
     title = QLabel("PlotCard")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     if PlotCard is None:
@@ -1068,9 +1029,9 @@ if __name__ == "__main__":
         from PySide6.QtWidgets import QHBoxLayout as _QHB
         ctrls = _QW()
         _cl = _QHB(ctrls); _cl.setContentsMargins(0, 0, 0, 0); _cl.setSpacing(theme.Spacing.sm)
-        _cl.addWidget(QLabel("Across:"))
+        _cl.addWidget(QLabel("Across"))
         _cl.addWidget(_make_segmented([("Replicates", "rep"), ("FOV", "fov")], current="rep"))
-        _cl.addWidget(QLabel("Error:"))
+        _cl.addWidget(QLabel("Error"))
         _cl.addWidget(_make_segmented([("SEM", "SEM"), ("SD", "SD"), ("None", "None")], current="SEM"))
         card.setControlsWidget(ctrls)
         lay.addWidget(card, 1)
@@ -1079,8 +1040,8 @@ if __name__ == "__main__":
         btn.clicked.connect(lambda: (card.setPlotTheme(
             "publication" if card.plotTheme() == "screen" else "screen"), _plot()))
         lay.addWidget(btn)
-        echo = QLabel("(left header: view-switcher · header: Publication↔Screen toggle + 'preview only' chip + stats chip → popover · controls row beneath the header)")
-        echo.setObjectName("Secondary")
+        echo = QLabel("(left header: view-switcher · header: publication↔screen toggle + 'preview only' chip + stats chip → popover · controls row beneath the header)")
+        echo.setProperty("textRole", "label")
         echo.setWordWrap(True)
         lay.addWidget(echo)
         card.statsChanged.connect(lambda s, e: echo.setText(f"stats → {s} · {e}"))
@@ -1089,3 +1050,42 @@ if __name__ == "__main__":
     root.resize(640, 500)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    QFrame#Panel {{
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.md}px;
+    }}
+    QWidget#PlotCardHeader, QWidget#PlotCardControls,
+    QWidget#PlotCardLeftSlot {{ background: transparent; }}
+    QLabel#PlotCardTitle {{
+        color: {c.text_primary};
+        font-size: {t.emph_size}px;
+        font-weight: {t.semibold};
+        background: transparent;
+    }}
+    QLabel#PlotCardPreviewChip {{
+        color: {c.text_secondary};
+        background-color: {c.control};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.pill}px;
+        padding: 1px 8px;
+        font-size: {t.small_size}px;
+    }}
+    QPushButton#PlotCardStatsChip {{
+        color: {c.text_secondary};
+        background-color: {c.control};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.pill}px;
+        padding: 2px 10px;
+        font-size: {t.small_size}px;
+    }}
+    QPushButton#PlotCardStatsChip:hover {{
+        color: {c.text_primary};
+        border-color: {c.field_edge};
+    }}
+    """

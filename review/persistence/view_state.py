@@ -1054,7 +1054,6 @@ def _sync_significance_controls(ctx) -> None:
     if btn is not None:
         with swallow("view_state: could not sync the Significance toggle"):
             btn.setChecked(on)
-            btn.setText(f"Significance: {'On' if on else 'Off'}")
     cb = ctx.widgets.get_or_none("_bar_significance_label_cb")
     if cb is not None:
         with swallow("view_state: could not sync the Label picker"):
@@ -1261,8 +1260,6 @@ def _apply_scatter(ctx, state: dict) -> None:
             if btn is not None:
                 try:
                     btn.setChecked(_sc.color_by_tp)
-                    btn.setText(
-                        "Color by time: On" if _sc.color_by_tp else "Color by time: Off")
                 except Exception:
                     swallowed()
         if "gates_hidden" in state:
@@ -1275,9 +1272,6 @@ def _apply_scatter(ctx, state: dict) -> None:
             if btn is not None:
                 try:
                     btn.setChecked(_sc.apply_gates_to_points)
-                    btn.setText(
-                        "Apply gates: On" if _sc.apply_gates_to_points
-                        else "Apply gates: Off")
                 except Exception:
                     swallowed()
     mode = state.get("mode")

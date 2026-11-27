@@ -149,10 +149,10 @@ def test_the_legend_names_uploaded_on_remote_runs_only(qapp):
     d = RunDashboard()
     d.reset(remote=True, total=1)
     remote_terms = {lbl.text() for lbl in d._legend_host.findChildren(QLabel)}
-    assert "uploaded" in remote_terms
+    assert "Uploaded" in remote_terms
     d.reset(remote=False, total=1)
     local_terms = {lbl.text() for lbl in d._legend_host.findChildren(QLabel)}
-    assert "uploaded" not in local_terms, "a local run never uploads"
+    assert "Uploaded" not in local_terms, "a local run never uploads"
 
 
 def test_remote_threshold_does_not_count_as_download(qapp):
@@ -194,12 +194,15 @@ def test_dashboard_rail_local_vs_remote(qapp):
     assert d._active_stage == "threshold"
 
 
-def test_dashboard_collapse_toggle(qapp):
+def test_the_dashboard_does_not_fold(qapp):
+    """The Run card's progress stays on its card: the log is what hides (design language §6, *Analyze*), and
+    the app folds a section only through ``CollapsibleSection``."""
+    from PySide6.QtWidgets import QToolButton
+
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard()
-    d._toggle.setChecked(False); d._on_toggle()
-    assert not d._body.isVisible()
-    d._toggle.setChecked(True); d._on_toggle()
+    assert not hasattr(d, "_toggle") and not hasattr(d, "_on_toggle")
+    assert not any(b.text() in ("▾", "▸") for b in d.findChildren(QToolButton))
 
 
 def test_tracker_emits_per_well_fov_progress():

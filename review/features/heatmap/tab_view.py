@@ -12,7 +12,7 @@ from review.core.channel_state_controller import on_plot_channel_selected
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QInputDialog, QLabel, QLineEdit,
-    QPushButton, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from review.core.inspector_panels import make_popover_button
@@ -31,6 +31,7 @@ from review.features.heatmap.layout_view import build_heatmap_layout_editor
 from review.core.channel_state_controller import refresh_heatmap_aggregation_options
 from core.safe import swallowed
 from ui import theme
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -95,18 +96,17 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     metric_cb = reg.register("_heatmap_metric_cb", QComboBox())
     metric_cb.addItems(METRIC_OPTIONS)
     metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx))
-    band.add_scope("Aggregation", metric_cb)
 
     # The timepoint picker — a LabeledComboBox like every other Timepoint
     # control in Review, painting its own "Timepoint: 4.0h" prefix. Was a
     # StyledSlider; unified to a combo so scrubbing to an exact timepoint
     # doesn't depend on pixel-precise dragging and the control matches its
     # siblings (Stats, Distribution, …) instead of being the one holdout.
-    from widgets.labeled_combo import LabeledComboBox
-    tp_cb = reg.register("_heatmap_tp_cb", LabeledComboBox("Timepoint"))
+    from widgets.labeled_combo import unlabelled
+    tp_cb = reg.register("_heatmap_tp_cb", unlabelled("Timepoint"))
     tp_cb.addItem("—")
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed(ctx))
-    band.add_scope("", tp_cb)
+    band.add_scope("Timepoint", tp_cb)
 
     # ── Display popover: everything about how the grid is drawn ─────────────
     # These change the figure's appearance rather than what it is showing, and
@@ -115,9 +115,16 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # labels are appearance by the same test and live here too.
     display_btn, disp, disp_l = make_popover_button("Display", band, ctx=ctx, root=True)
     display_btn.setToolTip(
-        "Colour map, scale, layout, per-cell error and tick labels")
+        "Aggregation, color map, scale, layout, per-cell error and tick labels")
+    # Aggregation heads the Display page rather than sitting on the band (the user's decision, tracker §9.1
+    # step 20): the band keeps what is plotted on one row.
+    _agg_lbl = QLabel("Aggregation", disp)
+    _agg_lbl.setProperty("textRole", "label")
+    disp_l.addWidget(_agg_lbl)
+    metric_cb.setParent(disp)
+    disp_l.addWidget(metric_cb)
 
-    disp_l.addWidget(QLabel("Color map:", disp))
+    disp_l.addWidget(QLabel("Color map", disp))
     # v2: LutSelector (gradient strip + name + searchable popover + reverse-LUT
     # button) in place of the legacy QComboBox of mpl colormap names.
     from widgets.lut_selector import LutSelector
@@ -133,26 +140,25 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx))
     disp_l.addWidget(cmap_cb)
 
-    disp_l.addWidget(QLabel("Scale:", disp))
+    disp_l.addWidget(QLabel("Scale", disp))
     scale_cb = reg.register("_heatmap_scale_cb", QComboBox(disp))
     scale_cb.addItems(_SCALE_OPTIONS)
     scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx))
     disp_l.addWidget(scale_cb)
 
-    disp_l.addWidget(QLabel("vmin:", disp))
+    disp_l.addWidget(QLabel("vmin", disp))
     vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(disp))
     vmin_edit.setFixedWidth(theme.Metrics.num_field_w)
     vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     disp_l.addWidget(vmin_edit)
 
-    disp_l.addWidget(QLabel("vmax:", disp))
+    disp_l.addWidget(QLabel("vmax", disp))
     vmax_edit = reg.register("_heatmap_vmax_edit", QLineEdit(disp))
     vmax_edit.setFixedWidth(theme.Metrics.num_field_w)
     vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     disp_l.addWidget(vmax_edit)
 
-    transpose_btn = QPushButton("⇄ Transpose", disp)
-    transpose_btn.setProperty("variant", "secondary")
+    transpose_btn = buttons.default("Transpose", disp)
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
     transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx))
     disp_l.addWidget(transpose_btn)

@@ -101,7 +101,7 @@ def test_edit_in_place_needs_no_destination_and_cuts_the_source(qapp, tmp_path):
     page._in_place_cb.setChecked(True)
     assert page._dest_field.isHidden()
     assert not page._in_place_warning.isHidden()
-    assert page._run_btn.text() == "▶  Remove from dataset"
+    assert page._run_btn.text() == "Remove from dataset"
     page._tp_checks["48h"].setChecked(False)
     page._plate.setSelectedWellIds(["A01", "A02"])
     assert page._run_btn.isEnabled()                          # no destination asked for
@@ -186,7 +186,7 @@ def test_the_page_says_what_an_interrupted_edit_keeps_and_offers_only_to_finish_
     ctrl, page = _page_for(src)
     assert page.interrupted_edit() is not None
     assert "interrupted in-place edit that keeps wells A01, A02; timepoints 48h" in page._interrupted_note.text()
-    assert page._run_btn.text() == "▶  Finish the interrupted edit"
+    assert page._run_btn.text() == "Finish the interrupted edit"
     assert page._run_btn.isEnabled() and not page._queue_btn.isEnabled()
     assert page.in_place() and page._dest_field.isHidden()
     assert page.selected_timepoints() == ["48h"]        # the recorded choice, shown
@@ -194,7 +194,7 @@ def test_the_page_says_what_an_interrupted_edit_keeps_and_offers_only_to_finish_
     page.runRequested.emit()
     run_worker_to_completion(ctrl)
     assert ctrl._last_result[0], ctrl._last_result
-    assert page._run_btn.text() == "▶  Remove from dataset"
+    assert page._run_btn.text() == "Remove from dataset"
     ctrl.shutdown()
 
 
@@ -260,7 +260,7 @@ def test_a_cancelled_in_place_run_turns_the_page_to_finishing_it(qapp, tmp_path,
     run_worker_to_completion(ctrl)
     assert not ctrl._last_result[0] and ctrl._last_result[1].startswith("Cancelled"), ctrl._last_result
     assert (src / IN_PLACE_MARKER).exists()
-    assert page._run_btn.text() == "▶  Finish the interrupted edit" and page._run_btn.isEnabled()
+    assert page._run_btn.text() == "Finish the interrupted edit" and page._run_btn.isEnabled()
     ctrl.shutdown()
 
     # The next session: the same folder opened afresh, as after a restart.

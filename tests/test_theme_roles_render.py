@@ -15,6 +15,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from ui import theme  # noqa: E402
+from widgets.empty_state import qss as empty_state_qss  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -34,7 +35,7 @@ def _bg(widget):
     return widget.palette().color(widget.backgroundRole()).name()
 
 
-@pytest.mark.parametrize("object_name", ["Muted", "MutedCaption", "Accent"])
+@pytest.mark.parametrize("object_name", ["Accent"])
 def test_label_roles_differ_from_plain_body_text(styled_app, object_name):
     from PySide6.QtWidgets import QLabel
 
@@ -49,26 +50,7 @@ def test_label_roles_differ_from_plain_body_text(styled_app, object_name):
     )
 
 
-def test_muted_is_dimmer_than_secondary(styled_app):
-    """The three text tiers must actually be three tiers."""
-    from PySide6.QtWidgets import QLabel
-
-    def lum(name):
-        lbl = QLabel("x")
-        lbl.setObjectName(name)
-        c = lbl.palette().color(lbl.foregroundRole()) if not name else None
-        lbl.ensurePolished()
-        col = lbl.palette().color(lbl.foregroundRole())
-        return 0.2126 * col.redF() + 0.7152 * col.greenF() + 0.0722 * col.blueF()
-
-    primary, secondary, muted = lum(""), lum("Secondary"), lum("Muted")
-    assert primary > secondary > muted, (
-        f"text tiers are not ordered: primary={primary:.3f} "
-        f"secondary={secondary:.3f} muted={muted:.3f}"
-    )
-
-
-@pytest.mark.parametrize("variant", ["primary", "danger", "toggle_accent"])
+@pytest.mark.parametrize("variant", ["primary", "destructive", "quiet"])
 def test_button_variants_differ_from_default(styled_app, variant):
     from PySide6.QtWidgets import QPushButton
 
@@ -106,15 +88,14 @@ def _stylesheet_sources():
     looks at.
     """
     from ui import theme as _theme
-    from widgets.empty_state import EmptyState
 
     yield "theme.qss()", _theme.qss()
     yield "theme.link_row_qss()", _theme.link_row_qss("Probe")
-    yield "EmptyState._build_qss()", EmptyState("probe")._build_qss()
+    yield "widgets.empty_state.qss()", empty_state_qss()
 
 
 @pytest.mark.parametrize("name", ["theme.qss()", "theme.link_row_qss()",
-                                  "EmptyState._build_qss()"])
+                                  "widgets.empty_state.qss()"])
 def test_no_stylesheet_reaches_qt_with_doubled_braces(qapp, name):
     """``{{`` in the output means an f-string escape survived into the QSS.
 
@@ -158,7 +139,6 @@ def test_the_two_link_row_hosts_are_styled_identically(qapp):
         "Home's card no longer takes its rows from link_row_qss, so the two "
         "lists can now be adjusted apart"
     )
-    from widgets.empty_state import EmptyState
-    assert entry in EmptyState("probe")._build_qss(), (
+    assert entry in empty_state_qss(), (
         "EmptyState's entries no longer take their rows from link_row_qss"
     )

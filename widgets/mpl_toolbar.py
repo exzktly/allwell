@@ -80,7 +80,7 @@ class _HoverChip(QLabel):
         c, t = theme.Colors, theme.Typography
         self.setStyleSheet(
             f"QLabel {{"
-            f" background-color: {c.panel_elevated};"
+            f" background-color: {c.control};"
             f" color: {c.text_secondary};"
             f" border: 1px solid {c.border_subtle};"
             f" border-radius: 3px;"
@@ -179,7 +179,6 @@ if _HAVE_MPL:
                 )
             except Exception:
                 swallowed()
-            self.setStyleSheet(self._qss())
             form_registry.declare(self, "toolbar")
 
         def closeEvent(self, event):  # Qt naming
@@ -333,18 +332,6 @@ if _HAVE_MPL:
             f.setFixedWidth(_F_W)
             return f
 
-        def _qss(self) -> str:
-            c, t = theme.Colors, theme.Typography
-            return f"""
-            QWidget#MplToolbar {{ background: transparent; }}
-            QFrame#MplToolbarSep {{ background-color: {c.border_subtle}; border: none; }}
-            QLabel#MplToolbarCoords {{
-                color: {c.text_muted};
-                font-family: {t.family_mono};
-                font-size: {t.small_size}px;
-                background: transparent;
-            }}
-            """
 
 else:  # pragma: no cover - matplotlib unavailable
     MplToolbar = None  # type: ignore
@@ -364,7 +351,7 @@ if __name__ == "__main__":
     lay.setContentsMargins(pad, pad, pad, pad)
     lay.setSpacing(theme.Spacing.md)
     title = QLabel("MplToolbar")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     if MplToolbar is None:
@@ -385,3 +372,17 @@ if __name__ == "__main__":
     root.resize(640, 460)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t = theme.Colors, theme.Typography
+    return f"""
+    QWidget#MplToolbar {{ background: transparent; }}
+    QFrame#MplToolbarSep {{ background-color: {c.border_subtle}; border: none; }}
+    QLabel#MplToolbarCoords {{
+        color: {c.text_secondary};
+        font-family: {t.family_mono};
+        font-size: {t.small_size}px;
+        background: transparent;
+    }}
+    """

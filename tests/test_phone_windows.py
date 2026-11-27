@@ -163,11 +163,11 @@ def test_a_pop_out_that_is_not_a_dialog_fits_the_phone_and_its_close_closes_it(q
     for text in ("Well", "Timepoint", "Run", "Nanowell outlines", "Zoom", "Fit to window"):
         row.addWidget(QPushButton(text, popout))
     lay.addLayout(row)
-    lay.addWidget(QLabel("Choose a well and a timepoint, then Run.", popout), 1)
+    lay.addWidget(QLabel("Choose a well and a timepoint, then press “Run”.", popout), 1)
     _open(qapp, shell, popout)
 
     assert popout.frameGeometry() == UPRIGHT
-    assert _foot_texts(popout) == ["Close ✕"]
+    assert _foot_texts(popout) == ["Close"]
     close = popout.findChild(QPushButton, "PhoneWindowClose")
     assert _on_screen(close, UPRIGHT)
     assert close.height() >= phone_layout.touch_px(shell.unit(), phone_layout.TOUCH_MIN_PT)

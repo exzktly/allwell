@@ -25,11 +25,10 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMenu,
+    QToolButton,
     QMessageBox,
     QProgressBar,
-    QPushButton,
     QScrollArea,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -43,15 +42,11 @@ from review.features.batch_export._common import (
     _PLATE_ROWS,
     apply_ax_style,
     ask_name_dialog,
-    btn_card,
-    btn_danger,
-    btn_primary,
     btn_secondary,
     _clear_layout_helper,
     _logger,
     unique_export_stem,
     _CLR_WHITE,
-    get_color,
 )
 # Qt-free export-execution service (A14 / X3) — safe to import at module level.
 from review.features.batch_export.service import (
@@ -74,7 +69,8 @@ from review.core.lazy import lazy as _lazy
 # unless a run ticked one of the extra destinations.
 _capture_params = _lazy("review.features.saved_plots.collect",
                         "capture_params")
-from widgets.separator import build_hline_separator
+from widgets.form_grid import FormGrid
+from review.features.batch_export._page import form_row, form_wide, hug
 from review.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     on_cutoff_for_column as _on_cutoff_for_column,
@@ -98,6 +94,8 @@ _TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
 from review.domain.numeric import is_number
+from ui import buttons
+from ui import text_roles
 
 
 #: The three answers the scale combos offer, and what each means to
@@ -242,27 +240,15 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
     row["fold_change_outcome"] = str(outcome or "") if vs_control else ""
 
 
-def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
-    """Point *sep* along the split's current axis, name and shape together.
-
-    The Batch Export output panel folds from side-by-side to stacked when the
-    viewport narrows, and its divider turns with it. That makes it the one
-    divider in the app whose orientation is not fixed at build time, so it
-    cannot take a fixed object name: ``theme.qss`` pins ``QFrame#HRule`` to
-    ``max-height: 1px`` and ``QFrame#VRule`` to ``max-width: 1px``, and either
-    name applied to the other orientation renders a hairline stretched along
-    the wrong axis. Leaving it unnamed is worse still — an ``HLine`` / ``VLine``
-    frame with no sanctioned name keeps Qt's default etched border, 3 px of
-    near-white on this app's dark surfaces.
-
-    An object-name change does not repaint on its own: Qt's stylesheet cache
-    only re-evaluates a selector on an explicit repolish, the same reason
-    ``widgets/_support.set_variant`` exists for dynamic properties.
-    """
-    sep.setFrameShape(QFrame.HLine if stacked else QFrame.VLine)
-    sep.setObjectName("HRule" if stacked else "VRule")
-    sep.style().unpolish(sep)
-    sep.style().polish(sep)
+def _scroll_into_view(widget) -> None:
+    """Bring *widget* into view in the scroll area it sits in. Export is in the page title and the progress line at
+    the foot of the Output card, which on a short or stacked page is below the fold when a run starts."""
+    parent_of = getattr(widget, "parentWidget", None)
+    g = parent_of() if callable(parent_of) else None
+    while g is not None and not isinstance(g, QScrollArea):
+        g = g.parentWidget()
+    if g is not None:
+        g.ensureWidgetVisible(widget)
 
 
 class _Destination(NamedTuple):
@@ -292,7 +278,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
     """Batch export panel — defines export groups and runs the export."""
 
     #: Line & bar exports carry the Error-band (SEM/SD) + per-FOV-points spread
-    #: controls in their OUTPUT SETTINGS; scatter panels turn this off.
+    #: controls in their Plot form; scatter panels turn this off.
     _INCLUDES_SPREAD = True
 
     #: The Plotting leaf whose figure this mode exports. It is what a gallery
@@ -472,44 +458,60 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         return SHARED_PERSIST_KEY
 
     def _build_ui(self) -> None:
+        """The page (``_page.py``): the title with Sync from app and Export, then the Groups card beside the card
+        holding the Output and Plot forms — stacked when the viewport is too narrow for both."""
         from PySide6.QtWidgets import QBoxLayout
-        outer = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
+        from widgets.card import Card
+        from widgets.form_grid import FormGrid
+
+        page = QVBoxLayout(self)
+        page.setContentsMargins(0, 0, 0, 0)
+        page.setSpacing(theme.Spacing.md)
+        page.addWidget(self._build_page_header())
+        outer = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        outer.setSpacing(theme.Spacing.md)
+        page.addLayout(outer, 1)
+
+        right = Card("Output")
+        output = FormGrid(right)
+        right.body().addWidget(output)
+        right.body().addWidget(text_roles.section_heading("Plot", right))
+        plot = FormGrid(right)
+        right.body().addWidget(plot)
+        self._build_output_panel(output, plot)
+        self._build_foot(right.body())
+        right.body().addStretch(1)
 
         if self._use_sidebar_groups:
-            right = QWidget()
-            right_layout = QVBoxLayout(right)
-            right_layout.setContentsMargins(0, 0, 0, 0)
-            self._build_output_panel(right_layout)
             outer.addWidget(right, 1)
             return
 
-        left = QWidget()
+        left = Card("Groups", commands=self._build_group_commands())
         left.setMinimumWidth(_LEFT_MIN_W)
         left.setMaximumWidth(_LEFT_MAX_W)
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        self._build_group_editor(left_layout)
+        self._build_group_editor(left.body())
         outer.addWidget(left)
-
-        sep = QFrame()
-        sep.setFrameShadow(QFrame.Plain)
-        _apply_split_sep_orientation(sep, stacked=False)
-        outer.addWidget(sep)
-
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        self._build_output_panel(right_layout)
         outer.addWidget(right, 1)
 
         # Handles for the responsive stack/unstack (see apply_split_orientation).
         self._split_outer = outer
         self._split_left = left
         self._split_right = right
-        self._split_sep = sep
-        self._split_right_index = 2   # left(0), sep(1), right(2)
+        self._split_right_index = 1   # left(0), right(1)
+
+    def _mode_title(self) -> str:
+        """The mode's name, as the page's mode bar spells it."""
+        return "Line"
+
+    def _build_page_header(self) -> QWidget:
+        """"Batch Export · <mode>", with a quiet Sync from app and the primary Export."""
+        from ui.page_chrome import PageHeader
+
+        sync = buttons.quiet("Sync from app", on_click=self._sync_from_app)
+        sync.setToolTip("Replace the export groups with the app's replicate sets.")
+        self._run_btn = buttons.primary("Export")
+        self._run_btn.clicked.connect(self._run_batch)
+        return PageHeader(f"Batch Export \u00b7 {self._mode_title()}", self, commands=(sync, self._run_btn))
 
     def resizeEvent(self, event) -> None:  # Qt override
         super().resizeEvent(event)
@@ -517,7 +519,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
 
     def apply_split_orientation(self, avail: int | None = None) -> None:
         """Side-by-side when the pane is wide enough for both panels, otherwise
-        stacked vertically (plate map on top, OUTPUT SETTINGS below) so nothing is
+        stacked vertically (the Groups card on top, Output and Plot below) so nothing is
         pushed off-edge.
 
         *avail* is the width actually available to the panel — the enclosing
@@ -539,7 +541,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         # horizontal scroll bar to reach the rest.
         need = (self._effective_min_width(self._split_left)
                 + self._effective_min_width(self._split_right)
-                + self._split_sep.sizeHint().width() + 24)
+                + max(0, self._split_outer.spacing()) + 24)
         stacked_now = (self._split_outer.direction()
                        == QBoxLayout.Direction.TopToBottom)
         if not stacked_now and avail < need:
@@ -551,7 +553,6 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self._split_outer.setDirection(
             QBoxLayout.Direction.TopToBottom if stack
             else QBoxLayout.Direction.LeftToRight)
-        _apply_split_sep_orientation(self._split_sep, stacked=stack)
         # Stacked: the plate map takes the full width; side-by-side: keep it capped.
         self._split_left.setMaximumWidth(16777215 if stack else 560)  # QWIDGETSIZE_MAX
         # Right panel fills leftover horizontal space when side-by-side; when
@@ -575,49 +576,29 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             g = g.parentWidget()
         return self.width()
 
-    def _build_group_editor(self, layout: QVBoxLayout) -> None:
-        # Row 1: title + the two ways to *create* groups (Add / Quick Setup).
-        hdr1 = QHBoxLayout()
-        hdr1.setContentsMargins(8, 4, 8, 4)
-        title = QLabel("EXPORT GROUPS")
-        f = title.font()
-        f.setBold(True)
-        title.setFont(f)
-        hdr1.addWidget(title)
-        hdr1.addStretch(1)
-        hdr1.addWidget(btn_primary(None, "+ Add", self._grp_add))
-        qs_btn = QToolButton()
-        # A menu button draws one arrow: the theme's shared chevron, through
-        # ``hasMenu`` (CLAUDE.md §7.12). It used to hide Qt's indicator and
-        # show none at all, so nothing said the button opened a menu.
-        qs_btn.setText("Quick Setup")
+    def _build_group_commands(self) -> tuple[QWidget, ...]:
+        """The Groups card's heading: a quiet Clear all, a quiet Quick setup menu, and Add group. Clear all is kept
+        apart from Add group by the menu between them, so it is not pressed for its neighbour. Groups autosave to
+        the dataset's persistence.json, so there is no Save or Load."""
+        clear = buttons.quiet("Clear all", on_click=self._grp_clear_all)
+        # A menu button draws one arrow: the theme's shared chevron, through ``hasMenu`` (CLAUDE.md §7.12).
+        qs_btn = buttons.tool_button(self, buttons.QUIET)
+        qs_btn.setText("Quick setup")
         qs_btn.setPopupMode(QToolButton.InstantPopup)
         qs_btn.setProperty("hasMenu", True)
         qs_menu = QMenu(qs_btn)
-        qs_menu.addAction("One group per row  (Row A = all A wells, \u2026)", self._quick_by_row)
-        qs_menu.addAction("One group per column  (Col 01 = all col-01 wells, \u2026)", self._quick_by_col)
-        self._vsel_add_quick_setup_menu(qs_menu)
         qs_btn.setMenu(qs_menu)
-        hdr1.addWidget(qs_btn)
-        layout.addLayout(hdr1)
+        qs_menu.addAction("One group per row  (row A = all A wells, \u2026)", self._quick_by_row)
+        qs_menu.addAction("One group per column  (column 01 = all column-01 wells, \u2026)", self._quick_by_col)
+        self._vsel_add_quick_setup_menu(qs_menu)
+        add = buttons.default("Add group", on_click=self._grp_add)
+        return clear, qs_btn, add
 
-        # Row 2: Sync on the left; the destructive Clear All isolated on the
-        # right so it isn't fat-fingered next to Add. Groups autosave to the
-        # dataset's persistence.json, so there is no manual Save/Load route.
-        hdr2 = QHBoxLayout()
-        hdr2.setContentsMargins(8, 2, 8, 2)
-        hdr2.addWidget(btn_secondary(None, "Sync from app", self._sync_from_app))
-        hdr2.addStretch(1)
-        hdr2.addWidget(btn_secondary(None, "Clear All", self._grp_clear_all))
-        layout.addLayout(hdr2)
+    def _build_group_editor(self, layout: QVBoxLayout) -> None:
 
-        layout.addWidget(build_hline_separator(None))
-
-        hint = QLabel("Left-drag wells onto the plate map to add them to the "
-                      "selected group, or add every well holding a sample-variable value.")
-        hint.setWordWrap(True)
-        hint.setContentsMargins(6, 2, 6, 2)
-        layout.addWidget(hint)
+        layout.addWidget(text_roles.help_text(
+            "Drag wells onto the plate to add them to the selected group, or add every well holding a "
+            "sample-variable value."))
         self._build_variable_select_row(layout)
 
         # The app's plate control, in its "paint" selection model: the plate
@@ -654,13 +635,12 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self._map_plate.setRowColumnSelectable(False)
         layout.addWidget(self._map_plate, 0, PLATE_ALIGNMENT)
 
-        layout.addWidget(build_hline_separator(None))
-
         self._grp_scroll = QScrollArea()
+        self._grp_scroll.setFrameShape(QFrame.NoFrame)
         self._grp_scroll.setWidgetResizable(True)
         self._grp_inner = QWidget()
         self._grp_inner_layout = QVBoxLayout(self._grp_inner)
-        self._grp_inner_layout.setContentsMargins(4, 2, 4, 2)
+        self._grp_inner_layout.setContentsMargins(0, 0, 0, 0)
         self._grp_inner_layout.addStretch(1)
         self._grp_scroll.setWidget(self._grp_inner)
         layout.addWidget(self._grp_scroll, 1)
@@ -699,19 +679,15 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             self._refresh_group_list()
         self._drag_visited = set()
 
-    def _build_output_panel(self, layout: QVBoxLayout) -> None:
-        self._build_output_header_and_io(layout)
-        self._build_channel_row(layout, attr="_line_channel_cb")
+    def _build_output_panel(self, output: FormGrid, plot: FormGrid) -> None:
+        """The Output form (where the files go) and the Plot form (what each figure draws)."""
+        self._build_output_header_and_io(output)
+        self._build_channel_row(plot, attr="_line_channel_cb")
+        self._build_output_tail(plot)
 
-        layout.addWidget(build_hline_separator(None))
-
-        self._build_summary_label(layout)
-        self._build_run_row(layout)
-        layout.addStretch(1)
-
-    def _build_channel_row(self, layout: QVBoxLayout, *, attr: str,
+    def _build_channel_row(self, form: FormGrid, *, attr: str,
                            include_fraction: bool = False) -> None:
-        """Add a Channel: <combo> + Property: <combo> row.
+        """Add the Channel and Property rows (and Fold change, where the mode offers it).
 
         The channel combo is populated from ``_all_export_channels()`` so
         ratios are listed alongside real fluor channels. The Property combo
@@ -724,12 +700,6 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         "_metric">`` so the panel's ``_run_batch`` can read them.
         """
         channels = self._all_export_channels()
-        row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
-        lbl = QLabel("Channel:")
-        f = lbl.font(); f.setBold(True); lbl.setFont(f)
-        lbl.setMinimumWidth(_FIELD_LABEL_W)
-        row.addWidget(lbl)
         cb = QComboBox()
         cb.addItems(channels)
         default = str(self._ctx.state.channel.active_channel or "")
@@ -748,16 +718,12 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         # once and drop it the first time the channel moved.
         cb._include_fraction = bool(include_fraction)
         setattr(self, attr, cb)
-        row.addWidget(cb)
+        form_row(form, "Channel", hug(cb))
 
-        prop_lbl = QLabel("Property:")
-        pf = prop_lbl.font(); pf.setBold(True); prop_lbl.setFont(pf)
-        row.addWidget(prop_lbl)
         prop_cb = QComboBox()
         prop_cb.setMinimumWidth(theme.Metrics.combo_min_w)
         prop_attr = f"{attr}_metric"
         setattr(self, prop_attr, prop_cb)
-        row.addWidget(prop_cb)
         # Populate the property combo based on the channel's nature
         # (ratio → only "Calculated Val", else full METRIC_ORDER) and
         # keep it in sync as the user changes channel.
@@ -765,8 +731,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         cb.currentIndexChanged.connect(
             lambda _i, _a=attr: self._refresh_property_combo_for(_a)
         )
-        row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, "Property", hug(prop_cb))
 
         # Fold-change controls get their own row below the Channel/Property
         # row — keeping them on the same line caused widget overlap on
@@ -783,10 +748,9 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         if not self._INCLUDES_FOLD_CHANGE:
             return
         fc_row = QHBoxLayout()
-        fc_row.setContentsMargins(12, 2, 12, 2)
         self._build_fold_change_widgets(fc_row)
         fc_row.addStretch(1)
-        layout.addLayout(fc_row)
+        form_row(form, "Fold change", fc_row)
 
     def _all_export_channels(self) -> list[str]:
         """Fluorescence channels + ratio metrics available for batch export."""
@@ -1131,22 +1095,14 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                     return text
         return str(self._ctx.state.channel.active_channel or "")
 
-    def _build_export_profile_row(self, layout: QVBoxLayout) -> None:
-        row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
-        lbl = QLabel("Style Preset:")
-        f = lbl.font(); f.setBold(True); lbl.setFont(f)
-        lbl.setMinimumWidth(_FIELD_LABEL_W)
-        row.addWidget(lbl)
+    def _build_export_profile_row(self, form: FormGrid) -> None:
         self._profile_combo = QComboBox()
         self._profile_combo.addItems(self._export_profile_names())
         if self._export_profile_value not in self._export_profile_names():
             self._export_profile_value = "Custom"
         self._profile_combo.setCurrentText(self._export_profile_value)
         self._profile_combo.currentTextChanged.connect(self._on_export_profile_selected)
-        row.addWidget(self._profile_combo)
-        row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, "Style preset", hug(self._profile_combo))
         self._apply_export_profile_to_prefs(self._export_profile_value)
 
     def _export_profile_names(self) -> list[str]:
@@ -1192,57 +1148,36 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         if chosen:
             self._out_dir_edit.setText(chosen)
 
-    @staticmethod
-    def _add_bold_label(layout, text: str, *, min_width: int = 0) -> QLabel:
-        lbl = QLabel(text)
-        f = lbl.font(); f.setBold(True); lbl.setFont(f)
-        if min_width:
-            lbl.setMinimumWidth(min_width)
-        layout.addWidget(lbl)
-        return lbl
+    #: Whether the mode offers the raw per-cell CSV (*Also write*). Nanowells does not: a nanowell's cells are in
+    #: the run's own cell table, and the figure's numbers are the summary CSV the mode always writes.
+    _WRITES_CELL_ROWS = True
 
-    def _build_output_header_and_io(
-        self, layout: QVBoxLayout, *, title: str = "OUTPUT SETTINGS",
-    ) -> None:
-        """Common OUTPUT header + Write to + Folder + Format + Profile rows."""
-        hdr = QHBoxLayout()
-        hdr.setContentsMargins(12, 4, 12, 4)
-        self._add_bold_label(hdr, title)
-        hdr.addStretch(1)
-        layout.addLayout(hdr)
+    def _build_output_header_and_io(self, form: FormGrid) -> None:
+        """The Output form: Write to, Folder, Format, Style preset, Also write."""
+        self._build_write_to_row(form)
 
-        self._build_write_to_row(layout)
-
-        out_row = QHBoxLayout()
-        out_row.setContentsMargins(12, 6, 12, 6)
-        self._add_bold_label(out_row, "Folder:", min_width=_FIELD_LABEL_W)
         self._out_dir_edit = QLineEdit(self._out_dir_value)
         self._out_dir_edit.setMinimumWidth(_OUT_DIR_EDIT_MIN_W)
-        out_row.addWidget(self._out_dir_edit, 1)
         self._out_dir_browse_btn = btn_secondary(None, "Browse\u2026",
                                                  self._browse_out_dir)
-        out_row.addWidget(self._out_dir_browse_btn)
-        layout.addLayout(out_row)
+        form_row(form, "Folder", self._out_dir_edit, self._out_dir_browse_btn)
 
-        fmt_row = QHBoxLayout()
-        fmt_row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(fmt_row, "Format:", min_width=_FIELD_LABEL_W)
         self._fmt_cb = QComboBox()
         self._fmt_cb.addItems(["png", "svg", "eps", "pdf"])
         self._fmt_cb.setCurrentText(self._fmt_value)
         self._fmt_cb.currentTextChanged.connect(self._on_fmt_change)
-        fmt_row.addWidget(self._fmt_cb)
         self._fmt_hint = QLabel("300 DPI raster")
-        fmt_row.addWidget(self._fmt_hint)
-        fmt_row.addStretch(1)
-        layout.addLayout(fmt_row)
+        self._fmt_hint.setProperty("textRole", "help")
+        form_row(form, "Format", hug(self._fmt_cb, self._fmt_hint))
 
-        self._build_export_profile_row(layout)
-        if self._AXES_FOLLOW_HEADER:
-            self._build_output_tail(layout)
+        self._build_export_profile_row(form)
+        if self._WRITES_CELL_ROWS:
+            self._build_also_write_row(form)
+        else:
+            self._cell_rows_cb = None
         self._sync_destination_widgets()
 
-    def _build_write_to_row(self, layout: QVBoxLayout) -> None:
+    def _build_write_to_row(self, form: FormGrid) -> None:
         """Where this run's figures go — the first question, asked first.
 
         Three destinations, none of them privileged. A folder of image files
@@ -1266,8 +1201,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         leaving it to be discovered afterwards.
         """
         row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(row, "Write to:", min_width=_FIELD_LABEL_W)
+        row.setSpacing(theme.Spacing.md)
         self._to_files_cb = QCheckBox("Image files")
         self._to_files_cb.setChecked(True)
         self._to_files_cb.setToolTip(
@@ -1300,7 +1234,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                 "Records are added only if the whole run succeeds.")
             row.addWidget(self._to_gallery_cb)
         row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, "Write to", row)
         for box in (self._to_files_cb, self._to_deck_cb, self._to_gallery_cb):
             if box is not None:
                 box.toggled.connect(
@@ -1357,31 +1291,18 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             box.setEnabled(files)
         self._refresh_run_summary()
 
-    #: Whether the AXES block and the "Also …" rows go straight under Format,
-    #: or wait for the mode to place them.
-    #:
-    #: False on the modes whose *axes are a choice* — Scatter picks a channel
-    #: per axis, Response picks the dose variable — because there the AXES
-    #: block above those rows asks for a range on an axis the user has not
-    #: chosen yet, and Scatter ends up with two rows labelled "X:" a hundred
-    #: pixels apart meaning different things. Those modes call
-    #: :meth:`_build_output_tail` themselves, after the rows that say what the
-    #: axes are.
-    _AXES_FOLLOW_HEADER = True
+    def _build_output_tail(self, form: FormGrid) -> None:
+        """The spread rows and the Axes block, at the end of the Plot form.
 
-    def _build_output_tail(self, layout: QVBoxLayout) -> None:
-        """AXES, the per-cell CSV, and the spread rows."""
-        self._build_axes_rows(layout)
-        self._build_extra_output_rows(layout)
+        Each mode calls it from its own :meth:`_build_output_panel`, after the rows that say what its axes *are*:
+        Scatter picks a channel per axis and Response the dose variable, and an Axes block above those rows would
+        ask for a range on an axis the user had not chosen yet."""
         if self._INCLUDES_SPREAD:
-            self._build_spread_settings_rows(layout)
-        # Again here because the modes that place this block themselves build
-        # it *after* the header, so the header's own sync ran before the
-        # per-cell checkbox existed.
-        self._sync_destination_widgets()
+            self._build_spread_settings_rows(form)
+        self._build_axes_rows(form)
 
-    def _build_axes_rows(self, layout: QVBoxLayout) -> None:
-        """The AXES block: a shared x row, then one row per panel.
+    def _build_axes_rows(self, form: FormGrid) -> None:
+        """The Axes block: a shared x row, then one row per panel.
 
         Every field is optional and blank means "leave it as it is", falling
         through to whatever the app-wide Export Style sidebar holds — which is
@@ -1393,26 +1314,24 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         separate x range per panel would let a user set three ranges on one
         axis and see the last one win.
         """
-        hdr = QHBoxLayout()
-        hdr.setContentsMargins(12, 6, 12, 2)
-        self._add_bold_label(hdr, "AXES")
+
+        # Its own small table, under an eyebrow, rather than rows of the form grid: the min, max and scale fields
+        # line up in columns under their own headings, and a panel row's label is a checkbox.
+        form.add_eyebrow("Axes")
         # Not "blank = auto", which is what this said and is not what happens:
         # an unfilled field falls through to whatever the app-wide Export Style
         # sidebar holds, and that may itself be a hard limit somebody set on a
         # different plot on a different day. A user who read "auto" and left the
         # fields empty got a folder of figures clipped to it, with nothing
         # saying so.
-        hint = QLabel("blank = as the Export Style sidebar has it")
-        hint.setEnabled(False)
-        hdr.addWidget(hint)
-        hdr.addStretch(1)
-        layout.addLayout(hdr)
+        form.add_wide(text_roles.help_text("A blank field keeps the export style sidebar's limit."))
+        layout = QVBoxLayout()
+        layout.setSpacing(theme.Spacing.xs)
 
         # Column headers. Four unlabelled columns of numbers read as three
         # numbers and a word once they are filled, because the ``min`` / ``max``
         # placeholders disappear exactly when the block gets hard to scan.
         head = QHBoxLayout()
-        head.setContentsMargins(12, 0, 12, 0)
         spacer = QLabel("")
         spacer.setFixedWidth(self._axes_label_w())
         head.addWidget(spacer)
@@ -1420,8 +1339,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         if self._AXES_SCALE_OFFERED:
             columns.append(("scale", theme.Metrics.combo_min_w))
         for text, width in columns:
-            cap = QLabel(text)
-            cap.setEnabled(False)
+            cap = text_roles.help_text(text)
             cap.setFixedWidth(width)
             head.addWidget(cap)
         head.addStretch(1)
@@ -1431,15 +1349,16 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         if not self._X_IS_NUMERIC:
             # No X row at all on a categorical axis — see ``_X_IS_NUMERIC``.
             self._build_panel_rows(layout)
+            form_wide(form, layout)
             return
         x_row = QHBoxLayout()
-        x_row.setContentsMargins(12, 2, 12, 2)
         # ``setFixedWidth``, not a minimum: a minimum let the widest row's
         # label push its own fields right, so a five-row grid meant to be
         # scanned down a column started its fields at three different x
         # positions.
-        self._add_bold_label(x_row, self._x_row_label()).setFixedWidth(
-            self._axes_label_w())
+        x_label = text_roles.field_label(self._x_row_label())
+        x_label.setFixedWidth(self._axes_label_w())
+        x_row.addWidget(x_label)
         self._x_min_edit = self._limit_edit("min")
         x_row.addWidget(self._x_min_edit)
         self._x_max_edit = self._limit_edit("max")
@@ -1450,9 +1369,10 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         x_row.addStretch(1)
         layout.addLayout(x_row)
         self._build_panel_rows(layout)
+        form_wide(form, layout)
 
     def _axes_label_w(self) -> int:
-        """Width of the AXES block's first column, measured not guessed.
+        """Width of the Axes block's first column, measured not guessed.
 
         ``_FIELD_LABEL_W`` is sized for the words the rest of the column uses
         ("Format:", "Also write:"); a panel row's label is whatever the mode
@@ -1493,7 +1413,6 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         single = len(self._PANELS) == 1
         for panel in self._PANELS:
             row = QHBoxLayout()
-            row.setContentsMargins(12, 2, 12, 2)
             # A single-panel mode has nothing to select between, so the
             # checkbox would be one that can only be wrong: unticking it asks
             # for a figure with no panels. Its label still names the row, so
@@ -1504,8 +1423,9 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                 # only reading that makes the pairing obvious is "Y:", and
                 # calling it "Plot:" actively obstructed it — nothing else in
                 # the block said these were the *y* limits.
-                label = self._add_bold_label(row, self._Y_ROW_LABEL)
+                label = text_roles.field_label(self._Y_ROW_LABEL)
                 label.setFixedWidth(self._axes_label_w())
+                row.addWidget(label)
             else:
                 box = QCheckBox(panel.label)
                 box.setChecked(True)
@@ -1539,13 +1459,13 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
     #: mode because "X:" over a row of numbers says nothing about what unit to
     #: type: the line stack's x is time, Response's is the dose variable, and
     #: Scatter's is whatever channel its X axis was pointed at.
-    _X_ROW_LABEL = "X (time, h):"
+    _X_ROW_LABEL = "X (time, h)"
 
     #: What the single-panel modes' one y row is called. Not the panel's own
     #: name: under a row called "X …" the only reading that makes the pairing
     #: obvious is "Y …", and calling it "Plot:" actively obstructed it —
     #: nothing else in the block said these were the *y* limits.
-    _Y_ROW_LABEL = "Y:"
+    _Y_ROW_LABEL = "Y"
 
     #: False where the mode's x is **categorical** — one position per group
     #: member, as the bar stack draws. A numeric bound there is not a zoom, it
@@ -1594,7 +1514,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         return combo
 
     def _snapshot_axes(self) -> AxesSpec:
-        """Read the AXES block once, for the whole of one run.
+        """Read the Axes block once, for the whole of one run.
 
         Once, for the reason :class:`ScatterAxes` is read once: the runner pumps
         ``processEvents()`` between jobs, so a field edited mid-export would
@@ -1661,17 +1581,6 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         """The figure size for a run that kept *drawn* of this mode's panels."""
         return (width, figure_height(height, len(self._PANELS), drawn))
 
-    def _build_extra_output_rows(self, layout: QVBoxLayout) -> None:
-        """What else goes into the output folder, beyond the figures.
-
-        Just the per-cell CSV now. The two destinations that used to live down
-        here moved up to **Write to:**, where they belong: they are answers to
-        "where does this run's output go", and asking that question after
-        Folder and Format had already been answered was what made both of them
-        read as extras bolted onto a folder of PNGs.
-        """
-        self._build_also_write_row(layout)
-
     def _has_saved_plots(self) -> bool:
         """Whether the deck writer and the gallery are in this build.
 
@@ -1683,7 +1592,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         """
         return self._ctx.features.get("Saved Plots") is not None
 
-    def _build_also_write_row(self, layout: QVBoxLayout) -> None:
+    def _build_also_write_row(self, form: FormGrid) -> None:
         """The opt-in for the raw per-cell CSV beside each figure.
 
         Its own row rather than a fourth box on **Write to:**, because it is
@@ -1698,18 +1607,13 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         Greyed out when **Image files** is off, since there is then no folder
         of files for it to sit beside.
         """
-        row = QHBoxLayout()
-        row.setContentsMargins(12, 2, 12, 6)
-        self._add_bold_label(row, "Also write:", min_width=_FIELD_LABEL_W)
         self._cell_rows_cb = QCheckBox("Raw per-cell CSV")
         self._cell_rows_cb.setToolTip(
             "Beside each group's figure, write every cell row the figure was "
             "computed from — the same file the plot tabs' “Save cell data…” "
             "produces, with its scope block and marker columns.\n"
             "Large: one row per cell per well, not one per group.")
-        row.addWidget(self._cell_rows_cb)
-        row.addStretch(1)
-        layout.addLayout(row)
+        form_row(form, "Also write", hug(self._cell_rows_cb))
 
     def _refresh_run_summary(self) -> None:
         """Rewrite what a run produces, from the controls as they are.
@@ -1843,7 +1747,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         return [
             ("Groups come from Home \u2192 Sample Map \u2192 Replicates."
              if self._use_sidebar_groups
-             else "Groups are defined in the left panel."),
+             else "Groups are defined in the Groups card."),
             "No statistics are computed across group members.",
             "SD/SEM is only computed within a ReplicateSet.",
         ]
@@ -2075,76 +1979,41 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             dataset_name=dataset_display_name(self._ctx.state.dataset.data_dir),
         )
 
-    def _build_spread_settings_rows(self, layout: QVBoxLayout) -> None:
-        """Error-band (SEM/SD) + per-FOV-points toggles as OUTPUT SETTINGS rows.
+    def _build_spread_settings_rows(self, form: FormGrid) -> None:
+        """Error-band (SEM/SD) + per-FOV-points toggles as rows of the Plot form.
 
         Line & bar only. Previously a separate top button row above the panels;
         moved here so the spread controls sit with the rest of the export config,
         aligned like Folder / Format. The buttons still register into the shared
         ``ctx.runtime.sem.btns`` / ``fov.btns`` banks so they stay in sync with
         the plot toolbars."""
-        from review.core.plot_toggles import (
-            register_fov_button, toggle_fov_replicates, toggle_sem,
-        )
-        from widgets.reserved_width_button import ReservedWidthButton
+        from review.core.plot_toggles import make_fov_switch, make_spread_choice
         ctx = self._ctx
 
-        eb_row = QHBoxLayout()
-        eb_row.setContentsMargins(12, 2, 12, 2)
-        self._add_bold_label(eb_row, "Error band:", min_width=_FIELD_LABEL_W)
-        initial_sem = bool(ctx.state.plot.use_sem)
-        sem_btn = QPushButton(spread_label(initial_sem))
-        sem_btn.setProperty("variant", "sem" if initial_sem else "sem_warn")
-        sem_btn.setToolTip(
-            "Switch the spread used by line/bar batch exports between\n"
-            "SEM (Standard Error of the Mean) and SD (Standard Deviation).\n"
-            "Mirrors the SEM/SD toggle in the plot toolbars.")
-        sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
-        eb_row.addWidget(sem_btn)
-        eb_row.addStretch(1)
-        layout.addLayout(eb_row)
-        if ctx.runtime.sem.btns is None:
-            ctx.runtime.sem.btns = []
-        ctx.runtime.sem.btns.append(sem_btn)
-        if not ctx.runtime.sem.btn:
-            ctx.runtime.sem.btn = sem_btn
+        sem_choice = make_spread_choice(ctx, None)
+        sem_choice.setToolTip(
+            "The spread used by line/bar batch exports: SEM (standard error of the\n"
+            "mean) or SD (standard deviation). The same choice as the plots' own.")
+        form_row(form, "Error band", hug(sem_choice))
+        form_row(form, "Points", hug(make_fov_switch(ctx, None)))
 
-        fov_row = QHBoxLayout()
-        fov_row.setContentsMargins(12, 2, 12, 6)
-        self._add_bold_label(fov_row, "Per-FOV points:", min_width=_FIELD_LABEL_W)
-        fov_btn = ReservedWidthButton("FOV")
-        fov_btn.setProperty("variant", "toggle")
-        fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
-        fov_row.addWidget(fov_btn)
-        fov_row.addStretch(1)
-        layout.addLayout(fov_row)
-        register_fov_button(ctx, fov_btn)
+    def _build_foot(self, layout: QVBoxLayout) -> None:
+        """Under the forms: what each export group produces (re-derived as the controls change), and the run's
+        progress and result. Export itself is in the page title (:meth:`_build_page_header`)."""
 
-    def _build_summary_label(self, layout: QVBoxLayout) -> None:
-        """The derived "Each export group produces:" block, above Run."""
-        self._summary_lbl = QLabel("")
+        self._summary_lbl = text_roles.help_text("")
         self._summary_lbl.setWordWrap(True)
-        self._summary_lbl.setContentsMargins(12, 4, 12, 4)
         layout.addWidget(self._summary_lbl)
         self._wire_run_summary()
-
-    def _build_run_row(
-        self, layout: QVBoxLayout, *, button_text: str = "▶  Run Batch Export",
-    ) -> None:
-        run_row = QHBoxLayout()
-        run_row.setContentsMargins(12, 8, 12, 8)
-        self._run_btn = QPushButton(button_text)
-        self._run_btn.setProperty("variant", "primary")
-        self._run_btn.clicked.connect(self._run_batch)
-        run_row.addWidget(self._run_btn)
-        self._prog_lbl = QLabel("")
-        run_row.addWidget(self._prog_lbl)
+        self._prog_lbl = text_roles.body("")
+        self._prog_lbl.setWordWrap(True)
         self._prog_bar = QProgressBar()
         self._prog_bar.setFixedWidth(_PROG_BAR_W)
         self._prog_bar.setVisible(False)
-        run_row.addWidget(self._prog_bar)
-        run_row.addStretch(1)
-        layout.addLayout(run_row)
+        row = QHBoxLayout()
+        row.addWidget(self._prog_lbl, 1)
+        row.addWidget(self._prog_bar)
+        layout.addLayout(row)
 
     def _tp_select_all(self) -> None:
         for i in range(self._tp_lb.count()):
@@ -2179,11 +2048,6 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         mean each bar is divided by, Baseline picks a per-member
         reference timepoint. ``—`` in either combo disables that axis.
         """
-        fc_lbl = QLabel("Fold change:")
-        f = fc_lbl.font(); f.setBold(True); fc_lbl.setFont(f)
-        fc_lbl.setMinimumWidth(_FIELD_LABEL_W)
-        row.addWidget(fc_lbl)
-
         row.addWidget(QLabel("Control"))
         self._fc_ctrl_combo = QComboBox()
         self._fc_ctrl_combo.setMinimumWidth(_FC_CTRL_COMBO_MIN_W)
@@ -2326,20 +2190,20 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             control_render=str(self._fc_control_render or "self"),
         )
 
-    def _build_timepoints_section(self, layout: QVBoxLayout) -> None:
-        """TIMEPOINTS header + multi-select list (shared by Bar/Scatter)."""
-        tp_hdr = QHBoxLayout()
-        tp_hdr.setContentsMargins(12, 0, 12, 2)
-        self._add_bold_label(tp_hdr, "TIMEPOINTS")
-        tp_hdr.addStretch(1)
-        tp_hdr.addWidget(btn_secondary(None, "All", self._tp_select_all))
-        tp_hdr.addWidget(btn_secondary(None, "None", self._tp_clear_all))
-        layout.addLayout(tp_hdr)
-
+    def _build_timepoints_section(self, form: FormGrid) -> None:
+        """The Timepoints block: a multi-select list under an eyebrow, with quiet All and None above it (Bar,
+        Scatter, Response). Under an eyebrow across the form, like the Axes block, rather than beside a label: a
+        label beside a list this tall would sit at its middle."""
+        col = QVBoxLayout()
+        col.setSpacing(theme.Spacing.xs)
+        col.addLayout(hug(buttons.quiet("All", on_click=self._tp_select_all),
+                          buttons.quiet("None", on_click=self._tp_clear_all)))
         self._tp_lb = QListWidget()
         self._tp_lb.setSelectionMode(QAbstractItemView.MultiSelection)
         self._tp_lb.setMinimumHeight(_TP_LB_MIN_H)
-        layout.addWidget(self._tp_lb, 1)
+        col.addWidget(self._tp_lb, 1)
+        form.add_eyebrow("Timepoints")
+        form_wide(form, col)
 
     def _active_group(self) -> BarGroup | None:
         if 0 <= self._active_grp < len(self._groups):
@@ -2470,9 +2334,9 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                     self._clear_layout(inner)
 
         if not self._groups:
-            empty = QLabel("No export groups.  Click + Add or use Quick Setup.")
-            empty.setContentsMargins(8, 8, 8, 8)
-            self._grp_inner_layout.insertWidget(0, empty)
+            from widgets.notice import Notice
+            self._grp_inner_layout.insertWidget(0, Notice(
+                "No export groups yet.", "Add one, or use Quick setup."))
             self._refresh_map()
             return
 
@@ -2489,18 +2353,16 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         card.setFrameShape(QFrame.StyledPanel)
         if is_sel:
             card.setStyleSheet(
-                f"QFrame {{ border: 2px solid {color}; background: {theme.Colors.panel_elevated}; }}"
+                f"QFrame {{ border: 2px solid {color}; background: {theme.Colors.control}; }}"
             )
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(6, 4, 6, 4)
+        card_layout.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
 
         hdr = QHBoxLayout()
         dot = QLabel("\u25cf")
         dot.setStyleSheet(f"color: {color};")
         hdr.addWidget(dot)
-        name_lbl = QLabel(grp.name)
-        f = name_lbl.font(); f.setBold(True); name_lbl.setFont(f)
-        hdr.addWidget(name_lbl)
+        hdr.addWidget(text_roles.body(grp.name))
         n_mem, n_sol = len(grp.members), len(grp.solo_wells)
         parts = []
         if n_mem:
@@ -2509,12 +2371,12 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             parts.append(f"{n_sol} solo well{'s' if n_sol != 1 else ''}")
         if not parts:
             parts = ["empty"]
-        summary = QLabel(f"  ({', '.join(parts)})")
-        hdr.addWidget(summary)
+        hdr.addWidget(text_roles.help_text(", ".join(parts)))
         hdr.addStretch(1)
-        hdr.addWidget(btn_card(None, "Rename", lambda i=gi: self._grp_rename(i)))
-        hdr.addWidget(btn_card(None, "Clear", lambda i=gi: self._grp_clear(i)))
-        hdr.addWidget(btn_danger(None, "\u2715", lambda i=gi: self._grp_delete(i)))
+        # Quiet commands, as a list row's are (design language §6): Rename… asks for the new name first.
+        hdr.addWidget(buttons.quiet("Rename\u2026", on_click=lambda i=gi: self._grp_rename(i)))
+        hdr.addWidget(buttons.quiet("Clear", on_click=lambda i=gi: self._grp_clear(i)))
+        hdr.addWidget(buttons.icon_button("x", "Delete this export group", on_click=lambda i=gi: self._grp_delete(i)))
         card_layout.addLayout(hdr)
 
         if grp.members or grp.solo_wells:
@@ -2528,7 +2390,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                     chip.setStyleSheet(f"background: {color}; color: {_CLR_WHITE}; padding: 1px 3px;")
                     mrow.addWidget(chip)
                 if is_sel:
-                    mrow.addWidget(btn_danger(None, "\u2212", lambda g=gi, r=rset: self._grp_remove_member(g, r)))
+                    mrow.addWidget(buttons.icon_button("minus", "Take this replicate set out of the group", on_click=lambda g=gi, r=rset: self._grp_remove_member(g, r)))
                 mrow.addStretch(1)
                 card_layout.addLayout(mrow)
             for w in grp.solo_wells:
@@ -2537,7 +2399,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                 s_lbl.setStyleSheet(f"color: {color};")
                 srow.addWidget(s_lbl)
                 if is_sel:
-                    srow.addWidget(btn_danger(None, "\u2212", lambda g=gi, wl=w: self._grp_remove_solo(g, wl)))
+                    srow.addWidget(buttons.icon_button("minus", "Take this well out of the group", on_click=lambda g=gi, wl=w: self._grp_remove_solo(g, wl)))
                 srow.addStretch(1)
                 card_layout.addLayout(srow)
 
@@ -2845,6 +2707,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self._prog_bar.setMaximum(max(len(jobs), 1))
         self._prog_bar.setValue(0)
         self._run_btn.setEnabled(False)
+        _scroll_into_view(self._prog_bar)
         # Fixed before the first job, and before the staging directory is
         # chosen from it. Everything downstream — ``_out_path``, the spool, the
         # commit, the headline — reads this one answer. See ``_destinations``.
@@ -2972,7 +2835,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
             note = (f" · {len(skipped)} with no data" if skipped else "")
             self._prog_lbl.setText(
                 f"Done with {len(errors)} error(s){note}. See log.")
-            self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_DANGER')};")
+            text_roles.set_role(self._prog_lbl, text_roles.BODY, tone=text_roles.FAILURE)
             for err in errors:
                 _logger.error("Batch export error: %s", err)
             if dest_short:
@@ -2988,14 +2851,14 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         if skipped:
             done = len(jobs) - len(skipped)
             self._prog_lbl.setText(
-                f"✓ {done} group(s){where.short} · {len(skipped)} with no data")
-            self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
+                f"Exported {done} group(s){where.short} · {len(skipped)} with no data")
+            text_roles.set_role(self._prog_lbl, text_roles.BODY)
             self._ctx.notify.set_status(
                 f"{status_text}{where.long} · {len(skipped)} group(s) had no "
                 f"data{tail}")
             return
         self._prog_lbl.setText(f"{success_text}{where.short}")
-        self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
+        text_roles.set_role(self._prog_lbl, text_roles.BODY)
         self._ctx.notify.set_status(f"{status_text}{where.long}{tail}")
 
     def _where_it_went(self, out_dir: Path) -> _Destination:
@@ -3162,7 +3025,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         return self._axes_block_refuses_the_run()
 
     def _axes_block_refuses_the_run(self) -> bool:
-        """Refuse a run the AXES block has asked for impossibly, and say why.
+        """Refuse a run the Axes block has asked for impossibly, and say why.
 
         Checked before the jobs rather than discovered inside one. Both of the
         things it catches produce a *file*, which is what makes them worth a
@@ -3174,14 +3037,14 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         if self._snapshot_axes().draws_nothing():
             QMessageBox.warning(
                 self, "No panels",
-                "Every panel is unticked under AXES, so there is nothing to "
+                "Every panel is unticked under Axes, so there is nothing to "
                 "draw. Tick at least one.")
             return True
         complaints = self._axes_complaints()
         if complaints:
             QMessageBox.warning(
                 self, "Axis limits",
-                "The AXES block asks for a range that cannot be drawn:\n\n  \u2022 "
+                "The Axes block asks for a range that cannot be drawn:\n\n  \u2022 "
                 + "\n  \u2022 ".join(complaints)
                 + "\n\nClear or correct those fields and run again.")
             return True
@@ -3207,7 +3070,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         """
         spec = self._snapshot_axes()
         single = len(self._PANELS) == 1
-        rows = [(self._x_row_label().rstrip(":"),
+        rows = [(self._x_row_label(),
                  spec.x_min, spec.x_max, spec.x_log)]
         for panel in self._PANELS:
             axis = spec.for_panel(panel.key)
@@ -3216,7 +3079,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
                 # nothing. Refusing a run over them would block it on a value
                 # that has no effect.
                 continue
-            name = self._Y_ROW_LABEL.rstrip(":") if single else panel.label
+            name = self._Y_ROW_LABEL if single else panel.label
             rows.append((name, axis.y_min, axis.y_max, axis.y_log))
         out: list[str] = []
         for name, low, high, log in rows:

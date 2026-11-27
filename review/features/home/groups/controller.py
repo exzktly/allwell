@@ -10,13 +10,14 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
+    QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QVBoxLayout,
 )
 
 from core.safe import swallowed
 from review.domain.batch_models import ReplicateSet
 from review.domain.plate_layout import PLATE_COLS, PLATE_ROWS
 from review.domain.viewer_state import extract_well_token as _extract_well_token
+from ui import buttons
 
 
 # Pixel geometry for the New Replicate Set dialog. Named rather than written
@@ -312,7 +313,7 @@ def refresh_replicates_button(ctx) -> None:
 def build_rep_add_dialog(ctx) -> RepAddDialog:
     """Build the New Replicate Set dialog, fully wired, without showing it.
 
-    Wells are picked on the same graphical plate the "+ wells…" popover uses to
+    Wells are picked on the same graphical plate the "Add wells…" popover uses to
     edit an existing group's membership — not a text list of well names.
     Configured identically to ``SavedSelectionsList._open_compose_popover`` so
     the two flows look and feel the same (rubber-band rectangle select,
@@ -356,11 +357,11 @@ def build_rep_add_dialog(ctx) -> RepAddDialog:
     dlg.setModal(True)
     dlg.setMinimumSize(_DLG_MIN_W, _DLG_MIN_H)
     v = QVBoxLayout(dlg)
-    v.addWidget(QLabel("Name:"))
+    v.addWidget(QLabel("Name"))
     fallback_name = f"Rep {len(sel_state.selections)+1}"
     name_edit = QLineEdit(fallback_name)
     v.addWidget(name_edit)
-    v.addWidget(QLabel("Choose wells for this group:"))
+    v.addWidget(QLabel("Choose wells for this group"))
 
     # The last name this dialog offered, and whether it came from the variables.
     # A one-element list because ``_offer_name`` closes over it and rebinding a
@@ -405,9 +406,8 @@ def build_rep_add_dialog(ctx) -> RepAddDialog:
 
     btn_row = QHBoxLayout()
     v.addLayout(btn_row)
-    ok_btn = QPushButton("Create")
-    ok_btn.setProperty("variant", "primary")
-    cancel_btn = QPushButton("Cancel")
+    ok_btn = buttons.primary("Create")
+    cancel_btn = buttons.default("Cancel")
     btn_row.addWidget(ok_btn)
     btn_row.addWidget(cancel_btn)
     btn_row.addStretch(1)

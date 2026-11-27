@@ -17,7 +17,7 @@ from functools import partial
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QBoxLayout, QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QScrollArea, QVBoxLayout, QWidget,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -26,7 +26,7 @@ from pipeline.background import BACKGROUND_METHODS
 from pipeline.cli_args import FLATFIELD_MODES
 from widgets.button_row import ButtonRow
 from widgets.info_icon import info_icon
-from widgets.page_body import build_page_body
+from widgets.page_body import build_bandless_body
 from widgets.separator import build_hline_separator
 from review.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
@@ -39,6 +39,7 @@ from review.features.image_browser.playground.controller import (
 )
 from review.features.image_browser.playground.renderer import render_playground_display
 from review.features.image_browser.playground.nanowell_view import build_nanowell_section
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -111,7 +112,8 @@ class _StackWhenNarrow(QObject):
         lay.setStretchFactor(self._canvas, 1)
         # The dock's hairline faces the preview: its left edge beside it, its top below it.
         dock.setProperty("stacked", narrow)
-        dock.layout().setContentsMargins(0 if narrow else 1, 1 if narrow else 0, 0, 0)
+        line = theme.Metrics.hairline
+        dock.layout().setContentsMargins(0 if narrow else line, line if narrow else 0, 0, 0)
         dock.style().unpolish(dock)
         dock.style().polish(dock)
 
@@ -145,10 +147,10 @@ def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
     """
     row = QWidget(parent)
     rl = QHBoxLayout(row)
-    rl.setContentsMargins(0, 1, 0, 1)
-    rl.setSpacing(6)
+    rl.setContentsMargins(0, theme.Metrics.hairline, 0, theme.Metrics.hairline)
+    rl.setSpacing(theme.Spacing.xs)
     lbl = QLabel(label_text, row)
-    lbl.setObjectName("Muted")
+    lbl.setProperty("textRole", "help")
     # A floor, not a pin: the labels line up in a column at the desk, and a
     # label whose text is wider than the column at phone layout's larger text
     # takes the width it needs. Pinned, "Overlap (NMS)" and "Pixel size (µm)"
@@ -171,12 +173,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # app instance through the ``window`` handle (the QMainWindow *is* the app)
     # until it gets its own ctx migration; the generic app escape hatch is gone.
     app = ctx.window
-    # The band is empty on this tab — every Playground control lives in the
-    # right-hand dock — but it is added anyway so this page's top edge is drawn
-    # level with every other page's (widgets/page_body.py). The body is a row:
-    # the canvas, then the dock.
-    _band, body = build_page_body(parent, content_margins=(12, 12, 12),
-                                  horizontal=True)
+    # No control band: every Playground control lives in the right-hand dock, and an empty band reads as a row
+    # of missing controls (``widgets.page_body.build_bandless_body``). The body is a row: the canvas, then the dock.
+    body = build_bandless_body(parent, inset=theme.Spacing.md, horizontal=True)
     on_change = partial(playground_on_change, ctx)
 
     # ── The controls dock (mounted on the right, below) ──────────────────────
@@ -193,17 +192,6 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     dock = QWidget(parent)
     dock.setObjectName("PlaygroundDock")
     dock.setAttribute(Qt.WA_StyledBackground, True)
-    dock.setStyleSheet(
-        f"#PlaygroundDock {{ background-color: {theme.Colors.rail};"
-        f" border-left: 1px solid {theme.Colors.border_subtle}; }}"
-        f"#PlaygroundDock[stacked=\"true\"] {{ border-left: none;"
-        f" border-top: 1px solid {theme.Colors.border_subtle}; }}"
-        # The blanket ``QScrollArea`` / ``QWidget`` rules would paint the
-        # scroll area and its viewport in the canvas colour over the rail fill.
-        "#PlaygroundDockScroll, #PlaygroundDockScroll > QWidget"
-        " { background-color: transparent; }"
-        f"#PropertyPanel {{ background-color: {theme.Colors.rail}; }}"
-    )
     dock.setFixedWidth(theme.Metrics.dock_w)
     dock_scroll = QScrollArea(dock)
     dock_scroll.setObjectName("PlaygroundDockScroll")
@@ -213,7 +201,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     dock_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     dock_outer = QVBoxLayout(dock)
     # One pixel on the left so the dock's hairline is not painted over.
-    dock_outer.setContentsMargins(1, 0, 0, 0)
+    dock_outer.setContentsMargins(theme.Metrics.hairline, 0, 0, 0)
     dock_outer.setSpacing(0)
     dock_outer.addWidget(dock_scroll)
     controls = QWidget()
@@ -221,12 +209,12 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     controls.setAttribute(Qt.WA_StyledBackground, True)
     dock_scroll.setWidget(controls)
     cl = QVBoxLayout(controls)
-    cl.setContentsMargins(10, 10, 10, 10)
-    cl.setSpacing(4)
+    cl.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    cl.setSpacing(theme.Spacing.xs)
 
     def _section(title: str) -> None:
         lbl = QLabel(title, controls)
-        lbl.setObjectName("SectionTitle")
+        lbl.setProperty("textRole", "sectionHeading")
         cl.addWidget(lbl)
         cl.addWidget(build_hline_separator(controls))
 
@@ -264,15 +252,13 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # backwards for a tool whose job is choosing the settings to analyse it with.
     file_row = QWidget(controls)
     frl = QHBoxLayout(file_row)
-    frl.setContentsMargins(0, 2, 0, 2)
-    open_btn = QPushButton("Open image…", file_row)
-    open_btn.setProperty("variant", "secondary")
+    frl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+    open_btn = buttons.default("Open image…", file_row)
     open_btn.setToolTip(
         "Load a single image file straight from disk, instead of a frame from "
         "the loaded dataset. Works with no dataset open at all — the intended "
         "way to tune segmentation before running a plate.")
-    clear_btn = QPushButton("Use dataset", file_row)
-    clear_btn.setProperty("variant", "secondary")
+    clear_btn = buttons.default("Use dataset", file_row)
     clear_btn.setToolTip("Go back to the frame selected above.")
     frl.addWidget(open_btn)
     frl.addWidget(clear_btn)
@@ -323,11 +309,11 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # dock leaves, so side by side the segments were squeezed into each other.
     from widgets.segmented_control import SegmentedControl
     stage_lbl = QLabel("Correct up to", controls)
-    stage_lbl.setObjectName("Muted")
+    stage_lbl.setProperty("textRole", "help")
     cl.addWidget(stage_lbl)
     stage_row = QWidget(controls)
     srl = QHBoxLayout(stage_row)
-    srl.setContentsMargins(0, 1, 0, 1)
+    srl.setContentsMargins(0, theme.Metrics.hairline, 0, theme.Metrics.hairline)
     cl.addWidget(stage_row)
     source_seg = SegmentedControl(stage_row)
     for _lbl, _data in (("Raw", "raw"), ("Flat-field only", "flatfield"),
@@ -346,9 +332,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     stage_row.layout().addWidget(source_seg)
     stage_row.layout().addStretch(1)
     app._playground_source_seg = source_seg
-    stage_note = QLabel("decides which controls below run — Raw runs none",
+    stage_note = QLabel("decides which controls below run — “Raw” runs none",
                         controls)
-    stage_note.setObjectName("Muted")
+    stage_note.setProperty("textRole", "help")
     stage_note.setWordWrap(True)
     cl.addWidget(stage_note)
 
@@ -375,8 +361,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # to be inferred: the two halves of this tab run on completely different
     # triggers.
     run_note = QLabel("Correction re-runs as you change these. Segmentation runs "
-                      "only when you press Segment.", controls)
-    run_note.setObjectName("Muted")
+                      "only when you press “Segment”.", controls)
+    run_note.setProperty("textRole", "help")
     run_note.setWordWrap(True)
     cl.addWidget(run_note)
 
@@ -417,13 +403,13 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     seg_btn_row = QWidget(controls)
     sbl = QHBoxLayout(seg_btn_row)
-    sbl.setContentsMargins(0, 2, 0, 2)
-    seg_btn = QPushButton("Segment", seg_btn_row)
+    sbl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+    seg_btn = buttons.default("Segment", seg_btn_row)
     seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
     hint = QLabel("Tuned here, then run the plate: type the same two values into "
-                  "Analyze → Channel Tokens → Nucleus probability / Overlap.",
+                  "Analyze → Segmentation → “Nucleus probability” and “Overlap”.",
                   controls)
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
 
     def _on_segment() -> None:
@@ -445,14 +431,14 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # clipped. The sweep and its Stop pair naturally, so they share this one.
     sweep_row = QWidget(controls)
     swl = QHBoxLayout(sweep_row)
-    swl.setContentsMargins(0, 2, 0, 2)
-    sweep_btn = QPushButton("Threshold curve…", sweep_row)
+    swl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+    sweep_btn = buttons.default("Threshold curve…", sweep_row)
     sweep_btn.setToolTip(
         "Segment the displayed frame at a range of probability thresholds and "
         "plot how many nuclei each one finds.\n"
         "Slower than Segment — it runs the detector across the whole range — "
         "and it suggests no threshold: the curve is the answer.")
-    sweep_stop_btn = QPushButton("Stop", sweep_row)
+    sweep_stop_btn = buttons.default("Stop", sweep_row)
     sweep_stop_btn.setToolTip(
         "Stop after the threshold now running. What was measured so far is "
         "still plotted.")
@@ -477,7 +463,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # Not given a Stop twin: the sweep is M segmentations and runs for
     # minutes, while this is one measurement per outline over a mask that
     # already exists.
-    focus_btn = QPushButton("Focus distribution…", seg_btn_row)
+    focus_btn = buttons.default("Focus distribution…", seg_btn_row)
     focus_btn.setToolTip(
         "Measure every outline on screen and plot how sharp each cell is, "
         "with your own cut marked and a live count of what it keeps and "
@@ -562,7 +548,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         on_change()
     lmin.editingFinished.connect(_on_lut_edit)
     lmax.editingFinished.connect(_on_lut_edit)
-    lut_auto = QPushButton("Auto", lut_row)
+    lut_auto = buttons.default("Auto", lut_row)
     lut_auto.setFixedWidth(_LUT_AUTO_W)   # 46 clipped "Auto" to "Autc" under the button padding
     lut_auto.setToolTip("Reset the LUT min/max to the displayed frame's range.")
 
@@ -614,19 +600,19 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # A wrapping row: three checkboxes side by side are wider than the dock on a
     # phone, and a plain row held the dock's content wider than its viewport.
     toggles = ButtonRow(controls)
-    toggles.layout().setContentsMargins(0, 2, 0, 2)
+    toggles.layout().setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     binary_cb = QCheckBox("Binary", toggles)
     binary_cb.setToolTip(
         "Fill the cells the mask found, on black, instead of showing the image.")
-    colors_cb = QCheckBox("Colour cells", toggles)
+    colors_cb = QCheckBox("Color cells", toggles)
     colors_cb.setToolTip(
-        "In Binary mode, give every label its own colour instead of painting "
+        "In Binary mode, give every label its own color instead of painting "
         "them all white — two nuclei that touch are otherwise one white shape, "
         "and whether the segmentation split them is the thing you are looking "
         "for.\n"
-        "The colour is a fixed function of the label id, so it does not change "
+        "The color is a fixed function of the label id, so it does not change "
         "between redraws. It has no effect where there is no usable mask: that "
-        "fallback thresholds pixels, and pixels have no labels to colour.")
+        "fallback thresholds pixels, and pixels have no labels to color.")
     colors_cb.setChecked(True)
     overlay_cb = QCheckBox("Outlines", toggles)
     overlay_cb.setToolTip(
@@ -664,20 +650,20 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # Zoom buttons
     zoom_row = QWidget(controls)
     zl = QHBoxLayout(zoom_row)
-    zl.setContentsMargins(0, 2, 0, 2)
+    zl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
     zl.addWidget(QLabel("Zoom", zoom_row))
 
     def _zoom(delta: float) -> None:
         st = ctx.state.playground
         st.zoom = max(0.1, min(8.0, st.zoom * delta))
         render_playground_display(ctx)
-    zout = QPushButton("−", zoom_row)
+    zout = buttons.icon_button("minus", "Zoom out", zoom_row, kind=buttons.DEFAULT)
     zout.setFixedWidth(theme.Metrics.icon_btn_w)
     zout.clicked.connect(lambda _=False: _zoom(1 / 1.25))
-    zin = QPushButton("+", zoom_row)
+    zin = buttons.icon_button("plus", "Zoom in", zoom_row, kind=buttons.DEFAULT)
     zin.setFixedWidth(theme.Metrics.icon_btn_w)
     zin.clicked.connect(lambda _=False: _zoom(1.25))
-    zfit = QPushButton("Fit", zoom_row)
+    zfit = buttons.default("Fit", zoom_row)
     zfit.clicked.connect(lambda _=False: (setattr(ctx.state.playground, "zoom", 1.0),
                                           render_playground_display(ctx)))
     zl.addWidget(zout)
@@ -700,7 +686,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # into a bug report.
     _section("What you're looking at")
     status = QLabel("Select a frame to begin.", controls)
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     status.setWordWrap(True)
     status.setTextInteractionFlags(Qt.TextSelectableByMouse)
     cl.addWidget(status)

@@ -447,13 +447,13 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
 
 #: Why a frame has no outlines and the cell tools are off. ``{overlays}`` is the sentence about nanowell overlays.
 NO_LABEL_MAP_NANOWELL = ("No label map: this nanowell run records cells as points, not outlines.{overlays} "
-                         "Delete / Crop / Edit are unavailable.")
-NO_LABEL_MAP = "No label map for this frame: the image is shown without outlines. Delete / Crop / Edit are unavailable."
+                         "“Delete cell”, “Crop cells” and “Edit” are unavailable.")
+NO_LABEL_MAP = "No label map for this frame: the image is shown without outlines. “Delete cell”, “Crop cells” and “Edit” are unavailable."
 OVERLAYS_NOT_IN_BUILD = " Nanowell overlays are not in this build."
 
 
 def set_cell_editing(ctx, enabled: bool) -> None:
-    """Enable or disable Delete Cell, Crop cells and Edit ▾ — they act on outlined cells, and a frame with no
+    """Enable or disable Delete cell, Crop cells and Edit ▾ — they act on outlined cells, and a frame with no
     label map has none. A disabled one says why in its tooltip."""
     why = "This frame has no label map, so there are no outlined cells to act on."
     for name in ("_review_image_delete_btn", "_review_image_crop_btn", "_review_image_edit_btn"):
@@ -509,7 +509,7 @@ def paint_nanowell_overlay(rgb, overlay):
 
     out = _np.array(rgb, copy=True)
     h, w = out.shape[:2]
-    rim = _np.array([int(round(255 * c)) for c in to_rgb(theme.Colors.border)], dtype=_np.uint8)
+    rim = _np.array([int(round(255 * c)) for c in to_rgb(theme.Colors.hairline)], dtype=_np.uint8)
     dot = _np.array([int(round(255 * c)) for c in to_rgb(theme.Colors.accent)], dtype=_np.uint8)
     for x, y, r, _state in overlay.rims:
         n = max(32, int(2 * _np.pi * r))
@@ -689,7 +689,7 @@ def draw_review_image(
     # **Both modes, once, outside the branch.** The overlay used to be drawn
     # inside the ``else`` above, so turning it on in Binary mode computed every
     # reason -- a full row fetch and verdict walk per refresh -- and then threw
-    # them away, while the button went on reading "Why removed: On". A toggle
+    # them away, while the switch went on reading on. A toggle
     # that is on and does nothing is §7.6 exactly, and Binary is the mode where
     # the question is asked most, because a binary mask is already a picture of
     # which cells counted. Hoisting it here is what makes that unrepeatable:
@@ -1016,7 +1016,7 @@ def review_image_zoom_fit(ctx) -> None:
 
 
 def toggle_selected_review_cell(ctx) -> None:
-    """Flip include-edit (delete) mode — the Delete Cell toolbar toggle."""
+    """Flip include-edit (delete) mode — the Delete cell tool."""
     set_review_image_include_mode(
         ctx, not ctx.state.review_image.include_edit_mode
     )
@@ -1069,7 +1069,6 @@ def refresh_review_image_binary_btn(ctx) -> None:
         return
     on = bool(ctx.state.review_image.binary_mask)
     btn.setChecked(on)
-    btn.setText("Binary: On" if on else "Binary: Off")
     btn.setToolTip(
         "Binary mask: cells above the active threshold are drawn white,\n"
         "cells below are drawn black, on a black background.\n"
@@ -1185,7 +1184,6 @@ def refresh_review_image_outline_btn(ctx) -> None:
         return
     on = bool(ctx.state.review_image.show_outline)
     btn.setChecked(on)
-    btn.setText("Outline: On" if on else "Outline: Off")
     btn.style().unpolish(btn)
     btn.style().polish(btn)
 
@@ -1219,9 +1217,9 @@ def toggle_review_image_binary_mask(ctx) -> None:
 #: (ARCHITECTURE §8).
 #:
 #: **Each answer needs its own colour, and the first draft had five for six.** "Outside the
-#: crop" and "outside the scatter gates" were both ``text_muted`` — the same
+#: crop" and "outside the scatter gates" were both the muted text ink (#5F6B7C) — the same
 #: pixel value, CIE76 ΔE of exactly 0 — so the overlay could not distinguish
-#: the two layers its own button promises to distinguish. ``text_muted`` is
+#: the two layers its own button promises to distinguish. That ink was
 #: also the darkest ink in the set (relative luminance 0.144), painted as a
 #: one-pixel stroke on a dark fluorescence frame, so the two layers that shared
 #: a colour were also the two hardest to see.
@@ -1255,7 +1253,7 @@ def toggle_review_image_binary_mask(ctx) -> None:
 #: The seventh, a field excluded by hand in QC triage, is ``ink_light`` (white),
 #: and it was chosen the same way: of every theme token not already used and
 #: not reserved, it is the only one whose ΔE to all six others clears the 31
-#: floor (35.1; the next best, ``accent_fg``, is 30.1). Its luminance is 1.0.
+#: floor (35.1; the next best, the near-white label then drawn on the accent, was 30.1). Its luminance is 1.0.
 #:
 #: The tenth, a cell of a nanowell whose rim was out of focus, is
 #: ``exclusion_nanowell_focus`` (pink): of the candidates measured, the one
@@ -1328,7 +1326,7 @@ def _size_class_legend_html(size_classes, include_by_nid, *, on: bool) -> str:
     if not on or not size_classes:
         return ""
     rule, by_nid = size_classes
-    muted = theme.Colors.text_muted
+    muted = theme.Colors.text_secondary
     if by_nid is None:
         return (f'<span style="color:{muted}">Size classes: this well\'s table has no cell area or nucleus id '
                 "column, so the outlines are not coloured by class.</span>")
@@ -1363,14 +1361,14 @@ def _exclusion_legend_html(ctx, exclusion_reasons, *, on: bool) -> str:
         if layers and layers[0] not in present:
             present.append(layers[0])
     if not present:
-        return (f'<span style="color:{theme.Colors.text_muted}">'
+        return (f'<span style="color:{theme.Colors.text_secondary}">'
                 "Why removed: nothing in this field is excluded.</span>")
     inks = _layer_inks()
     order = [label for _col, label in EXCLUSION_LAYERS if label in present]
     keys = " &nbsp; ".join(
         f'<span style="color:{inks[label]}">\u25a0</span> {_html.escape(label)}'
         for label in order)
-    return (f'<span style="color:{theme.Colors.text_muted}">Why removed:</span> '
+    return (f'<span style="color:{theme.Colors.text_secondary}">Why removed:</span> '
             f"{keys}")
 
 
@@ -1410,16 +1408,15 @@ def refresh_review_image_layers_btn(ctx) -> None:
         return
     on = bool(ctx.state.review_image.show_exclusion_layers)
     btn.setChecked(on)
-    btn.setText("Why removed: On" if on else "Why removed: Off")
     btn.setToolTip(
-        "Colour each excluded cell by the layer that removed it — you\n"
+        "Color each excluded cell by the layer that removed it — you\n"
         "deleted it, the debris gate, the crop, the scatter gates, the\n"
-        "run's field verdict, or the focus cut. The colour key appears\n"
+        "run's field verdict, or the focus cut. The color key appears\n"
         "under the picture, listing only the layers this field actually\n"
         "has cells for.\n"
         "\n"
         "Inclusion is the AND of all six, so a cell can fail more than one.\n"
-        "An outline can only be one colour, so it shows the first — hover a\n"
+        "An outline can only be one color, so it shows the first — hover a\n"
         "cell to read every layer that dropped it. That also means clicking\n"
         "a cell back in CANNOT restore one a verdict column removed —\n"
         "raise the threshold, or turn that layer off, instead.\n"

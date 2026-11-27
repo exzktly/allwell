@@ -49,7 +49,7 @@ def test_an_unset_environment_variable_applies_the_default(monkeypatch):
     between the constant and what a user sees."""
     monkeypatch.delenv("ALLWELL_THEME", raising=False)
     assert _theme.select_theme_from_env() == "grey"
-    assert _theme.Colors.surface == _theme.THEMES["grey"]["Colors"]["surface"]
+    assert _theme.Colors.canvas == _theme.THEMES["grey"]["Colors"]["canvas"]
 
 
 def test_an_unknown_theme_falls_back_to_the_default(monkeypatch):
@@ -74,12 +74,12 @@ def test_the_baseline_palette_has_a_name_to_be_restored_by():
     way back to the palette the classes hold."""
     assert _theme.THEMES["blue"] == {}
 
-    baseline_surface = _theme.Colors.surface
+    baseline_surface = _theme.Colors.canvas
     _theme.apply_theme("grey")
-    grey_surface = _theme.Colors.surface
+    grey_surface = _theme.Colors.canvas
     assert grey_surface != baseline_surface
     _theme.apply_theme("blue")
-    assert _theme.Colors.surface == baseline_surface
+    assert _theme.Colors.canvas == baseline_surface
 
 
 @pytest.mark.parametrize("name", _theme.available_themes())

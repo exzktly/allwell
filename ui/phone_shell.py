@@ -23,7 +23,7 @@ What phone layout does, and where:
   page's own controls go to a strip at the window's *foot*, in thumb reach:
   one "Bar Plots ▾" menu (the section's pages, then every other section),
   **Wells** (the page's plate in a sheet over the live plot) and
-  **⚙ Controls** (the page's control band in a sheet).
+  **Controls** (the page's control band in a sheet).
 * **Everything that scrolls, scrolls by a drag** (:func:`grab_every_scroll_area`
   and the sweep), except where a drag already means something
   (:func:`drag_scroll_eligible`, ``_DragOwnerGuard``); scroll bars are a
@@ -57,6 +57,7 @@ from ui import phone_inspector, phone_window, theme
 from widgets import form_registry
 from widgets.menu_marks import mark_current
 from widgets.control_band import ControlBand
+from ui import buttons
 
 
 def all_live_widgets() -> list:
@@ -1015,10 +1016,6 @@ class _BusyOverlay(QWidget):
         super().__init__(parent)
         self.setObjectName("PhoneBusyOverlay")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(
-            f"#PhoneBusyOverlay {{ background-color: {theme.Colors.surface}; }}"
-            f"#PhoneBusyOverlay QLabel {{ color: {theme.Colors.text_primary};"
-            f" font-size: {theme.Typography.h2_size}px; }}")
         lay = QVBoxLayout(self)
         label = QLabel(text, self)
         label.setAlignment(Qt.AlignCenter)
@@ -1113,6 +1110,9 @@ _P_SEEN = "_awPhoneSeen"
 #: the upright strip, where the page button needs the room.
 SHARE_TEXT = "Share ▾"
 SHARE_GLYPH = "⇪"
+#: The Controls slot's name: its word beside the gear sideways, its tooltip and accessible name upright, where it
+#: is the gear alone.
+CONTROLS_TEXT = "Controls"
 
 
 class PhoneShell(QObject):
@@ -1318,7 +1318,7 @@ class PhoneShell(QObject):
         # ☰ slides the pane's whole left panel — Review's sections and well
         # plate, the Analyze form — out over the page from the left; ✕ while
         # it is out.
-        self.menu_button = QToolButton()
+        self.menu_button = buttons.tool_button()
         self.menu_button.setObjectName("PhoneMenuButton")
         self.menu_button.setText("☰")
         self.menu_button.setCheckable(True)
@@ -1330,7 +1330,7 @@ class PhoneShell(QObject):
         self.back_button = history.make_button("back") if history is not None else None
         self.forward_button = history.make_button("forward") if history is not None else None
 
-        self.page_button = QToolButton()
+        self.page_button = buttons.tool_button()
         self.page_button.setObjectName("PhonePageButton")
         self.page_button.setPopupMode(QToolButton.InstantPopup)
         self._page_menu = QMenu(self.page_button)
@@ -1339,9 +1339,13 @@ class PhoneShell(QObject):
 
         # The page's own controls (channel, property, fold change, display,
         # threshold, …) live in a sheet behind this, so the plot gets the screen.
-        self.controls_button = QToolButton()
+        self.controls_button = buttons.tool_button()
         self.controls_button.setObjectName("PhoneControlsButton")
-        self.controls_button.setText("⚙ Controls")
+        # The drawn gear beside the word (design language §3.6), not the "⚙" character.
+        from widgets import icons as _icons
+        self.controls_button.setText(CONTROLS_TEXT)
+        self.controls_button.setIcon(_icons.make_icon("sliders", 16, dpr=self.controls_button.devicePixelRatioF() or 1.0))
+        self.controls_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         # It keeps its name while its sheet is open, and shows that it is by
         # being checked: closing is the sheet's own Close, and this again.
         self.controls_button.setCheckable(True)
@@ -1350,7 +1354,7 @@ class PhoneShell(QObject):
         # The well picker, one tap from the page: the page's plate and its
         # All / None slide up in a sheet of their own, with the plot left in
         # view above them, so a well tapped is a bar drawn where the eye is.
-        self.wells_button = QToolButton()
+        self.wells_button = buttons.tool_button()
         self.wells_button.setObjectName("PhoneWellsButton")
         self.wells_button.setText("Wells")
         self.wells_button.setCheckable(True)
@@ -1360,7 +1364,7 @@ class PhoneShell(QObject):
         # page's own Share button holds (save the figure, copy it, save its
         # data). The button has no menu of its own — the menu is the page's —
         # so the one arrow is the caret in its label (CLAUDE.md §7.12).
-        self.share_button = QToolButton()
+        self.share_button = buttons.tool_button()
         self.share_button.setObjectName("PhoneShareButton")
         self.share_button.setText(SHARE_TEXT)
         self.share_button.setToolTip("Share: save the figure, copy it, or save its data")
@@ -1383,9 +1387,10 @@ class PhoneShell(QObject):
 
         # ⋯: text size, reload, help, the app log, and the way back to the
         # desk — one flat menu, no submenus.
-        self.options_button = QToolButton()
+        self.options_button = buttons.tool_button()
         self.options_button.setObjectName("PhoneOptionsButton")
-        self.options_button.setText("⋯")
+        buttons.set_icon(self.options_button, "more-horizontal")
+        self.options_button.setToolTip("More")
         self.options_button.setPopupMode(QToolButton.InstantPopup)
         self._menu = QMenu(self.options_button)
         self._menu.aboutToShow.connect(self._fill_menu)
@@ -1497,6 +1502,14 @@ class PhoneShell(QObject):
         # (its name in the tooltip and accessible name); sideways, in the bar,
         # it is worded.
         self.share_button.setText(SHARE_TEXT if landscape else SHARE_GLYPH)
+        # Controls likewise: its drawn gear alone upright, where the page button needs the room — measured, the
+        # gear and the word left "Response Curves ▾" 130 px of the 147 it needs — and the gear and the word
+        # sideways. Its name is its tooltip and accessible name either way.
+        self.controls_button.setText(CONTROLS_TEXT if landscape else "")
+        self.controls_button.setToolButtonStyle(
+            Qt.ToolButtonTextBesideIcon if landscape else Qt.ToolButtonIconOnly)
+        self.controls_button.setToolTip(CONTROLS_TEXT)
+        self.controls_button.setAccessibleName(CONTROLS_TEXT)
 
     def strip_buttons(self) -> list[QWidget]:
         """The four permanent slots, in order: page, Wells, Controls, Share."""
@@ -2038,7 +2051,7 @@ class PhoneShell(QObject):
     def fit_popup_window(self, w: QWidget) -> None:
         """Fit a window the app opened — a dialog, a pop-out — to the phone:
         the phone form :mod:`ui.phone_window` gives it (the screen covered, the
-        content scrolling by a drag, its buttons and a Close ✕ at its foot), or
+        content scrolling by a drag, its buttons and a Close at its foot), or
         for Qt's own small dialogs only a place inside the screen."""
         if not phone_window.kind(w):
             return
@@ -2141,8 +2154,7 @@ class PhoneShell(QObject):
                 if to_phone else
                 "This screen looks like a desktop. Switch back to the desktop layout?")
         if self._banner is None:
-            self._banner = ContextBanner(text, "Switch", None, icon="smartphone",
-                                         cancel_text="Not now")
+            self._banner = ContextBanner(text, "Switch", None, cancel_text="Not now")
             self._banner.setObjectName("PhoneLayoutOffer")
             self._banner.confirmed.connect(self._on_banner_confirmed)
             self._banner.cancelled.connect(self._on_banner_cancelled)
@@ -2314,7 +2326,7 @@ class PhoneShell(QObject):
         scroll.setWidget(holder)
         # One way to close a panel, in one place: a button reading Close at
         # its top right, as the inspector's header has.
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+        from PySide6.QtWidgets import QHBoxLayout
         body = QWidget()
         body_lay = QVBoxLayout(body)
         body_lay.setContentsMargins(0, 0, 0, 0)
@@ -2325,9 +2337,11 @@ class PhoneShell(QObject):
         title = QLabel("", head)
         title.setProperty("role", "heading")
         head_lay.addWidget(title, 1)
-        close = QPushButton("Close", head)
+        # Close is the ✕ symbol at the sheet's top right (design language §3.6), at the touch size.
+        close = buttons.icon_button("x", "Close", head)
         close.setObjectName("PhoneSheetClose")
-        close.setProperty("variant", "secondary")
+        side = self.pt(phone_layout.TOUCH_MIN_PT)
+        close.setMinimumSize(side, side)
         close.clicked.connect(lambda _=False: sheet.close())
         head_lay.addWidget(close)
         body_lay.addWidget(head)
@@ -2640,7 +2654,8 @@ class PhoneShell(QObject):
             return
         open_ = self._h.navigator_open()
         self.menu_button.setChecked(open_)
-        self.menu_button.setText("✕" if open_ else "☰")
+        buttons.set_icon(self.menu_button, "x" if open_ else "menu")
+        self.menu_button.setToolTip("Close the menu" if open_ else "Menu")
         review = self._h.mode() == "review"
         tools = self._h.mode() == "datasets" and bool(self._h.tool_names())
         views = self._h.mode() == "analyze" and bool(self._h.page_views())

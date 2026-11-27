@@ -55,7 +55,7 @@ class ColourPage(QWidget):
         self.swatches.colorPicked.connect(self._on_swatch)
         outer.addWidget(self.swatches)
         caption = QLabel("Custom", self)
-        caption.setObjectName("Caption")
+        caption.setProperty("textRole", "label")
         outer.addWidget(caption)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)

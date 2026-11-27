@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
@@ -36,6 +35,8 @@ from core.safe import swallow, swallowed
 from review.core.ui_helpers import clear_layout
 from review.features.saved_plots import controller as C
 from review.features.saved_plots.state import get_store
+from ui import buttons
+from ui import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -153,7 +154,7 @@ class _AspectImage(QLabel):
             # figure that drew nothing. The object name is being set long after
             # the widget was polished, so the style has to be re-run by hand or
             # the message arrives in the body colour rather than the muted one.
-            self.setObjectName("Muted")
+            self.setProperty("textRole", "help")
             self.setText("(image unavailable)")
             style = self.style()
             style.unpolish(self)
@@ -199,8 +200,7 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     band.add_scope("", count_lbl)
     band.add_action(reg.register("_saved_plots_export_btn",
                                  _build_export_button(ctx, band)))
-    clear_btn = QPushButton("Clear all", band)
-    clear_btn.setProperty("variant", "secondary")
+    clear_btn = buttons.default("Clear all", band)
     clear_btn.clicked.connect(lambda: _confirm_clear(ctx))
     band.add_action(clear_btn)
 
@@ -218,8 +218,8 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     list_host = QWidget()
     col = QVBoxLayout(list_host)
-    col.setContentsMargins(10, 10, 10, 10)
-    col.setSpacing(12)
+    col.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm, theme.Spacing.sm)
+    col.setSpacing(theme.Spacing.md)
     col.setAlignment(Qt.AlignTop)
     scroll.setWidget(list_host)
     stack.addWidget(scroll)  # index 1
@@ -546,8 +546,8 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     card.setAttribute(Qt.WA_StyledBackground, True)
     card.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Maximum)
     v = QVBoxLayout(card)
-    v.setContentsMargins(12, 12, 12, 12)
-    v.setSpacing(8)
+    v.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+    v.setSpacing(theme.Spacing.sm)
 
     # Header: title + tab badge + timestamp
     header = QHBoxLayout()
@@ -556,7 +556,7 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     header.addWidget(title)
     header.addStretch(1)
     badge = QLabel(rec.tab, card)
-    badge.setObjectName("Muted")
+    badge.setProperty("textRole", "help")
     header.addWidget(badge)
     v.addLayout(header)
 
@@ -569,13 +569,13 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     else:
         from .state import undrawn_note
         missing = QLabel(undrawn_note(rec) or "(image unavailable)", card)
-        missing.setObjectName("Muted")
+        missing.setProperty("textRole", "help")
         missing.setAlignment(Qt.AlignCenter)
         missing.setWordWrap(True)
         v.addWidget(missing)
 
     ts = QLabel(rec.created_at.replace("T", "  "), card)
-    ts.setObjectName("Muted")
+    ts.setProperty("textRole", "help")
     v.addWidget(ts)
 
     # Parameter summary — collapsed by default, folds out on request.
@@ -583,7 +583,7 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
         from widgets.collapsible_section import CollapsibleSection
         details = CollapsibleSection("Parameters", expanded=False)
         summary = QLabel(rec.summary, card)
-        summary.setObjectName("Muted")
+        summary.setProperty("textRole", "help")
         summary.setWordWrap(True)
         summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         details.addWidget(summary)
@@ -593,35 +593,30 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     # the card's minimum width, which on a phone was wider than the screen and cut the plot off at the right.
     actions = QHBoxLayout()
     more = QHBoxLayout()
-    up_btn = QPushButton("▲", card)
-    up_btn.setProperty("variant", "secondary")
+    up_btn = buttons.icon_button("chevron-up", "Move up", card, kind=buttons.DEFAULT)
     up_btn.setToolTip("Move up")
     up_btn.setFixedWidth(_UP_BTN_W)
     up_btn.setEnabled(not is_first)
     up_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(ctx, _id, True))
     actions.addWidget(up_btn)
-    down_btn = QPushButton("▼", card)
-    down_btn.setProperty("variant", "secondary")
+    down_btn = buttons.icon_button("chevron-down", "Move down", card, kind=buttons.DEFAULT)
     down_btn.setToolTip("Move down")
     down_btn.setFixedWidth(_DOWN_BTN_W)
     down_btn.setEnabled(not is_last)
     down_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(ctx, _id, False))
     actions.addWidget(down_btn)
-    restore_btn = QPushButton("Restore settings", card)
+    restore_btn = buttons.default("Restore settings", card)
     restore_btn.setToolTip("Re-apply these parameters and open the source tab.")
     restore_btn.clicked.connect(lambda _=False, _id=rec.id: C.restore_saved_plot(ctx, _id))
     actions.addWidget(restore_btn)
-    rename_btn = QPushButton("Rename", card)
-    rename_btn.setProperty("variant", "secondary")
+    rename_btn = buttons.default("Rename", card)
     rename_btn.clicked.connect(lambda _=False, _id=rec.id, _t=rec.title: _rename(ctx, _id, _t))
     more.addWidget(rename_btn)
-    export_btn = QPushButton("Export…", card)
-    export_btn.setProperty("variant", "secondary")
+    export_btn = buttons.default("Export…", card)
     export_btn.clicked.connect(lambda _=False, _id=rec.id: C.export_saved_plot(ctx, _id))
     more.addWidget(export_btn)
     more.addStretch(1)
-    del_btn = QPushButton("Delete", card)
-    del_btn.setProperty("variant", "secondary")
+    del_btn = buttons.default("Delete", card)
     del_btn.clicked.connect(lambda _=False, _id=rec.id: C.delete_saved_plot(ctx, _id))
     more.addWidget(del_btn)
     actions.addStretch(1)

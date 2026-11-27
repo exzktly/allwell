@@ -20,13 +20,16 @@ from pathlib import Path
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout,
+    QCheckBox, QDialog, QHBoxLayout, QLabel, QMessageBox, QVBoxLayout,
     QWidget,
 )
 
 from core import local_storage as ls
 from core.worker_bridge import run_off_thread
+from ui import text_roles
 from util.state_dir import gui_state_dir
+from ui import buttons as ui_buttons
+from ui import theme
 
 #: Indent of an area's description under its checkbox, matching the reset
 #: dialog's (``review/core/reset_scopes_view.py``).
@@ -87,23 +90,21 @@ class StorageDialog(QDialog):
         layout.addLayout(self._rows)
 
         self._status = QLabel("", self)
-        self._status.setObjectName("Muted")
+        self._status.setProperty("textRole", "help")
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
 
         buttons = QWidget(self)
         bl = QHBoxLayout(buttons)
         bl.setContentsMargins(0, 0, 0, 0)
-        self._open_btn = QPushButton("Open folder", buttons)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn = ui_buttons.default("Open folder", buttons)
         self._open_btn.clicked.connect(self._open_folder)
         bl.addWidget(self._open_btn)
         bl.addStretch(1)
-        self._clear_btn = QPushButton("Clear selected", buttons)
-        self._clear_btn.setProperty("variant", "danger")
+        self._clear_btn = ui_buttons.destructive("Clear selected", buttons)
         self._clear_btn.clicked.connect(self.clear_selected)
         bl.addWidget(self._clear_btn)
-        close = QPushButton("Close", buttons)
+        close = ui_buttons.default("Close", buttons)
         close.clicked.connect(self.close)
         bl.addWidget(close)
         layout.addWidget(buttons)
@@ -162,16 +163,16 @@ class StorageDialog(QDialog):
             box.toggled.connect(lambda _on: self._sync_clear())
             rl.addWidget(box)
             detail = QLabel(area.detail, row)
-            detail.setObjectName("Muted")
+            detail.setProperty("textRole", "help")
             detail.setWordWrap(True)
             detail.setContentsMargins(_DETAIL_INDENT, 0, 0, 0)
             rl.addWidget(detail)
             if area.confirm:
                 # The warning's first sentence; the whole of it is asked on Clear.
-                warn = QLabel(f"⚠ {area.confirm.split('. ')[0]}.", row)
-                warn.setObjectName("Warn")
+                warn = QLabel(f"{area.confirm.split('. ')[0]}.", row)
+                text_roles.set_role(warn, text_roles.HELP, tone=text_roles.ATTENTION)
                 warn.setWordWrap(True)
-                warn.setContentsMargins(_DETAIL_INDENT, 2, 0, 0)
+                warn.setContentsMargins(_DETAIL_INDENT, theme.Spacing.xs, 0, 0)
                 rl.addWidget(warn)
             self._rows.addWidget(row)
             self._boxes[area.key] = box

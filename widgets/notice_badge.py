@@ -81,7 +81,7 @@ class NoticeBadge(QLabel):
         tone = self._tone
         self.setStyleSheet(
             f"#NoticeBadge {{ background-color: {getattr(theme.Colors, tone)}; "
-            f"color: {theme.Colors.accent_fg}; "
+            f"color: {theme.Colors.on_accent}; "
             f"border-radius: {self._diameter // 2}px; }}"
         )
         self._place()

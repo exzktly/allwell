@@ -458,7 +458,7 @@ def _restore(journal: Path) -> str:
     return f"{archive.name}: restored to its {header['members']} member(s) from before the append."
 
 
-_KEEP_HINT = (" To keep the archives as they are now, use \"Undo the unfinished addition…\" in "
+_KEEP_HINT = (" To keep the archives as they are now, use \"Undo the unfinished addition\" in "
               "Concatenate and choose to keep them; the log then says what each one holds.")
 
 

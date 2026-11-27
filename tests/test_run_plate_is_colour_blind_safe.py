@@ -147,7 +147,7 @@ def test_the_legend_paints_with_the_run_palette_and_shows_the_problem_glyphs(qap
         expected.discard(theme.Colors.run_uploaded)
     assert {item[0] for item in items} == expected
     problems = {item[1]: item[2:] for item in items if item[0] == theme.Colors.run_problem}
-    assert problems == {"partial / unfinished": ("!", None), "failed": ("✕", theme.Colors.run_failed_mark)}
+    assert problems == {"Partial / unfinished": ("!", None), "Failed": ("✕", theme.Colors.run_failed_mark)}
 
 
 def test_every_well_state_paints_with_the_run_palette(qapp):

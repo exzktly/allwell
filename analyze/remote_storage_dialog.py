@@ -24,7 +24,7 @@ from dataclasses import replace
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView, QDialog, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
-    QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from analyze.remote_dialog import poll_queue_on
@@ -32,6 +32,8 @@ from services import remote_storage as rs
 from services.remote_cache_gc import IN_USE_WINDOW_S
 from services.remote_config import STORAGE_EXPIRY_DAYS_RANGE, RemoteHost, write_remote
 from widgets.spin_box import SpinBox
+from ui import buttons
+from ui import theme
 
 _DAY = 86400
 COLUMNS = ("Project", "Kind", "Folder", "Size", "Created", "Last used", "Expires", "Local output")
@@ -147,15 +149,15 @@ class RemoteStorageDialog(QDialog):
         self.resize(1000, 560)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 12)
-        layout.setSpacing(8)
+        layout.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.lg, theme.Spacing.md)
+        layout.setSpacing(theme.Spacing.sm)
 
         top = QHBoxLayout()
         self._summary = QLabel(f"{host.ssh_alias}:{host.remote_staging_dir}", self)
-        self._summary.setObjectName("Muted")
+        self._summary.setProperty("textRole", "help")
         self._summary.setWordWrap(True)
         top.addWidget(self._summary, 1)
-        self._refresh_btn = QPushButton("Refresh", self)
+        self._refresh_btn = buttons.default("Refresh", self)
         self._refresh_btn.clicked.connect(lambda: self.refresh())
         top.addWidget(self._refresh_btn)
         layout.addLayout(top)
@@ -173,17 +175,16 @@ class RemoteStorageDialog(QDialog):
         layout.addWidget(self._tree, 1)
 
         actions = QHBoxLayout()
-        self._delete_btn = QPushButton("Delete…", self)
-        self._delete_btn.setProperty("variant", "danger")
+        self._delete_btn = buttons.destructive("Delete", self)
         self._delete_btn.clicked.connect(self._on_delete)
         actions.addWidget(self._delete_btn)
         actions.addSpacing(12)
-        self._keep_btn = QPushButton("Keep forever", self)
+        self._keep_btn = buttons.default("Keep forever", self)
         self._keep_btn.setToolTip("The expiry rule, the cache clean-up, the earlier-attempt clean-up and a run's "
-                                  "own Auto-delete never remove the selected folders. Delete… still can.")
+                                  "own Auto-delete never remove the selected folders. Delete still can.")
         self._keep_btn.clicked.connect(lambda: self._apply_expiry(rs.expiry_value(keep=True), "kept"))
         actions.addWidget(self._keep_btn)
-        self._expire_btn = QPushButton("Expire in", self)
+        self._expire_btn = buttons.default("Expire in", self)
         self._expire_btn.setToolTip("Remove the selected folders automatically after this many days.")
         self._expire_btn.clicked.connect(self._on_expire)
         actions.addWidget(self._expire_btn)
@@ -192,7 +193,7 @@ class RemoteStorageDialog(QDialog):
         self._expire_days.setValue(14)
         actions.addWidget(self._expire_days)
         actions.addWidget(QLabel("days", self))
-        self._clear_btn = QPushButton("Use host rule", self)
+        self._clear_btn = buttons.default("Use host rule", self)
         self._clear_btn.setToolTip("Drop the selected folders' own setting; the host-wide rule applies again.")
         self._clear_btn.clicked.connect(lambda: self._apply_expiry(rs.expiry_value(), "reset to the host rule"))
         actions.addWidget(self._clear_btn)
@@ -207,23 +208,23 @@ class RemoteStorageDialog(QDialog):
         self._host_days.valueChanged.connect(self._refresh_buttons)
         rule.addWidget(self._host_days)
         rule.addWidget(QLabel("days (0 = never)", self))
-        self._save_rule_btn = QPushButton("Save", self)
+        self._save_rule_btn = buttons.default("Save", self)
         self._save_rule_btn.setToolTip(
             "Applied at the start of every run on this host. Folders in use, kept folders, and "
             f"datasets a run used in the last {IN_USE_WINDOW_S // _DAY} days are never removed.")
         self._save_rule_btn.clicked.connect(self._on_save_rule)
         rule.addWidget(self._save_rule_btn)
-        self._sweep_btn = QPushButton("Remove expired now", self)
+        self._sweep_btn = buttons.default("Remove expired now", self)
         self._sweep_btn.clicked.connect(self._on_sweep)
         rule.addWidget(self._sweep_btn)
         rule.addStretch(1)
-        self._close_btn = QPushButton("Close", self)
+        self._close_btn = buttons.default("Close", self)
         self._close_btn.clicked.connect(self.accept)
         rule.addWidget(self._close_btn)
         layout.addLayout(rule)
 
         self._status = QLabel("", self)
-        self._status.setObjectName("Muted")
+        self._status.setProperty("textRole", "help")
         self._status.setWordWrap(True)
         layout.addWidget(self._status)
 

@@ -77,7 +77,6 @@ class GradientStrip(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._stops: list[tuple[float, QColor]] = _normalize_stops(stops)
         self._reversed = bool(reversed)
-        self.setStyleSheet("#GradientStrip { background: transparent; }")
 
     # ── API ──────────────────────────────────────────────────────────────
     def setStops(self, stops) -> None:
@@ -136,7 +135,7 @@ class GradientStrip(QWidget):
         radius = theme.Radii.xs
 
         if not self._stops:
-            p.setBrush(QColor(c.panel_elevated))
+            p.setBrush(QColor(c.control))
             p.setPen(QPen(QColor(c.border_subtle), 1.0))
             p.drawRoundedRect(rect, radius, radius)
             return
@@ -145,7 +144,7 @@ class GradientStrip(QWidget):
         for pos, col in self._stops:
             grad.setColorAt(1.0 - pos if self._reversed else pos, col)
         p.setBrush(grad)
-        p.setPen(QPen(QColor(c.border), 1.0))
+        p.setPen(QPen(QColor(c.hairline), 1.0))
         p.drawRoundedRect(rect, radius, radius)
         p.end()
 
@@ -167,7 +166,7 @@ if __name__ == "__main__":
     outer.setContentsMargins(pad, pad, pad, pad)
     outer.setSpacing(theme.Spacing.md)
     title = QLabel("GradientStrip")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -197,8 +196,8 @@ if __name__ == "__main__":
     rev.toggled.connect(g_func.setReversed)
     outer.addWidget(rev)
 
-    echo = QLabel("colorAt(0.5) of the first strip: " + g_pairs.colorAt(0.5).name())
-    echo.setObjectName("Secondary")
+    echo = QLabel("colorAt(0.5) of the first strip — " + g_pairs.colorAt(0.5).name())
+    echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     outer.addStretch(1)
 

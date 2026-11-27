@@ -54,7 +54,7 @@ class RangePage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(theme.Spacing.sm)
         self.caption = QLabel("", self)
-        self.caption.setObjectName("Muted")
+        self.caption.setProperty("textRole", "help")
         self.caption.setWordWrap(True)
         self.caption.hide()
         outer.addWidget(self.caption)
@@ -77,7 +77,7 @@ class RangePage(QWidget):
             self.auto_button.setToolTip(auto_tip)
         self.reset_button.setToolTip("Back to the range this page opened with.")
         for button in (self.auto_button, self.reset_button):
-            button.setProperty("variant", "secondary")
+            button.setProperty("variant", "default")
             row.addWidget(button, 1)
         self.auto_button.clicked.connect(lambda _=False: self.setAuto())
         self.reset_button.clicked.connect(lambda _=False: self.reset())

@@ -150,7 +150,6 @@ class EmptyState(QWidget):
         # two-line minimum for each wrap label, sized to that label's OWN font
         # (the title renders at the larger h3 size, so the widget's default
         # font metrics would under-reserve it).
-        self.setStyleSheet(self._build_qss())
         # Measured off the polished fonts — the stylesheet's — so a floor set
         # here and one re-derived after a UI scale (``_aw_rescale``) agree;
         # measured before the polish, the hint's came back 32 px against 30.
@@ -417,60 +416,18 @@ class EmptyState(QWidget):
         # off scaledContents so the pixmap renders 1:1.
         self._glyph.setFixedSize(px, px)
         self._glyph.setScaledContents(False)
-        # ``text_muted`` rather than ``text_faint``: against the panel surface
-        # the faint token measures about 2:1, which on a dark theme reads as an
-        # absent glyph rather than a quiet one. This is the only picture on an
+        # ``text_secondary``, the one quieter ink: against a card anything
+        # fainter measured about 2:1, which on a dark theme reads as an absent
+        # glyph rather than a quiet one. This is the only picture on an
         # otherwise empty page.
         self._glyph.setPixmap(
-            icons.make_pixmap(self._icon_name, "text_muted", px, dpr or 1.0)
+            icons.make_pixmap(self._icon_name, "text_secondary", px, dpr or 1.0)
         )
 
     def showEvent(self, event):
         self._refresh_glyph()
         super().showEvent(event)
 
-    def _build_qss(self) -> str:
-        # The hint carries the action — what to click to leave this state — so it
-        # cannot be the least legible thing on the page. On ``text_muted`` it
-        # measured about 3.2:1 against the panel surface, under the 4.5:1 that
-        # 12px text needs. It moves to ``text_secondary``, which puts it on the
-        # title's colour, so the hierarchy is carried by size and weight instead:
-        # colour alone was doing a job the contrast budget could not afford.
-        c, t = theme.Colors, theme.Typography
-        return f"""
-        #EmptyState {{ background: transparent; }}
-        QWidget#EmptyStateProgressRow {{ background: transparent; }}
-        QLabel#EmptyStateText {{
-            color: {c.text_secondary};
-            font-size: {t.h3_size}px;
-            font-weight: {t.semibold};
-            background: transparent;
-        }}
-        QLabel#EmptyStateHint {{
-            color: {c.text_secondary};
-            font-size: {t.small_size}px;
-            background: transparent;
-        }}
-        /* The optional action, when a site sets one. Same shape as the app's
-           other secondary buttons — this is the way out of an empty page, not
-           a call to action competing with the message above it. */
-        QPushButton#EmptyStateAction {{
-            background: {c.panel_elevated};
-            border: 1px solid {c.border};
-            border-radius: {theme.Radii.sm}px;
-            color: {c.text_primary};
-            padding: {theme.Spacing.xs}px {theme.Spacing.lg}px;
-        }}
-        QPushButton#EmptyStateAction:hover {{
-            background: {c.hover};
-            border-color: {c.border_strong};
-        }}
-        /* The secondary links — one definition, shared with Home's Recent
-           datasets card; see theme.link_row_qss. */
-        QWidget#EmptyStateEntries {{ background: transparent; }}
-        {theme.link_row_qss("EmptyStateEntry")}
-        {theme.row_remove_qss("EmptyStateEntryRemove")}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -489,3 +446,47 @@ if __name__ == "__main__":
     es.resize(480, 360)
     es.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    # The hint carries the action — what to click to leave this state — so it
+    # cannot be the least legible thing on the page. On the muted ink it once
+    # took it measured about 3.2:1 against a card, under the 4.5:1 that
+    # 12px text needs. It takes ``text_secondary``, which puts it on the
+    # title's colour, so the hierarchy is carried by size and weight instead:
+    # colour alone was doing a job the contrast budget could not afford.
+    c, t = theme.Colors, theme.Typography
+    return f"""
+    #EmptyState {{ background: transparent; }}
+    QWidget#EmptyStateProgressRow {{ background: transparent; }}
+    QLabel#EmptyStateText {{
+        color: {c.text_secondary};
+        font-size: {t.h3_size}px;
+        font-weight: {t.semibold};
+        background: transparent;
+    }}
+    QLabel#EmptyStateHint {{
+        color: {c.text_secondary};
+        font-size: {t.small_size}px;
+        background: transparent;
+    }}
+    /* The optional action, when a site sets one. Same shape as the app's
+       other secondary buttons — this is the way out of an empty page, not
+       a call to action competing with the message above it. */
+    QPushButton#EmptyStateAction {{
+        background: {c.control};
+        border: 1px solid {c.button_edge};
+        border-radius: {theme.Radii.sm}px;
+        color: {c.text_primary};
+        padding: {theme.Spacing.xs}px {theme.Spacing.lg}px;
+    }}
+    QPushButton#EmptyStateAction:hover {{
+        background: {c.hover};
+        border-color: {c.border_strong};
+    }}
+    /* The secondary links — one definition, shared with Home's Recent
+       datasets card; see theme.link_row_qss. */
+    QWidget#EmptyStateEntries {{ background: transparent; }}
+    {theme.link_row_qss("EmptyStateEntry")}
+    {theme.row_remove_qss("EmptyStateEntryRemove")}
+    """

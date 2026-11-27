@@ -178,7 +178,7 @@ def teardown_review_pane(app) -> None:
 
     ``ReviewApp`` is mounted as a child widget of ``AllWellApp``, so its own
     ``closeEvent`` never fires — ``AllWellApp.closeEvent`` calls this instead
-    (audit L3/L4). It (L3) signals any in-flight smFISH "Apply to All" worker to
+    (audit L3/L4). It (L3) signals any in-flight smFISH "Apply global threshold" worker to
     abort so it can't write CSVs after the UI is gone, and (L4) disconnects the
     application-global ``focusChanged`` watcher installed for Split View.
     """

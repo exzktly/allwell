@@ -14,19 +14,19 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import tool_page
 from ui import theme
 from datasets.core.log_panel import hrule as _hrule
 from widgets.flow_layout import FlowLayout
+from ui import buttons
 
 #: The recipe list's ceiling: enough for a handful of rows before it scrolls,
 #: so the selected recipe's steps below stay on screen.
@@ -65,38 +65,16 @@ class RecipesPage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Recipes", self)  # the Recipes tab of Automation
-        heading.setObjectName("Heading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
-            "A recipe is a chain of jobs saved as a plan — Watch, Convert, "
-            "Analyze, say — that you apply to each new acquisition. Applying one "
+        scroll, outer = tool_page(
+            self, "Recipes",
+            "A recipe is a chain of jobs saved as a plan — a watch, a conversion "
+            "and an Analyze run, say — that you apply to each new acquisition. Applying one "
             "adds its jobs to the Job Queue. Save a recipe from any queued job's "
-            "⋯ menu: “Save chain as recipe…”.", self)
-        blurb.setObjectName("Muted")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "⋯ menu: “Save chain as recipe…”.")
 
         top = QWidget(self)
         tl = FlowLayout(top, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
-        self._import_btn = QPushButton("Import…", self)
-        self._import_btn.setProperty("variant", "secondary")
+        self._import_btn = buttons.default("Import…", self)
         self._import_btn.setToolTip("Add a recipe exported from All-Well, here or elsewhere.")
         self._import_btn.clicked.connect(self.importRequested)
         tl.addWidget(self._import_btn)
@@ -105,7 +83,7 @@ class RecipesPage(QWidget):
         self._empty = QLabel(
             "No recipes yet. Set a chain up in the Job Queue, then choose "
             "“Save chain as recipe…” from one of its jobs' ⋯ menu.", self)
-        self._empty.setObjectName("Muted")
+        self._empty.setProperty("textRole", "help")
         self._empty.setWordWrap(True)
         outer.addWidget(self._empty)
 
@@ -120,11 +98,11 @@ class RecipesPage(QWidget):
         dl.setContentsMargins(0, 0, 0, 0)
         dl.setSpacing(theme.Spacing.sm)
         self._name = QLabel("", self._detail)
-        self._name.setObjectName("SectionTitle")
+        self._name.setProperty("textRole", "sectionHeading")
         self._name.setWordWrap(True)
         dl.addWidget(self._name)
         self._origin = QLabel("", self._detail)
-        self._origin.setObjectName("Muted")
+        self._origin.setProperty("textRole", "help")
         self._origin.setWordWrap(True)
         dl.addWidget(self._origin)
 
@@ -132,12 +110,12 @@ class RecipesPage(QWidget):
         al = FlowLayout(actions, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
         self._buttons: dict[str, QPushButton] = {}
         for key, text, variant, signal in (
-                ("apply", "▶  Apply to…", "primary", self.applyRequested),
-                ("rename", "Rename…", "secondary", self.renameRequested),
-                ("duplicate", "Duplicate", "secondary", self.duplicateRequested),
-                ("export", "Export…", "secondary", self.exportRequested),
-                ("delete", "Delete…", "danger", self.deleteRequested)):
-            button = QPushButton(text, actions)
+                ("apply", "Apply to…", "primary", self.applyRequested),
+                ("rename", "Rename…", "default", self.renameRequested),
+                ("duplicate", "Duplicate", "default", self.duplicateRequested),
+                ("export", "Export…", "default", self.exportRequested),
+                ("delete", "Delete…", "destructive", self.deleteRequested)):
+            button = buttons.default(text, actions)
             button.setProperty("variant", variant)
             button.clicked.connect(lambda _checked=False, s=signal: s.emit(self._current))
             al.addWidget(button)
@@ -145,7 +123,7 @@ class RecipesPage(QWidget):
         dl.addWidget(actions)
 
         steps_title = QLabel("Steps", self._detail)
-        steps_title.setObjectName("SectionTitle")
+        steps_title.setProperty("textRole", "sectionHeading")
         dl.addWidget(steps_title)
         self._steps = QLabel("", self._detail)
         self._steps.setObjectName("RecipeSteps")
@@ -154,7 +132,7 @@ class RecipesPage(QWidget):
         self._steps.setTextInteractionFlags(Qt.TextSelectableByMouse)
         dl.addWidget(self._steps)
         self._notes = QLabel("", self._detail)
-        self._notes.setObjectName("Muted")
+        self._notes.setProperty("textRole", "help")
         self._notes.setWordWrap(True)
         dl.addWidget(self._notes)
 
@@ -171,17 +149,16 @@ class RecipesPage(QWidget):
         dl.addWidget(self._open_result)
         self._open_result_note = QLabel(
             "This recipe has no Analyze step, so there is no result to open.", self._detail)
-        self._open_result_note.setObjectName("Muted")
+        self._open_result_note.setProperty("textRole", "help")
         self._open_result_note.setWordWrap(True)
         dl.addWidget(self._open_result_note)
 
         dl.addWidget(_hrule(self._detail))
         self._runs_line = QLabel("", self._detail)
-        self._runs_line.setObjectName("Muted")
+        self._runs_line.setProperty("textRole", "help")
         self._runs_line.setWordWrap(True)
         dl.addWidget(self._runs_line)
-        self._runs_btn = QPushButton("Show runs", self._detail)
-        self._runs_btn.setProperty("variant", "secondary")
+        self._runs_btn = buttons.default("Show runs", self._detail)
         self._runs_btn.setToolTip("Every time this recipe was applied, with each run's log.")
         self._runs_btn.clicked.connect(lambda: self.showRunsRequested.emit(self._current))
         dl.addWidget(self._runs_btn, 0, Qt.AlignLeft)

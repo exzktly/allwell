@@ -105,7 +105,7 @@ def on_release(ctx, st, event) -> None:
     Without Shift the box replaces the window drawn for this metric and axis, and takes a window gate out of the
     Subset first so it selects from every nanowell. With Shift held (:func:`extends`) the box is *added*: to the
     window drawn, as another of its boxes, and — when a window gate is in the Subset — that gate's nanowells are
-    carried into the window before the gate is taken out, so *Use as Subset* then keeps both regions."""
+    carried into the window before the gate is taken out, so *Use as subset* then keeps both regions."""
     press, st.window_press = st.window_press, None
     if press is None:
         return
@@ -138,7 +138,7 @@ def on_release(ctx, st, event) -> None:
         # Dropping the gate redraws, so the members are read off the model drawn without it. With Shift the gate's
         # nanowells are carried into the window, so they are kept as well as the new box's.
         ctx.notify.set_status(
-            "The earlier window's nanowells were carried into this one: Use as Subset keeps both." if gate_sites else
+            "The earlier window's nanowells were carried into this one: Use as subset keeps both." if gate_sites else
             "The earlier window was taken out of the Subset: this one selects from every nanowell. Hold Shift while "
             "dragging to add to it instead.")
         model = st.window_model
@@ -250,7 +250,7 @@ def _window_name(subset) -> str:
 
 
 def use_window_as_subset(ctx) -> None:
-    """**Use as Subset**: freeze the nanowells inside the window into the page's Subset as its window condition
+    """**Use as subset**: freeze the nanowells inside the window into the page's Subset as its window condition
     (``subset_compute.WINDOW``), applied at once, so the Distribution — and every view the Subset governs — loses the
     nanowells outside it. The Subset holds **one window gate at a time**: a window condition already in it is
     replaced, not narrowed further (a box drawn while one is applied has already taken it out, ``on_release``). The

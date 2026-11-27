@@ -389,7 +389,7 @@ def _annotates_anything(vset: VariableSet, variable: Variable) -> bool:
 
     A variable with no values, or with values that were never put on a well,
     answers for nobody. It is a variable the user has begun and not finished —
-    clicking *+ Variable* before typing its values is the normal authoring
+    clicking *Add variable* before typing its values is the normal authoring
     order, and :func:`from_block` persists the empty one, so the state is
     durable rather than a moment during editing.
 

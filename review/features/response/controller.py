@@ -120,7 +120,7 @@ def series_button_text(ctx) -> str:
     order = {vid: i for i, vid in enumerate(selected_series_ids(ctx))}
     by_id = {v.id: v.name for v in series_variables(ctx)}
     names = [by_id[vid] for vid in sorted(order, key=order.get) if vid in by_id]
-    return f"Series: {NAME_JOIN.join(names)}" if names else f"Series: {NO_SERIES_LABEL}"
+    return f"Series: {NAME_JOIN.join(names)}" if names else f"Series: {NO_SERIES_LABEL.lower()}"
 
 
 def refresh_series_control(ctx) -> None:
@@ -139,6 +139,11 @@ def refresh_series_control(ctx) -> None:
     button = _widget(ctx, "_response_series_btn")
     if button is not None:
         button.setText(series_button_text(ctx))
+    curves = _widget(ctx, "_response_curves_btn")      # the Data row that reads X and the series
+    if curves is not None:
+        from review.core import inspector_panels
+
+        inspector_panels.refresh(curves)
 
 
 def open_series_selector(ctx) -> None:
@@ -395,7 +400,7 @@ def available_timepoints(ctx) -> list[float]:
     tab's picker takes. This asked ``data_loading.get_all_timepoints`` instead,
     which reads only the numeric ``timepoint_hours`` column: on a plate whose
     filename schema has no timepoint slot that column is NaN in every row, so
-    the picker offered nothing, the button read "Timepoints: 0 selected" and the
+    the picker offered nothing, the button read "Timepoints: none" and the
     figure was empty — while every other tab listed the plate's timepoints and
     drew it. The aggregator files those rows at 0.0, which is what the shared
     helper returns, so asking for it draws them.
@@ -501,7 +506,7 @@ def open_timepoint_selector(ctx) -> None:
 def update_timepoint_button(ctx) -> None:
     """The button carries its own readout, as the Bar tab's does.
 
-    Through the shared ``multiselect_button_text``, so it reads "2/5 selected"
+    Through the shared ``multiselect_button_text``, so it reads "2 of 5"
     rather than "2 selected". The count alone cannot say whether the other
     three are unticked or simply not there, and this tab's failure mode was
     exactly that: a picker with nothing in it, reading "0 selected", which is

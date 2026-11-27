@@ -16,7 +16,7 @@ thread, and shows the addresses land before anyone starts a plate.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QLabel, QLineEdit, QPushButton, QSizePolicy, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QLabel, QLineEdit, QSizePolicy, QWidget,
 )
 
 from analyze.domain.nanowell_fields import (
@@ -26,6 +26,7 @@ from analyze.domain.nanowell_fields import (
     nanowell_enabled, nanowell_option_errors,
 )
 from analyze.domain.well_list import incremental_is_moot
+from ui import buttons
 
 _FLUOR_BACKGROUND_TIP = (
     "What every fluorescence number of a nanowell is measured above — cell fluorescence (mean per cell) and nanowell fluorescence "
@@ -236,8 +237,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_format_cb.currentIndexChanged.connect(lambda _i: self._refresh_nanowell_custom())
 
         row = self._row(sec, "Check")
-        self._nanowell_preview_btn = QPushButton("Test detection…", row)
-        self._nanowell_preview_btn.setProperty("variant", "secondary")
+        self._nanowell_preview_btn = buttons.default("Test detection…", row)
         self._nanowell_preview_btn.setToolTip(
             "Run registration and detection on one well at one timepoint and show the montage with every nanowell "
             "labelled, before starting a plate-wide run.")
@@ -245,7 +245,7 @@ class AnalyzeNanowellSectionMixin:
         row.layout().addWidget(self._nanowell_preview_btn)
         row.layout().addStretch(1)
         self._nanowell_status = QLabel("", sec)
-        self._nanowell_status.setObjectName("Muted")
+        self._nanowell_status.setProperty("textRole", "help")
         self._nanowell_status.setWordWrap(True)
         sec.layout().addWidget(self._nanowell_status)
         self._nanowell_field_rows.append(row.parentWidget())
@@ -273,8 +273,7 @@ class AnalyzeNanowellSectionMixin:
         self._nanowell_registration_edit.setMinimumWidth(0)
         self._nanowell_registration_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout.addWidget(self._nanowell_registration_edit, 1)
-        self._nanowell_registration_btn = QPushButton("Browse…", row)
-        self._nanowell_registration_btn.setProperty("variant", "secondary")
+        self._nanowell_registration_btn = buttons.default("Browse…", row)
         self._nanowell_registration_btn.clicked.connect(lambda _=False: self._browse_nanowell_registration())
         layout.addWidget(self._nanowell_registration_btn)
         return row.parentWidget()
@@ -297,7 +296,7 @@ class AnalyzeNanowellSectionMixin:
             "A nanowell run does not run the per-image segmentation the methods above choose between: it counts the "
             "cells in each nanowell with its own Cellpose call, on the channel marked 'Phase', with the settings "
             "below."))
-        heading = QLabel("Nanowell cell count (Cellpose, on the Phase channel)", row)
+        heading = QLabel("Nanowell cell count (Cellpose, on the “Phase” channel)", row)
         heading.setWordWrap(True)
         row.layout().addWidget(heading, 1)
         row = self._row(box, "Cellpose model", tooltip=(
@@ -363,7 +362,7 @@ class AnalyzeNanowellSectionMixin:
                 self._nanowell_field_rows.append(self._nanowell_edit_row(box, key, label, attr, tip))
         # Where the size came from, when it was carried over from the pixel diameter above (_carry_cellpose_diameter).
         self._nanowell_size_note = QLabel("", box)
-        self._nanowell_size_note.setObjectName("Muted")
+        self._nanowell_size_note.setProperty("textRole", "help")
         self._nanowell_size_note.setWordWrap(True)
         self._nanowell_size_note.setVisible(False)
         box.layout().addWidget(self._nanowell_size_note)

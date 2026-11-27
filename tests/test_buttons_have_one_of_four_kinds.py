@@ -1,0 +1,153 @@
+"""Every button is given one of the four kinds (``ui/buttons.py``): primary, default, quiet or destructive.
+
+A button's kind is its ``variant`` property, and the stylesheet styles exactly four. A fifth value is a look
+nobody chose for it — before the four existed the app set eleven, five of which no rule read, so those buttons
+fell through to the bare default without anyone deciding they should. The scan reads every place a variant is
+set: ``setProperty("variant", …)``, ``widgets._support.set_variant``, ``ui.buttons.set_kind`` and the
+``ui_helpers._btn`` funnel, and every string a conditional or a table could hand them.
+
+The six values that once marked a button carrying an on/off state (``toggle``, ``toggle_active``,
+``toggle_muted``, ``toggle_accent``, ``sem``, ``sem_warn``) are gone: each such control is a switch, a checkbox,
+a segmented control or a pressed-in tool (``ui.buttons.mode_tool``), never a fifth kind of button. What
+:data:`PENDING` still holds is per site, with its reason, and only shrinks.
+"""
+
+from __future__ import annotations
+
+import ast
+from collections import Counter
+
+from tests._design_rosters import BUTTON_CONSTRUCTOR
+from tests._design_scan import call_name, count_sites, over_roster, stale_roster
+from tests._repo_scan import parse_source, python_sources, rel
+
+KINDS = {"primary", "default", "quiet", "destructive"}
+
+#: ``(file, value)`` → how many sites there set that value, and why it is not one of the four yet.
+PENDING: dict[tuple[str, str], tuple[int, str]] = {
+}
+
+_SETTERS = {"set_variant", "set_kind", "_set_variant"}
+
+
+def _strings(node: ast.AST) -> list[str]:
+    return [n.value for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+
+
+def _variant_values(tree: ast.AST) -> list[str]:
+    found: list[str] = []
+    for call in ast.walk(tree):
+        if not isinstance(call, ast.Call):
+            continue
+        f = call.func
+        name = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ""
+        if (name == "setProperty" and len(call.args) >= 2 and isinstance(call.args[0], ast.Constant)
+                and call.args[0].value == "variant"):
+            found += _strings(call.args[1])
+        elif name in _SETTERS and len(call.args) >= 2:
+            found += _strings(call.args[1])
+        elif name == "_btn" and len(call.args) >= 4:
+            found += _strings(call.args[3])
+    # A table of (key, text, variant, …) rows feeding a loop, as Job Queue's recipe actions are built: a
+    # variant handed through a name is still set, and a scan that read only call arguments missed it.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.For) and isinstance(node.target, ast.Tuple):
+            names = [t.id for t in node.target.elts if isinstance(t, ast.Name)]
+            if "variant" in names and isinstance(node.iter, (ast.Tuple, ast.List)):
+                at = names.index("variant")
+                for row in node.iter.elts:
+                    if isinstance(row, ast.Tuple) and len(row.elts) > at:
+                        found += _strings(row.elts[at])
+    # A helper's default kind: ``def _button(text, …, *, variant="secondary")`` sets every button the helper
+    # builds without saying so at any call — the Nanowells QC helper did, and a call-site scan never saw it.
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = fn.args
+            positional = args.posonlyargs + args.args
+            pairs = list(zip(positional[len(positional) - len(args.defaults):], args.defaults))
+            pairs += [(a, d) for a, d in zip(args.kwonlyargs, args.kw_defaults) if d is not None]
+            found += [v for a, d in pairs if a.arg == "variant" for v in _strings(d)]
+    return found
+
+
+def _sites() -> Counter:
+    seen: Counter = Counter()
+    for path in python_sources():
+        for value in _variant_values(parse_source(path)):
+            if value not in KINDS:
+                seen[(rel(path), value)] += 1
+    return seen
+
+
+def test_every_button_is_given_one_of_the_four_kinds():
+    seen = _sites()
+    unexpected = sorted(f"{path}: variant {value!r} ({n} site{'s' * (n > 1)})" for (path, value), n in seen.items()
+                        if (path, value) not in PENDING or n > PENDING[(path, value)][0])
+    assert not unexpected, (
+        "a button given a variant that is not one of the four kinds — build it with ui.buttons "
+        "(primary / default / quiet / destructive):\n  " + "\n  ".join(unexpected))
+
+
+def test_the_pending_roster_only_describes_real_sites():
+    seen = _sites()
+    stale = sorted(f"{path} {value!r}: roster {n}, found {seen.get((path, value), 0)}"
+                   for (path, value), (n, _why) in PENDING.items() if seen.get((path, value), 0) < n)
+    assert not stale, "these PENDING entries are larger than what is left — lower or delete them:\n  " + \
+        "\n  ".join(stale)
+
+
+# ── buttons built past ui.buttons ────────────────────────────────────────────
+
+#: The panes and the app-level UI, where a button is a command a person presses and so one of the four kinds.
+#: ``widgets/`` is left out: a reusable widget builds its own parts and knows nothing of the kinds.
+_PANES = ("analyze/", "datasets/", "review/", "ui/", "allwell.py")
+
+
+def _built_by_hand(_path: str, tree: ast.Module):
+    yield from (c for c in ast.walk(tree)
+                if isinstance(c, ast.Call) and call_name(c) in ("QPushButton", "QToolButton"))
+
+
+def _in_a_pane(r: str) -> bool:
+    return (r.startswith(_PANES) or any(f"/{p}" in r for p in _PANES)) and not r.endswith("ui/buttons.py")
+
+
+def _hand_built():
+    return count_sites(_built_by_hand, python_sources(), rel, skip=lambda r: not _in_a_pane(r))
+
+
+def test_a_pane_builds_its_buttons_through_ui_buttons():
+    bad = over_roster(_hand_built(), BUTTON_CONSTRUCTOR)
+    assert not bad, ("a QPushButton or QToolButton built by hand in a pane — build it with ui.buttons:\n  "
+                     + "\n  ".join(bad))
+
+
+def test_the_hand_built_roster_only_describes_sites_that_remain():
+    stale = stale_roster(_hand_built(), BUTTON_CONSTRUCTOR)
+    assert not stale, "lower these roster entries:\n  " + "\n  ".join(stale)
+
+
+#: Object names that once gave a button its own look by an ID selector (``#Primary``, ``#Ghost``, ``#Danger``).
+#: An ID selector outranks ``[variant=…]``, so a button carrying one of them drew a fifth look over its kind —
+#: a default button filled like the primary — and the scan above, which reads only ``variant``, could not see it.
+RETIRED_BUTTON_NAMES = {"Primary", "Ghost", "Danger"}
+
+
+def _retired_names(tree: ast.AST) -> list[str]:
+    return [call.args[0].value for call in ast.walk(tree)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "setObjectName" and call.args
+            and isinstance(call.args[0], ast.Constant) and call.args[0].value in RETIRED_BUTTON_NAMES]
+
+
+def test_no_button_takes_a_look_from_its_object_name():
+    found = [f"{rel(p)}: {name}" for p in python_sources() for name in _retired_names(parse_source(p))]
+    assert not found, "a button's look is its kind (ui.buttons), not an object name:\n  " + "\n  ".join(found)
+    from ui import theme
+    sheet = theme.qss()
+    assert not [n for n in RETIRED_BUTTON_NAMES if f"#{n}" in sheet], "the theme still styles a retired name"
+
+
+def test_the_retired_name_scan_bites():
+    """It reads a ``setObjectName`` of a retired name, and nothing else."""
+    assert _retired_names(ast.parse('b.setObjectName("Ghost")\nc.setObjectName("Card")')) == ["Ghost"]

@@ -19,9 +19,16 @@ is what would happen if a tab were reverted to its own row.
 There is exactly one legitimate reason to take an entry out, and it is not "the
 module stopped using the band": it is that the **page** the entry described no
 longer exists, and the module that now owns that page's row is listed in its
-place. Removing an entry any other way is the regression this file exists to
-catch, so a commit that does it says which page went away and which module
-inherited the row.
+place. The design language adds one more, decided per page by its row in
+``_Docs/Markdowns/DESIGN_LANGUAGE_TRACKER.md``: a page that is a form or a
+dashboard rather than a plot carries its controls in a card's heading, not in a
+band (§6) — Analyze's output pane became the Run card that way (row D22), and
+the Datasets tool pages, whose band held nothing, lost it (row D24), as did
+Batch Export's modes, whose title row carries Sync from app and Export (row D26),
+and Home, whose one band command, Import, went beside Sample Map's layer switch (row D27).
+Removing an entry any other way is the regression this file exists to catch, so
+a commit that does it says which page went away and which module inherited the
+row, or which tracker row made it a card.
 """
 
 import ast
@@ -37,21 +44,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #: the page out as band-then-content and returns the band it made; a leaf sharing
 #: a page's row claims a slot in it. Each is adoption — building two of them, in
 #: any combination, is the stacking of control rows the band exists to remove.
-_BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot")
+#: The fourth, ``build_bandless_body``, is a page that has no scoping control at all and so, by the design
+#: language's rule (no empty band strip), builds the same page body without the band: it has decided its control
+#: row as surely as the other three, and building it beside one of them would be the same stacking.
+_BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot", "build_bandless_body")
 
 ADOPTED = (
-    "analyze/log_pane.py",                       # Analyze — the output pane
-    "datasets/tab.py",                          # Datasets — the tool pages
     "review/core/centre_view.py",          # Plotting — all five sub-tabs
     "review/features/barplot/tab_view.py",
     "review/features/distribution/tab_view.py",
     "review/features/heatmap/tab_view.py",
-    "review/features/home/tab_view.py",     # Home — the page band + its tabs
     "review/features/lineplot/tab_view.py",
     "review/features/multivariate/tab_view.py",
     "review/features/scatter/agg_tab_view.py",
     "review/features/scatter/cells_tab_view.py",
-    "review/features/batch_export/tab_view.py",
     "review/features/image_browser/cell_browser/tab_view.py",
     "review/features/image_browser/playground/tab_view.py",
     "review/features/preview/panel_view.py",          # Segmentation

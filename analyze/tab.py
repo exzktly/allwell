@@ -163,20 +163,17 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         # Left — scrollable form
         scroll = FooterScrollArea()  # the run footer pins under it (analyze/run_footer.py)
         scroll.setWidgetResizable(True)
-        # Fixed, not just a minimum: theme.Metrics.rail_w (review/core/app_shell_view.py)
-        # is the one width shared by Review's rail, Datasets' sidebar, and this
-        # panel, so switching modes never visibly resizes the window. The form
-        # is laid out to fit it — the narrow label column and the capped combo
-        # widths in analyze/form_chrome.py are that fit, and
-        # tests/test_analyze_narrow_sidebar_fit.py holds it with every section
-        # open — so a change to either side has to re-check the other. A
-        # QSplitter child still respects setFixedWidth's equal min/max, so the
-        # handle can't be dragged past it either.
-        scroll.setFixedWidth(theme.Metrics.rail_w)
+        # Fixed at theme.Metrics.form_column_w, the design language's Analyze
+        # form column (Analyze has no rail). The form's label column and capped
+        # fields are laid out to fit it, and tests/test_analyze_narrow_sidebar_fit.py
+        # holds that with every section open. A QSplitter child respects
+        # setFixedWidth, so the handle can't be dragged past it either.
+        scroll.setFixedWidth(theme.Metrics.form_column_w)
         form_host = QWidget()
         self._form_layout = QVBoxLayout(form_host)
-        self._form_layout.setContentsMargins(0, 8, 0, 8)
-        self._form_layout.setSpacing(0)
+        # The sections are cards (``form_chrome._section``): a gap between them and room round them.
+        self._form_layout.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+        self._form_layout.setSpacing(theme.Spacing.md)
         scroll.setWidget(form_host)
         self._left_sidebar = scroll  # shell left-rail toggle hides/shows this
         splitter.addWidget(scroll)
@@ -191,7 +188,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
         self._build_log(right)
-        splitter.setSizes([theme.Metrics.rail_w, 600])
+        splitter.setSizes([theme.Metrics.form_column_w, 600])
         self._phone_view = AnalyzePhoneView(self)  # follows phone layout on its own
 
     # ------------------------------------------------------------------
@@ -382,6 +379,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         # Hand back the raw-log toggle if the previous run's failure opened it
         # and the user has not since made that choice their own.
         self.restore_raw_log()
+        self.force_raw_log_open()     # ...and show it for this run: "Show log" hides it only between runs
         self._eta_deadline = None
         self._dashboard.set_eta("ETA")
         self._pipeline_started_at = _time.monotonic()
@@ -437,6 +435,7 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         else:
             self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
             self._dashboard.set_headline(f"Complete — {n} well(s) processed{self._partial_note()}")
+            self.restore_raw_log()   # a clean end hides the log the run showed; a short run above keeps it
         self._dashboard.set_status("")
         self._dashboard.set_eta("")
         self._log_line(payload, "DONE")

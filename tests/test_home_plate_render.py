@@ -65,7 +65,7 @@ def _render(qapp) -> dict:
 
     grid = plate._grid
     image = QImage(grid.size(), QImage.Format_ARGB32)
-    image.fill(QColor(theme.Colors.panel))
+    image.fill(QColor(theme.Colors.card))
     grid.render(image)
     # The harness must not be able to pass by rendering nothing: a plate that
     # never painted returns the fill colour for every well, which would make
@@ -110,7 +110,7 @@ def test_no_coloured_well_is_painted_black(painted):
     """The report that started this: wells arriving as near-black cells against
     a near-black panel. Every state that carries a colour must be visible on the
     card it sits on."""
-    panel = QColor(theme.Colors.panel)
+    panel = QColor(theme.Colors.card)
     dark = {
         state: (painted[state].name(), round(_contrast(painted[state], panel), 2))
         for state in STATE_TOKENS

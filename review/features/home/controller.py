@@ -18,6 +18,7 @@ from review.core.analyze_handoff import dataset_root, open_in_analyze
 from review.core.lazy import lazy
 from review.core.record_sync import resync_run_check
 from core.safe import swallow
+from ui import text_roles
 from review.core.selection_controller import (
     groups_centre_refresh, update_active_group_label,
 )
@@ -36,9 +37,11 @@ from .sample_map.controller import current_layer, on_tab_entered
 from ._phone import apply as apply_phone_form
 from ._phone import grid_columns
 from .tab_view import (
-    IMPORT_KEY, build_recent_tile, build_saved_plot_tile, definition_subtabs,
+    build_recent_tile, build_saved_plot_tile, definition_subtabs,
     format_value, legend_label, legend_swatch_style,
 )
+from ui import buttons
+from .import_view import IMPORT_KEY
 
 # Cell Gating's controller is reached for two refreshes the sub-tab handler and
 # the selection hook drive. Its tab body, and the other four, are built through
@@ -76,6 +79,10 @@ HOME_ACTIONS = (
 #: ``tab_controller.PANE_MODES``. Read from there rather than restated so a
 #: fourth pane cannot leave this mapping behind.
 _PANE_INDEX = {"analyze": 1, "datasets": 2}
+
+#: A receipt value's tone for the severity its row carries (``text_roles`` tones: amber, red).
+_RECEIPT_TONE = {"warn": text_roles.ATTENTION, "warning": text_roles.ATTENTION,
+                 "danger": text_roles.FAILURE, "error": text_roles.FAILURE}
 
 _SEVERITY_COLORS = {
     "ok": theme.Colors.success,
@@ -456,14 +463,18 @@ def _paint_masthead(ctx) -> None:
     _widget(ctx, "_home_run_meta").setText("   ·   ".join(bits))
 
 
+#: The notice's severity for each of ``collect.next_step``'s: amber only for what the reader should look at, red
+#: only for what went wrong, and the rest — no dataset, a nudge, nothing to do — information (design language §2.6).
+_NOTICE_SEVERITY = {"warn": "attention", "danger": "failure"}
+
+
 def _paint_next_step(ctx) -> None:
     step = hc.next_step(ctx)
-    label = _widget(ctx, "_home_next_text")
-    label.setText(step["text"])
-    label.setStyleSheet(
-        f"color:{_SEVERITY_COLORS.get(step['severity'], theme.Colors.text_primary)};")
-    button = _widget(ctx, "_home_next_button")
-    button.setText(step["label"])
+    notice = _widget(ctx, "_home_next_step")
+    notice.setSeverity(_NOTICE_SEVERITY.get(step["severity"], "information"))
+    lead, text = step["lead"], step["text"]
+    notice.setMessage(lead, text[len(lead):].strip() if text.startswith(lead) else text)
+    notice.action_button().setText(step["label"])
 
 
 def _plate_has_focus(ctx) -> bool:
@@ -527,7 +538,8 @@ def _paint_plate(ctx) -> None:
         layout.addWidget(swatch, index, 0)
         layout.addWidget(QLabel(legend_label(state, ended_early=ended_early), host), index, 1)
         value = QLabel(str(count), host)
-        value.setObjectName("Muted" if not count else "")
+        if not count:
+            text_roles.set_role(value, text_roles.HELP)
         layout.addWidget(value, index, 2)
     # The marker gets a legend row of its own, and only when the plate carries
     # one. The plate's own invariant is that no well can be left without a row
@@ -570,7 +582,7 @@ def _paint_plate(ctx) -> None:
     elif gating_pending:
         # The markers are owed, not absent: say so where they would be counted.
         pending = QLabel("Wells needing a look — counted once cell gating finishes", host)
-        pending.setObjectName("Muted")
+        pending.setProperty("textRole", "help")
         layout.addWidget(pending, len(hc.plate_legend(ctx)) + 1, 0, 1, 3)
 
     totals = ((ctx.state.dataset.pipeline_info or {}).get("run_check") or {}
@@ -614,16 +626,16 @@ def _tile_widget(parent: QWidget, tile) -> QWidget:
     column.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
                               theme.Spacing.md, theme.Spacing.sm)
     column.setSpacing(theme.Spacing.xs)
-    label = QLabel(tile.label, card)
-    label.setObjectName("HomeTileLabel")
-    column.addWidget(label)
+    column.addWidget(text_roles.field_label(tile.label, card))
     value = QLabel(format_value(tile.value), card)
-    value.setObjectName("HomeTileValue" if tile.available else "Muted")
-    if not tile.available:
+    if tile.available:
+        value.setObjectName("HomeTileValue")
+    else:
+        text_roles.show_not_recorded(value)
         value.setToolTip(tile.value.reason)
     column.addWidget(value)
     sub = QLabel(tile.sub, card)
-    sub.setObjectName("Muted")
+    sub.setProperty("textRole", "help")
     sub.setWordWrap(True)
     column.addWidget(sub)
     return card
@@ -636,9 +648,7 @@ def _channel_widget(parent: QWidget, chips) -> QWidget:
     column.setContentsMargins(theme.Spacing.md, theme.Spacing.sm,
                               theme.Spacing.md, theme.Spacing.sm)
     column.setSpacing(theme.Spacing.xs)
-    label = QLabel("Channels", card)
-    label.setObjectName("HomeTileLabel")
-    column.addWidget(label)
+    column.addWidget(text_roles.field_label("Channels", card))
     row = QHBoxLayout()
     row.setSpacing(theme.Spacing.xs)
     for chip in chips:
@@ -730,7 +740,7 @@ def _paint_saved_plots(ctx) -> None:
     shown = strip["shown"]
     if not shown:
         note.setText("No plots saved from this dataset yet — hover a plot's "
-                     "top-right corner and click Save to put one here.")
+                     "top-right corner and click “Save” to put one here.")
         return
     hidden = total - len(shown)
     note.setText(
@@ -781,7 +791,6 @@ def _paint_rows(ctx, widget_name: str, rows, *, kind: str, on_anchor=None) -> No
 
 def _anchor_chips(parent: QWidget, wells, targets: dict, on_anchor) -> QWidget:
     """The well chips of a not-addressed row: a well an anchor can fix is a button that opens it."""
-    from PySide6.QtWidgets import QPushButton
 
     box = QWidget(parent)
     line = QHBoxLayout(box)
@@ -792,7 +801,7 @@ def _anchor_chips(parent: QWidget, wells, targets: dict, on_anchor) -> QWidget:
         if tp is None:
             line.addWidget(QLabel(well, box))
             continue
-        chip = QPushButton(well, box)
+        chip = buttons.default(well, box)
         chip.setObjectName("HomeWellChip")
         chip.setFlat(True)
         chip.setCursor(Qt.PointingHandCursor)
@@ -811,12 +820,12 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
     if kind == "health":
         dot = QLabel("●", host)
         dot.setStyleSheet(
-            f"color:{_SEVERITY_COLORS.get(row.get('severity'), theme.Colors.text_muted)};")
+            f"color:{_SEVERITY_COLORS.get(row.get('severity'), theme.Colors.text_secondary)};")
         line.addWidget(dot)
         label = QLabel(str(row.get("label") or ""), host)
         line.addWidget(label)
         value = QLabel(str(row.get("value") or ""), host)
-        value.setObjectName("Muted")
+        value.setProperty("textRole", "help")
         value.setWordWrap(True)
         line.addWidget(value, 1)
         if row.get("wells") and row.get("anchor") and on_anchor is not None:
@@ -828,19 +837,21 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
         return host
 
     if kind == "receipt":
-        label = QLabel(str(row.get("label") or ""), host)
-        label.setObjectName("HomeTileLabel")
-        line.addWidget(label)
-        value = QLabel(str(row.get("value") or ""), host)
+        line.addWidget(text_roles.field_label(str(row.get("label") or ""), host))
+        value = QLabel(host)
         value.setWordWrap(True)
+        if row.get("value") is None:
+            text_roles.show_not_recorded(value)
+        else:
+            value.setText(str(row["value"]))
         # A receipt line is normally a plain statement of what was set, but a
         # setting can record that a step did not run — a reference-well
         # correction with no well named leaves every frame untouched, and the
         # output is bit-for-bit identical to a corrected one. That reads as
         # ordinary text unless it is coloured like the warning it is.
-        if row.get("severity"):
-            value.setStyleSheet(
-                f"color:{_SEVERITY_COLORS.get(row['severity'], theme.Colors.text_muted)};")
+        tone = _RECEIPT_TONE.get(row.get("severity") or "")
+        if tone:
+            text_roles.set_role(value, text_roles.BODY, tone=tone)
         line.addWidget(value, 1)
         if row.get("is_default"):
             chip = QLabel("default", host)
@@ -861,7 +872,7 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
     effect = str(row.get("effect") or "")
     if effect:
         chip = QLabel(effect, host)
-        chip.setObjectName("Muted")
+        chip.setProperty("textRole", "help")
         line.addWidget(chip)
     line.addStretch(1)
     count = int(row.get("count") or 0)
@@ -873,7 +884,8 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
         # reserved for a figure the page could not obtain at all.
         text = "None yet"
     value = QLabel(text, host)
-    value.setObjectName("" if count else "Muted")
+    if not count:
+        text_roles.set_role(value, text_roles.HELP)
     line.addWidget(value)
     return host
 

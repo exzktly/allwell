@@ -110,7 +110,7 @@ def _n_panel_bars(monkeypatch, pts_by_well):
             ctx, ax_n, wells=wells, colors=["#4488cc"] * len(wells),
             xlabels=wells, target_t=6.0, threshold=0.0,
         )
-        ph = tuple(round(v, 3) for v in to_rgb(theme.Colors.placeholder))
+        ph = tuple(round(v, 3) for v in to_rgb(theme.Colors.text_disabled))
         out = []
         for patch in ax_n.patches:
             rgb = tuple(round(v, 3) for v in patch.get_facecolor()[:3])

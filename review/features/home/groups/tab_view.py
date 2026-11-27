@@ -28,6 +28,7 @@ from review.features.home.groups.controller import (
 )
 from review.features.home.groups.panel_view import build_replicate_panel
 from widgets.spin_box import SpinBox
+from ui import theme as _theme
 
 
 #: Registry keys of the parts of this layer its phone form rearranges.
@@ -78,13 +79,13 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
 
     hdr = QWidget(parent)
     hdr_l = QHBoxLayout(hdr)
-    hdr_l.setContentsMargins(0, 8, 0, 4)
+    hdr_l.setContentsMargins(0, _theme.Spacing.sm, 0, _theme.Spacing.xs)
     layout.addWidget(hdr)
     hdr_l.addStretch(1)
-    # Named for its scope: an unqualified "Clear All" on a page that also holds
+    # Named for its scope: an unqualified "Clear all" on a page that also holds
     # well labels, ratios and gating reads as if it clears those too.
     hdr_l.addWidget(btn_secondary(hdr, "Clear all groups", lambda: rep_clear_all(ctx)))
-    hdr_l.addWidget(btn_primary(hdr, "+ Add", lambda: rep_add(ctx)))
+    hdr_l.addWidget(btn_secondary(hdr, "Add", lambda: rep_add(ctx)))
 
     # Quick Replicates: three labelled fields and the button that applies them.
     # Each label sits with its field in a pair of its own, so the phone form
@@ -93,13 +94,13 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # lay out exactly as the flat row did — no margins, the row's own spacing.
     hdr2r = ctx.widgets.register(QUICK_ROW_KEY, QWidget(parent))
     hdr2r_l = QHBoxLayout(hdr2r)
-    hdr2r_l.setContentsMargins(0, 4, 0, 4)
+    hdr2r_l.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.xs)
     layout.addWidget(hdr2r)
 
     pair_cb = QComboBox(hdr2r)
     pair_cb.addItems(["Rows (A01+A02)", "Columns (A01+B01)"])
     pair_cb.setCurrentText("Rows (A01+A02)")
-    hdr2r_l.addWidget(_field_pair(hdr2r, "Group along:", pair_cb))
+    hdr2r_l.addWidget(_field_pair(hdr2r, "Group along", pair_cb))
     ctx.widgets.register("_rep_quick_pair_dir_var", pair_cb)
 
     size_sb = SpinBox(hdr2r)
@@ -109,18 +110,18 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
         "How many consecutive wells form one replicate group "
         "(2 = pairs, 3 = triplicates, …). A partial trailing run becomes a "
         "smaller group.")
-    hdr2r_l.addWidget(_field_pair(hdr2r, "Replicates per group:", size_sb))
+    hdr2r_l.addWidget(_field_pair(hdr2r, "Replicates per group", size_sb))
     ctx.widgets.register("_rep_quick_size_var", size_sb)
 
     iter_cb = QComboBox(hdr2r)
     iter_cb.addItems(["Across rows", "Down columns"])
     iter_cb.setCurrentText("Across rows")
-    hdr2r_l.addWidget(_field_pair(hdr2r, "Order:", iter_cb))
+    hdr2r_l.addWidget(_field_pair(hdr2r, "Order", iter_cb))
     ctx.widgets.register("_rep_quick_iter_order_var", iter_cb)
     hdr2r_l.addStretch(1)
     hdr2r_l.addWidget(ctx.widgets.register(
         "_rep_quick_apply",
-        btn_primary(hdr2r, "Apply Quick Replicates",
+        btn_primary(hdr2r, "Apply quick replicates",
                     lambda: rep_quick_pairs_from_dropdowns(ctx))))
 
     _build_from_variables_row(ctx, parent, layout)
@@ -130,29 +131,20 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # Active-group banner — until the user clicks a group below, plate
     # clicks have no effect. Make that state legible so the user isn't
     # left wondering why nothing happens.
-    from ui import theme as _theme
     active_row = ctx.widgets.register(ACTIVE_ROW_KEY, QWidget(parent))
     active_row.setObjectName("ActiveGroupBanner")
     active_l = QHBoxLayout(active_row)
-    active_l.setContentsMargins(0, 6, 0, 6)
-    active_l.setSpacing(6)
+    active_l.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.xs)
+    active_l.setSpacing(_theme.Spacing.xs)
     active_caption = QLabel("ACTIVE GROUP", active_row)
-    active_caption.setStyleSheet(
-        f"color: {_theme.Colors.text_muted}; "
-        f"font-size: {_theme.Typography.caption_size}px; "
-        f"letter-spacing: 0.08em; font-weight: 600;"
-    )
+    active_caption.setProperty("textRole", "eyebrow")
     active_l.addWidget(active_caption)
     active_lbl = ctx.widgets.register(
         "_rep_active_group_lbl",
         QLabel("None selected — click a group below to start", active_row))
+    # Its rule is in the theme (``ui/component_qss``): the secondary ink, and the accent while a group is active
+    # (``selection_controller.update_active_group_label`` sets ``active``).
     active_lbl.setObjectName("ActiveGroupValue")
-    active_lbl.setStyleSheet(
-        f"QLabel#ActiveGroupValue {{ "
-        f"color: {_theme.Colors.text_secondary}; "
-        f"font-size: {_theme.Typography.small_size}px; "
-        f"font-weight: 600; }}"
-    )
     active_l.addWidget(active_lbl)
     active_l.addStretch(1)
     layout.addWidget(active_row)
@@ -174,7 +166,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     # ``selections_model.relabelled_groups_clause`` returns "" otherwise, and a
     # line that is always on screen is one nobody reads on the day it matters.
     relabel = ctx.widgets.register("_rep_relabel_note", QLabel("", parent))
-    relabel.setObjectName("Muted")
+    relabel.setProperty("textRole", "help")
     relabel.setWordWrap(True)
     relabel.setVisible(False)
     layout.addWidget(relabel)
@@ -186,9 +178,9 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
         "structure.",
         parent,
     )
-    hint.setObjectName("Muted")
+    hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
-    hint.setContentsMargins(0, 6, 0, 8)
+    hint.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.sm)
     layout.addWidget(hint)
 
 
@@ -217,7 +209,7 @@ def set_replicates_phone_form(ctx, on: bool) -> None:
       is operated on, and at the editor role's caps a well was under 30 px;
     - **Quick Replicates is a form**: each field a row, its label in a column
       ``SHEET_LABEL_PT`` wide (the Controls sheet's), the field stretched over
-      the rest, rows ``TOUCH_GAP_PT`` apart, and *Apply Quick Replicates* the
+      the rest, rows ``TOUCH_GAP_PT`` apart, and *Apply quick replicates* the
       full width under them;
     - **the active-group banner** puts its caption above the group's name, which
       wraps;
@@ -290,7 +282,7 @@ _FROM_VARIABLES_TIP = (
     "Replace the groups with one replicate group per condition: wells whose "
     "values are identical for every variable on the Variables tab become "
     "replicates of one group. The groups are ordinary groups afterwards — "
-    "rename them, recolour them, add or remove wells. Wells with no values "
+    "rename them, recolor them, add or remove wells. Wells with no values "
     "join no group.")
 
 
@@ -303,12 +295,12 @@ def _build_from_variables_row(ctx, parent: QWidget, layout) -> None:
     """
     row = QWidget(parent)
     row_l = QHBoxLayout(row)
-    row_l.setContentsMargins(0, 4, 0, 4)
+    row_l.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.xs)
     layout.addWidget(row)
     row_l.addStretch(1)
     button = ctx.widgets.register(
         "_rep_from_var_btn",
-        btn_primary(row, "Make replicates from variables",
+        btn_secondary(row, "Make replicates from variables",
                     lambda: rep_replicates_from_variables(ctx)))
     button.setProperty("enabledTip", _FROM_VARIABLES_TIP)
     row_l.addWidget(button)

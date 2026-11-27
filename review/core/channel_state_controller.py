@@ -1414,6 +1414,13 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
     # Plotting + Segmentation quick-edits have no channel picker of their own —
     # they edit the app's ACTIVE channel, so they follow it.
     _sync("_plotting_thresh_frac_stepper", label_attr="_plotting_thresh_frac_lbl")
+    # The Plotting box sits on an inspector page behind the band's "ON threshold: … ›" row, which reads its value:
+    # the value was set with signals blocked, so the row is told.
+    thr_row = ctx.widgets.get_or_none("_plotting_thresh_frac_btn")
+    if thr_row is not None:
+        from review.core import inspector_panels
+
+        inspector_panels.refresh(thr_row)
     _sync("_review_thresh_frac_stepper", label_attr="_review_thresh_frac_lbl")
 
     # The Image Table quick-edit has its OWN channel dropdown, so it must follow

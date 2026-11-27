@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QVBoxLayout, QWidget,
 )
 
@@ -26,6 +26,7 @@ from review.core.selection_controller import rebuild_all
 from review.core.selection_controller import set_selected_wells
 from review.domain.viewer_state import parse_rc
 from ui import theme
+from ui import buttons
 
 _logger = logging.getLogger("review")
 
@@ -67,12 +68,11 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
         name_row = QWidget(section)
         nr = QHBoxLayout(name_row)
         nr.setContentsMargins(0, 0, 0, 0)
-        nr.setSpacing(6)
+        nr.setSpacing(theme.Spacing.xs)
         name_edit = QLineEdit(name_row)
         name_edit.setPlaceholderText("Name current selection…")
         nr.addWidget(name_edit, 1)
-        add_btn = QPushButton("Add", name_row)
-        add_btn.setProperty("variant", "secondary")
+        add_btn = buttons.default("Add", name_row)
         add_btn.setToolTip(
             "Save the wells currently selected under a name you can get back. "
             "A saved selection only restores which wells are lit — it pools "
@@ -95,7 +95,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
             ctx.widgets.register("_plot_groups_add_btn", add_btn)
 
     empty_label = QLabel("No saved selections yet.", section)
-    empty_label.setObjectName("Muted")
+    empty_label.setProperty("textRole", "help")
     empty_label.setWordWrap(True)
     section.addWidget(empty_label)
 
@@ -108,7 +108,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
     list_widget = QWidget(scroll)
     list_layout = QVBoxLayout(list_widget)
     list_layout.setContentsMargins(0, 0, 0, 0)
-    list_layout.setSpacing(4)
+    list_layout.setSpacing(theme.Spacing.xs)
     scroll.setWidget(list_widget)
     section.addWidget(scroll)
 
@@ -393,9 +393,9 @@ def refresh_plot_groups_sidebar(ctx) -> None:
             row = QWidget(list_widget)
             rl = QHBoxLayout(row)
             rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(4)
+            rl.setSpacing(theme.Spacing.xs)
             wells = [w for w in (group.get("wells") or []) if w in valid]
-            load_btn = QPushButton(
+            load_btn = buttons.default(
                 f"{group.get('name', 'Selection')} ({len(wells)})",
                 row,
             )
@@ -404,7 +404,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
                 lambda _=False, gid=group.get("id", ""): _plot_groups_load(ctx, gid)
             )
             rl.addWidget(load_btn, 1)
-            del_btn = QPushButton("×", row)
+            del_btn = buttons.icon_button("x", "Delete this saved selection", row)
             del_btn.setFixedWidth(theme.Metrics.icon_btn_w)
             del_btn.setToolTip("Delete this saved selection")
             del_btn.clicked.connect(

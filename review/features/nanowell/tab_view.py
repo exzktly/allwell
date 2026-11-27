@@ -59,8 +59,11 @@ from review.features.nanowell.statistics_view import (
 )
 from widgets.control_band import ControlBand
 from widgets.delayed_tooltip import DelayedToolTip
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
+from widgets.labelled_field import LabelledField
 from widgets.spin_box import SpinBox
+from ui import buttons
+from ui.text_roles import NOT_SET
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("qc", "QC"), ("array", "Array"), ("trajectories", "Trajectories"),
@@ -84,7 +87,7 @@ _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The band's *Notes* button: the Layers menu's *Notes*, where it can be found.
 #: The views whose footer the *Notes* switch shortens (the Distribution's footer is in its Details field instead).
 NOTES_VIEWS = ("array",)
-_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — under the array, in room kept for it so the array never moves. "
+_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colors — under the array, in room kept for it so the array never moves. "
               "Off, the footer keeps the counts and anything that went wrong. The same switch as Layers → Notes.")
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
@@ -222,8 +225,8 @@ _IMAGE_TIP = ("What the Array view draws under the nanowells (measured positions
 _POSITIONS_TIP = ("Measured: where the run found each nanowell, over the image, tiles and anchor.\n"
                   "Lattice: each nanowell at its address on an ideal lattice, so it keeps its place from one "
                   "timepoint to the next even when the plate was put back rotated.")
-_LAYERS_TIP = "Turn the Array view's elements on and off, colour the nanowells, or set them all from a preset."
-_OVERLAYS_TIP = ("Show or hide every coloured overlay at once — the nanowells, the tiles, the anchor and the cells — to see the "
+_LAYERS_TIP = "Turn the Array view's elements on and off, color the nanowells, or set them all from a preset."
+_OVERLAYS_TIP = ("Show or hide every colored overlay at once — the nanowells, the tiles, the anchor and the cells — to see the "
                  "image beneath. The Layers menu's choices are kept: showing them again restores exactly those.")
 _ZOOM_TIP = ("How far the view is zoomed against Fit. The wheel zooms about the pointer (over VNC from a phone, a "
              "two-finger swipe); − and + zoom about the centre.")
@@ -372,16 +375,17 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     well_cb.currentIndexChanged.connect(lambda _i: nwc.set_well(ctx, well_cb.currentData() or ""))
     reg.register("_nw_well_cb", well_cb)
     exclusion = build_exclude_controls(ctx, well_cb)
-    # The Plotting tabs' timepoint control (Distribution, Heat Map): a LabeledComboBox painting its own
-    # "Timepoint:" prefix, the timepoints in time order and named by their hours. One control for every view that
-    # draws one timepoint — the Array view's included, which had a slider of its own.
-    tp_cb = LabeledComboBox("Timepoint")
+    # The Plotting tabs' timepoint control (Distribution, Heat Map): the timepoints in time order and named by their
+    # hours, labelled beside the box rather than inside it. One control for every view that draws one timepoint —
+    # the Array view's included, which had a slider of its own.
+    tp_cb = unlabelled("Timepoint")
     tp_cb.setToolTip(_TP_TIP)
     tp_cb.currentIndexChanged.connect(lambda _i: nwc.set_timepoint(ctx, tp_cb.currentData() or ""))
     reg.register("_nw_tp_cb", tp_cb)
     # *Where*: the well and the timepoint, one flow item, so "A01 at 5 h" never wraps apart.
     well_part = _well_part(band, well_cb)
-    grp_where = band.add_scope("", well_part, tp_cb)
+    tp_part = LabelledField("Timepoint", tp_cb, band, above=False)
+    grp_where = band.add_scope("", well_part, tp_part)
     reg.register("_nw_where_group", grp_where)
     positions_seg, grp_positions = _build_positions_control(ctx, band)
     selection_row_end = band.add_break()
@@ -436,7 +440,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     grp_moving = band.add_scope("", moving_kind_cb, moving_spin)
 
     responding_edit = QLineEdit()
-    responding_edit.setPlaceholderText("not set")
+    responding_edit.setPlaceholderText(NOT_SET)
     responding_edit.setToolTip(_RESPONDING_TIP)
     responding_edit.setFixedWidth(_RESPONDING_W)
     responding_edit.editingFinished.connect(lambda: nwc.set_responding_above(ctx, responding_edit.text()))
@@ -711,7 +715,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
             shows_tp = ((at_one_timepoint and not per_nanowell) or view == "position"
                         or view in RANKED_WELL_VIEWS or view in ONE_WELL_VIEWS)
             shows_well = view in ONE_WELL_VIEWS or view in RANKED_WELL_VIEWS
-            _show_where(grp_where, well_part, tp_cb, shows_well, shows_tp,
+            _show_where(grp_where, well_part, tp_part, shows_well, shows_tp,
                         walking=view == walk_view, exclude=grp_exclude)
             exclusion.refresh(st, well_cb)
             extremes_spin.setValue(st.extremes_n)
@@ -899,10 +903,10 @@ def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
     clears the choice."""
     from review.core import inspector_pages
 
-    button = QToolButton(parent)
+    button = buttons.tool_button(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
     button.setToolTip(_EXTREMES_TPS_TIP)
-    button.setProperty("variant", "secondary")
+
     ctx.widgets.register("_nw_extremes_tps_btn", button)
 
     def state():
@@ -990,9 +994,8 @@ def _detail_header(ctx, parent) -> QHBoxLayout:
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
     title = QLabel(DETAIL_TITLE, parent)
-    title.setObjectName("Caption")
-    clear = QPushButton(CLEAR_SELECTION_TEXT, parent)
-    clear.setProperty("variant", "secondary")
+    title.setProperty("textRole", "label")
+    clear = buttons.default(CLEAR_SELECTION_TEXT, parent)
     clear.setToolTip("Deselect the nanowell: its rings and this detail go")
     clear.clicked.connect(lambda _=False: nwc.clear_selection(ctx))
     ctx.widgets.register("_nw_detail_clear_btn", clear)
@@ -1014,9 +1017,8 @@ def _crops_header(ctx, parent) -> QWidget:
     row = FlowLayout(host, h_spacing=8)
     sync_flow_height(host)
     title = QLabel("Crops over time", host)
-    title.setObjectName("Caption")
-    button = QPushButton("Pop out", host)
-    button.setProperty("variant", "secondary")
+    title.setProperty("textRole", "label")
+    button = buttons.default("Pop out", host)
     button.setToolTip("Open the first selected nanowell's crops at every timepoint, large, in a window of their own "
                       "— on one brightness scale, so changes between timepoints read as changes. The window "
                       "follows the selection.")
@@ -1034,8 +1036,7 @@ def _crops_header(ctx, parent) -> QWidget:
 
 def _go_to_button(ctx, name: str, parent) -> QPushButton:
     """**Go to nanowell**: the crops' nanowell on Identity ▸ Blink (``controller.go_to_site_in_blink``)."""
-    button = QPushButton("Go to nanowell", parent)
-    button.setProperty("variant", "secondary")
+    button = buttons.default("Go to nanowell", parent)
     button.setToolTip(_GO_TO_TIP)
     button.clicked.connect(lambda _=False: nwc.go_to_site_in_blink(ctx))
     ctx.widgets.register(name, button)
@@ -1203,8 +1204,7 @@ class _PopoutWindow(QDialog):
 
 
 def _button(text: str, tip: str, on_click) -> QPushButton:
-    button = QPushButton(text)
-    button.setProperty("variant", "secondary")
+    button = buttons.default(text)
     button.setToolTip(tip)
     if on_click is not None:
         button.clicked.connect(lambda _=False: on_click())
@@ -1230,7 +1230,7 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
         lay.addWidget(box)
         layer_actions[key] = box
     caption = QLabel("Nanowells", page)
-    caption.setObjectName("Muted")
+    caption.setProperty("textRole", "help")
     lay.addWidget(caption)
     group = QButtonGroup(page)
     colour_actions = {}
@@ -1242,11 +1242,10 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
         lay.addWidget(radio)
         colour_actions[key] = radio
     caption = QLabel("Show as", page)
-    caption.setObjectName("Muted")
+    caption.setProperty("textRole", "help")
     lay.addWidget(caption)
     for key, label in _PRESETS:
-        preset = QPushButton(label, page)
-        preset.setProperty("variant", "secondary")
+        preset = buttons.default(label, page)
         preset.clicked.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
         reg.register(f"_nw_preset_{key}", preset)
         lay.addWidget(preset)
@@ -1264,7 +1263,7 @@ def _well_part(band, well_cb) -> QWidget:
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(theme.Spacing.xs)
     caption = QLabel("Well", part)
-    caption.setObjectName("Muted")
+    caption.setProperty("textRole", "help")
     row.addWidget(caption)
     row.addWidget(well_cb)
     return part
@@ -1414,17 +1413,16 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     grp_image = band.add_scope("Image", image_cb, image_channel_cb, range_btn)
 
     layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
-    overlays_btn = _button("Overlays", _OVERLAYS_TIP, None)
-    overlays_btn.setCheckable(True)
-    overlays_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
-    overlays_btn.setChecked(True)
+    # Two settings of the figure, each acting at once: switches named for what is true when on (§2.5).
+    from widgets.toggle_switch import ToggleSwitch
+    overlays_btn = ToggleSwitch("Show overlays", checked=True)
+    overlays_btn.setToolTip(_OVERLAYS_TIP)
     overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
     reg.register("_nw_overlays_btn", overlays_btn)
     # The footer's Notes, also a button: the Layers menu's entry alone was hard to find (UX review N6). Like
     # Overlays it shows or hides what is on the figure, so it sits beside Overlays under the figure.
-    notes_btn = _button("Notes", _NOTES_TIP, None)
-    notes_btn.setCheckable(True)
-    notes_btn.setProperty("variant", "toggle")
+    notes_btn = ToggleSwitch("Show notes")
+    notes_btn.setToolTip(_NOTES_TIP)
     notes_btn.toggled.connect(lambda on: nwc.set_layer(ctx, "notes", on))
     reg.register("_nw_notes_btn", notes_btn)
     grp_layers = band.add_scope("", layers_btn)
@@ -1454,9 +1452,9 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     reg.register("_nw_refresh_zoom", refresh_zoom)
 
     # The anchor's buttons last: actions on the picture, after the settings that say how it is drawn.
-    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
-    anchor_btn.setCheckable(True)
-    anchor_btn.setProperty("variant", "toggle")         # "secondary" paints checked and unchecked the same
+    # A tool: pressed in while the next click on the picture sets the anchor (``ui.buttons.mode_tool``).
+    anchor_btn = buttons.mode_tool("Set anchor")
+    anchor_btn.setToolTip(_ANCHOR_TIP)
     anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
     clear_anchor_btn = _button("Clear anchor", _CLEAR_ANCHOR_TIP, lambda: nwc.clear_anchor(ctx))
     # Shorter here than on the QC view, where it has room: every button beside it already says "anchor".

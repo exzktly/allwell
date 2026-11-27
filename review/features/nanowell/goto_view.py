@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from review.features.nanowell import _goto_controller as gtc
 from review.features.nanowell.identity_focus_compute import FOCUS_MODES
+from ui import buttons
 
 _TIP = ("Go to one nanowell: type its address and press Enter. Write it as the addresses are drawn, q,r (for\n"
         "example -2,3), or as a ring label such as 3.7, and lead it with a well to go to another well: B04 2,-1.\n"
@@ -37,7 +38,7 @@ class GotoControls:
 
 def build_goto_controls(ctx, band) -> GotoControls:
     """The box and **Origin** on *band*, as one scope."""
-    from PySide6.QtWidgets import QLineEdit, QPushButton
+    from PySide6.QtWidgets import QLineEdit
 
     edit = QLineEdit()
     edit.setPlaceholderText("q,r")
@@ -48,8 +49,7 @@ def build_goto_controls(ctx, band) -> GotoControls:
     edit.returnPressed.connect(lambda: gtc.go_to_nanowell(ctx, edit.text()))
     edit.textChanged.connect(lambda text: gtc.go_to_nanowell(ctx, "") if not text.strip() else None)
     ctx.widgets.register("_nw_goto_edit", edit)
-    origin = QPushButton("Origin")
-    origin.setProperty("variant", "secondary")
+    origin = buttons.default("Origin")
     origin.setToolTip(_ORIGIN_TIP)
     origin.clicked.connect(lambda _=False: go_to(ctx, edit, "0,0"))
     ctx.widgets.register("_nw_goto_origin_btn", origin)

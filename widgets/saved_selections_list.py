@@ -15,7 +15,7 @@ clicking the chevron expands it to the selection's well chips.
 
 **Composition (opt-in via ``setComposable(True)``):** the expanded
 row becomes editable — a single flat strip of the group's well chips (each a
-click-menu: *Remove*) plus a ``+ wells…`` button that opens a ``Popover``
+click-menu: *Remove*) plus a ``Add wells…`` button that opens a ``Popover``
 hosting a ``WellPlateSelector`` (multi-select). A group is one condition: its
 wells are implicitly its replicate set, so there are no replicate sub-lists /
 solo strips. The widget does *not* enforce cross-selection well exclusivity (a
@@ -73,7 +73,6 @@ _LST_MIN_H = 300
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"
 _EYE_OFF = "○"
-_KEBAB = "⋯"
 _CHEV_C = "▸"
 _CHEV_O = "▾"
 
@@ -219,7 +218,7 @@ class _SelectionRow(QFrame):
         self._dot = QToolButton(top)
         self._dot.setObjectName("RowDot")
         self._dot.setCursor(Qt.PointingHandCursor)
-        self._dot.setToolTip("Recolour")
+        self._dot.setToolTip("Recolor")
         self._dot.clicked.connect(
             lambda: self.recolourRequested.emit(self._id, self._dot))
         row.addWidget(self._dot)
@@ -238,7 +237,10 @@ class _SelectionRow(QFrame):
 
         self._kebab = QToolButton(top)
         self._kebab.setObjectName("RowGhost")
-        self._kebab.setText(_KEBAB)
+        from widgets import icons
+        self._kebab.setIcon(icons.make_icon("more-horizontal", 14))    # the drawn icon, not a "⋯" in the text
+        self._kebab.setToolTip("More")
+        self._kebab.setAccessibleName("More")
         self._kebab.setCursor(Qt.PointingHandCursor)
         self._kebab.clicked.connect(
             lambda: self.kebabRequested.emit(self._id, self._kebab))
@@ -255,7 +257,6 @@ class _SelectionRow(QFrame):
         outer.addWidget(self._chips_host)
 
         self._top = top
-        self.setStyleSheet(self._qss())
         top.mouseDoubleClickEvent = self._begin_rename  # type: ignore[assignment]
         top.mousePressEvent = self._on_body_press        # type: ignore[assignment]
 
@@ -288,37 +289,6 @@ class _SelectionRow(QFrame):
         return self._compact
 
     # ── styling ──────────────────────────────────────────────────────────
-    def _qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        QFrame#SelectionRow {{ background: transparent; border-radius: {r.sm}px;
-            border-left: 3px solid transparent; }}
-        QFrame#SelectionRow[current="true"] {{
-            background-color: {c.accent_dim};
-            border-left: 3px solid {c.accent};
-        }}
-        QFrame#SelectionRow[current="true"] QLabel#RowName {{
-            color: {c.text_primary};
-            font-weight: 700;
-        }}
-        QToolButton#RowGhost {{ border: none; background: transparent; color: {c.text_secondary};
-            padding: 0 2px; }}
-        QToolButton#RowGhost:hover {{ color: {c.text_primary}; }}
-        QToolButton#RowDot {{ border: 1px solid {c.border}; border-radius: 7px;
-            min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; }}
-        QLabel#RowHandle {{ color: {c.text_faint}; }}
-        QLabel#RowName {{ color: {c.text_primary}; }}
-        QLabel#RowName[hiddenRow="true"] {{ color: {c.text_muted}; }}
-        QLabel#RowCount {{ color: {c.text_secondary}; background-color: {c.panel_elevated};
-            border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 0 6px; }}
-        QLabel#RepLabel {{ color: {c.text_faint}; font-size: {theme.Typography.caption_size}px; }}
-        QToolButton#RowChip {{ color: {c.text_primary}; background-color: {c.panel_elevated};
-            border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 1px 6px; }}
-        QToolButton#RowChip:hover {{ border-color: {c.accent}; }}
-        QToolButton#RepBtn {{ border: 1px solid {c.border_subtle}; border-radius: {r.xs}px;
-            background: transparent; color: {c.text_secondary}; padding: 0 4px; }}
-        QToolButton#RepBtn:hover {{ color: {c.text_primary}; border-color: {c.border}; }}
-        """
 
     # ── populate / refresh ───────────────────────────────────────────────
     def update_from(self, sel: dict, *, current: bool, composable: bool = False,
@@ -337,7 +307,7 @@ class _SelectionRow(QFrame):
         self._chip.setText(str(len(self._wells)))
         col = _hex6(sel.get("color"))
         self._dot.setStyleSheet(
-            f"QToolButton#RowDot {{ background-color: {col}; border: 1px solid {theme.Colors.border};"
+            f"QToolButton#RowDot {{ background-color: {col}; border: 1px solid {theme.Colors.hairline};"
             f" border-radius: 7px; min-width:14px; max-width:14px; min-height:14px; max-height:14px; }}")
         self._eye.blockSignals(True)
         self._eye.setChecked(hidden)
@@ -350,7 +320,6 @@ class _SelectionRow(QFrame):
         # selector (colour swap). Per-widget ``opacity:`` in QSS is a no-op
         # on QLabel — Qt only honours opacity via QGraphicsOpacityEffect —
         # so don't try to set it here.
-        self.setStyleSheet(self._qss())
         if self._expanded:
             self._fill_chips()
         self.style().unpolish(self); self.style().polish(self)
@@ -367,7 +336,7 @@ class _SelectionRow(QFrame):
         box = QWidget(self._chips_host)
         bv = QVBoxLayout(box)
         bv.setContentsMargins(0, 0, 0, 0)
-        bv.setSpacing(2)
+        bv.setSpacing(theme.Spacing.xs)
         if not self._composable:
             self._build_readonly(bv, box)
         else:
@@ -402,7 +371,7 @@ class _SelectionRow(QFrame):
 
         if not self._wells:
             lbl = QLabel("(no wells)", parent)
-            lbl.setObjectName("Caption")
+            lbl.setProperty("textRole", "label")
             lbl.setWordWrap(True)
             bv.addWidget(lbl)
             return
@@ -417,7 +386,7 @@ class _SelectionRow(QFrame):
         w = QWidget(parent)
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
-        h.setSpacing(3)
+        h.setSpacing(theme.Spacing.xs)
         if label:
             lab = QLabel(label, w)
             lab.setObjectName("RepLabel")
@@ -430,24 +399,24 @@ class _SelectionRow(QFrame):
     def _build_composable(self, bv: QVBoxLayout, parent: QWidget) -> None:
         # A group is one condition: all its wells are its replicate set, so the
         # editor is a single flat strip of well chips (each chip → Remove) plus
-        # the "+ wells…" picker. No replicate sub-lists / solo strips.
+        # the "Add wells…" picker. No replicate sub-lists / solo strips.
         if not self._wells:
-            lbl = QLabel("(no wells — use “+ wells…”)", parent)
-            lbl.setObjectName("Caption")
+            lbl = QLabel("(no wells — use “Add wells…”)", parent)
+            lbl.setProperty("textRole", "label")
             bv.addWidget(lbl)
         else:
-            bv.addWidget(self._chip_strip("wells:", self._wells,
+            bv.addWidget(self._chip_strip("wells", self._wells,
                                           parent=parent))
         # + wells…
         addw = QToolButton(parent)
         addw.setObjectName("RepBtn")
-        addw.setText("+ wells…")
+        addw.setText("Add wells…")
         addw.setCursor(Qt.PointingHandCursor)
         addw.clicked.connect(self._open_compose_popover)
         self._compose_btn = addw
         roww = QWidget(parent)
         hl = QHBoxLayout(roww)
-        hl.setContentsMargins(0, 2, 0, 0)
+        hl.setContentsMargins(0, theme.Spacing.xs, 0, 0)
         hl.addWidget(addw)
         hl.addStretch(1)
         bv.addWidget(roww)
@@ -531,7 +500,7 @@ class _SelectionRow(QFrame):
         br.addStretch(1)
         cancel = QPushButton("Cancel")
         okb = QPushButton("OK")
-        okb.setObjectName("Primary")
+        okb.setProperty("variant", "primary")
         br.addWidget(cancel)
         br.addWidget(okb)
         cv.addLayout(br)
@@ -667,7 +636,7 @@ class SavedSelectionsList(QWidget):
         self._vbox = QVBoxLayout(self._body)
         self._vbox.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs,
                                       theme.Spacing.xs, theme.Spacing.xs)
-        self._vbox.setSpacing(2)
+        self._vbox.setSpacing(theme.Spacing.xs)
         self._vbox.addStretch(1)
         self._scroll.setWidget(self._body)
         v.addWidget(self._scroll, 1)
@@ -681,15 +650,7 @@ class SavedSelectionsList(QWidget):
         footer.addStretch(1)
         v.addLayout(footer)
 
-        self.setStyleSheet(self._qss())
 
-    def _qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        QScrollArea#SavedSelScroll {{ background: transparent; }}
-        QWidget#SavedSelBody {{ background-color: {c.panel}; border: 1px solid {c.border_subtle};
-            border-radius: {r.sm}px; }}
-        """
 
     # ── model API ────────────────────────────────────────────────────────
     def setSelections(self, selections) -> None:
@@ -878,10 +839,10 @@ class SavedSelectionsList(QWidget):
             # large void above the marooned "From selection" / "Import" footer.
             self._vbox.insertStretch(0)
             hint = QLabel(
-                "No groups yet.\nUse “+ Add” above or “From selection” below "
+                "No groups yet.\nUse “Add” above or “From selection” below "
                 "to create one."
             )
-            hint.setObjectName("Muted")
+            hint.setProperty("textRole", "help")
             hint.setAlignment(Qt.AlignCenter)
             hint.setWordWrap(True)
             self._vbox.insertWidget(self._vbox.count() - 1, hint)
@@ -986,7 +947,7 @@ class SavedSelectionsList(QWidget):
             return
         m = QMenu(self)
         a_rename = m.addAction("Rename")
-        a_recolour = m.addAction("Recolour…")
+        a_recolour = m.addAction("Recolor…")
         a_dup = m.addAction("Duplicate")
         a_hide = m.addAction("Show" if s["hidden"] else "Hide")
         m.addSeparator()
@@ -1082,7 +1043,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("SavedSelectionsList (editable + composable)")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     lst = SavedSelectionsList()
@@ -1097,7 +1058,7 @@ if __name__ == "__main__":
          "wells": ["C01", "C02", "C03"], "replicates": [["C01", "C02", "C03"]], "source": "rep_set"},
         {"id": "cccc3333", "name": "Drug A — 10µM", "color": tr[2], "hidden": False,
          "wells": ["D01", "D02", "D03"], "replicates": None, "source": "user"},
-        {"id": "dddd4444", "name": "Untreated", "color": theme.Colors.text_muted, "hidden": True,
+        {"id": "dddd4444", "name": "Untreated", "color": theme.Colors.text_secondary, "hidden": True,
          "wells": ["E01", "E02"], "replicates": None, "source": "import"},
     ])
     lst.setCurrentId("bbbb2222")
@@ -1113,12 +1074,12 @@ if __name__ == "__main__":
     lay.addLayout(row)
 
     echo = QLabel("(expand a row → edit chips / replicates / + wells…)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     echo.setWordWrap(True)
     lay.addWidget(echo)
     lst.entryActivated.connect(lambda i: echo.setText(f"activated → {i}"))
     lst.entryRenamed.connect(lambda i, n: echo.setText(f"renamed {i} → {n}"))
-    lst.entryRecoloured.connect(lambda i, c: echo.setText(f"recoloured {i} → {c}"))
+    lst.entryRecoloured.connect(lambda i, c: echo.setText(f"recolored {i} → {c}"))
     lst.entryVisibilityToggled.connect(lambda i, h: echo.setText(f"{i} hidden={h}"))
     lst.orderChanged.connect(lambda ids: echo.setText("order → " + ", ".join(ids)))
     lst.entryDeleted.connect(lambda i: echo.setText(f"deleted → {i}"))
@@ -1129,3 +1090,50 @@ if __name__ == "__main__":
     root.resize(480, 480)
     root.show()
     _sys.exit(app.exec())
+
+
+def _row_qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    QFrame#SelectionRow {{ background: transparent; border-radius: {r.sm}px;
+        border-left: 3px solid transparent; }}
+    QFrame#SelectionRow[current="true"] {{
+        background-color: {c.selected};
+        border-left: 3px solid {c.accent};
+    }}
+    QFrame#SelectionRow[current="true"] QLabel#RowName {{
+        color: {c.text_primary};
+        font-weight: 700;
+    }}
+    QToolButton#RowGhost {{ border: none; background: transparent; color: {c.text_secondary};
+        padding: 0 2px; }}
+    QToolButton#RowGhost:hover {{ color: {c.text_primary}; }}
+    QToolButton#RowDot {{ border: 1px solid {c.hairline}; border-radius: 7px;
+        min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; }}
+    QLabel#RowHandle {{ color: {c.text_disabled}; }}
+    QLabel#RowName {{ color: {c.text_primary}; }}
+    QLabel#RowName[hiddenRow="true"] {{ color: {c.text_secondary}; }}
+    QLabel#RowCount {{ color: {c.text_secondary}; background-color: {c.control};
+        border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 0 6px; }}
+    QLabel#RepLabel {{ color: {c.text_secondary}; font-size: {theme.Typography.caption_size}px; }}
+    QToolButton#RowChip {{ color: {c.text_primary}; background-color: {c.control};
+        border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 1px 6px; }}
+    QToolButton#RowChip:hover {{ border-color: {c.accent}; }}
+    QToolButton#RepBtn {{ border: 1px solid {c.border_subtle}; border-radius: {r.xs}px;
+        background: transparent; color: {c.text_secondary}; padding: 0 4px; }}
+    QToolButton#RepBtn:hover {{ color: {c.text_primary}; border-color: {c.field_edge}; }}
+    """
+
+
+def _list_qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    QScrollArea#SavedSelScroll {{ background: transparent; }}
+    QWidget#SavedSelBody {{ background-color: {c.card}; border: 1px solid {c.border_subtle};
+        border-radius: {r.sm}px; }}
+    """
+
+
+def qss() -> str:
+    """The rows' and the list's rules, included by the application sheet (``ui/component_qss.py``)."""
+    return _row_qss() + _list_qss()

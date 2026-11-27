@@ -29,21 +29,18 @@ def qapp():
 _run_worker_to_completion = run_worker_to_completion
 
 
-def test_run_button_restores_its_play_glyph_when_not_running(qapp):
-    """Regression guard: every other Datasets tool's run button restores its
-    "▶ " glyph once a run finishes (Validate's "▶  Check", Subset's
-    "▶  Subset", OME-TIFF's "▶  Convert", Merge Plates'
-    "▶  Merge") -- Concatenate's was the one holdout, dropping back to a bare
-    "Concatenate" with no glyph, which read as a different, unstarted-looking
-    control next to its own "Concatenating…" running label."""
+def test_run_button_restores_its_label_when_not_running(qapp):
+    """Regression guard: the run button goes back to its own label once a run finishes, rather than keeping the
+    running label "Concatenating…" — the label every Datasets tool's run button restores. (It carried a "▶ "
+    glyph once; the design language draws no glyphs in labels, tracker row D13.)"""
     from datasets.concatenate.view import ConcatenatePage
 
     page = ConcatenatePage()
-    assert page._run_btn.text() == "▶  Concatenate"
+    assert page._run_btn.text() == "Concatenate"
     page.set_running(True)
     assert page._run_btn.text() == "Concatenating…"
     page.set_running(False)
-    assert page._run_btn.text() == "▶  Concatenate"
+    assert page._run_btn.text() == "Concatenate"
 
 
 def test_dashboard_hidden_until_both_datasets_are_valid_then_previews_real_wells(qapp, tmp_path):
@@ -105,7 +102,7 @@ def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_war
     _run_worker_to_completion(ctrl)
 
     assert ctrl._last_result[0] is True  # the run actually succeeded
-    assert page._dest_field._hint.objectName() == "Muted"
+    assert (page._dest_field._hint.property("textRole") == "help" and not page._dest_field._hint.property("textTone"))
     assert "Already holds a finished dataset" not in page._dest_field._hint.text()
     assert "now holds the merged dataset" in page._dest_field._hint.text()
     # The run gate itself is unaffected by the note -- Concatenate is still
@@ -133,7 +130,7 @@ def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path)
     ctrl = ConcatenateController(on_open_in_review=lambda _p: None)
     page = ctrl.page
     assert page._run_btn.property("variant") == "primary"
-    assert page._open_btn.property("variant") == "secondary"
+    assert page._open_btn.property("variant") == "default"
 
     page._ds1_field.set_path(str(ds1))
     page._ds2_field.set_path(str(ds2))
@@ -144,7 +141,7 @@ def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path)
 
     assert ctrl._last_result[0] is True
     assert page._open_btn.property("variant") == "primary"
-    assert page._run_btn.property("variant") == "secondary"
+    assert page._run_btn.property("variant") == "default"
 
     # Picking dataset 1 again (any interactive input change) hands the
     # primary emphasis back to the run button.

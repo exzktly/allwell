@@ -32,8 +32,7 @@ import logging
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
-    QVBoxLayout, QWidget,
+    QComboBox, QDialog, QLabel, QLineEdit, QMessageBox, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -49,6 +48,7 @@ from review.domain.viewer_state import make_schema_extractor, extract_well_token
 from review.core.channel_state_controller import recalculate_threshold
 from review.data.data_loading import load_and_project
 from core.safe import swallowed
+from ui import buttons
 
 logger = logging.getLogger("smfish_tab")
 
@@ -89,7 +89,8 @@ _NO_SIDECAR_MESSAGE = (
 
 
 from widgets.canvas import make_canvas
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
+
 from widgets.page_body import build_page_body
 from util.well_token import canonical_well_label
 
@@ -205,52 +206,64 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_scope("Channel", channel_cb)
 
-    fov_cb = reg.register("_smfish_fov_cb", LabeledComboBox("FOV"))
+    fov_cb = reg.register("_smfish_fov_cb", unlabelled("FOV"))
     fov_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    ctrl.add_scope("", fov_cb)
+    ctrl.add_scope("FOV", fov_cb)
 
-    tp_cb = reg.register("_smfish_tp_cb", LabeledComboBox("Timepoint"))
+    tp_cb = reg.register("_smfish_tp_cb", unlabelled("Timepoint"))
     tp_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    ctrl.add_scope("", tp_cb)
+    ctrl.add_scope("Timepoint", tp_cb)
 
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500"))
     threshold_edit.setFixedWidth(_THRESHOLD_EDIT_W)
     threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("Threshold", threshold_edit, trailing=True)
 
+    # How the frame is drawn — its LUT range, the overlays, the frame's CDF — is on the inspector's Display page
+    # (design language §6): the band keeps what is shown (channel, field, timepoint, threshold) on one row.
+    from review.core.inspector_panels import make_popover_button
+    from widgets.form_grid import FormGrid
+
+    display_btn, display_panel, display_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
+    display_btn.setToolTip("How the frame is drawn: its LUT range, the overlays and the frame's CDF")
+    reg.register("_smfish_display_btn", display_btn)
+    lut_form = FormGrid(display_panel)
+    display_lay.addWidget(lut_form)
+
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit(""))
-    lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
+    lut_min_edit.setMaximumWidth(theme.Metrics.num_field_w)
     lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    ctrl.add_scope("LUT Min", lut_min_edit)
+    lut_form.add_row("LUT min", lut_min_edit)
 
     lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit(""))
-    lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
+    lut_max_edit.setMaximumWidth(theme.Metrics.num_field_w)
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    ctrl.add_scope("LUT Max", lut_max_edit)
+    lut_form.add_row("LUT max", lut_max_edit)
 
-    apply_btn = QPushButton("Apply Global Threshold", ctrl)
-    apply_btn.setProperty("variant", "secondary")
+    apply_btn = buttons.default("Apply global threshold", ctrl)
     apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx))
     ctrl.add_action(apply_btn)
 
-    refresh_btn = QPushButton("Refresh", ctrl)
-    refresh_btn.setProperty("variant", "secondary")
+    refresh_btn = buttons.default("Refresh", ctrl)
     refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx))
     ctrl.add_action(refresh_btn)
 
-    overlay_btn = reg.register("_smfish_overlay_btn", QPushButton("Hide Overlays", ctrl))
-    overlay_btn.setProperty("variant", "secondary")
+    # A setting that acts at once: a switch named for what is true when on (§2.5).
+    from widgets.toggle_switch import ToggleSwitch
+    overlay_btn = reg.register("_smfish_overlay_btn",
+                               ToggleSwitch("Show overlays", display_panel,
+                                            checked=bool(ctx.state.smfish.show_overlays)))
     overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx))
-    ctrl.add_action(overlay_btn)
+    display_lay.addWidget(overlay_btn)
 
-    cdf_btn = QPushButton("This Frame CDF", ctrl)
-    cdf_btn.setProperty("variant", "secondary")
+    cdf_btn = buttons.default("This frame CDF", display_panel)
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
-    ctrl.add_action(cdf_btn)
+    display_lay.addWidget(cdf_btn)
+    ctrl.add_action(display_btn)
 
     # Status row. Starts blank: an empty selection is the shared placeholder's
     # message now, and this label sits *outside* the empty-state stack, so any
@@ -258,7 +271,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # instead of it. The label still carries this tab's own states (the smFISH
     # channel missing, an image that failed to load, Apply-to-All progress).
     status_label = reg.register("_smfish_status_label", QLabel("", parent))
-    status_label.setObjectName("Muted")
+    status_label.setProperty("textRole", "help")
     root.addWidget(status_label)
 
     # Matplotlib image
@@ -481,7 +494,7 @@ def _smfish_set_status(ctx, text: str) -> None:
     ctx.runtime.smfish.status_label.setText(text)
 
 
-# Apply to All reuses the status-row progress bar that a dataset load drives,
+# Apply global threshold reuses the status-row progress bar that a dataset load drives,
 # so the two long operations in the app report themselves the same way. The
 # three helpers below are the only place this tab touches that widget, and all
 # of them run on the GUI thread — the worker reaches them through
@@ -519,9 +532,7 @@ def _smfish_hide_progress(ctx) -> None:
 def _smfish_toggle_overlays(ctx) -> None:
     sm = ctx.state.smfish
     sm.show_overlays = not sm.show_overlays
-    ctx.runtime.smfish.overlay_btn.setText(
-        "Hide Overlays" if sm.show_overlays else "Show Overlays"
-    )
+    ctx.runtime.smfish.overlay_btn.setChecked(bool(sm.show_overlays))
     _smfish_redraw(ctx)
 
 
@@ -557,9 +568,9 @@ def _smfish_update_cdf_plot(ctx) -> None:
     if ctx.runtime.smfish.cdf_ax is None:
         return
 
-    bg_panel = theme.Colors.panel
+    bg_panel = theme.Colors.card
     txt_pri = theme.Colors.text_primary
-    txt_mut = theme.Colors.text_muted
+    txt_mut = theme.Colors.text_secondary
     accent = theme.Colors.accent
 
     log_img = ctx.runtime.smfish.current_log_img
@@ -637,8 +648,8 @@ def _smfish_paint_empty(ctx, message: str) -> None:
     if ctx.runtime.smfish.ax_img is None:
         return
     try:
-        bg_panel = theme.Colors.panel
-        txt_mut = theme.Colors.text_muted
+        bg_panel = theme.Colors.card
+        txt_mut = theme.Colors.text_secondary
         ctx.runtime.smfish.ax_img.clear()
         ctx.runtime.smfish.ax_img.set_facecolor(bg_panel)
         if ctx.runtime.smfish.fig_img is not None:
@@ -760,7 +771,7 @@ def _smfish_get_threshold(ctx) -> float:
 
     An unparseable box used to read as ``0.0``, which is not a neutral value
     here: it is the *lowest possible* threshold, so a stray keystroke silently
-    counted every spot in every well, and "Apply Global Threshold" would then
+    counted every spot in every well, and "Apply global threshold" would then
     write those counts across the plate. Falling back to the last value that
     parsed keeps the preview honest while the user is mid-edit, and the status
     line says the box is not a number.
@@ -925,7 +936,7 @@ def _smfish_apply_to_all(ctx) -> None:
     # ``cancel_event.clear()`` discarded a cancel meant for the first. Reject a
     # second concurrent run; the flag is cleared in ``_done`` on any exit.
     if ctx.runtime.smfish.apply_running:
-        _smfish_set_status(ctx, "Apply to All is already running.")
+        _smfish_set_status(ctx, "“Apply global threshold” is already running.")
         return
     channel = ctx.runtime.smfish.channel_cb.currentText().strip().lower()
     thr = _smfish_get_threshold(ctx)
@@ -969,12 +980,12 @@ def _smfish_apply_to_all(ctx) -> None:
             # it was and where to look.
             QMessageBox.warning(
                 frame, "smFISH",
-                f"Apply to All did not finish: {shortfall} well(s) were not "
+                f"Apply global threshold did not finish: {shortfall} well(s) were not "
                 "written and still hold their previous counts. The log names "
                 "which wells and why.",
             )
             return
-        QMessageBox.information(frame, "smFISH", "Apply to All finished.")
+        QMessageBox.information(frame, "smFISH", "Apply global threshold finished.")
 
     # Cancel event used by load_controller / app shutdown to abort
     # the in-flight smFISH run before it overwrites CSVs from a
@@ -1066,5 +1077,5 @@ def _smfish_refresh_app_cache(ctx) -> None:
             refresh_review_csv()
         except Exception:
             logging.getLogger("review").exception(
-                "Review CSV refresh after Apply Global Threshold failed"
+                "Review CSV refresh after Apply global threshold failed"
             )

@@ -26,7 +26,7 @@ column, or the high tail of one well and the low tail of another. The newest box
 (``keys``, ``lo``, ``hi``, ``panel``, ``slots``), which the strip's Low and High fields edit; the earlier ones are
 in ``more``, newest first. Membership is the **union** of the boxes' members, each box judged on its own columns and
 range under the window's one *every | any* rule and *This panel only* choice. A Shift-drag made while a window is
-already in the Subset (after *Use as Subset*) carries that window's nanowells over in ``carried``: they are members
+already in the Subset (after *Use as subset*) carries that window's nanowells over in ``carried``: they are members
 whatever the boxes hold, so the Subset can be built up one region at a time (``_window_controller.on_release``).
 
 Qt-free.

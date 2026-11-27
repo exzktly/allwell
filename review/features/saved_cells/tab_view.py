@@ -6,7 +6,7 @@ buttons under a list act on its selected row:
 
 * **Saved cell sets** — a line naming every set in force and where (excluded
   from analysis, highlighted on Scatter, shown in Cell Browser), then
-  *View in Cell Browser*, *Highlight on Scatter*,
+  *View in Cell Browser*, *Highlight on scatter*,
   *Exclude from analysis* (each a toggle; one set at a time can be highlighted
   and one excluded), rename and delete.
 * **Gates** — *View in Cell Browser* (the cells inside that gate alone) and
@@ -35,8 +35,9 @@ from review.core.ui_helpers import build_section_header
 from review.features.saved_cells import collect
 from review.features.saved_cells import controller as ctl
 from ui import theme
+from widgets.page_body import build_bandless_body
 from widgets.flow_layout import FlowLayout
-from widgets.page_body import build_page_body
+from ui import buttons
 
 _SET_COLUMNS = ("Name", "Cells", "From", "In use")
 #: A frame or a padding is drawn on both sides of what it surrounds.
@@ -138,8 +139,7 @@ def _button_row(parent: QWidget, lay: QVBoxLayout) -> FlowLayout:
 
 
 def _button(parent: QWidget, text: str, tip: str, *, checkable: bool = False) -> QPushButton:
-    btn = QPushButton(text, parent)
-    btn.setProperty("variant", "secondary")
+    btn = buttons.default(text, parent)
     btn.setToolTip(tip)
     btn.setCheckable(checkable)
     return btn
@@ -170,16 +170,16 @@ class SavedCellsPage(QWidget):
         self.in_force.setWordWrap(True)
         lay.addWidget(self.in_force)
         self.sets_empty = QLabel(
-            "No saved cells yet. Draw round cells with Lasso cells on a Spatial map or a "
+            "No saved cells yet. Draw round cells with “Lasso cells” on a Spatial map or a "
             "Multivariate projection to save them here.", self)
-        self.sets_empty.setObjectName("Muted")
+        self.sets_empty.setProperty("textRole", "help")
         self.sets_empty.setWordWrap(True)
         lay.addWidget(self.sets_empty)
         self.sets = _table(self, _SET_COLUMNS)
         self.sets.itemSelectionChanged.connect(self._sync_set_buttons)
         lay.addWidget(self.sets)
         self.set_detail = QLabel("", self)
-        self.set_detail.setObjectName("Muted")
+        self.set_detail.setProperty("textRole", "help")
         self.set_detail.setWordWrap(True)
         lay.addWidget(self.set_detail)
         row = _button_row(self, lay)
@@ -187,7 +187,7 @@ class SavedCellsPage(QWidget):
                                 "Open Image Browser → Cell Browser showing this set's cells.")
         self.view_set.clicked.connect(lambda: self._on_set(ctl.view_set))
         self.highlight = _button(
-            self, "Highlight on Scatter",
+            self, "Highlight on scatter",
             "Draw this set's cells solid over a faded cloud on the per-cell Scatter. "
             "Changes no number. Click again to stop.", checkable=True)
         self.highlight.clicked.connect(lambda: self._on_set(ctl.toggle_highlight, refresh=True))
@@ -256,8 +256,8 @@ class SavedCellsPage(QWidget):
                  "only where Cell Gating applies it. Cells inside: at every timepoint in the "
                  "wells it was drawn on, of the cells every other layer keeps."))
         self.gates_empty = QLabel(
-            "No gates yet. Draw one on the Scatter Plot's per-cell view with Draw gate.", self)
-        self.gates_empty.setObjectName("Muted")
+            "No gates yet. Draw one on the Scatter Plot's per-cell view with “Draw gate”.", self)
+        self.gates_empty.setProperty("textRole", "help")
         self.gates_empty.setWordWrap(True)
         lay.addWidget(self.gates_empty)
         self.gates = _table(self, _GATE_COLUMNS)
@@ -275,7 +275,7 @@ class SavedCellsPage(QWidget):
         self.manage.clicked.connect(lambda: ctl.open_cell_gating(self.ctx))
         row.addWidget(self.manage)
         self.intensity = QLabel("", self)
-        self.intensity.setObjectName("Muted")
+        self.intensity.setProperty("textRole", "help")
         self.intensity.setWordWrap(True)
         lay.addWidget(self.intensity)
 
@@ -296,8 +296,8 @@ class SavedCellsPage(QWidget):
                  "page's Subset decides which nanowells its views and the Scatter Plot's nanowell scatter draw.")
         lay.addWidget(self.subsets_header)
         self.subsets_empty = QLabel(
-            "No saved subsets yet. Build one with Subset on the Nanowells page and save it there.", self)
-        self.subsets_empty.setObjectName("Muted")
+            "No saved subsets yet. Build one with “Subset” on the Nanowells page and save it there.", self)
+        self.subsets_empty.setProperty("textRole", "help")
         self.subsets_empty.setWordWrap(True)
         lay.addWidget(self.subsets_empty)
         self.subsets = _table(self, _SUBSET_COLUMNS)
@@ -369,7 +369,8 @@ class SavedCellsPage(QWidget):
 
 def build_saved_cells_tab(ctx, parent: QWidget) -> None:
     """Build the page into *parent* and register it for refreshes."""
-    _band, body = build_page_body(parent, content_margins=(theme.Spacing.lg,) * 3)
+    # No control band: nothing on the page scopes what it shows (``build_bandless_body``).
+    body = build_bandless_body(parent, inset=theme.Spacing.lg)
     # Scrolled, so on a short screen the lists keep their height and the page
     # scrolls, instead of every label being squeezed to fit.
     scroll = QScrollArea(body)

@@ -22,13 +22,15 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
 from services.remote_batch_step import DEFAULT_UPLOAD_AHEAD, UPLOAD_AHEAD_CHOICES
 from services.remote_config import default_remote_index, load_remotes
 from widgets.value_combo import ValueCombo
 from widgets.wrap_checkbox import WrapCheckBox
+from ui import buttons
+from ui import theme
 
 
 class AnalyzeRunFooterMixin:
@@ -124,19 +126,24 @@ class AnalyzeRunFooterMixin:
         Built after the form, because the remote selector's first refresh
         shows or hides the Remote options section the form holds.
         """
-        # Its top edge and fill are QSS (``QWidget#AnalyzeRunFooter``).
+        # The run's foot is a card (design language §6, *Analyze*) on the page's canvas, pinned under the form:
+        # Run on and Manage…, then the commands with the primary last, then why it cannot run yet.
+        from widgets.card import Card
         footer.setAttribute(Qt.WA_StyledBackground, True)
-        layout = QVBoxLayout(footer)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        outer = QVBoxLayout(footer)
+        outer.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.md)
+        outer.setSpacing(0)
+        card = Card(parent=footer)
+        outer.addWidget(card)
+        layout = card.body()
 
         # Remote-execution selector. Populated from remotes.toml in the app
         # folder so users can flip between Local and any configured SSH host
         # without restarting the GUI.
-        remote_widget = QWidget(footer)
+        remote_widget = QWidget(card)
         rl = QHBoxLayout(remote_widget)
-        rl.setContentsMargins(12, 8, 12, 0)
-        rl.setSpacing(8)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(theme.Spacing.sm)
         rl.addWidget(QLabel("Run on", remote_widget))
         self._remote_cb = QComboBox(remote_widget)
         self._remote_cb.addItem("Local", userData=None)
@@ -156,8 +163,7 @@ class AnalyzeRunFooterMixin:
         self._remote_cb.setCurrentIndex(
             default_remote_index(self._remote_cb.count()))
         rl.addWidget(self._remote_cb, 1)
-        self._manage_remotes_btn = QPushButton("Manage…", remote_widget)
-        self._manage_remotes_btn.setProperty("variant", "secondary")
+        self._manage_remotes_btn = buttons.quiet("Manage…", remote_widget)
         self._manage_remotes_btn.setToolTip(
             "Add, edit, delete, test, or bootstrap remote-execution hosts.")
         self._manage_remotes_btn.clicked.connect(self.open_manage_remotes)
@@ -170,13 +176,12 @@ class AnalyzeRunFooterMixin:
         self._cleanup_remote_cb.toggled.connect(self._refresh_remote_controls)
         self._refresh_remote_controls()
 
-        layout.addWidget(self._build_run_row(footer))
+        layout.addWidget(self._build_run_row(card))
 
         # What stops the form from running, under Run: every problem, the
         # first in full; a click goes to its section (``analyze.run_problems``).
-        self._run_problems_lbl = QLabel("", footer)
+        self._run_problems_lbl = QLabel("", card)
         self._run_problems_lbl.setWordWrap(True)
-        self._run_problems_lbl.setContentsMargins(12, 0, 12, 8)
         self._run_problems_lbl.setCursor(Qt.PointingHandCursor)
         self._run_problems_lbl.mousePressEvent = lambda _ev: self._go_to_run_problem()
         layout.addWidget(self._run_problems_lbl)

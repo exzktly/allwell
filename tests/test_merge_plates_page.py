@@ -107,7 +107,7 @@ def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_war
     _run_worker_to_completion(ctrl)
 
     assert ctrl._last_result[0] is True
-    assert page._dest_field._hint.objectName() == "Muted"
+    assert (page._dest_field._hint.property("textRole") == "help" and not page._dest_field._hint.property("textTone"))
     assert "Already holds a finished dataset" not in page._dest_field._hint.text()
     assert "now holds the merged plate" in page._dest_field._hint.text()
     assert not page._dest_field.is_valid()
@@ -133,7 +133,7 @@ def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path)
     ctrl = MergePlatesController(on_open_in_review=lambda _p: None)
     page = ctrl.page
     assert page._run_btn.property("variant") == "primary"
-    assert page._open_btn.property("variant") == "secondary"
+    assert page._open_btn.property("variant") == "default"
 
     page._ds1_field.set_path(str(ds1))
     page._ds2_field.set_path(str(ds2))
@@ -144,7 +144,7 @@ def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path)
 
     assert ctrl._last_result[0] is True
     assert page._open_btn.property("variant") == "primary"
-    assert page._run_btn.property("variant") == "secondary"
+    assert page._run_btn.property("variant") == "default"
 
     page._ds1_field.set_path(str(ds1))
     page._ds1_field.changed.emit()

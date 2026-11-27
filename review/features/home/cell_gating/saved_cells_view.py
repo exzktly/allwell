@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QComboBox, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QPushButton, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from review.core import cell_sets as cs
 from review.core.ui_helpers import build_section_header
+from ui import buttons
 
 _NONE = "— none —"
 
@@ -31,7 +32,7 @@ class SavedCellsPanel(QWidget):
             hint="Sets of cells saved with Lasso cells on Spatial or Multivariate. Saving a "
                  "set changes no number; use it as the Cell Browser's source, or exclude it here."))
         self.empty = QLabel("No saved cells yet — draw a lasso on Spatial or Multivariate.", self)
-        self.empty.setObjectName("Muted")
+        self.empty.setProperty("textRole", "help")
         self.empty.setWordWrap(True)
         lay.addWidget(self.empty)
         self.list = QListWidget(self)
@@ -43,12 +44,10 @@ class SavedCellsPanel(QWidget):
         self.name.setPlaceholderText("Name of the selected set")
         self.name.editingFinished.connect(self._rename)
         row.addWidget(self.name, 1)
-        self.delete = QPushButton("Delete", self)
-        self.delete.setProperty("variant", "secondary")
+        self.delete = buttons.default("Delete", self)
         self.delete.clicked.connect(self._delete)
         row.addWidget(self.delete)
-        self.highlight = QPushButton("Highlight on Scatter", self)
-        self.highlight.setProperty("variant", "secondary")
+        self.highlight = buttons.default("Highlight on scatter", self)
         self.highlight.setToolTip("Draw this set's cells solid over the faded cloud on the per-cell "
                                   "Scatter (also under the Scatter's Display ▾). Changes no number.")
         self.highlight.clicked.connect(self._highlight)
@@ -56,7 +55,7 @@ class SavedCellsPanel(QWidget):
         lay.addLayout(row)
         ex = QHBoxLayout()
         ex_lbl = QLabel("Exclude from analysis", self)
-        ex_lbl.setObjectName("Muted")
+        ex_lbl.setProperty("textRole", "help")
         ex.addWidget(ex_lbl)
         self.exclude = QComboBox(self)
         self.exclude.setToolTip("The one saved set whose cells are left out of every plot, "

@@ -12,9 +12,10 @@ what a layer *does* moved; what moved is that only one of them is on screen.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from ui import theme
+from review.features.home.import_view import build_import_button
 from review.features.home.sample_map._phone import (
     BODY_KEY, LayerPage, install as install_phone_form, on_layer_shown,
 )
@@ -40,7 +41,13 @@ def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     switch = reg.register(SWITCH_KEY, SegmentedControl(frame))
     for layer in LAYERS:
         switch.addSegment(layer, data=layer)
-    outer.addWidget(switch)
+    # Import (groups from a JSON file) beside the switch, quiet: the one command Home's band held, and the groups
+    # it brings in are this tab's (``home.import_view``).
+    head = QHBoxLayout()
+    head.setSpacing(theme.Spacing.sm)
+    head.addWidget(switch, 1)
+    head.addWidget(build_import_button(ctx, frame))
+    outer.addLayout(head)
 
     # The role strip is rebuilt per layer rather than three strips being
     # stacked and hidden: the sentence is about what the plate below it means
@@ -66,7 +73,7 @@ def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     # here, so a user painting a fifth group has no way of knowing from this tab
     # that a variable has been grouping the plots all along.
     note = reg.register("_sample_map_grouping_note", QLabel("", body))
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     note.setWordWrap(True)
     note.setVisible(False)
     column.addWidget(note)

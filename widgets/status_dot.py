@@ -36,8 +36,8 @@ _STATUS_TOKENS = {
     "danger": "danger",
     "error": "danger",
     "accent": "accent",
-    "neutral": "text_muted",
-    "muted": "text_muted",
+    "neutral": "text_secondary",
+    "muted": "text_secondary",
 }
 
 
@@ -51,7 +51,6 @@ class StatusDot(QWidget):
         self._explicit_d = int(diameter) if diameter else None
         self._label = ""
         self._color = self._resolve(status)
-        self.setStyleSheet("#StatusDot { background: transparent; }")
 
     # ── API ──────────────────────────────────────────────────────────────
     def setStatus(self, status: str) -> None:
@@ -118,7 +117,7 @@ class StatusDot(QWidget):
             if token is not None:
                 return QColor(getattr(theme.Colors, token))
         c = QColor(status)
-        return c if c.isValid() else QColor(theme.Colors.text_muted)
+        return c if c.isValid() else QColor(theme.Colors.text_secondary)
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -136,7 +135,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("StatusDot")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     row = QHBoxLayout()

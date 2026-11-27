@@ -172,7 +172,7 @@ def test_the_controller_reports_the_folder_once_it_settles(qtbot, tmp_path):
         assert ok, message
         assert path == str(tmp_path)
         assert message.startswith("Settled — 1 file")
-        assert controller.page.status_text().startswith("✓ Settled")
+        assert controller.page.status_text().startswith("Settled")
     finally:
         _stop(controller, qtbot)
 

@@ -328,14 +328,14 @@ def _setup_axes(ctx, n_axes: int):
     def _build(fig):
         if n_axes == 1:
             axes = [fig.add_subplot(1, 1, 1)]
-            fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
+            fig.subplots_adjust(top=0.93, bottom=0.12, left=LEFT_MARGIN, right=0.97)
         else:
             axes = list(fig.subplots(n_axes, 1, sharex=True))
             # Minimal vertical padding so the stacked histograms read as
             # one chart rather than ``n`` disconnected panels; the
             # outer margins leave enough room for a suptitle + x-label.
             fig.subplots_adjust(
-                top=0.93, bottom=0.10, left=0.10, right=0.97, hspace=0.02,
+                top=0.93, bottom=0.10, left=LEFT_MARGIN, right=0.97, hspace=0.02,
             )
         return axes
 
@@ -979,6 +979,13 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
         ctx, tp_h, sum(_n_of(exact, i, vs) for i, (_, _, vs) in enumerate(groups)), len(groups),
     )
     fig.suptitle(title, fontsize=9)
+
+
+#: The figure's left margin, as a fraction of its width: room for the density tick labels and the "Density" label
+#: beside them. At 0.10 the label ran 21 px off the figure's left edge on a desk window, which the every-page render
+#: test's figure check reported. The tab's first axis is laid out with it too (``tab_view``), since a redraw keeps
+#: an axis it already has.
+LEFT_MARGIN = 0.13
 
 
 #: Tag on the sampled-figure note, so a test (and a redraw) can find it.

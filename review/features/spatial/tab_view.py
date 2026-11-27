@@ -12,12 +12,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QPushButton, QWidget,
+    QComboBox, QWidget,
 )
 
 from widgets.control_band import ControlBand
 from widgets.icons import make_icon
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 
 from review.core.ui_helpers import build_plot_save_menu
 from review.features.export.service import export_cell_data_from
@@ -28,6 +28,7 @@ from review.features.spatial import controller as sp_ctrl
 from review.features.spatial.collect import available_metric_columns, available_timepoints
 from domain.tp_match import tp_close
 from widgets.spin_box import SpinBox, DoubleSpinBox
+from ui import buttons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -71,7 +72,7 @@ _VIZ_LABELS = {
 
 _VIZ_TOOLTIPS = {
     sp_state.VIZ_SPATIAL_MAP:
-        "Scatter of every cell centroid in the well plane, coloured by the "
+        "Scatter of every cell centroid in the well plane, colored by the "
         "selected metric / colony id / normalised radial position (r/R). "
         "Convex-hull overlays show colony footprints when detected.",
     sp_state.VIZ_NND_HISTOGRAM:
@@ -115,7 +116,7 @@ _VIZ_TOOLTIPS = {
 }
 
 _METRIC_PICKER_TOOLTIP = (
-    "Per-cell CSV column used as the signal in colour maps, radial "
+    "Per-cell CSV column used as the signal in color maps, radial "
     "profiles, per-colony violins, and the boundary/interior split.\n"
     "Any <channel>_<property> intensity / count column, any shape_* "
     "morphology column, and any user-defined ratio channel is eligible."
@@ -207,18 +208,17 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_metric_cb", metric_cb)
     band.add_scope("Metric", metric_cb)
 
-    tp_cb = LabeledComboBox("Timepoint")
+    tp_cb = unlabelled("Timepoint")
     tp_cb.addItem("First available", None)
     tp_cb.setToolTip(_TP_PICKER_TOOLTIP)
     tp_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_timepoint(ctx, tp_cb.currentData()))
     reg.register("_sp_tp_cb", tp_cb)
-    band.add_scope("", tp_cb)
+    band.add_scope("Timepoint", tp_cb)
 
     # Labelled, not a bare tick. A "✓" button says nothing about what it does;
     # this one forces a fresh compute, and the glyph now says so too.
-    recompute_btn = QPushButton("Recompute")
-    recompute_btn.setProperty("variant", "secondary")
+    recompute_btn = buttons.default("Recompute")
     recompute_btn.setIcon(make_icon("refresh-cw", 14))
     recompute_btn.setToolTip(
             "Force a fresh compute.\n"
@@ -230,7 +230,17 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
             "keystroke).")
     recompute_btn.clicked.connect(lambda _=False: sp_ctrl.sp_recompute(ctx))
     reg.register("_sp_recompute_btn", recompute_btn)
-    band.add_action(recompute_btn)
+    # On the page's Display page, not the band (the user's decision, tracker §9.1 step 15): the per-frame levels
+    # recompute on every change, so the button matters only at Summary level, and the band keeps the data choices
+    # on one row.
+    from review.core.inspector_panels import make_popover_button
+    display_btn, display_panel, display_lay = make_popover_button("Display", band, ctx=ctx, root=True)
+    display_btn.setToolTip("Recompute the map")
+    reg.register("_sp_display_btn", display_btn)
+    recompute_btn.setParent(display_panel)
+    display_lay.addWidget(recompute_btn)
+    display_lay.addStretch(1)
+    band.add_action(display_btn)
 
     export_btn, export_menu, export_csv_act = build_plot_save_menu(
         ctx, band,
@@ -246,8 +256,6 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_export_btn", export_btn)
     reg.register("_sp_export_csv_act", export_csv_act)
     band.add_action(export_btn)
-    from review.core.cell_lasso_view import make_lasso_button
-    band.add_action(make_lasso_button(ctx, band, "_sp_canvas", source="lasso · Spatial map"))
     band.add_action(make_style_button(ctx, band, "spatial"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
@@ -353,7 +361,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     summary_display_cb.addItem("Line plot", sp_state.SUMMARY_DISPLAY_LINE)
     _select_combo_by_data(summary_display_cb, st.summary_display)
     summary_display_cb.setToolTip(
-        "Heatmap: wells × timepoints matrix, coloured by the summary metric.\n"
+        "Heatmap: wells × timepoints matrix, colored by the summary metric.\n"
         "Line plot: one line per well, X = timepoint, Y = summary metric."
     )
     summary_display_cb.currentIndexChanged.connect(
@@ -424,6 +432,10 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_card", card)
     reg.register("_sp_fig", card.figure)
     reg.register("_sp_canvas", card.canvas)
+    # Lasso cells draws on this figure, so it is a tool under it rather than a band button (the user's decision,
+    # tracker §9.1 step 15) — where the Nanowells Array view keeps its canvas tools.
+    from review.core.cell_lasso_view import make_lasso_button
+    card.toolbar.add_group(make_lasso_button(ctx, card.toolbar, "_sp_canvas", source="lasso · Spatial map"))
     # A click on a cell in a well map focuses it; the focused cell is ringed.
     from review.core.cell_picking import wire_cell_picking
     wire_cell_picking(ctx, card.canvas, lambda: card.figure)

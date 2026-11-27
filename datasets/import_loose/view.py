@@ -24,17 +24,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.tool_page import cards, foot_row, into_card, tool_page
+from datasets.core.log_panel import LogPanelMixin
 from core.safe import swallowed
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from util.schema_infer import infer_from_dir
@@ -50,6 +46,8 @@ from datasets.import_loose.dashboard import ImportLooseDashboard
 from datasets.import_loose.import_loose_compute import (
     detection_for_grouping, scan_folder,
 )
+from ui import text_roles
+from ui import buttons
 
 
 #: A marker this tool never writes. The shared destination rule exempts a folder
@@ -112,39 +110,15 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # Wrap in a scroll area — see datasets/concatenate/view.py's
         # _build_ui for why (the dashboard's plate map used to render
         # illegibly small at the app's default window height).
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Zip Loose Folder", self)
-        heading.setObjectName("Heading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Zip Loose Folder",
             "Sort a folder of loose, ungrouped TIFs into one archive per well — "
             "the layout Analyze reads. By default it writes a new folder and "
             "leaves your images where they are; tick <b>Group in place</b> to "
             "sort them where they sit and delete the loose originals instead. "
             "Analyze does this for you when it meets a folder of loose TIFs, in "
             "place and without asking, so use this page when you want to check "
-            "the split first or keep the originals.",
-            self,
-        )
-        blurb.setTextFormat(Qt.RichText)
-        blurb.setObjectName("Muted")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "the split first or keep the originals.", rich=True)
 
         self._src_field = PathField(
             "Loose-TIF folder", pick=folder_picker("Select folder of loose TIFs"))
@@ -157,7 +131,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # between a folder picker and a checkbox, with nothing saying they
         # describe *filenames* or what a "position" is.
         schema_heading = QLabel("How are the filenames laid out?", self)
-        schema_heading.setObjectName("Heading")
+        schema_heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(schema_heading)
 
         schema_hint = QLabel(
@@ -166,7 +140,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             "position 1 is the experiment and position 3 is the well.",
             self,
         )
-        schema_hint.setObjectName("Muted")
+        schema_hint.setProperty("textRole", "help")
         schema_hint.setTextFormat(Qt.RichText)
         schema_hint.setWordWrap(True)
         outer.addWidget(schema_hint)
@@ -183,13 +157,13 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         outer.addWidget(self._schema_picker)
 
         self._schema_err = QLabel("", self)
-        self._schema_err.setObjectName("Error")
+        text_roles.set_role(self._schema_err, text_roles.HELP, tone=text_roles.FAILURE)
         self._schema_err.setWordWrap(True)
         self._schema_err.setVisible(False)
         outer.addWidget(self._schema_err)
 
         self._readout = QLabel("", self)
-        self._readout.setObjectName("Muted")
+        self._readout.setProperty("textRole", "help")
         self._readout.setWordWrap(True)
         outer.addWidget(self._readout)
 
@@ -202,7 +176,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             "This deletes the original loose TIFs once each well is safely "
             "zipped. This can't be undone.", self,
         )
-        self._in_place_warning.setObjectName("Danger")
+        text_roles.set_role(self._in_place_warning, text_roles.HELP, tone=text_roles.FAILURE)
         self._in_place_warning.setWordWrap(True)
         self._in_place_warning.setVisible(False)
         outer.addWidget(self._in_place_warning)
@@ -213,28 +187,17 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._dest_field.changed.connect(self._refresh_run_enabled)
         outer.addWidget(self._dest_field)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Zip folder", self)
-        self._run_btn.setProperty("variant", "primary")
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
-        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(self, "Zip folder", on_run=self.runRequested,
+                                    on_queue=self.queueRequested, queue_tip="Add this run to the Job Queue instead of running it now.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Filenames", 2, 8))
+        into_card(outer, "Folders", [self._src_field, self._dest_field])
 
         self._build_status_section(outer)
 
-        self._open_btn = QPushButton("Open dataset in Analyze", self)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn = buttons.default("Open dataset in Analyze", self)
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInAnalyzeRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
@@ -248,7 +211,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         outer.addStretch(1)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Zip Output")
+        self.build_log_header(outer, "Zip output")
 
         self.dashboard = ImportLooseDashboard(self)
         # Hidden until the source folder scans to at least a real answer —
@@ -294,7 +257,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._can_run())
         self._queue_btn.setEnabled(not running and self._can_run())
-        self._run_btn.setText("Zipping…" if running else "▶  Zip folder")
+        self._run_btn.setText("Zipping…" if running else "Zip folder")
         if running:
             # The run changes the folder; whatever scan the page holds is about
             # to describe a tree that no longer exists.
@@ -318,7 +281,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             # Promoted to the primary action on success, demoting Convert —
             # see ConcatenatePage.show_open_in_review for the reasoning.
             set_variant(self._open_btn, "primary")
-            set_variant(self._run_btn, "secondary")
+            set_variant(self._run_btn, "default")
 
     def revalidate_fields(self, *, ok: bool = False) -> None:
         """Re-run the destination field's validator against current disk

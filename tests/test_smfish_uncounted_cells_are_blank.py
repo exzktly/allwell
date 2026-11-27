@@ -1,4 +1,4 @@
-"""smFISH *Apply Global Threshold*: a cell that was never counted is written blank, never ``0``.
+"""smFISH *Apply global threshold*: a cell that was never counted is written blank, never ``0``.
 
 The counting pass looks only at the frames that have both an smFISH image and a mask in the well's archive and
 whose bytes could be read. It used to record only nuclei with at least one hit, and the writer filled every other

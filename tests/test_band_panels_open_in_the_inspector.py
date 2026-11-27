@@ -13,7 +13,7 @@ file's first test fails on a page whose buttons press nothing.
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication, QComboBox, QToolButton
+from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QToolButton
 
 from review.core import inspector_panels as panels
 from review.core import inspector_service as svc
@@ -25,10 +25,13 @@ from tests._minimal_shell import build_page
 PANELS = {
     "Bar Plots": [("Fold change", "data", False), ("Display", "display", True)],
     "Line Graphs": [("Fold change", "data", False), ("Display", "display", True)],
-    "Response Curves": [("Fit", "data", False), ("Fold change", "data", False),
+    "Response Curves": [("Curves", "data", False), ("Fit", "data", False), ("Fold change", "data", False),
                         ("Display", "display", True)],
     "Heat Map": [("Layout", "data", False), ("Display", "display", True)],
-    "Multivariate": [("Features", "data", False)],
+    "Distribution": [("Display", "display", True)],
+    "Multivariate": [("Features", "data", False), ("Display", "display", True)],
+    "Spatial": [("Display", "display", True)],
+    "smFISH": [("Display", "display", True)],
 }
 
 
@@ -78,7 +81,7 @@ def test_each_panel_button_opens_its_panel_in_the_inspector(name, qtbot, mini_da
 
 def test_a_row_reads_its_value_and_ends_in_a_chevron(qtbot, mini_dataset):
     ctx, window, _frame, _bands = build_page(qtbot, "Multivariate", mini_dataset)
-    (features,) = _buttons(ctx, window)
+    (features,) = [b for b in _buttons(ctx, window) if panels.panel_of(b).title == "Features"]
     assert features.text().endswith("›") and "▾" not in features.text()
     assert features.menu() is None
 
@@ -91,7 +94,7 @@ def test_multivariate_features_is_the_one_multi_select_and_a_tick_reaches_the_ma
     from widgets.multi_select import MultiSelect
 
     ctx, window, _frame, _bands = build_page(qtbot, "Multivariate", mini_dataset)
-    (features,) = _buttons(ctx, window)
+    (features,) = [b for b in _buttons(ctx, window) if panels.panel_of(b).title == "Features"]
     st = ctx.state.feature_slice("multivariate")
     features.click()
     picker = ctx.widgets.get("_mv_feature_list")
@@ -126,10 +129,12 @@ def test_bar_display_s_grouping_toggle_inside_the_inspector_changes_the_bar_stat
     insp = svc.inspector(ctx)
     grouping = ctx.widgets.get("_bar_group_mode_btn")
     assert insp.isAncestorOf(grouping) and grouping.isVisibleTo(window)
-    before = grouping.text()
-    grouping.click()
+    # A choice of two, so a segmented control (design language D13): choosing the other segment changes the state.
+    before = ctx.state.plot.bar_group_mode or "well"
+    other = "timepoint" if before == "well" else "well"
+    grouping.setCurrentByData(other)
     QApplication.processEvents()
-    assert grouping.text() != before and grouping.text().startswith("Grouping: ")
+    assert ctx.state.plot.bar_group_mode == other
     assert surf.depth(window) == 0, "the desk inspector is a column, not a surface over the page"
 
 
@@ -291,3 +296,38 @@ def test_per_sample_control_is_a_row_of_fold_change_and_opens_a_page_over_it(qtb
     assert insp.currentWidget() is panels.panel_of(fold).content, "Back did not return to Fold change"
     svc.close(ctx)
     assert editor.isHidden() and editor.parentWidget() is window
+
+
+def test_smfish_display_holds_the_frame_s_drawing_controls_and_the_overlay_switch_reaches_the_state(qtbot, mini_dataset):
+    """smFISH's band keeps what is shown on one row; the LUT range, the overlays and the frame's CDF are on its
+    Display page (design language §6, row D17). Pressed where the user now finds them."""
+    ctx, window, _frame, _bands = build_page(qtbot, "smFISH", mini_dataset)
+    (display,) = _buttons(ctx, window)
+    display.click()
+    QApplication.processEvents()
+    insp = svc.inspector(ctx)
+    for name in ("_smfish_lut_min_edit", "_smfish_lut_max_edit", "_smfish_overlay_btn"):
+        widget = ctx.widgets.get(name)
+        assert insp.isAncestorOf(widget) and widget.isVisibleTo(window), f"{name} is not on the Display page"
+    cdf = [w for w in panels.panel_of(display).content.findChildren(QAbstractButton) if w.text() == "This frame CDF"]
+    assert len(cdf) == 1 and cdf[0].isVisibleTo(window), "This frame CDF is not on the Display page"
+    switch = ctx.widgets.get("_smfish_overlay_btn")
+    before = bool(ctx.state.smfish.show_overlays)
+    switch.click()
+    QApplication.processEvents()
+    assert bool(ctx.state.smfish.show_overlays) is (not before)
+
+
+@pytest.mark.parametrize("name, moved", [("Spatial", "_sp_recompute_btn"), ("Multivariate", "_mv_standardize_cb")])
+def test_a_map_page_s_display_page_holds_what_left_its_band(qtbot, mini_dataset, name, moved):
+    """Spatial's Recompute and Multivariate's Standardize left the band for the Display page (the user's decision,
+    tracker §9.1 step 15); pressed where the user now finds them."""
+    ctx, window, _frame, _bands = build_page(qtbot, name, mini_dataset)
+    (display,) = [b for b in _buttons(ctx, window) if panels.panel_of(b).root]
+    display.click()
+    QApplication.processEvents()
+    widget = ctx.widgets.get(moved)
+    assert svc.inspector(ctx).isAncestorOf(widget) and widget.isVisibleTo(window), f"{moved} is not on Display"
+    display.click()
+    QApplication.processEvents()
+    svc.close(ctx)

@@ -11,7 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QPushButton
+
+from ui import buttons
 
 from review.features.nanowell import _identity_controller as idc
 from review.features.nanowell import _identity_zoom as izoom
@@ -23,7 +24,7 @@ MODES = (("distance", "Distance map"), ("blink", "Blink"), ("sides", "Side by si
 #: What the Distance map colours by, as its switch lists them (``state.IDENTITY_COLOURS``).
 COLOURS = (("auto", "Auto"), ("status", "Status"), ("distance", "Distance"))
 _MODE_TIP = ("What the Identity view shows of the chosen timepoint against the well's reference timepoint:\n"
-             "Distance map: each nanowell at its reference position, coloured by its status or by how far its address\n"
+             "Distance map: each nanowell at its reference position, colored by its status or by how far its address\n"
              "lands from itself; the compared timepoint's tiles mapped onto the reference.\n"
              "Blink: the two montages alternating in the reference's frame — a correct mapping keeps the lattice still,\n"
              "and each frame's own address labels jump where the addresses name other nanowells.\n"
@@ -32,7 +33,7 @@ _MODE_TIP = ("What the Identity view shows of the chosen timepoint against the w
              "Diagnostics: the central square looked for, where it was found and how clearly, and every check the\n"
              "verdict rests on with its numbers and thresholds.\n"
              "Every mode zooms: the wheel about the pointer, drag to pan, Reset zoom or a double-click for the whole view.")
-_COLOUR_TIP = ("What the Distance map colours each nanowell by:\n"
+_COLOUR_TIP = ("What the Distance map colors each nanowell by:\n"
                "Status: lands on itself, imprecise, wrong name, in a tile placed a lattice step off, or not compared —\n"
                "with a count of each, so the nanowells left out are seen at once.\n"
                "Distance: how far its address lands from itself, in nanowell spacings.\n"
@@ -80,12 +81,11 @@ def build_identity_controls(ctx, band) -> IdentityControls:
     timer.timeout.connect(lambda: idc.blink_tick(ctx))
     ctx.widgets.register("_nw_blink_timer", timer)
     # What a double click on a panel does, as a button a user can see: every panel back to its whole view.
-    reset = QPushButton(RESET_ZOOM_TEXT, band)
-    reset.setProperty("variant", "secondary")
+    reset = buttons.default(RESET_ZOOM_TEXT, band)
     reset.setToolTip("Show the whole of every panel again (double-clicking a panel does the same for that panel)")
     reset.clicked.connect(lambda _=False: reset_zoom(ctx))
     ctx.widgets.register("_nw_identity_reset_zoom_btn", reset)
-    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Colour", colour),
+    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Color", colour),
                             band.add_scope("", reset))
 
 

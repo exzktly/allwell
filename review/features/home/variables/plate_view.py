@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from review.domain.plate_layout import FILL_ALONG_COLS, FILL_ALONG_ROWS
 from widgets.spin_box import SpinBox
+from ui import buttons as ui_buttons
 
 
 #: Widest the plate column may render. The plate itself is capped narrower
@@ -91,7 +92,7 @@ def build_plate_column(ctx, parent: QWidget, reg) -> QWidget:
     _build_groups(ctx, host, column, reg)
 
     policy = QLabel(POLICY_NOTE, host)
-    policy.setObjectName("Muted")
+    policy.setProperty("textRole", "help")
     policy.setWordWrap(True)
     column.addWidget(policy)
     column.addStretch(1)
@@ -110,7 +111,7 @@ def _build_empty_state(ctx, parent: QWidget, reg) -> QWidget:
     points at the existing control otherwise, and a plate with no variables on it
     is exactly the start of the flow.
 
-    **Two ``+ Variable`` buttons is deliberate.** The rail keeps its own, at
+    **Two ``Add variable`` buttons is deliberate.** The rail keeps its own, at
     secondary weight, because it is where the control lives for the rest of the
     tab's life and every test that needs a variable presses it there; this one
     is the primary action on the one page where adding a variable is the entire
@@ -132,12 +133,12 @@ def _build_empty_state(ctx, parent: QWidget, reg) -> QWidget:
     empty = reg.register("_var_empty", EmptyState(
         "No variables on this plate yet", icon="grid", parent=parent,
         hint=EMPTY_HINT))
-    empty.setAction("+ Variable", lambda: _add_variable(ctx), keep_hint=True)
+    empty.setAction("Add variable", lambda: _add_variable(ctx), keep_hint=True)
     return empty
 
 
 def _add_variable(ctx) -> None:
-    """The placeholder's button, doing exactly what the rail's ``+ Variable`` does.
+    """The placeholder's button, doing exactly what the rail's ``Add variable`` does.
 
     Imported at call time rather than at module scope: ``controller`` imports
     this module for the plate builder, so a module-scope import back would be a
@@ -186,7 +187,7 @@ def _build_selection_row(ctx, host: QWidget, column, reg) -> None:
          "Select every well holding the same value as the wells you have "
          "selected."),
     ):
-        button = reg.register(name, QPushButton(text, host))
+        button = reg.register(name, ui_buttons.default(text, host))
         button.setObjectName("VariablesLink")
         button.setToolTip(tip)
         links.addWidget(button)
@@ -259,7 +260,7 @@ def _build_fill_row(ctx, host: QWidget, column, reg) -> None:
     column.addWidget(host_row)
 
     scope = reg.register("_var_fill_scope", QLabel("", host))
-    scope.setObjectName("Muted")
+    scope.setProperty("textRole", "help")
     scope.setWordWrap(True)
     column.addWidget(scope)
 
@@ -299,7 +300,7 @@ def _build_overlay_row(ctx, host: QWidget, column, reg) -> None:
     column.addLayout(row)
 
     legend = reg.register("_var_overlay_legend", QLabel("", host))
-    legend.setObjectName("Muted")
+    legend.setProperty("textRole", "help")
     legend.setWordWrap(True)
     column.addWidget(legend)
 
@@ -335,8 +336,7 @@ def _build_groups(ctx, host: QWidget, column, reg) -> None:
 
 
 def _action(parent: QWidget, text: str) -> QPushButton:
-    button = QPushButton(text, parent)
-    button.setObjectName("HomeAction")
+    button = ui_buttons.default(text, parent)
     return button
 
 
@@ -372,7 +372,7 @@ def swatch_block(colour: str) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.setBrush(QColor(colour))
-    painter.setPen(QColor(theme.Colors.border))
+    painter.setPen(QColor(theme.Colors.hairline))
     painter.drawRoundedRect(0, 0, SWATCH_W - 1, SWATCH_H - 1, 2, 2)
     painter.end()
     return QIcon(pixmap)
@@ -390,7 +390,7 @@ def value_chip(label: str, value_id: str, parent: QWidget, *,
     chip would still be needed to say which value is being painted. Two steps
     that always mean the same thing beat one that sometimes means the opposite.
     """
-    button = QPushButton(label, parent)
+    button = ui_buttons.default(label, parent)
     button.setObjectName("VariableValueChip")
     button.setCheckable(False)
     button.setCursor(Qt.PointingHandCursor)

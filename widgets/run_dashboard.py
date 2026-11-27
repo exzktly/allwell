@@ -115,7 +115,7 @@ _UNFINISHED_NOTE = "the run ended before this well finished; it has no complete 
 class RunDashboard(PlateProgress):
     """At-a-glance per-well run view. Driven entirely by the host."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, title: str = "Run progress") -> None:
         self._remote = False
         self._total = 0
         # Per-stage overrides for the rail's denominator. A remote run's stages
@@ -166,7 +166,7 @@ class RunDashboard(PlateProgress):
         self._transfer: float | None = None
         self._transfer_direction = _XFER_UP
         self._rail: dict[str, _StageRow] = {}
-        super().__init__("Run Progress", parent)
+        super().__init__(title, parent)
         self.setObjectName("RunDashboard")
 
     # ── host-facing API ─────────────────────────────────────────────────────
@@ -695,10 +695,10 @@ class RunDashboard(PlateProgress):
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
         self._rail = {}
-        head = QLabel("Stages", self._rail_host)
+        head = QLabel("STAGES", self._rail_host)
         head.setObjectName("StageRailHead")
         head.setVisible(not self.isStacked())
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head.setProperty("textRole", "eyebrow")
         self._rail_lay.addWidget(head)
         rows = _RAIL_REMOTE if self._remote else _RAIL_LOCAL
         for key, label in rows:
@@ -706,7 +706,6 @@ class RunDashboard(PlateProgress):
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(_STAGE_ROW_SPACING_PX)
             nm = QLabel(label, row_w); nm.setFixedWidth(scaled_px(_NM_W))
-            nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = QProgressBar(row_w)
             bar.setRange(0, max(1, self._total)); bar.setValue(0)
@@ -716,7 +715,7 @@ class RunDashboard(PlateProgress):
             bar.setVisible(not self.isRailBeside())
             row.addWidget(bar)
             cnt = QLabel("0/0", row_w); cnt.setFixedWidth(scaled_px(_CNT_W))
-            cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
+            cnt.setProperty("textRole", "label")
             row.addWidget(cnt)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)
@@ -742,14 +741,15 @@ class RunDashboard(PlateProgress):
         """The only legend here whose rows are decided at run time: a remote
         run gains an Upload stage and renames the two that follow it, since
         "processed" happens on the server and "complete" means fetched back."""
-        items = [(theme.Colors.run_pending, "pending")]
+        # Sentence case: each row is a label of its own (design language §2.2, rule 7).
+        items = [(theme.Colors.run_pending, "Pending")]
         if self._remote:
-            items.append((theme.Colors.run_uploaded, "uploaded"))
-        items.append((theme.Colors.run_processing, "processing"))
-        items.append((theme.Colors.run_on_server, "on server" if self._remote else "processed"))
-        items.append((theme.Colors.run_done, "downloaded" if self._remote else "complete"))
-        items.append((theme.Colors.run_problem, "partial / unfinished", _PARTIAL_GLYPH, None))
-        items.append((theme.Colors.run_problem, "failed", _FAILED_GLYPH, theme.Colors.run_failed_mark))
+            items.append((theme.Colors.run_uploaded, "Uploaded"))
+        items.append((theme.Colors.run_processing, "Processing"))
+        items.append((theme.Colors.run_on_server, "On server" if self._remote else "Processed"))
+        items.append((theme.Colors.run_done, "Downloaded" if self._remote else "Complete"))
+        items.append((theme.Colors.run_problem, "Partial / unfinished", _PARTIAL_GLYPH, None))
+        items.append((theme.Colors.run_problem, "Failed", _FAILED_GLYPH, theme.Colors.run_failed_mark))
         return "Wells", items
 
     def _detail(self, w: str) -> str:

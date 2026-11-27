@@ -90,7 +90,7 @@ def test_an_outline_is_drawn_in_its_state_s_colour_and_a_fused_one_in_the_fused_
     assert _colours(_paint(qapp, state="occluded", fused=True)) == {black, QColor(FUSED_COLOUR).rgb()}
     # A state with no colour of its own is drawn muted, never in another state's colour or not at all.
     from ui.theme import Colors
-    assert _colours(_paint(qapp, state="not_located")) == {black, QColor(Colors.text_muted).rgb()}
+    assert _colours(_paint(qapp, state="not_located")) == {black, QColor(Colors.text_secondary).rgb()}
 
 
 def test_the_address_is_written_only_where_the_outline_has_room_for_it(qapp):

@@ -429,7 +429,7 @@ def _unpooled_clause(ctx, pooled) -> str:
     # for this reason: it is the only control that can make one tab disagree
     # with a sentence derived from the seam, so it is also the only one that has
     # to say so when it moves.
-    return ", though Bar Plots is drawing each well separately (Pooled: Off)"
+    return ", though Bar Plots is drawing each well separately (“Pool replicates” is off)"
 
 
 def _plural_groups(count: int, lead: str, suffix: str = ".") -> str:

@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMenu,
-    QPushButton,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -51,6 +50,8 @@ from review.domain.fold_change_pairing import (
     auto_pair,
     summary_text,
 )
+from ui import buttons
+from ui.text_roles import NOT_SET
 
 #: Combo text for "this member has no control".
 NONE_LABEL = "—"
@@ -227,8 +228,8 @@ def build_pairing_window(ctx, scope: str) -> QWidget | None:
     frow.setContentsMargins(0, 0, 0, 0)
     # Two buttons, each dropping one menu of commands; the inspector's header
     # holds the one Close.
-    set_all_btn = QPushButton("Set all to ▾", footer)
-    auto_btn = QPushButton("Auto-pair ▾", footer)
+    set_all_btn = buttons.default("Set all to ▾", footer)
+    auto_btn = buttons.default("Auto-pair ▾", footer)
     frow.addWidget(set_all_btn)
     frow.addWidget(auto_btn)
     frow.addStretch(1)
@@ -408,4 +409,4 @@ def _fill_row(ctx, scope: str, table: QTableWidget, r: int, row: dict,
     table.setItem(r, COL_STATUS, status_item)
 
     table.setItem(r, COL_RESOLVES,
-                  QTableWidgetItem(", ".join(row["resolves_to"]) or "—"))
+                  QTableWidgetItem(", ".join(row["resolves_to"]) or NOT_SET))

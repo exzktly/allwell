@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QLabel, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 from review.core.tab_controller import on_tab_change
 from review.core.group_by_controller import (
@@ -162,7 +162,7 @@ def build_centre(win, parent: QWidget) -> None:
     win._ctx.widgets.register("_tab_frames", tab_frames)
     for _t in _PLOT_SUBTABS:
         _f = QWidget()
-        QVBoxLayout(_f).setContentsMargins(12, 0, 12, 12)
+        QVBoxLayout(_f).setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.md)
         tab_frames[_t] = _f
 
     # Group definitions: ordered list of (title, builder, eager_flag).
@@ -226,6 +226,14 @@ def build_centre(win, parent: QWidget) -> None:
         from widgets.control_band import ControlBand
         band = ControlBand(plotting_container)
         win._plotting_band = win._ctx.widgets.register("_plotting_band", band)
+        # The band's sentences — what Group by did, why a plot has no nanowell view — are a help line under it, not
+        # band items: they state rather than choose, and on the band they took a quarter of the row (the user's
+        # decision, tracker §9.1 step 20). Laid out under the band below; empty, it takes no height.
+        notes = QWidget(plotting_container)
+        notes_lay = QHBoxLayout(notes)
+        notes_lay.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, 0)
+        notes_lay.setSpacing(theme.Spacing.md)
+        win._ctx.widgets.register("_plotting_notes", notes)
         # First in the row: Observations (cells | nanowells) changes what every other control lists.
         from review.core.observation_band import build_observation_controls
         build_observation_controls(win._ctx, band)
@@ -259,7 +267,20 @@ def build_centre(win, parent: QWidget) -> None:
         scatter_view.currentChanged.connect(_on_scatter_view)
         win._plotting_scatter_view = win._ctx.widgets.register(
             "_plotting_scatter_view", scatter_view)
-        win._plotting_scatter_grp = band.add_scope("Points", scatter_view)
+        # A Data row, "Points: Each observation ›", whose page holds the switch, rather than a band item (the user's
+        # decision, tracker §9.1 step 20).
+        from review.core import inspector_panels as _points_panels
+
+        _points_btn, _points_panel, _points_lay = _points_panels.make_popover_button(
+            "Points", band, ctx=win._ctx, tab="data", summary=lambda: scatter_view.segmentText(
+                max(0, scatter_view.currentIndex())))
+        _points_btn.setToolTip("Each observation is a point, or one point per well")
+        scatter_view.setParent(_points_panel)
+        _points_lay.addWidget(scatter_view)
+        _points_lay.addStretch(1)
+        scatter_view.currentChanged.connect(lambda _i: _points_panels.refresh(_points_btn))
+        win._ctx.widgets.register("_plotting_scatter_points_btn", _points_btn)
+        win._plotting_scatter_grp = band.add_scope("", _points_btn)
         win._plotting_scatter_grp.setVisible(False)
 
         # Phase 11b (A4): the channel selector is now a single global combo
@@ -267,14 +288,13 @@ def build_centre(win, parent: QWidget) -> None:
         # but ``win._on_plot_channel_selected`` mirrors every change back to
         # all of them, so editing here re-renders every renderer's view
         # against the new channel.
-        from widgets.labeled_combo import LabeledComboBox as _QComboBox
+        from widgets.labeled_combo import unlabelled as _QComboBox
         win._plotting_channel_cb = win._ctx.widgets.register(
             "_plotting_channel_cb", _QComboBox("Channel"))
-        # No min-width / setMinimumContentsLength — LabeledComboBox sizes
-        # itself to exactly the painted "Channel: …" text, and a floor here
+        # No min-width / setMinimumContentsLength — the box sizes itself to its current entry, and a floor here
         # would just re-introduce the wasted space that sizing exists to cut.
         win._plotting_channel_cb.setStyleSheet(
-            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"QComboBox {{ background-color: {_C.control}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
@@ -292,11 +312,9 @@ def build_centre(win, parent: QWidget) -> None:
                 swallowed()  # was: pass (silent except)
 
         win._plotting_channel_cb.currentIndexChanged.connect(_on_global_channel)
-        # The combo paints its own "Channel: " prefix (LabeledComboBox), so
-        # it needs no separate ControlBand label — pass "" so add_scope adds
-        # the combo alone rather than pairing it with a QLabel.
+        # The band labels the combo from outside (design language §5); the box draws only its value.
         win._plotting_channel_grp = win._ctx.widgets.register(
-            "_plotting_channel_grp", band.add_scope("", win._plotting_channel_cb))
+            "_plotting_channel_grp", band.add_scope("Channel", win._plotting_channel_cb))
         # Legacy display-only chip remains as an attribute for code that
         # still pokes at ``_plotting_channel_chip`` — point it at the new
         # combo so callers that read its text still work.
@@ -310,7 +328,7 @@ def build_centre(win, parent: QWidget) -> None:
             "_plotting_metric_cb", _QComboBox("Property"))
         # No min-width / setMinimumContentsLength — see the Channel combo above.
         win._plotting_metric_cb.setStyleSheet(
-            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"QComboBox {{ background-color: {_C.control}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
@@ -318,6 +336,8 @@ def build_centre(win, parent: QWidget) -> None:
             f"QComboBox:hover {{ color: {_C.text_primary}; }}"
         )
         win._plotting_metric_cb.addItems(_METRIC_ORDER)
+        # A ceiling, so a long property ("Fraction above threshold") elides rather than pushing the band to two rows.
+        win._plotting_metric_cb.setMaximumWidth(theme.Metrics.form_label_w)
 
         def _on_global_metric(_idx: int) -> None:
             handler = getattr(win, "_on_metric_selected_global", None)
@@ -330,7 +350,7 @@ def build_centre(win, parent: QWidget) -> None:
 
         win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
         win._plotting_metric_grp = win._ctx.widgets.register(
-            "_plotting_metric_grp", band.add_scope("", win._plotting_metric_cb))
+            "_plotting_metric_grp", band.add_scope("Property", win._plotting_metric_cb))
 
         # Group the plot's members by a sample variable instead of by the user's
         # replicate sets. In the scope zone because that is exactly what it does
@@ -345,7 +365,7 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_groupby_cb = win._ctx.widgets.register(
             "_plotting_groupby_cb", _QComboBox("Group by"))
         win._plotting_groupby_cb.setStyleSheet(
-            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"QComboBox {{ background-color: {_C.control}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
@@ -381,11 +401,10 @@ def build_centre(win, parent: QWidget) -> None:
         from PySide6.QtWidgets import QLabel as _QLabel
         win._plotting_grouping_note = win._ctx.widgets.register(
             "_plotting_grouping_note", _QLabel(""))
-        win._plotting_grouping_note.setObjectName("Muted")
-        win._plotting_grouping_note.setStyleSheet(
-            f"color: {_C.text_muted}; font-size: {_T.caption_size}px;")
-        win._plotting_grouping_grp = band.add_scope(
-            "", win._plotting_grouping_note)
+        win._plotting_grouping_note.setProperty("textRole", "help")
+        win._plotting_grouping_note.setWordWrap(True)
+        notes_lay.addWidget(win._plotting_grouping_note)
+        win._plotting_grouping_grp = win._plotting_grouping_note
         win._plotting_grouping_grp.setVisible(False)
 
         # Colour by / Split by, in a popover rather than beside Group by. They
@@ -396,6 +415,7 @@ def build_centre(win, parent: QWidget) -> None:
         # Hidden with the same rule and for the same reason as Group by: two
         # combos whose only option is the status quo are two controls that do
         # nothing.
+        from review.core import inspector_panels as _panels
         from review.core.inspector_panels import make_popover_button
 
         from review.core.group_by_controller import (
@@ -403,14 +423,14 @@ def build_centre(win, parent: QWidget) -> None:
             decoration_summary as _decoration_summary,
         )
         _dec_btn, _dec_panel, _dec_lay = make_popover_button(
-            "Colour & split", band, ctx=win._ctx, tab="data",
+            "Color & split", band, ctx=win._ctx, tab="data",
             summary=lambda: _decoration_summary(win._ctx))
         _dec_note = win._ctx.widgets.register(
             "_plotting_decorate_note", _QLabel(_NO_VARIABLES_NOTE, _dec_panel))
         _dec_note.setWordWrap(True)
-        _dec_note.setObjectName("Muted")
+        _dec_note.setProperty("textRole", "help")
         _dec_lay.addWidget(_dec_note)
-        _dec_btn.setToolTip("Colour and split the plot by a sample variable")
+        _dec_btn.setToolTip("Color and split the plot by a sample variable")
         win._ctx.widgets.register("_plotting_decorate_btn", _dec_btn)
         for _field, _name, _label in _DECORATION_CONTROLS:
             _cb = win._ctx.widgets.register(_name, _QComboBox(
@@ -463,11 +483,23 @@ def build_centre(win, parent: QWidget) -> None:
         # rather than handing it back, so it is fished out and registered here —
         # two of three captions switching and the third not would be worse than
         # either consistent choice.
+        # A row of the inspector's Data tab, not a field on the band (the user's decision, tracker §9.1 step 20):
+        # the band reads "ON threshold: 1500 ›" and the page it opens holds the box. The caption on that page is the
+        # one ``refresh_thresh_frac_quick_edit`` rewrites; the row's title follows it.
+        _thr_btn, _thr_panel, _thr_lay = make_popover_button(
+            "ON threshold", band, ctx=win._ctx, tab="data",
+            summary=lambda: f"{win._plotting_thresh_frac_stepper.value():g}")
+        _thr_btn.setToolTip(win._plotting_thresh_frac_stepper.toolTip())
+        win._ctx.widgets.register("_plotting_thresh_frac_btn", _thr_btn)
+        _thr_cap = win._ctx.widgets.register("_plotting_thresh_frac_lbl", QLabel("ON threshold", _thr_panel))
+        _thr_cap.setProperty("textRole", "label")
+        _thr_lay.addWidget(_thr_cap)
+        win._plotting_thresh_frac_stepper.setParent(_thr_panel)
+        _thr_lay.addWidget(win._plotting_thresh_frac_stepper)
+        _thr_lay.addStretch(1)
+        win._plotting_thresh_frac_stepper.valueChanged.connect(lambda _v: _panels.refresh(_thr_btn))
         win._plotting_thresh_frac_grp = win._ctx.widgets.register("_plotting_thresh_frac_grp", band.add_scope(
-            "ON threshold", win._plotting_thresh_frac_stepper, trailing=True))
-        _thr_cap = win._plotting_thresh_frac_grp.findChild(QLabel)
-        if _thr_cap is not None:
-            win._ctx.widgets.register("_plotting_thresh_frac_lbl", _thr_cap)
+            "", _thr_btn, trailing=True))
 
         # "+ Add panel" button retired — the underlying per-renderer
         # multi-subplot story was never wired (the _add_panel handler
@@ -482,6 +514,8 @@ def build_centre(win, parent: QWidget) -> None:
         # invoke it without re-importing centre_view.
 
         plotting_container.layout().addWidget(band, 0)
+        notes_lay.addStretch(1)
+        plotting_container.layout().addWidget(notes, 0)
 
         # ── renderer pages (per-tab views in a NamedPageStack — Phase 15) ─
         plotting_nb = NamedPageStack(plotting_container)

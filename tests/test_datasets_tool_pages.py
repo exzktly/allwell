@@ -1,0 +1,108 @@
+"""Every Datasets tool page has the design language's skeleton (§6, *Datasets*; tracker row D24): a column no
+wider than ``theme.Metrics.tool_page_w`` holding the tool's title and one line of help, its rows in titled cards,
+and a foot row whose last button is the primary action — built through ``datasets/core/tool_page.py`` and read
+here off the real pages the pane builds."""
+
+from __future__ import annotations
+
+import pytest
+from PySide6.QtWidgets import QLabel, QWidget
+
+from ui import theme
+
+
+@pytest.fixture
+def tab(qapp, tmp_path):
+    from datasets.tab import DatasetsTab
+    t = DatasetsTab(queue_state_dir=tmp_path)
+    yield t
+    t.shutdown()
+
+
+def _tool_pages(tab):
+    for name in tab.tool_names():
+        tab.show_tool(name)
+        page = tab._pages.currentWidget()
+        column = page.findChild(QWidget, "ToolPageColumn")
+        yield name, page, column
+
+
+def test_every_tool_page_is_a_capped_column_with_a_title_and_help(tab):
+    for name, page, column in _tool_pages(tab):
+        assert column is not None, f"{name} is not built as a tool page"
+        assert column.maximumWidth() == theme.Metrics.tool_page_w, name
+        titles = [w.text() for w in column.findChildren(QLabel) if w.property("textRole") == "pageTitle"]
+        assert len(titles) == 1, (name, titles)
+
+
+def test_a_queueable_tool_ends_its_foot_row_with_the_primary_action(tab):
+    from ui.page_chrome import ActionRow
+    for name, page, column in _tool_pages(tab):
+        row = column.findChild(ActionRow)
+        if row is None:
+            continue                                     # Automation: a page of runs, not a tool
+        lay = row.layout()
+        last = next(lay.itemAt(i).widget() for i in reversed(range(lay.count())) if lay.itemAt(i).widget())
+        assert last is page._run_btn and last.property("variant") == "primary", name
+
+
+def test_the_rows_sit_in_cards_and_a_card_of_hidden_rows_hides(tab):
+    from widgets.card import Card
+    tab.show_tool("Subset / Split")
+    page = tab._pages.currentWidget()
+    column = page.findChild(QWidget, "ToolPageColumn").layout()
+    in_order = sorted(page.findChildren(Card), key=column.indexOf)
+    titles = [c.title() for c in in_order if column.indexOf(c) >= 0]
+    assert titles[:2] == ["Folders", "What to copy"], titles
+    assert page._src_field.parentWidget().parentWidget().title() == "Folders"
+    tab.show_tool("Convert OME-TIFF")
+    page = tab._pages.currentWidget()
+    channels = next(c for c in page.findChildren(Card) if c.title() == "Channels")
+    assert channels.isHidden(), "an empty Channels card is shown before a file is read"
+    page._channels_caption.show()
+    assert not channels.isHidden()
+
+
+def test_the_rail_groups_the_tools_under_three_eyebrows(tab):
+    assert tab._nav.captions() == ["Combine", "Convert", "Maintain"]
+
+
+def _browse_to(field, path) -> None:
+    """Browse… as a user presses it, the folder dialog answered with *path*."""
+    field._pick = lambda _current, _parent=None: str(path)
+    field._browse()
+
+
+def test_the_foot_row_says_which_folder_is_missing(tab, tmp_path):
+    """Read off the page's own folder fields: the first one with no path names itself, and once the fields are
+    filled the reason goes. Driven through the fields the user fills."""
+    tab.show_tool("Subset / Split")
+    page = tab._pages.currentWidget()
+    row = page._action_row
+    assert not page._run_btn.isEnabled()
+    assert row.reason() == "Choose a folder for “Source dataset”."
+    not_a_dataset = tmp_path / "plain"
+    not_a_dataset.mkdir()
+    _browse_to(page._src_field, not_a_dataset)                # filled, refused: Subset stays disabled
+    assert not page._run_btn.isEnabled()
+    assert row.reason() == "Choose a folder for “Destination folder”."
+    _browse_to(page._dest_field, tmp_path / "out")
+    assert row.reason() == page._src_field.message() != "", row.reason()
+    tab.show_tool("Validate & Repair")
+    page = tab._pages.currentWidget()
+    assert page._action_row.reason() == "Choose a folder for “Dataset folder”."
+
+
+def test_the_foot_row_follows_a_path_set_from_code(tab, tmp_path):
+    """A swap, a restored job or a queued job's output fills a field from code, with no Browse — and with the
+    action still disabled, nothing else re-reads the reason. Here Concatenate's two datasets are filled by the
+    page's own setters (what a restored job does); the reason must move on to the destination."""
+    tab.show_tool("Concatenate Datasets")
+    page = tab._pages.currentWidget()
+    row = page._action_row
+    assert row.reason() == "Choose a folder for “Dataset 1 (base)”."
+    page.set_dataset1_path(str(tmp_path / "a"))
+    page.set_dataset2_path(str(tmp_path / "b"))
+    assert not page._run_btn.isEnabled()
+    assert row.reason() != "Choose a folder for “Dataset 1 (base)”."
+    assert row.reason() == "Choose a folder for “Destination”.", row.reason()

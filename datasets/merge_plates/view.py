@@ -20,18 +20,16 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from util.well_token import canonical_well_label
 from widgets._support import set_variant
 from datasets.core.dataset_paths import preview_wells
@@ -46,6 +44,8 @@ from datasets.merge_plates.merge_plates_compute import (
 )
 from datasets.core.dataset_fields import is_dataset, is_free_destination
 from datasets.core.dataset_fields import promote_open_button
+from ui import text_roles
+from ui import buttons
 
 # Well-token field for the remap origin (e.g. `A01`).
 _ORIGIN_EDIT_W = 60
@@ -83,61 +83,26 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         # Wrap in a scroll area — see datasets/concatenate/view.py's
         # _build_ui for why (the dashboard's plate map used to render
         # illegibly small at the app's default window height).
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Merge Plates", self)
-        heading.setObjectName("Heading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Merge Plates",
             "Join two different datasets along the well axis into one — the "
-            "well-axis sibling of Concatenate, which joins the same dataset "
+            "well-axis sibling of Concatenate Datasets, which joins the same dataset "
             "across time. A well present in both is refused, not stitched: "
-            "remap dataset 2's wells onto free positions first if they overlap.",
-            self,
-        )
-        blurb.setObjectName("Muted")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "remap dataset 2's wells onto free positions first if they overlap.")
 
         self._build_equation_row(outer)
         self._build_remap_row(outer)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Merge", self)
-        self._run_btn.setProperty("variant", "primary")
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = QPushButton("+ Queue", self)
-        self._queue_btn.setProperty("variant", "secondary")
-        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(self, "Merge", on_run=self.runRequested,
+                                    on_queue=self.queueRequested, queue_tip="Add this run to the Job Queue instead of running it now.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folders", 1, 2), ("Placement", 3, 5))
 
         self._build_status_section(outer)
 
-        self._open_btn = QPushButton("Open merged dataset in Review", self)
-        self._open_btn.setProperty("variant", "secondary")
+        self._open_btn = buttons.default("Open merged dataset in Review", self)
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
@@ -168,7 +133,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         hl = QHBoxLayout(row)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.sm)
-        self._remap_cb = QCheckBox("Place dataset 2 starting at well:", row)
+        self._remap_cb = QCheckBox("Place dataset 2 starting at well", row)
         self._remap_cb.toggled.connect(self._on_input_changed)
         hl.addWidget(self._remap_cb)
         self._remap_origin_edit = QLineEdit("E01", row)
@@ -181,13 +146,13 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         outer.addWidget(row)
 
         self._remap_hint = QLabel("", self)
-        self._remap_hint.setObjectName("Danger")
+        text_roles.set_role(self._remap_hint, text_roles.HELP, tone=text_roles.FAILURE)
         self._remap_hint.setWordWrap(True)
         self._remap_hint.setVisible(False)
         outer.addWidget(self._remap_hint)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Merge Output")
+        self.build_log_header(outer, "Merge output")
 
         self.dashboard = MergePlatesDashboard(self)
         # Hidden until both datasets are valid — _update_status_preview()
@@ -263,7 +228,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if self._swap_btn is not None:
             self._swap_btn.setEnabled(not running)
-        self._run_btn.setText("Merging…" if running else "▶  Merge")
+        self._run_btn.setText("Merging…" if running else "Merge")
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")

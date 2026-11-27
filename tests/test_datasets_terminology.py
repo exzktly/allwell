@@ -23,7 +23,7 @@ def _labels(widget) -> set[str]:
 
 
 def test_concatenate_and_merge_plates_no_longer_share_merge_output(qapp):
-    """"Merge Output" used to be both Concatenate's and Merge Plates' status
+    """"Merge output" used to be both Concatenate's and Merge Plates' status
     section header — indistinguishable from a screenshot of either page."""
     from datasets.concatenate.view import ConcatenatePage
     from datasets.merge_plates.view import MergePlatesPage
@@ -31,9 +31,9 @@ def test_concatenate_and_merge_plates_no_longer_share_merge_output(qapp):
     concat_labels = _labels(ConcatenatePage())
     merge_labels = _labels(MergePlatesPage())
 
-    assert "Concatenate Output" in concat_labels
-    assert "Merge Output" not in concat_labels
-    assert "Merge Output" in merge_labels
+    assert "Concatenate output" in concat_labels
+    assert "Merge output" not in concat_labels
+    assert "Merge output" in merge_labels
 
 
 def test_concatenate_and_merge_plates_dashboards_no_longer_share_merge_progress(qapp):
@@ -60,9 +60,9 @@ def test_ome_import_and_import_loose_no_longer_share_conversion_output(qapp):
     ome_labels = _labels(OmeImportPage())
     loose_labels = _labels(ImportLoosePage())
 
-    assert "Convert Output" in ome_labels
+    assert "Convert output" in ome_labels
     assert "Conversion Output" not in ome_labels
-    assert "Zip Output" in loose_labels
+    assert "Zip output" in loose_labels
     assert not any("onversion" in lbl for lbl in loose_labels)
 
 

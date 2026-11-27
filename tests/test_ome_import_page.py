@@ -11,7 +11,7 @@ import pytest
 
 tifffile = pytest.importorskip("tifffile")
 
-from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea, QWidget  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -218,8 +218,8 @@ def test_plate_is_capped_and_sits_below_the_readout_and_convert_button(qapp):
     assert page._plate.maximumWidth() == 330
     assert page._plate.maximumHeight() == 210
 
-    content = page.layout().itemAt(0).widget().widget()
-    outer = content.layout()
+    column = page.findChild(QWidget, "ToolPageColumn")      # the tool page's column (datasets/core/tool_page.py)
+    outer = column.layout()
     widgets = [outer.itemAt(i).widget() for i in range(outer.count())]
     readout_idx = widgets.index(page._readout)
     run_row_idx = widgets.index(page._run_btn.parentWidget())
@@ -229,7 +229,7 @@ def test_plate_is_capped_and_sits_below_the_readout_and_convert_button(qapp):
 
 
 def test_queue_button_round_trips_source_dest_and_params(qapp, tmp_path):
-    """Regression guard: Convert OME-TIFF used to have no "+ Queue" button and
+    """Regression guard: Convert OME-TIFF used to have no "Add to queue" button and
     no QueueableController wiring at all — the only Datasets tool the Job
     Queue couldn't drive. collect_spec()/show_job() must round-trip every
     field params() reads, including the click-defined well order, since
@@ -276,7 +276,7 @@ def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):
     hint = tab._packed_input_hint()
     assert hint is not None and "Convert OME-TIFF" in hint
     # The output/layout labels carry the redirect, not a run plan.
-    assert tab._output_lbl.text() == "—"
+    assert tab._output_lbl.text() == ""
     assert "Convert OME-TIFF" in tab._layout_lbl.text()
 
 
@@ -596,7 +596,7 @@ def test_a_malformed_count_blocks_the_run_and_names_the_field(qapp, tmp_path):
         assert not page._run_btn.isEnabled(), (field, text)
         assert not page._queue_btn.isEnabled(), (field, text)
         assert expected in page._verdict.text(), (field, text)
-        assert page._verdict.objectName() == "Warn"
+        assert page._verdict.property("textTone") == "attention"
         getattr(page, field).setText("")
 
 
@@ -611,13 +611,13 @@ def test_a_refused_plan_is_red_and_a_good_one_is_not(qapp, tmp_path):
     page._rows_edit.setText("1")
     page._cols_edit.setText("4")
     page.refresh_readout()
-    assert page._verdict.objectName() == "Muted"
-    assert page._verdict.text().startswith("✓")
+    assert (page._verdict.property("textRole") == "help" and not page._verdict.property("textTone"))
+    assert page._verdict.text()
 
     page._cols_edit.setText("3")        # 4 frames don't divide into 3 wells
     page.refresh_readout()
-    assert page._verdict.objectName() == "Danger"
-    assert page._verdict.text().startswith("⚠")
+    assert page._verdict.property("textTone") == "failure"
+    assert page._verdict.text() and not page._verdict.text().startswith(("⚠", "✓"))
 
 
 def test_a_destination_that_already_holds_wells_blocks_the_run(qapp, tmp_path):
@@ -1572,7 +1572,7 @@ def test_a_zero_stride_is_refused_with_a_reason_the_ome_page_can_show(
     try:
         page._stride_edit.setText("0")
         problems = page.raw_fields().problems()
-        assert any("Keep every Nth timepoint" in p for p in problems), problems
+        assert any("Keep every nth timepoint" in p for p in problems), problems
     finally:
         ctrl.shutdown()
         page.deleteLater()

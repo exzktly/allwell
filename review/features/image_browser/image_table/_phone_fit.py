@@ -28,7 +28,7 @@ def empty_hint() -> str:
     the builder is not above the placeholder but behind ⚙ Controls, and "above"
     sent the reader looking at an empty page."""
     if phone_layout.is_on():
-        return "Open ⚙ Controls to choose channels, then press Generate."
+        return "Open “Controls” to choose channels, then press “Generate”."
     return "Choose wells/channels above, then press Generate."
 
 

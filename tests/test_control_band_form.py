@@ -3,7 +3,7 @@
 Reported: the Controls sheet was "a mess". Its controls flowed left to right at
 their own widths, so rows wrapped wherever a label happened to end and there
 was no edge to read down; some controls carried their label inside their text
-("Channel: GFP", "Timepoints: 1/3 selected"), the threshold had a small grey
+("Channel: GFP", "Timepoints: 1 of 3"), the threshold had a small grey
 label beside it, others had none; a hint floated between controls; data
 choices, display options and commands were interleaved. ``ControlBand.setForm``
 lays the same widgets out as one column: Data rows of label + control, then
@@ -38,7 +38,7 @@ def _band(qtbot):
     combo.addItems(["GFP", "mCherry"])
     prop = LabeledComboBox("Property")
     prop.addItems(["Mean Intensity", "Area"])
-    tp = QPushButton("Timepoints: 1/3 selected")
+    tp = QPushButton("Timepoints: 1 of 3")
     hint = QLabel("Plots draw one member per selected well.")
     hint.setObjectName("Muted")
     tp.setFixedWidth(150)          # pinned, like a touch stepper
@@ -62,7 +62,7 @@ def _band(qtbot):
     display = QToolButton()
     display.setText("Display")
     display.setProperty("bandPanel", "root")
-    reset = QPushButton("Reset Order")
+    reset = QPushButton("Reset order")
     save = QToolButton()
     save.setText("Save ▾")
     save.setPopupMode(QToolButton.InstantPopup)
@@ -90,10 +90,10 @@ def _row_label(row) -> str:
 
 
 def test_split_labelled_text():
-    assert split_labelled_text("Timepoints: 1/3 selected") == ("Timepoints", "1/3 selected")
+    assert split_labelled_text("Timepoints: 1 of 3") == ("Timepoints", "1 of 3")
     assert split_labelled_text("Series: None") == ("Series", "None")
     assert split_labelled_text("Display ▾") is None
-    assert split_labelled_text("Reset Order") is None
+    assert split_labelled_text("Reset order") is None
 
 
 def test_every_scope_control_is_a_row_with_its_label_in_one_column(qtbot):
@@ -122,14 +122,14 @@ def test_every_scope_control_is_a_row_with_its_label_in_one_column(qtbot):
     # The label left the control: the combo paints only its value, the
     # button's own text is untouched (pages rewrite it) but painted as value.
     assert w["prop"]._painted_text() == "Mean Intensity"
-    assert w["tp"].text() == "Timepoints: 1/3 selected"
+    assert w["tp"].text() == "Timepoints: 1 of 3"
     # The hint is a caption at the top of Data, not a row of its own.
     assert form.hints() == [w["hint"]] and w["hint"].wordWrap()
 
 
 def test_a_labelled_button_is_painted_as_its_value_only(qtbot):
     """Assert what reaches the screen: the Timepoints button in the form draws
-    exactly what a button reading "1/3 selected" draws — and keeps doing so
+    exactly what a button reading "1 of 3" draws — and keeps doing so
     after the page rewrites its text."""
     band, _parts, w = _band(qtbot)
     band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
@@ -147,11 +147,11 @@ def test_a_labelled_button_is_painted_as_its_value_only(qtbot):
         _settle()
         return twin.grab().toImage()
 
-    assert tp.grab().toImage() == twin_of("1/3 selected")
-    assert tp.grab().toImage() != twin_of("Timepoints: 1/3 selected")
-    tp.setText("Timepoints: 2/3 selected")
+    assert tp.grab().toImage() == twin_of("1 of 3")
+    assert tp.grab().toImage() != twin_of("Timepoints: 1 of 3")
+    tp.setText("Timepoints: 2 of 3")
     _settle()
-    assert tp.grab().toImage() == twin_of("2/3 selected")
+    assert tp.grab().toImage() == twin_of("2 of 3")
 
 
 def test_the_form_is_the_data_tab_panel_rows_are_rows_and_a_tab_s_root_is_not_in_it(qtbot):
@@ -287,24 +287,36 @@ def test_the_shared_builders_declare_their_role(qtbot):
     assert prop.property("bandRole") == "style" and cmd.property("bandRole") == "action"
 
 
-def test_a_flat_icon_button_is_drawn_as_a_button_in_the_sheet(qtbot):
-    """The Properties toggle is an ``IconButton``, whose own stylesheet is
-    transparent: in the Actions grid it was the one cell with no fill or edge.
-    In the sheet it takes the application's button style; leaving the form
-    gives its own back. Another tool button's stylesheet is left alone — a
-    popover button's hides its menu arrow, and clearing it drew a stray one."""
-    band, _parts, w = _band(qtbot)
-    own = w["props"].styleSheet()
-    assert "transparent" in own
-    fold_qss = "QToolButton::menu-indicator { image: none; }"
-    w["fold"].setStyleSheet(fold_qss)
-    band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
-    _settle()
-    assert w["props"].styleSheet() == ""
-    assert w["fold"].styleSheet() == fold_qss
-    band.setForm(False)
-    _settle()
-    assert w["props"].styleSheet() == own
+def test_a_flat_icon_button_is_drawn_as_a_button_in_the_sheet(qtbot, qapp):
+    """The Properties toggle is an ``IconButton``, which is transparent: in the Actions grid it was the one cell
+    with no fill or edge. In the sheet it is drawn with a button's fill, under the phone sheet that draws the form;
+    leaving the form gives it its own look back. Another tool button's own stylesheet is left alone — a popover
+    button's hides its menu arrow, and clearing it drew a stray one. Read off a grab: the fill the reader sees."""
+    from ui import theme
+
+    theme.set_touch_unit(1.0)
+    qapp.setStyleSheet(theme.qss())
+    try:
+        band, _parts, w = _band(qtbot)
+        fold_qss = "QToolButton::menu-indicator { image: none; }"
+        w["fold"].setStyleSheet(fold_qss)
+        props = w["props"]
+
+        def fill() -> str:
+            img = props.grab().toImage()
+            return img.pixelColor(2, img.height() // 2).name().upper()
+
+        band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
+        _settle()
+        assert fill() == theme.Colors.control.upper()
+        assert w["fold"].styleSheet() == fold_qss
+        band.setForm(False)
+        _settle()
+        assert props.property("sheetButton") is None
+        assert fill() != theme.Colors.control.upper()
+    finally:
+        theme.set_touch_unit(None)
+        qapp.setStyleSheet("")
 
 
 def test_a_form_gets_its_whole_height_in_a_column_that_does_not_size_to_it(qtbot):

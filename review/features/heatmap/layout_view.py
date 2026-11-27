@@ -46,7 +46,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QSpinBox,
     QStyle,
@@ -66,6 +65,7 @@ from core.safe import swallowed
 from review.core.dnd import WELL_MIME  # shared drag/drop token
 from ui import theme
 from widgets.spin_box import SpinBox
+from ui import buttons
 
 #: The one layout this editor owns. Persisted under this name, so it stays
 #: ``"Sidebar"`` although the editor is drawn in the inspector.
@@ -171,7 +171,7 @@ class _TokenDelegate(QStyledItemDelegate):
                 radius = min(theme.Radii.sm, tile.height() / 3)
                 painter.setRenderHint(painter.RenderHint.Antialiasing, True)
                 painter.setPen(Qt.NoPen)
-                painter.setBrush(QColor(theme.Colors.accent_dim))
+                painter.setBrush(QColor(theme.Colors.selected))
                 painter.drawRoundedRect(tile, radius, radius)
             painter.setFont(opt.font)
             if selected:
@@ -461,16 +461,14 @@ class _LayoutPanel(QWidget):
         actions_l = QHBoxLayout(actions)
         actions_l.setContentsMargins(0, 0, 0, 0)
         actions_l.setSpacing(sp.sm)
-        autopop_btn = QPushButton("Auto-populate from selection", actions)
-        autopop_btn.setProperty("variant", "primary")
+        autopop_btn = buttons.default("Auto-populate from selection", actions)
         autopop_btn.setToolTip(
             "Place the wells the plate shows as selected into this grid in plate "
             "order. The grid grows if it needs more cells to hold them."
         )
         autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(ctx))
         actions_l.addWidget(autopop_btn, 1)
-        clear_btn = QPushButton("Clear", actions)
-        clear_btn.setProperty("variant", "secondary")
+        clear_btn = buttons.default("Clear", actions)
         clear_btn.setToolTip("Empty every cell of the grid; its size and labels stay")
         clear_btn.clicked.connect(lambda _=False: _on_clear_all(ctx))
         actions_l.addWidget(clear_btn, 0)
@@ -479,8 +477,7 @@ class _LayoutPanel(QWidget):
         # What double-clicking a cell does, as a control that can be seen (and
         # pressed where there is no double click): empty the cell selected in
         # the grid. Disabled until the selected cell holds a well.
-        empty_btn = QPushButton(EMPTY_CELL_TEXT, body)
-        empty_btn.setProperty("variant", "secondary")
+        empty_btn = buttons.default(EMPTY_CELL_TEXT, body)
         empty_btn.setToolTip("Take the well out of the cell selected in the grid below")
         empty_btn.setEnabled(False)
         body_l.addWidget(empty_btn)
@@ -501,14 +498,14 @@ class _LayoutPanel(QWidget):
 
         # Auto-populate first: it is the one way in that works by touch too.
         hint = QLabel(
-            "Select wells on the plate and press Auto-populate, or drag wells "
+            "Select wells on the plate and press “Auto-populate”, or drag wells "
             "from the plate map into a cell. Drag a cell to move it. To empty "
-            "a cell, select it and press Empty cell — or double-click it, or "
+            "a cell, select it and press “Empty cell” — or double-click it, or "
             "drag it back onto the plate. Row and column names are under "
-            "Display › Labels.",
+            "“Display” › “Labels”.",
             body,
         )
-        hint.setObjectName("Muted")
+        hint.setProperty("textRole", "help")
         hint.setWordWrap(True)
         body_l.addWidget(hint)
         body_l.addStretch(1)
@@ -528,7 +525,7 @@ class _LayoutPanel(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(theme.Spacing.sm)
         cap = QLabel("Grid", row)
-        cap.setObjectName("Secondary")
+        cap.setProperty("textRole", "label")
         lay.addWidget(cap)
         rows_spin = SpinBox(row)
         rows_spin.setRange(1, _MAX_GRID)
@@ -536,7 +533,7 @@ class _LayoutPanel(QWidget):
         rows_spin.setToolTip("Rows in the heat-map grid")
         lay.addWidget(rows_spin)
         times = QLabel("×", row)
-        times.setObjectName("Secondary")
+        times.setProperty("textRole", "label")
         lay.addWidget(times)
         cols_spin = SpinBox(row)
         cols_spin.setRange(1, _MAX_GRID)
@@ -544,7 +541,7 @@ class _LayoutPanel(QWidget):
         cols_spin.setToolTip("Columns in the heat-map grid")
         lay.addWidget(cols_spin)
         unit = QLabel("rows × columns", row)
-        unit.setObjectName("Muted")
+        unit.setProperty("textRole", "help")
         lay.addWidget(unit)
         lay.addStretch(1)
         reg = ctx.widgets

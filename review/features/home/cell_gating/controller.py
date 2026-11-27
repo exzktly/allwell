@@ -84,6 +84,8 @@ from review.features.home.cell_gating.fov_view import refresh_fov_selection_widg
 from review.data.fov_selection import available_fovs, normalise_selection, selected_fovs
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 from widgets.squeeze_label import SqueezeWrapLabel
+from ui import theme
+from ui.text_roles import show_not_applicable
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -1574,7 +1576,7 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
         tp_combo = ctx.runtime.cell_gating.opt_timepoint_combo
         timepoint = tp_combo.currentData() if tp_combo is not None else None
     except ValueError:
-        _status("Optimize ThreshFracOn: Min, Max, Max points and Spec. weight "
+        _status("Optimize ThreshFracOn: “Min”, “Max”, “Max points” and “Spec. weight” "
                 "must be numeric.")
         return
     except Exception as exc:
@@ -1587,16 +1589,16 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
     # floor stays, with a message that states what the field now means.
     if steps < 10:
         _status(
-            "Optimize ThreshFracOn: Max points must be at least 10 — it caps "
+            "Optimize ThreshFracOn: “Max points” must be at least 10 — it caps "
             "how many of the thresholds the data offers get scanned, and a cap "
             "that small leaves nothing to choose between."
         )
         return
     if not (weight > 0):
         _status(
-            "Optimize ThreshFracOn: Spec. weight must be greater than 0 — it "
-            "is what a cell counted ON in Well B costs relative to a cell "
-            "missed in Well A. Use 1 to weigh the two alike."
+            "Optimize ThreshFracOn: “Spec. weight” must be greater than 0 — it "
+            "is what a cell counted ON in “Well B” costs relative to a cell "
+            "missed in “Well A”. Use 1 to weigh the two alike."
         )
         return
 
@@ -1784,7 +1786,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
 
     if not row_specs:
         lbl = QLabel("No channels loaded", host)
-        lbl.setObjectName("Muted")
+        lbl.setProperty("textRole", "help")
         inner_layout.addWidget(lbl)
         return
 
@@ -1794,8 +1796,8 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
     table = QWidget(host)
     grid = QGridLayout(table)
     grid.setContentsMargins(0, 0, 0, 0)
-    grid.setHorizontalSpacing(16)
-    grid.setVerticalSpacing(4)
+    grid.setHorizontalSpacing(theme.Spacing.lg)
+    grid.setVerticalSpacing(theme.Spacing.xs)
     grid.setColumnStretch(len(headers) + 1, 1)
 
     # The column header names its layer and the measurement it is made against —
@@ -1803,11 +1805,11 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
     # used to be a three-line paragraph at the top of the tab, far from either
     # field it qualifies.
     head = QLabel("Channel", table)
-    head.setObjectName("Muted")
+    head.setProperty("textRole", "help")
     grid.addWidget(head, 0, 0)
     for col, (text, tip) in enumerate(headers, start=1):
         head = QLabel(text, table)
-        head.setObjectName("Muted")
+        head.setProperty("textRole", "help")
         head.setToolTip(tip)
         # Wrapped, so a column header gives way to the page's width instead of
         # fixing the table (and so the tab) wider than a narrow viewport.
@@ -1874,8 +1876,9 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
                 count_edits[channel].setParent(table)
                 grid.addWidget(count_edits[channel], r, 2)
             else:
-                absent = QLabel("\u2014", table)
-                absent.setObjectName("Muted")
+                absent = QLabel(table)
+                absent.setProperty("textRole", "help")
+                show_not_applicable(absent)
                 absent.setToolTip(
                     "This channel has no smFISH count column, so there is no "
                     "count cutoff to set.")

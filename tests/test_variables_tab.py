@@ -1114,7 +1114,7 @@ def test_with_no_variable_there_is_no_plate_to_stare_at(tab):
     control that cannot work *yet* and states a rule the user can act on; there
     is no plate to show at all until a variable exists, and a greyed grid around
     a two-paragraph explainer reads as software that has broken. The one thing a
-    user can do here — ``+ Variable`` — is what is left.
+    user can do here — ``Add variable`` — is what is left.
     """
     for name in _PLATE_SIDE:
         assert not tab.w(name).isVisibleTo(tab.frame), (

@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from review.core.inspector_panels import as_display_row, make_popover_button, on_open
 from widgets.range_page import parse_number
 from review.core.ui_helpers import (
-    add_menu_action, btn_card, btn_secondary,
+    add_menu_action, btn_secondary,
     make_action_menu_button,
 )
 from widgets.control_band import ControlBand
@@ -32,11 +32,12 @@ from review.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
 from widgets.stepper import Stepper
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from functools import partial
 from core.safe import swallowed
 from review.core.lazy import lazy as _lazy
 from ui import theme
+from ui import buttons
 
 # Height of the colour swatch chip beside a control (its width is the
 # shared theme.Metrics.swatch_w).
@@ -108,19 +109,19 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # under both names so ctx.widgets resolves either.
     reg.register("_review_image_chan_var", chan_cb)
 
-    fov_menu = reg.register("_review_image_fov_menu", LabeledComboBox("FOV"))
+    fov_menu = reg.register("_review_image_fov_menu", unlabelled("FOV"))
     fov_menu.addItems(["—"])
     fov_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    ctrl.add_scope("", fov_menu)
+    ctrl.add_scope("FOV", fov_menu)
 
-    tp_menu = reg.register("_review_image_tp_menu", LabeledComboBox("Timepoint"))
+    tp_menu = reg.register("_review_image_tp_menu", unlabelled("Timepoint"))
     tp_menu.addItems(["—"])
     tp_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    ctrl.add_scope("", tp_menu)
+    ctrl.add_scope("Timepoint", tp_menu)
     rt.tp_var = tp_menu
     rt.tp_cb = tp_menu  # alias for review_image_controller
 
@@ -133,24 +134,34 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # each display pass. The four go in as ONE scope group, so a wrap can never
     # split the readout from the buttons that drive it. No "Zoom:" caption —
     # the readout reads "100%", which says what the buttons either side do.
-    zoom_out_btn = btn_card(ctrl, "−", lambda: review_image_zoom_step(ctx, -1))
+    zoom_out_btn = buttons.icon_button("minus", "Zoom out", ctrl, kind=buttons.DEFAULT,
+                                      on_click=lambda: review_image_zoom_step(ctx, -1))
     zoom_out_btn.setToolTip("Zoom out (scroll wheel works on the image too)")
     zoom_lbl = reg.register("_review_image_zoom_lbl", QLabel("100%"))
-    zoom_lbl.setObjectName("Muted")
+    zoom_lbl.setProperty("textRole", "help")
     zoom_lbl.setToolTip("Current zoom, relative to fit-to-window (100% = Fit)")
-    zoom_in_btn = btn_card(ctrl, "+", lambda: review_image_zoom_step(ctx, +1))
+    zoom_in_btn = buttons.icon_button("plus", "Zoom in", ctrl, kind=buttons.DEFAULT,
+                                     on_click=lambda: review_image_zoom_step(ctx, +1))
     zoom_in_btn.setToolTip("Zoom in (scroll wheel works on the image too)")
     zoom_fit_btn = btn_secondary(ctrl, "Fit", lambda: review_image_zoom_fit(ctx))
     zoom_fit_btn.setToolTip("Fit the whole image in the view (100%) and recentre")
-    ctrl.add_scope("", zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn)
+    # The zoom and the editing tools below are a tool row under the image, not band items: the band keeps what is
+    # shown on one row (the user's decision, tracker §9.1 step 15). Still on screen and grouped, never in a popover.
+    # A ``ButtonRow`` — buttons that act on the image around them, wrapping onto a second line on a phone rather
+    # than squeezing their labels. Not a control row: what the page shows stays in the band.
+    from widgets.button_row import ButtonRow
+    from widgets.flow_layout import flow_group
 
-    from PySide6.QtWidgets import QPushButton
-    delete_btn = QPushButton("Delete Cell", ctrl)
+    tools_row = ButtonRow()
+    tools_row.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    tools_lay = tools_row.layout()
+    tools_row.add(flow_group(tools_row, zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn))
+    reg.register("_review_image_tools_row", tools_row)
+
+    # A tool: pressed in while the next click or drag deletes (``ui.buttons.mode_tool``).
+    delete_btn = buttons.mode_tool("Delete cell", ctrl)
     rt.delete_btn = delete_btn
     reg.register("_review_image_delete_btn", delete_btn)
-    delete_btn.setProperty("variant", "toggle")
-    delete_btn.setCheckable(True)
-    delete_btn.setChecked(False)
     delete_btn.setToolTip(
         "Enter drag-delete mode.\n"
         "• Click a cell to mark it Included=0.\n"
@@ -161,11 +172,11 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     delete_btn.clicked.connect(
         lambda _=False: toggle_selected_review_cell(ctx)
     )
-    ctrl.add_action(delete_btn)
+    tools_lay.addWidget(delete_btn)
 
     # Which frames the next drag-delete reaches. Sits next to the button it
     # modifies, and carries the armed scope in its own label.
-    ctrl.add_action(build_delete_scope_control(ctx, ctrl))
+    tools_lay.addWidget(build_delete_scope_control(ctx, tools_row))
 
     # Crop cells: drag a rectangle to keep only cells whose centroid is inside.
     # Every FOV/timepoint/channel/well by default; the Crop scope control beside
@@ -176,12 +187,9 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # Named for what it does to the *data*. The Image Table has a "Crop view"
     # that sounds the same and is not: that one crops the pixels shown, this one
     # excludes cells from every downstream number.
-    crop_btn = QPushButton("Crop cells", ctrl)
+    crop_btn = buttons.mode_tool("Crop cells", ctrl)
     rt.crop_btn = crop_btn
     reg.register("_review_image_crop_btn", crop_btn)
-    crop_btn.setProperty("variant", "toggle")
-    crop_btn.setCheckable(True)
-    crop_btn.setChecked(False)
     crop_btn.setToolTip(
         "Enter crop mode, then drag a rectangle.\n"
         "• Cells whose centroid is inside are kept; cells outside are excluded "
@@ -194,13 +202,13 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     crop_btn.clicked.connect(
         lambda _=False: toggle_crop_edit_mode(ctx)
     )
-    ctrl.add_action(crop_btn)
+    tools_lay.addWidget(crop_btn)
 
     # Which frames the crop filters. Same control as the Delete scope above, and
     # for the same reason it sits next to the button it modifies and carries the
     # armed scope in its own label — an off-screen scope silently deciding which
     # cells count is exactly what this readout exists to prevent.
-    ctrl.add_action(build_crop_scope_control(ctx, ctrl))
+    tools_lay.addWidget(build_crop_scope_control(ctx, tools_row))
 
     # ── Edit ▾ menu — the one-shot crop / reset actions ─────────────────
     edit_btn, edit_menu = make_action_menu_button(
@@ -211,7 +219,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     add_menu_action(edit_menu, "Reset crop + curation",
                     lambda: reset_crop_and_overrides(ctx))
     reg.register("_review_image_edit_btn", edit_btn)
-    ctrl.add_action(edit_btn)
+    tools_lay.addWidget(edit_btn)
 
     # ── View ▾ popover — image stage · zoom · overlay toggles ───────────
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
@@ -225,8 +233,8 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     stage_row = QWidget(view_panel)
     stage_lay = QHBoxLayout(stage_row)
     stage_lay.setContentsMargins(0, 0, 0, 0)
-    stage_lay.setSpacing(6)
-    stage_lay.addWidget(QLabel("Stage:", stage_row))
+    stage_lay.setSpacing(theme.Spacing.xs)
+    stage_lay.addWidget(QLabel("Stage", stage_row))
     source_seg = _SegmentedControl(stage_row)
     rt.source_seg = source_seg
     for _lbl, _data in (("Raw", "raw"), ("Flat-field", "flatfield"),
@@ -250,11 +258,11 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # Zoom lives inline on the control row above, not here — it is used far too
     # often to sit two clicks deep inside a popover.
 
+    # Three settings of the picture, each acting at once: switches named for what is true when on (§2.5).
     from PySide6.QtWidgets import QPushButton as _QPushButton
-    outline_btn = _QPushButton("Outline: On", view_panel)
+    from widgets.toggle_switch import ToggleSwitch as _ToggleSwitch
+    outline_btn = _ToggleSwitch("Show outlines", view_panel)
     rt.outline_btn = outline_btn
-    outline_btn.setProperty("variant", "toggle")
-    outline_btn.setCheckable(True)
     outline_btn.setChecked(bool(ctx.state.review_image.show_outline))
     outline_btn.clicked.connect(
         lambda _=False: toggle_review_image_outline(ctx)
@@ -262,10 +270,8 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     view_lay.addWidget(outline_btn)
     refresh_review_image_outline_btn(ctx)
 
-    binary_btn = _QPushButton("Binary: Off", view_panel)
+    binary_btn = _ToggleSwitch("Show as a binary mask", view_panel)
     rt.binary_btn = binary_btn
-    binary_btn.setProperty("variant", "toggle")
-    binary_btn.setCheckable(True)
     binary_btn.setChecked(bool(ctx.state.review_image.binary_mask))
     binary_btn.clicked.connect(
         lambda _=False: toggle_review_image_binary_mask(ctx)
@@ -276,10 +282,8 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # "Why was this cell removed" -- the one surface in the app that answers
     # it. Beside the other two overlay toggles because it is the same kind of
     # control: it changes what the picture says, not what is included.
-    layers_btn = _QPushButton("Why removed: Off", view_panel)
+    layers_btn = _ToggleSwitch("Show why cells were removed", view_panel)
     rt.layers_btn = layers_btn
-    layers_btn.setProperty("variant", "toggle")
-    layers_btn.setCheckable(True)
     layers_btn.setChecked(bool(ctx.state.review_image.show_exclusion_layers))
     layers_btn.clicked.connect(
         lambda _=False: toggle_review_image_exclusion_layers(ctx)
@@ -296,7 +300,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # quick-edit on the control row above — ThreshFracOn for an intensity
     # Property, ThreshCountOn for a spot count.
     status = reg.register("_review_image_status", QLabel("", inner))
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     il.addWidget(status)
 
     # ── LUT ▾ popover — display brightness (min/max) ────────────────────
@@ -334,11 +338,11 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     thr_row = QWidget()
     thr_lay = QHBoxLayout(thr_row)
     thr_lay.setContentsMargins(0, 0, 0, 0)
-    thr_lay.setSpacing(6)
+    thr_lay.setSpacing(theme.Spacing.xs)
     # Registered because the caption follows the cutoff the selected Property
     # uses — ``refresh_thresh_frac_quick_edit`` rewrites it alongside the value.
     _thr_lbl = reg.register("_review_thresh_frac_lbl", QLabel("ON threshold", thr_row))
-    _thr_lbl.setObjectName("Muted")   # the band's own captions read this way
+    _thr_lbl.setProperty("textRole", "help")   # the band's own captions read this way
     thr_lay.addWidget(_thr_lbl)
     thresh_stepper = reg.register(
         "_review_thresh_frac_stepper",
@@ -360,8 +364,8 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     ctrl.add_scope("", thr_row)
 
     # ── Colors ▾ popover — per-element display colours + reset ──────────
-    colors_btn, colors_panel, colors_lay = make_popover_button("Colours", ctrl, ctx=ctx)
-    colors_btn.setToolTip("Boundary / Selected / Tint colours and reset")
+    colors_btn, colors_panel, colors_lay = make_popover_button("Colors", ctrl, ctx=ctx)
+    colors_btn.setToolTip("Boundary / Selected / Tint colors and reset")
     swatches: dict = {}
     rt.color_swatches = swatches
 
@@ -369,7 +373,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         row = QWidget(colors_panel)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(6)
+        rl.setSpacing(theme.Spacing.xs)
         rl.addWidget(QLabel(label_text, row))
         sw = _QPushButton("", row)
         sw.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)
@@ -382,11 +386,11 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         swatches[key] = sw
         review_image_refresh_color_swatch(ctx, key)
 
-    _add_swatch("Boundary:", "boundary",
+    _add_swatch("Boundary", "boundary",
                 "Color used for included cell boundaries.")
-    _add_swatch("Selected:", "selected",
+    _add_swatch("Selected", "selected",
                 "Color used for the selected cell highlight.")
-    _add_swatch("Tint:", "tint",
+    _add_swatch("Tint", "tint",
                 "Tints the grayscale fluorescence image. White (default) "
                 "leaves it pure grayscale; pick a color to multiply each\n"
                 "channel by the chosen RGB.")
@@ -411,6 +415,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     label.setMouseTracking(True)
     canvas.setWidget(label)
     il.addWidget(canvas, 1)
+    il.addWidget(tools_row)
 
     # Re-fit the image whenever the scroll area is (re)sized. The lazy first
     # build draws before Qt has laid out the canvas, so the initial

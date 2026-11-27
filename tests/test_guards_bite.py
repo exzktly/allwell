@@ -652,7 +652,7 @@ HEALTH_ROSTER_CLEAN = {
     "colour_map": ('COLORS = {"complete": theme.Colors.success,\n'
                    '          "partial": theme.Colors.warn,\n'
                    '          "missing": theme.Colors.danger,\n'
-                   '          "no_output": theme.Colors.text_muted}\n'),
+                   '          "no_output": theme.Colors.text_secondary}\n'),
     # A single state named in passing.
     "one_state": 'if state == "no_output":\n    pass\n',
 }
@@ -6067,6 +6067,150 @@ def test_recursive_delete_guard_clears(shape):
     found = violations(ast.parse(RECURSIVE_DELETE_CLEAR[shape]), "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
 
+
+# ── button kinds ────────────────────────────────────────────────────────────
+
+BUTTON_KIND_VIOLATIONS = {
+    "set_property": 'def build(b):\n    b.setProperty("variant", "secondary")\n',
+    # A conditional hands either value to the setter: Subset's Run button picks its kind at run time.
+    "conditional": 'def build(b, in_place):\n    set_variant(b, "danger" if in_place else "primary")\n',
+    # Job Queue's recipe actions are built from a table of rows, the variant in one column.
+    "table": ('def build(p):\n    for key, text, variant in (("a", "Apply", "primary"), ("d", "Delete", "danger")):\n'
+              '        b = QPushButton(text, p)\n        b.setProperty("variant", variant)\n'),
+    "funnel": 'def build(p):\n    return _btn(p, "Clear", None, "muted")\n',
+    # A helper's default: every button it builds gets the kind without any call naming it.
+    "default_kind": ('def _button(text, *, variant="secondary"):\n    b = QPushButton(text)\n'
+                     '    b.setProperty("variant", variant)\n    return b\n'),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(BUTTON_KIND_VIOLATIONS))
+def test_button_kind_guard_catches_a_fifth_kind(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, f"bad_kind_{shape}.py", BUTTON_KIND_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_buttons_have_one_of_four_kinds",
+                    "test_every_button_is_given_one_of_the_four_kinds", [bad])
+    assert exc is not None and f"bad_kind_{shape}.py" in str(exc)
+
+
+def test_button_kind_guard_clears_the_four(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_kind.py",
+                  'def build(b, x):\n    b.setProperty("variant", "primary")\n'
+                  '    set_variant(b, "destructive" if x else "quiet")\n    set_kind(b, "default")\n')
+    assert _run_scan(monkeypatch, "tests.test_buttons_have_one_of_four_kinds",
+                     "test_every_button_is_given_one_of_the_four_kinds", [good]) is None
+
+
+# ── the design-language guards (DESIGN_LANGUAGE_TRACKER.md §5.2) ────────────
+
+DESIGN_GUARD_CASES = {
+    # (module, test, a violating file, a clean file)
+    "text_role_name": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                       'def build(lbl, bad):\n    lbl.setObjectName("Notice" if bad else "Muted")\n',
+                       'def build(p):\n    return text_roles.help_text("Hint", p)\n'),
+    "text_role_font": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                       'def build(lbl):\n    lbl.setStyleSheet("font-weight: 600;")\n',
+                       'def build(lbl):\n    lbl.setStyleSheet("color: red;")\n'),
+    "text_role_variable": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                           'def show(lbl, bad):\n    tone = "Muted"\n    if bad:\n        tone = "Danger"\n'
+                           '    lbl.setObjectName(tone)\n',
+                           'def show(lbl, name):\n    lbl.setObjectName(name)\n'),
+    "text_role_default": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                          'def status(lbl, text, *, quiet="Muted"):\n    lbl.setObjectName(quiet)\n',
+                          'def status(lbl, text, *, quiet=True):\n    lbl.setProperty("textRole", "help")\n'),
+    "text_role_helper": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                         'class F:\n    def note(self):\n        self._style("Muted")\n'
+                         '    def _style(self, name):\n        if name:\n            self._hint.setObjectName(name)\n',
+                         'class F:\n    def note(self):\n        self._style("help")\n'
+                         '    def _style(self, role):\n        self._hint.setProperty("textRole", role)\n'),
+    "text_role_property": ("tests.test_text_has_a_role", "test_text_takes_a_role_not_a_name_or_font_of_its_own",
+                           'def build(lbl):\n    lbl.setProperty("muted", True)\n',
+                           'def build(lbl):\n    lbl.setProperty("textRole", "label")\n'),
+    "style_sheet": ("tests.test_no_style_sheet_outside_the_theme", "test_no_style_sheet_is_set_outside_the_theme",
+                    'def build(w):\n    w.setStyleSheet(QSS)\n',
+                    'def build(app, w):\n    app.setStyleSheet(theme.qss())\n    w.setStyleSheet("")\n'),
+    # The exemption is for the theme's own builder, called bare: a module's own qss() with arguments is a rule
+    # of its own, written past the application sheet.
+    "style_sheet_own_qss": ("tests.test_no_style_sheet_outside_the_theme",
+                            "test_no_style_sheet_is_set_outside_the_theme",
+                            'def build(w, c):\n    w.setStyleSheet(qss(c))\n',
+                            'def build(w):\n    w.setObjectName("Card")\n'),
+    # A literal wrapped in arithmetic on a token is still a literal.
+    "spacing": ("tests.test_spacing_comes_from_tokens", "test_spacing_comes_from_the_scale",
+                'def build(lay):\n    lay.setSpacing(theme.Spacing.sm + 2)\n',
+                'def build(lay):\n    lay.setContentsMargins(0, theme.Spacing.sm, 0, 0)\n'),
+    "sentence_case": ("tests.test_labels_are_sentence_case",
+                      "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                      'def build(p, x):\n    return QPushButton("Run Pipeline" if x else "Stop", p)\n',
+                      'def build(p):\n    return QPushButton("Run pipeline", p)\n'),
+    "sentence_case_colon": ("tests.test_labels_are_sentence_case",
+                            "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                            'def build(band, w):\n    band.add_scope("Channel:", w)\n',
+                            'def build(band, w):\n    band.add_scope("Channel", w)\n'),
+    "state_label": ("tests.test_no_state_in_a_button_label", "test_no_button_carries_its_state",
+                    'def build(b):\n    b.setText("Pooled: Off")\n', 'def build(b):\n    b.setText("Pool replicates")\n'),
+    "checkable_push": ("tests.test_no_state_in_a_button_label", "test_no_button_carries_its_state",
+                       'def build(p):\n    self._sem = QPushButton("SEM", p)\n    self._sem.setCheckable(True)\n',
+                       'def build(p):\n    box = QCheckBox("Show SEM", p)\n    box.setCheckable(True)\n'),
+    "unset": ("tests.test_unset_reads_not_set", "test_an_unset_value_reads_not_set_through_one_constant",
+              'def build(edit):\n    edit.setPlaceholderText("(not set)")\n',
+              'def build(lbl):\n    text_roles.show_value(lbl, None)\n'),
+    # A dash handed to a table cell is that cell's unset value; a dash in a figure's text is not a control's.
+    "unset_dash_in_a_cell": ("tests.test_unset_reads_not_set", "test_an_unset_value_reads_not_set_through_one_constant",
+                             'def build(t):\n    t.setItem(0, 1, QTableWidgetItem("—"))\n',
+                             'def draw(ax):\n    ax.text(0, 0, "—")\n'),
+    # An f-string's words are unknown until it runs, but its marks are not.
+    "sentence_case_fstring_glyph": ("tests.test_labels_are_sentence_case",
+                                    "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                                    'def build(lbl, n):\n    lbl.setText(f"✓ {n} saved")\n',
+                                    'def build(lbl, n):\n    lbl.setText(f"{n} saved")\n'),
+    # A label handed through the module's own helper is still a label.
+    "sentence_case_through_a_helper": ("tests.test_labels_are_sentence_case",
+                                       "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                                       'def _add_label(row, text):\n    row.addWidget(QLabel(text))\n\n'
+                                       'def build(row):\n    _add_label(row, "Folder:")\n',
+                                       'def _add_label(row, text):\n    row.addWidget(QLabel(text))\n\n'
+                                       'def build(row):\n    _add_label(row, "Folder")\n'),
+    "hand_built_fold": ("tests.test_one_collapse_implementation", "test_a_section_folds_through_collapsible_section",
+                        'def toggle(caret, body):\n    caret.setText("▾" if body.isVisible() else "▸")\n',
+                        'def build(btn):\n    btn.setText("Display ▾")\n'),
+    # A label handed over by name, or as a parameter's default, is still a label.
+    "sentence_case_constant": ("tests.test_labels_are_sentence_case",
+                               "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                               '_RUN_LABEL = "▶  Subset"\n\ndef build(p):\n    return buttons.primary(_RUN_LABEL, p)\n',
+                               '_RUN_LABEL = "Subset"\n\ndef build(p):\n    return buttons.primary(_RUN_LABEL, p)\n'),
+    "sentence_case_default": ("tests.test_labels_are_sentence_case",
+                              "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                              'def build(p, text="Start The Run"):\n    return buttons.primary(text, p)\n',
+                              'def build(p, text="Run batch export"):\n    return buttons.primary(text, p)\n'),
+    "color_spelling": ("tests.test_color_is_the_one_spelling", "test_the_interface_spells_it_color",
+                       'def build(b):\n    b.setToolTip("Pick the colour of the outline")\n',
+                       'def build(b, s):\n    b.setToolTip("Pick the color of the outline")\n    s["colour_by"] = 1\n'),
+    # A page named in prose keeps its name's capitals; any other capital mid-sentence is Title Case.
+    "sentence_case_page_name": ("tests.test_labels_are_sentence_case",
+                                "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                                'def build(lbl):\n    lbl.setText("Draw one on the Scatter Plot Panel")\n',
+                                'def build(lbl):\n    lbl.setText("Draw one on the Scatter Plot tab")\n'),
+    "button_by_hand": ("tests.test_buttons_have_one_of_four_kinds",
+                       "test_a_pane_builds_its_buttons_through_ui_buttons",
+                       'def build(p):\n    return QPushButton("Run", p)\n',
+                       'def build(p):\n    return buttons.primary("Run", p)\n'),
+}
+
+
+@pytest.mark.parametrize("case", sorted(DESIGN_GUARD_CASES))
+def test_design_guard_catches_its_violation(tmp_path, monkeypatch, case):
+    module, test, bad_src, _good = DESIGN_GUARD_CASES[case]
+    # Under a pane's path, so the button guard (which reads panes only) reads it too.
+    bad = _write(tmp_path, f"review/bad_{case}.py", bad_src)
+    exc = _run_scan(monkeypatch, module, test, [bad])
+    assert exc is not None and f"bad_{case}.py" in str(exc)
+
+
+@pytest.mark.parametrize("case", sorted(DESIGN_GUARD_CASES))
+def test_design_guard_clears_the_right_way(tmp_path, monkeypatch, case):
+    module, test, _bad, good_src = DESIGN_GUARD_CASES[case]
+    good = _write(tmp_path, f"review/good_{case}.py", good_src)
+    assert _run_scan(monkeypatch, module, test, [good]) is None
 
 # ── the surface guards (tests/_surface_guards.py) ─────────────────────────────
 #

@@ -312,7 +312,7 @@ def _halo() -> list:
     """A dark outline round a text, so it reads on a bright pixel as well as a dark one."""
     from matplotlib import patheffects
 
-    return [patheffects.withStroke(linewidth=2.6, foreground=_theme().surface)]
+    return [patheffects.withStroke(linewidth=2.6, foreground=_theme().canvas)]
 
 
 def render_blink(fig, pair, frames, lines: list[str]) -> IdentityDrawn:
@@ -344,7 +344,7 @@ def render_blink(fig, pair, frames, lines: list[str]) -> IdentityDrawn:
                                    gid=f"nw-identity-label-{k}"))
         artists.append(ax.text(0.01, 0.99, name, transform=ax.transAxes, fontsize=8.5, fontweight="bold",
                                color=colour, va="top", path_effects=halo, gid="nw-identity-frame",
-                               bbox={"boxstyle": "round,pad=0.3", "facecolor": Colors.surface, "alpha": 0.8,
+                               bbox={"boxstyle": "round,pad=0.3", "facecolor": Colors.canvas, "alpha": 0.8,
                                      "edgecolor": colour}))
         sets.append(artists)
     drawn.frames = sets

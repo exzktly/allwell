@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0">
+<title>All-Well Language Prototype</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a short decision bar, then one working app window drawn in the proposed language. */
+:root{
+  --bg:#F5F6FA; --panel:#FFFFFF; --ink:#151A26; --ink2:#4A5468; --ink3:#7B8598; --line:#DCE0EA; --accent:#3F5BD9; --accent-soft:#E6EAFD;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --bg:#0C1018; --panel:#131924; --ink:#E7EAF1; --ink2:#A9B2C3; --ink3:#77829A; --line:#263042; --accent:#8AA2FF; --accent-soft:#1E2A52; color-scheme:dark } }
+:root[data-theme="dark"]{ --bg:#0C1018; --panel:#131924; --ink:#E7EAF1; --ink2:#A9B2C3; --ink3:#77829A; --line:#263042; --accent:#8AA2FF; --accent-soft:#1E2A52; color-scheme:dark }
+body{background:var(--bg);color:var(--ink);font:15px/1.5 var(--sans)}
+.wrap{max-width:1240px;margin:0 auto;padding-block:24px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:20px}
+h1{font-size:26px;line-height:1.2;letter-spacing:-.02em;margin:0;text-wrap:balance}
+p{margin:0;max-width:70ch;color:var(--ink2)}
+.eyebrow{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.decide{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.qcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.qcard b{font-size:14px}.qcard span{font-size:12.5px;color:var(--ink2)}
+.pick{display:inline-flex;align-self:flex-start;padding:3px;border-radius:8px;background:var(--bg);border:1px solid var(--line)}
+.pick button{font:500 13px var(--sans);padding:6px 12px;border:0;border-radius:6px;background:none;color:var(--ink2);cursor:pointer}
+.pick button.on{background:var(--accent);color:var(--panel);font-weight:600}
+button:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.try{font-size:13px;color:var(--ink2);display:flex;flex-wrap:wrap;gap:6px 14px}
+.try b{color:var(--ink)}
+.why{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px}
+.why h2,.dis h2{font-size:16px;margin:0}
+.why ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;font-size:13.5px;color:var(--ink2)}
+.why li b{color:var(--ink);font-weight:600}
+.src{display:inline-block;font:600 10.5px/1 var(--mono);letter-spacing:.04em;padding:3px 6px;border-radius:4px;background:var(--accent-soft);color:var(--accent);margin-left:4px;white-space:nowrap}
+.dis{display:flex;flex-direction:column;gap:10px}
+.wpg{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+.wp{display:grid;grid-template-columns:repeat(12,1fr);gap:4px;padding:10px;border-radius:8px;border:1px solid var(--line)}
+.wp i{aspect-ratio:1;border-radius:50%}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.tw table{border-collapse:collapse;width:100%;font-size:13.5px}
+.tw th,.tw td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.tw th{font:600 11px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3)}
+.tw tr:last-child td{border-bottom:0}
+.scroller{overflow-x:auto;border-radius:12px}
+
+/* ───────── the app, in the proposed language ───────── */
+.app{--canvas:#141618;--card:#24272C;--raised:#2D3137;--hair:#3F444B;--bedge:#60666E;--fedge:#787E86;--text:#EAECEE;--text2:#A1A7AF;--off:#7F858D;--acc:#2D8CEB;--onacc:#0B0D10;--sel:#22415E;--seltext:#D6E6F8;--ok:#3FB950;--warn:#FFB300;--bad:#FF6B6B;--plot:#0A0C10;
+  min-width:1080px;height:680px;background:var(--canvas);color:var(--text);font:13px/1.35 var(--sans);border-radius:12px;border:1px solid #05070B;display:flex;flex-direction:column;overflow:hidden;position:relative;box-shadow:0 16px 40px rgba(8,12,24,.25)}
+.app[data-pal="blue"]{--canvas:#0B0F17;--card:#131A24;--raised:#1D2633;--hair:#2A3343;--bedge:#3B475C;--fedge:#5E6B82;--text:#E6E9EF;--text2:#98A2B3;--off:#5F6B7C;--acc:#6B8AFD;--onacc:#0B0F17;--sel:#24315C;--seltext:#C9D4FF;--ok:#4ADE80;--warn:#F59E0B;--bad:#F87171;--plot:#131A24}
+.app *{box-sizing:border-box}
+:where(.app) button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left}
+.top{height:44px;flex:none;display:flex;align-items:center;gap:12px;padding:0 12px;border-bottom:1px solid var(--hair)}
+.brand{font-size:15px;font-weight:600;display:flex;align-items:center;gap:9px;width:184px;flex:none}
+.dsb{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 10px;border-radius:8px;background:var(--raised);margin-bottom:10px}
+.dsb:hover{outline:1px solid var(--bedge)}
+.dsb span{display:flex;flex-direction:column;gap:1px;min-width:0}.dsb b{font-weight:600}.dsb small{font-size:12px;color:var(--text2)}.dsb i{font-style:normal;font-size:10px;color:var(--text2)}
+.app{--frame:var(--canvas)}
+.app[data-shell="panels"],.app[data-shell="frame"]{--frame:#0B0D0F;background:var(--frame)}
+.app[data-pal="blue"][data-shell="panels"],.app[data-pal="blue"][data-shell="frame"]{--frame:#06090F}
+.app:not([data-shell="lines"]) .top{border-bottom:0;height:52px}
+.app:not([data-shell="lines"]) .rail{border-right:0;padding-top:4px}
+.app:not([data-shell="lines"]) .nav{border-radius:7px;height:32px}
+.app:not([data-shell="lines"]) .nav.on{box-shadow:none}
+.app:not([data-shell="lines"]) .top .seg{border-radius:9px;padding:3px;height:32px;background:var(--canvas);border-color:transparent}
+.app:not([data-shell="lines"]) .top .seg button{border-radius:6px;padding:0 14px}
+.app[data-shell="panels"] .body{gap:8px;padding:0 8px 8px 0}
+.app[data-shell="panels"] .body.norail{padding-left:8px}
+.app[data-shell="panels"] .main{background:var(--canvas);border-radius:12px}
+.app[data-shell="panels"] .insp{border-left:0;border-radius:12px}
+.app[data-shell="frame"] .main{background:var(--canvas);border-top-left-radius:16px}
+.app[data-shell="frame"] .body.norail .main{border-top-left-radius:0}
+.app[data-shell="frame"] .insp{border-left:1px solid var(--hair)}
+.body{flex:1;min-height:0;display:flex}
+.rail{width:196px;flex:none;border-right:1px solid var(--hair);padding:10px 8px;display:flex;flex-direction:column;gap:2px;overflow-y:auto}
+.rail .ds{margin-bottom:8px}
+.nav{display:flex;align-items:center;height:30px;padding:0 10px;border-radius:4px;color:var(--text2);width:100%}
+.nav:hover{background:var(--raised)}
+.nav.on{background:var(--sel);color:var(--seltext);font-weight:600;box-shadow:inset 2px 0 0 var(--acc)}
+.main{flex:1;min-width:0;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.insp{width:272px;flex:none;border-left:1px solid var(--hair);background:var(--card);padding:12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto}
+.t-page{font-size:17px;font-weight:600}.t-sec{font-size:15px;font-weight:600}
+.t-eye{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text2);padding-top:4px}
+.t-lab{font-size:12px;color:var(--text2)}.t-help{font-size:12px;color:var(--text2)}
+.t-num{font-family:var(--mono);font-size:12px;font-variant-numeric:tabular-nums}
+.r{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.sp{flex:1}
+.card{background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.b{flex:none;height:28px;padding:0 12px;border-radius:4px;font-weight:500;font-size:12.5px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;background:var(--raised);color:var(--text);border:1px solid var(--bedge)}
+.b:hover{border-color:var(--fedge)}
+.b.p{background:var(--acc);border-color:var(--acc);color:var(--onacc);font-weight:600}
+.b.q{background:transparent;border-color:transparent;color:var(--text2)}.b.q:hover{color:var(--text);background:var(--raised)}
+.b.d{color:var(--bad)}
+.b.on{background:var(--sel);border-color:var(--acc);color:var(--seltext)}
+.b[disabled]{color:var(--off);border-color:var(--hair);background:var(--raised);cursor:default}
+.f{overflow:hidden;height:28px;padding:0 10px;border-radius:4px;background:var(--canvas);border:1px solid var(--fedge);color:var(--text);display:inline-flex;align-items:center;gap:8px;font-size:13px;white-space:nowrap;min-width:0}
+.f i{font-style:normal;color:var(--text2);font-size:10px}.f.ph{color:var(--off)}
+button.f:hover{border-color:var(--text2)}
+.fl{display:inline-flex;flex-direction:column;gap:4px;min-width:0}
+.seg{flex:none;white-space:nowrap;display:inline-flex;height:28px;padding:2px;border-radius:4px;background:var(--canvas);border:1px solid var(--hair)}
+.seg button{padding:0 10px;border-radius:3px;color:var(--text2);font-size:12.5px}
+.seg button.on{background:var(--sel);color:var(--seltext);font-weight:600}
+.ck{display:inline-flex;align-items:center;gap:8px}
+.ck::before{content:"";width:16px;height:16px;border-radius:3px;border:1px solid var(--fedge);background:var(--canvas);flex:none}
+.ck.on::before{content:"✓";background:var(--acc);border-color:var(--acc);color:var(--onacc);font-size:11px;font-weight:700;display:grid;place-items:center}
+.swt{width:32px;height:18px;border-radius:9px;background:var(--raised);border:1px solid var(--fedge);position:relative;flex:none}
+.swt::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--text2);transition:left .12s}
+.swt.on{background:var(--acc);border-color:var(--acc)}.swt.on::after{left:16px;background:var(--onacc)}
+@media (prefers-reduced-motion:reduce){.swt::after{transition:none}}
+.note{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:6px;background:var(--card);border:1px solid var(--hair);border-left:3px solid var(--text2)}
+.note.w{border-left-color:var(--warn)}.note.e{border-left-color:var(--bad)}.note.g{border-left-color:var(--ok)}
+.dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--text2)}
+.dot.w{background:var(--warn)}.dot.ok{background:var(--ok)}.dot.e{background:var(--bad)}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--hair)}
+.tabs button{padding:8px 12px;color:var(--text2);border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabs button.on{color:var(--text);font-weight:600;border-bottom-color:var(--acc)}
+.grid2{display:grid;grid-template-columns:112px minmax(0,1fr);gap:10px 16px;align-items:center}
+.irow{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:30px}
+.chip{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:11px;background:var(--raised);font-size:12px}
+.tile{background:var(--card);border:1px solid var(--hair);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:4px;min-width:104px}
+.tile b{font:600 20px/1.1 var(--mono)}
+.plot{background:var(--plot);border-radius:4px;border:1px solid var(--hair)}
+.plot svg{display:block;width:100%;height:230px}
+.plate{display:grid;grid-template-columns:repeat(12,14px);gap:3px}
+.plate button{width:14px;height:14px;border-radius:50%;background:var(--raised);border:1px solid var(--hair)}
+.plate button.on{background:var(--acc);border-color:var(--acc)}
+.menu{position:absolute;z-index:5;background:var(--raised);border:1px solid var(--bedge);border-radius:10px;padding:4px;min-width:190px;display:flex;flex-direction:column;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+.menu button{padding:8px 10px;border-radius:6px}.menu button:hover{background:var(--sel)}
+.menu hr{border:0;border-top:1px solid var(--hair);margin:4px 0;width:100%}
+.veil{position:absolute;inset:0;z-index:4}
+table.res{border-collapse:collapse;width:100%}
+table.res th{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--text2);text-align:left;padding:6px 10px;border-bottom:1px solid var(--hair)}
+table.res td{padding:7px 10px;border-bottom:1px solid var(--hair)}
+.log{font-family:var(--mono);font-size:11.5px;color:var(--text2);background:var(--canvas);border:1px solid var(--hair);border-radius:4px;padding:10px;white-space:pre-wrap;max-height:120px;overflow:auto}
+.dot.a{background:var(--acc)}
+.wide .seg{display:flex;width:100%}.wide .seg button{flex:1;padding:0 4px;text-align:center}
+button.chip{border:1px solid var(--bedge)}button.chip.on{background:var(--sel);color:var(--seltext);border-color:var(--acc)}
+.chip .x{display:inline-grid;place-items:center;width:14px;height:14px;border-radius:50%;color:var(--text2)}.chip .x:hover{background:var(--hair);color:var(--text)}
+.ic{width:28px;height:28px;border-radius:4px;display:inline-grid;place-items:center;color:var(--text2);flex:none}.ic:hover{background:var(--raised);color:var(--text)}
+.scrim{position:absolute;inset:0;z-index:6;background:rgba(0,0,0,.55);display:grid;place-items:center}
+.alert{width:380px;background:var(--card);border:1px solid var(--bedge);border-radius:10px;padding:20px;display:flex;flex-direction:column;gap:10px;box-shadow:0 20px 50px rgba(0,0,0,.6)}
+.menu button.d{color:var(--bad)}
+.bar{height:6px;border-radius:3px;background:var(--raised);overflow:hidden}.bar i{display:block;height:100%;background:var(--acc)}
+</style>
+
+<div class="wrap">
+  <span class="eyebrow">All-Well · design language · try it</span>
+  <h1>A working example, revised against the published guidance</h1>
+  <p>I went back to the sources behind the proposal (Apple's Human Interface Guidelines, Nielsen Norman Group, Microsoft's Windows writing guidance, and Material where it could be loaded) and changed this example wherever it broke one of their rules. Every control works. The panel under the window names the rule behind each choice on the page you are looking at, and follows you as you move.</p>
+
+  <div class="decide">
+    <div class="qcard"><b>Window style</b><span>How the sidebar, top bar and page are separated. Lines is what I showed before.</span><div class="pick" id="qShell"><button data-v="panels">W1 · Panels</button><button data-v="frame">W2 · Frame</button><button data-v="lines">W3 · Lines</button></div></div>
+    <div class="qcard"><b>Palette</b><span>The app starts grey today. The picture you sent was the blue variant.</span><div class="pick" id="qPal"><button data-v="grey">P1 · Grey</button><button data-v="blue">P2 · Blue</button></div></div>
+    <div class="qcard"><b>Well colours</b><span>See Plotting. Changing them alters saved datasets and needs a migration.</span><div class="pick" id="qWell"><button data-v="cur">C1 · Current</button><button data-v="new">C2 · Proposed</button></div></div>
+    <div class="qcard"><b>Spelling</b><span>Both appear in the app today. See the inspector's rows on Plotting.</span><div class="pick" id="qSpell"><button data-v="uk">S1 · Colour</button><button data-v="us">S2 · Color</button></div></div>
+  </div>
+  <div class="try"><b>Things to try:</b><span>Plotting › Display, then change Show and Error band</span><span>Nanowells › Subset ›, then Show in the inspector</span><span>Statistics › Run test</span><span>Analyze › Browse…, then Run pipeline</span><span>Datasets › Job queue › Add job</span><span>plate_0412 ▾ › Reset view… (an alert)</span></div>
+
+  <div class="scroller"><div class="app" id="app" data-pal="grey" aria-label="Interactive example of the proposed design language"></div></div>
+  <div class="why"><h2 id="whyT">Rules this page follows</h2><ol id="why"></ol></div>
+  <div class="dis"><h2>The 96 well colours (C2)</h2>
+  <p style="font-size:13.5px">Each plate below is the palette laid out as it falls on a 96-well plate. The first eight are the ones you approved; I chose the other 88 and their positions by measurement, so that wells next to each other are easy to tell apart, including for colour-blind readers. A colour already saved in a dataset stays as it is.</p>
+  <div class="wpg"><figure style="margin:0"><div class="wp" style="background:#0A0C10"><i style="background:#338CED"></i><i style="background:#E76624"></i><i style="background:#00A888"></i><i style="background:#D28E05"></i><i style="background:#E24D8B"></i><i style="background:#0AAC23"></i><i style="background:#9887EF"></i><i style="background:#EB6263"></i><i style="background:#C01085"></i><i style="background:#DF816E"></i><i style="background:#447CBF"></i><i style="background:#FF648B"></i><i style="background:#1C6E80"></i><i style="background:#C588B0"></i><i style="background:#D302C5"></i><i style="background:#2E8C7C"></i><i style="background:#D40E14"></i><i style="background:#A67284"></i><i style="background:#857829"></i><i style="background:#C6099F"></i><i style="background:#F36AA9"></i><i style="background:#C03DB3"></i><i style="background:#878F5D"></i><i style="background:#7C60DB"></i><i style="background:#639F74"></i><i style="background:#795C84"></i><i style="background:#D38B5A"></i><i style="background:#AF16B6"></i><i style="background:#976371"></i><i style="background:#7BA944"></i><i style="background:#566394"></i><i style="background:#5EA0E3"></i><i style="background:#A43FAE"></i><i style="background:#FC146F"></i><i style="background:#7332FD"></i><i style="background:#C35E74"></i><i style="background:#A174F0"></i><i style="background:#4AA7B7"></i><i style="background:#3D68BC"></i><i style="background:#915075"></i><i style="background:#0F9CD0"></i><i style="background:#C03A8F"></i><i style="background:#FB5FCA"></i><i style="background:#B6443A"></i><i style="background:#FD449D"></i><i style="background:#5F63CC"></i><i style="background:#BA6C95"></i><i style="background:#B639F0"></i><i style="background:#D8006D"></i><i style="background:#236FEA"></i><i style="background:#3E7C6B"></i><i style="background:#A765DB"></i><i style="background:#ED214B"></i><i style="background:#FD46F5"></i><i style="background:#FC7145"></i><i style="background:#D163CF"></i><i style="background:#7C6135"></i><i style="background:#AC3992"></i><i style="background:#2258E5"></i><i style="background:#BF5297"></i><i style="background:#5A7BE2"></i><i style="background:#26894C"></i><i style="background:#9E4BFF"></i><i style="background:#9A4F57"></i><i style="background:#9C78B6"></i><i style="background:#A0832A"></i><i style="background:#4C869D"></i><i style="background:#E14513"></i><i style="background:#E87997"></i><i style="background:#D56CFC"></i><i style="background:#BC857C"></i><i style="background:#C452FD"></i><i style="background:#507C41"></i><i style="background:#6F70AB"></i><i style="background:#D14160"></i><i style="background:#3694A6"></i><i style="background:#B29B37"></i><i style="background:#C27FDD"></i><i style="background:#AB6647"></i><i style="background:#DD63A7"></i><i style="background:#8D4E9F"></i><i style="background:#5C7704"></i><i style="background:#9428DD"></i><i style="background:#AE4565"></i><i style="background:#EE27A6"></i><i style="background:#2AA1FE"></i><i style="background:#FB3DCC"></i><i style="background:#FD171C"></i><i style="background:#8552C2"></i><i style="background:#61911C"></i><i style="background:#8688C5"></i><i style="background:#4DA64F"></i><i style="background:#4C6D48"></i><i style="background:#B33DD3"></i><i style="background:#097463"></i><i style="background:#DE49BD"></i></div><figcaption style="font-size:12px;color:var(--ink3);padding-top:6px">New, on the grey plot background</figcaption></figure><figure style="margin:0"><div class="wp" style="background:#FFFFFF"><i style="background:#338CED"></i><i style="background:#E76624"></i><i style="background:#00A888"></i><i style="background:#D28E05"></i><i style="background:#E24D8B"></i><i style="background:#0AAC23"></i><i style="background:#9887EF"></i><i style="background:#EB6263"></i><i style="background:#C01085"></i><i style="background:#DF816E"></i><i style="background:#447CBF"></i><i style="background:#FF648B"></i><i style="background:#1C6E80"></i><i style="background:#C588B0"></i><i style="background:#D302C5"></i><i style="background:#2E8C7C"></i><i style="background:#D40E14"></i><i style="background:#A67284"></i><i style="background:#857829"></i><i style="background:#C6099F"></i><i style="background:#F36AA9"></i><i style="background:#C03DB3"></i><i style="background:#878F5D"></i><i style="background:#7C60DB"></i><i style="background:#639F74"></i><i style="background:#795C84"></i><i style="background:#D38B5A"></i><i style="background:#AF16B6"></i><i style="background:#976371"></i><i style="background:#7BA944"></i><i style="background:#566394"></i><i style="background:#5EA0E3"></i><i style="background:#A43FAE"></i><i style="background:#FC146F"></i><i style="background:#7332FD"></i><i style="background:#C35E74"></i><i style="background:#A174F0"></i><i style="background:#4AA7B7"></i><i style="background:#3D68BC"></i><i style="background:#915075"></i><i style="background:#0F9CD0"></i><i style="background:#C03A8F"></i><i style="background:#FB5FCA"></i><i style="background:#B6443A"></i><i style="background:#FD449D"></i><i style="background:#5F63CC"></i><i style="background:#BA6C95"></i><i style="background:#B639F0"></i><i style="background:#D8006D"></i><i style="background:#236FEA"></i><i style="background:#3E7C6B"></i><i style="background:#A765DB"></i><i style="background:#ED214B"></i><i style="background:#FD46F5"></i><i style="background:#FC7145"></i><i style="background:#D163CF"></i><i style="background:#7C6135"></i><i style="background:#AC3992"></i><i style="background:#2258E5"></i><i style="background:#BF5297"></i><i style="background:#5A7BE2"></i><i style="background:#26894C"></i><i style="background:#9E4BFF"></i><i style="background:#9A4F57"></i><i style="background:#9C78B6"></i><i style="background:#A0832A"></i><i style="background:#4C869D"></i><i style="background:#E14513"></i><i style="background:#E87997"></i><i style="background:#D56CFC"></i><i style="background:#BC857C"></i><i style="background:#C452FD"></i><i style="background:#507C41"></i><i style="background:#6F70AB"></i><i style="background:#D14160"></i><i style="background:#3694A6"></i><i style="background:#B29B37"></i><i style="background:#C27FDD"></i><i style="background:#AB6647"></i><i style="background:#DD63A7"></i><i style="background:#8D4E9F"></i><i style="background:#5C7704"></i><i style="background:#9428DD"></i><i style="background:#AE4565"></i><i style="background:#EE27A6"></i><i style="background:#2AA1FE"></i><i style="background:#FB3DCC"></i><i style="background:#FD171C"></i><i style="background:#8552C2"></i><i style="background:#61911C"></i><i style="background:#8688C5"></i><i style="background:#4DA64F"></i><i style="background:#4C6D48"></i><i style="background:#B33DD3"></i><i style="background:#097463"></i><i style="background:#DE49BD"></i></div><figcaption style="font-size:12px;color:var(--ink3);padding-top:6px">New, on white (exported figures)</figcaption></figure><figure style="margin:0"><div class="wp" style="background:#0A0C10"><i style="background:#6AB2FB"></i><i style="background:#06F906"></i><i style="background:#0606F9"></i><i style="background:#DF2020"></i><i style="background:#138613"></i><i style="background:#D406F9"></i><i style="background:#FAAC38"></i><i style="background:#6E2277"></i><i style="background:#6AFBE5"></i><i style="background:#2E719E"></i><i style="background:#EC79B8"></i><i style="background:#FAFA38"></i><i style="background:#774C22"></i><i style="background:#131386"></i><i style="background:#05C783"></i><i style="background:#806AFB"></i><i style="background:#B37D19"></i><i style="background:#C7058D"></i><i style="background:#5C05C7"></i><i style="background:#2E9E9E"></i><i style="background:#950437"></i><i style="background:#FA7238"></i><i style="background:#AAC705"></i><i style="background:#224877"></i><i style="background:#9C39C6"></i><i style="background:#D4DD88"></i><i style="background:#AA88DD"></i><i style="background:#779E2E"></i><i style="background:#F906BC"></i><i style="background:#0553C7"></i><i style="background:#068CF9"></i><i style="background:#20D6DF"></i><i style="background:#E56AFB"></i><i style="background:#FA387C"></i><i style="background:#DD9D88"></i><i style="background:#777222"></i><i style="background:#79EC7F"></i><i style="background:#227762"></i><i style="background:#6938FA"></i><i style="background:#05C705"></i><i style="background:#B34F19"></i><i style="background:#D16167"></i><i style="background:#C7A005"></i><i style="background:#471386"></i><i style="background:#B0F906"></i><i style="background:#950495"></i><i style="background:#0667F9"></i><i style="background:#1929B3"></i><i style="background:#7F4660"></i><i style="background:#7F0000"></i><i style="background:#007F43"></i><i style="background:#33337F"></i><i style="background:#EAC081"></i><i style="background:#7F0C51"></i><i style="background:#70ADCC"></i><i style="background:#EAE15D"></i><i style="background:#EA965D"></i><i style="background:#A55B9B"></i><i style="background:#7ACC33"></i><i style="background:#7F3333"></i><i style="background:#70CCA1"></i><i style="background:#5D7F46"></i><i style="background:#EA3A52"></i><i style="background:#A5875B"></i><i style="background:#DC81EA"></i><i style="background:#46747F"></i><i style="background:#CC14CC"></i><i style="background:#9BA55B"></i><i style="background:#EACB00"></i><i style="background:#8ECC70"></i><i style="background:#5B60A5"></i><i style="background:#A56A5B"></i><i style="background:#EA7D00"></i><i style="background:#EA5DC5"></i><i style="background:#00EA6D"></i><i style="background:#CCB351"></i><i style="background:#CC337A"></i><i style="background:#CC708E"></i><i style="background:#BBEA5D"></i><i style="background:#A5A510"></i><i style="background:#6A42A5"></i><i style="background:#6DEA00"></i><i style="background:#00A579"></i><i style="background:#EA795D"></i><i style="background:#21A500"></i><i style="background:#1482CC"></i><i style="background:#7F3B00"></i><i style="background:#00EABB"></i><i style="background:#A5425C"></i><i style="background:#6C467F"></i><i style="background:#42A54F"></i><i style="background:#A43AEA"></i><i style="background:#81EAA4"></i><i style="background:#3A46EA"></i><i style="background:#17C0EA"></i><i style="background:#EA5D83"></i></div><figcaption style="font-size:12px;color:var(--ink3);padding-top:6px">Current, on the grey plot background</figcaption></figure><figure style="margin:0"><div class="wp" style="background:#FFFFFF"><i style="background:#6AB2FB"></i><i style="background:#06F906"></i><i style="background:#0606F9"></i><i style="background:#DF2020"></i><i style="background:#138613"></i><i style="background:#D406F9"></i><i style="background:#FAAC38"></i><i style="background:#6E2277"></i><i style="background:#6AFBE5"></i><i style="background:#2E719E"></i><i style="background:#EC79B8"></i><i style="background:#FAFA38"></i><i style="background:#774C22"></i><i style="background:#131386"></i><i style="background:#05C783"></i><i style="background:#806AFB"></i><i style="background:#B37D19"></i><i style="background:#C7058D"></i><i style="background:#5C05C7"></i><i style="background:#2E9E9E"></i><i style="background:#950437"></i><i style="background:#FA7238"></i><i style="background:#AAC705"></i><i style="background:#224877"></i><i style="background:#9C39C6"></i><i style="background:#D4DD88"></i><i style="background:#AA88DD"></i><i style="background:#779E2E"></i><i style="background:#F906BC"></i><i style="background:#0553C7"></i><i style="background:#068CF9"></i><i style="background:#20D6DF"></i><i style="background:#E56AFB"></i><i style="background:#FA387C"></i><i style="background:#DD9D88"></i><i style="background:#777222"></i><i style="background:#79EC7F"></i><i style="background:#227762"></i><i style="background:#6938FA"></i><i style="background:#05C705"></i><i style="background:#B34F19"></i><i style="background:#D16167"></i><i style="background:#C7A005"></i><i style="background:#471386"></i><i style="background:#B0F906"></i><i style="background:#950495"></i><i style="background:#0667F9"></i><i style="background:#1929B3"></i><i style="background:#7F4660"></i><i style="background:#7F0000"></i><i style="background:#007F43"></i><i style="background:#33337F"></i><i style="background:#EAC081"></i><i style="background:#7F0C51"></i><i style="background:#70ADCC"></i><i style="background:#EAE15D"></i><i style="background:#EA965D"></i><i style="background:#A55B9B"></i><i style="background:#7ACC33"></i><i style="background:#7F3333"></i><i style="background:#70CCA1"></i><i style="background:#5D7F46"></i><i style="background:#EA3A52"></i><i style="background:#A5875B"></i><i style="background:#DC81EA"></i><i style="background:#46747F"></i><i style="background:#CC14CC"></i><i style="background:#9BA55B"></i><i style="background:#EACB00"></i><i style="background:#8ECC70"></i><i style="background:#5B60A5"></i><i style="background:#A56A5B"></i><i style="background:#EA7D00"></i><i style="background:#EA5DC5"></i><i style="background:#00EA6D"></i><i style="background:#CCB351"></i><i style="background:#CC337A"></i><i style="background:#CC708E"></i><i style="background:#BBEA5D"></i><i style="background:#A5A510"></i><i style="background:#6A42A5"></i><i style="background:#6DEA00"></i><i style="background:#00A579"></i><i style="background:#EA795D"></i><i style="background:#21A500"></i><i style="background:#1482CC"></i><i style="background:#7F3B00"></i><i style="background:#00EABB"></i><i style="background:#A5425C"></i><i style="background:#6C467F"></i><i style="background:#42A54F"></i><i style="background:#A43AEA"></i><i style="background:#81EAA4"></i><i style="background:#3A46EA"></i><i style="background:#17C0EA"></i><i style="background:#EA5D83"></i></div><figcaption style="font-size:12px;color:var(--ink3);padding-top:6px">Current, on white</figcaption></figure></div>
+  <div class="tw"><table>
+   <tr><th>Measured</th><th>Current</th><th>New</th></tr>
+   <tr><td>Under 3 : 1 on the grey plot background</td><td>19 of 96</td><td>0</td></tr>
+   <tr><td>Under 3 : 1 on white</td><td>38 (lowest 1.12)</td><td>18 (lowest 2.75)</td></tr>
+   <tr><td>Closest pair of neighbouring wells, normal vision</td><td>5.2</td><td>14.0</td></tr>
+   <tr><td>Closest pair of neighbouring wells, colour-blind</td><td>1.2</td><td>10.1</td></tr>
+   <tr><td>Neighbouring wells too close when colour-blind (under 8)</td><td>19 of 172 pairs</td><td>0</td></tr>
+   <tr><td>Closest pair anywhere on the plate</td><td>4.1</td><td>4.0</td></tr>
+  </table></div>
+  <p style="font-size:13px">Larger distances are easier to tell apart; about 8 is the usual floor. Two limits: on white, 18 of the new colours sit just under 3 : 1 (between 2.75 and 3.0), because the yellow you approved is 2.76 and I held the rest to that. And the palette leans to blues, purples and pinks, because a bright yellow or green cannot be dark enough for white and light enough for the plot at once.</p></div>
+  <div class="dis"><h2>Where the sources disagree, and what this example does</h2>
+  <div class="tw"><table>
+   <tr><th>Question</th><th>The sources</th><th>This example</th></tr>
+   <tr><td>Capitals</td><td>Apple uses title-style on buttons and segment labels. Microsoft: "Capitalize the start of every string of text in your app". Apple's own writing page: "Choose a style for each UI element type and use it consistently".</td><td>Sentence-style everywhere. The app runs mainly on Windows, and it is already the majority style in the app (135 labels to 24).</td></tr>
+   <tr><td>Button order in an alert</td><td>Apple puts the most likely choice last and Cancel first. NN/g: "Following platform conventions is more important than optimizing an individual dialog box".</td><td>Drawn Apple's way here. In the app the toolkit orders the buttons for whichever system it is running on.</td></tr>
+   <tr><td>Close and Back</td><td>Apple: do not use a text label that says Back or Close in a toolbar; use the standard symbols. NN/g: always include a visible close control.</td><td>A visible ✕ and ‹ as symbols, each with a tooltip. My earlier version spelled out "Close".</td></tr>
+   <tr><td>Icons or words in a toolbar</td><td>Apple prefers symbols. NN/g prefers icons with labels.</td><td>Words. The app's eleven unlabelled header icons were one of the audit's findings.</td></tr>
+   <tr><td>Switch or checkbox</td><td>NN/g: a switch "should take immediate effect"; where it cannot, use a checkbox. Apple: "In general, don't replace a checkbox with a switch", and on a phone use a switch only in a list row.</td><td>Switches only in the inspector's rows, where the plot changes at once. Checkboxes in every form that has a Run or Export button. This corrected one control on Batch export.</td></tr>
+   <tr><td>Text inside an empty field</td><td>Apple allows a hint if a separate label is also shown. NN/g: placeholders "often hurt usability more than help it" and must never replace the label.</td><td>Every field has a label outside it. "not set" appears only as a state, never as an instruction.</td></tr>
+   <tr><td>How many text sizes</td><td>NN/g's web guidance says no more than three. Apple gives a floor: 10 points on a Mac, 11 on a phone.</td><td>Four (17, 15, 13, 12), down from five, plus the large numerals on Home's tiles. Rank is carried by weight and ink more than by size.</td></tr>
+   <tr><td>Material's capitalisation rule</td><td>Its style guide would not load, so it is not confirmed.</td><td>Not relied on.</td></tr>
+  </table></div>
+  <p style="font-size:13px"><b style="color:var(--ink)">One rule the app breaks today that this example does not settle:</b> Apple says to "avoid putting critical information or actions at the bottom of a sidebar". The well plate, the control Review depends on most, sits at the bottom of the app's sidebar. It is left out of this example; where it should live is a question for you.</p></div>
+  <p style="font-size:13px">Data, paths and results are examples. This is drawn in a browser to show the language; the real app will match it in structure, colour, spacing and weight, with slightly different text rendering.</p>
+</div>
+
+<script>
+(function(){
+var app=document.getElementById("app");
+var S={shell:"panels",pal:"grey",well:"new",spell:"us",mode:"review",page:"plot",tab:{nano:"Distribution"},insp:null,itab:"Display",ipage:null,menu:null,
+  v:{},folder:"",run:"idle",prog:0,log:[],src:"",dst:"",wells:{},jobs:[],queue:"idle",stats:false,ntab:"Distribution"};
+for(var i=0;i<96;i++)S.wells[i]=1;
+var WELL={cur:["#6AB2FB","#06F906","#0606F9","#DF2020"],new:["#338ced","#e76624","#00a888","#d28e05"]};
+function e(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")}
+function V(id,d){return id in S.v?S.v[id]:(S.v[id]=d)}
+function col(s){return S.spell==="uk"?s:s.replace(/olour/g,"olor")}
+function sw(id,d){return '<button class="swt '+(V(id,d)?"on":"")+'" data-a="t" data-v="'+id+'" role="switch" aria-checked="'+!!V(id,d)+'" aria-label="'+id+'"></button>'}
+function ck(id,l,d){return '<button class="ck '+(V(id,d)?"on":"")+'" data-a="t" data-v="'+id+'">'+e(l)+'</button>'}
+function seg(id,o,d){var c=V(id,d||0);return '<span class="seg">'+o.map(function(x,i){return '<button class="'+(i===c?"on":"")+'" data-a="s" data-v="'+id+':'+i+'">'+e(x)+'</button>'}).join("")+'</span>'}
+function fld(v,o){o=o||{};return '<span class="f '+(o.ph?"ph ":"")+(o.num?"t-num":"")+'" style="'+(o.w?"width:"+o.w+"px;":"")+(o.flex?"flex:1;":"")+(o.h?"height:24px;":"")+'">'+e(v)+(o.c?' <i>▾</i>':'')+'</span>'}
+function lab(l,inner){return '<span class="fl"><span class="t-lab">'+e(l)+'</span>'+inner+'</span>'}
+function btn(l,k,a,v,dis){return '<button class="b '+(k||"")+'" '+(dis?"disabled":"")+' data-a="'+(a||"")+'" data-v="'+(v||"")+'">'+l+'</button>'}
+function go(l,v,ipage){return '<button class="f" data-a="ipage" data-v="'+ipage+'">'+e(v)+' <i>›</i></button>'}
+function irow(l,r,cls){return '<div class="irow"><span class="'+(cls||"")+'">'+e(l)+'</span><span class="r">'+r+'</span></div>'}
+var XI='<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>',BI='<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M8 1.5L3.5 6 8 10.5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>';
+function ic(svg,label,a){return '<button class="ic" data-a="'+a+'" title="'+label+'" aria-label="'+label+'">'+svg+'</button>'}
+function fixed(){return '<span class="sp"></span>'+btn("Display",S.insp&&!S.ipage&&S.itab==="Display"?"on":"","itab","Display")+btn("Style",S.insp&&!S.ipage&&S.itab==="Style"?"on":"","itab","Style")+btn('Share <i style="font-style:normal;font-size:10px">▾</i>',"","menu","share")}
+
+// ── plots ──
+function bars(){var c=WELL[S.well],h=[92,104,118,130],show=V("show",2),err=V("err",0),s='<svg viewBox="0 0 600 230" preserveAspectRatio="none" aria-hidden="true"><line x1="50" y1="195" x2="580" y2="195" stroke="var(--hair)"/>';
+ ["A01","A02","B01","B02"].forEach(function(n,i){var x=90+i*125,y=195-h[i];
+  if(show!==1)s+='<rect x="'+x+'" y="'+y+'" width="70" height="'+h[i]+'" rx="3" fill="'+c[i]+'"'+(show===2?' opacity=".85"':'')+'/>';
+  if(show!==0)[-14,0,12].forEach(function(d,j){s+='<circle cx="'+(x+22+j*13)+'" cy="'+(y+d)+'" r="4" fill="'+(show===1?c[i]:"var(--text)")+'" stroke="var(--plot)" stroke-width="1.5"/>'});
+  if(err<2){var k=err?16:9;s+='<line x1="'+(x+35)+'" y1="'+(y-k)+'" x2="'+(x+35)+'" y2="'+(y+k)+'" stroke="var(--text)" stroke-width="1.5"/>'}
+  s+='<text x="'+(x+35)+'" y="214" text-anchor="middle" fill="var(--text2)" font-size="12">'+n+'</text>';});
+ if(V("sig",true))s+='<path d="M125 52 V44 H500 V52" fill="none" stroke="var(--text2)"/><text x="312" y="38" text-anchor="middle" fill="var(--text2)" font-size="12">ns</text>';
+ return s+'<text x="14" y="120" fill="var(--text2)" font-size="12" transform="rotate(-90 14 120)" text-anchor="middle">GFP mean intensity</text></svg>'}
+function nanoPlot(){var show=V("nshow",0),ax=V("nx",0),c=WELL[S.well][0],s='<svg viewBox="0 0 600 230" preserveAspectRatio="none" aria-hidden="true"><line x1="40" y1="195" x2="580" y2="195" stroke="var(--hair)"/>';
+ [["A01",150,95],["A02",150,120],["B01",150,118]].forEach(function(g,i){var x=80+i*180;
+  if(show===3){[30,62,48,20].forEach(function(h,j){s+='<rect x="'+(x+j*24)+'" y="'+(195-h*1.6)+'" width="20" height="'+(h*1.6)+'" rx="2" fill="'+c+'"/>'})}
+  else if(show===2){s+='<ellipse cx="'+(x+20)+'" cy="'+g[1]+'" rx="16" ry="38" fill="'+c+'" opacity=".5"/><ellipse cx="'+(x+90)+'" cy="'+g[2]+'" rx="16" ry="46" fill="'+c+'" opacity=".5"/>'}
+  else{[[20,g[1]],[20,g[1]-40],[20,g[1]+25],[90,g[2]],[90,g[2]-30],[90,g[2]+28]].forEach(function(p){s+='<circle cx="'+(x+p[0])+'" cy="'+p[1]+'" r="4.5" fill="'+c+'"/>'})}
+  if(show!==3)s+='<path d="M'+(x+20)+' '+g[1]+' L'+(x+90)+' '+g[2]+'" stroke="var(--text)" stroke-width="2"/>';
+  s+='<text x="'+(x+55)+'" y="214" text-anchor="middle" fill="var(--text2)" font-size="12">'+(ax?g[0]:g[0]+" · 0 → 5 h")+'</text>';});
+ return s+'</svg>'}
+
+// ── pages ──
+var P={};
+P.home=function(){return '<div class="r"><div><div class="t-page">plate_0412</div><div class="t-help t-num">/data/plates/plate_0412</div></div><span class="sp"></span>'+btn("Reload","q")+'</div>'+
+ (V("checked",false)?'<div class="note g"><span class="dot ok"></span><span><b>Complete.</b> All 4 wells have measurements and images.</span></div>':'<div class="note w"><span class="dot w"></span><span><b>No completeness record.</b> This dataset was produced before the check existed.</span><span class="sp"></span>'+btn("Check now","","t","checked")+'</div>')+
+ '<div class="r" style="align-items:stretch"><div class="tile"><span class="t-lab">Wells</span><b>4</b><span class="t-help">loaded</span></div><div class="tile"><span class="t-lab">Timepoints</span><b>3</b><span class="t-help">0 h → 48 h</span></div><div class="tile"><span class="t-lab">Fields per well</span><b style="color:var(--off)">–</b><span class="t-help">not recorded</span></div><div class="tile" style="flex:1"><span class="t-lab">Channels</span><div class="r" style="margin-top:4px"><span class="chip t-num">gfp</span><span class="chip t-num">mcherry</span><span class="chip t-num">smfish</span></div></div></div>'+
+ '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px"><div class="card"><span class="t-sec">Plate</span>'+irow("Complete",'<span class="t-num">'+(V("checked",false)?4:0)+'</span>')+irow("Partial",'<span class="t-num">0</span>')+irow("Failures recorded",'<span class="t-num">0</span>')+irow("Not checked",'<span class="t-num">'+(V("checked",false)?0:4)+'</span>')+'</div><div class="card"><span class="t-sec">Run parameters</span>'+irow("Segmentation",'<span>StarDist, nuclei</span>',"t-lab")+irow("Background subtraction",'<span style="color:var(--off)">not recorded</span>',"t-lab")+irow("Flat-field",'<span>None</span>',"t-lab")+'</div></div>'};
+P.plot=function(){return '<div class="tabs"><button>Heat map</button><button class="on">Bar plots</button><button>Line graphs</button><button>Response curves</button><button>Scatter plot</button><button>Distribution</button></div>'+
+ '<div class="r">'+lab("Channel",fld("GFP",{c:1}))+lab("Property",fld("Mean intensity",{c:1}))+lab("Timepoints",go("","1 of 3","Timepoints"))+lab("Fold change",go("",V("fc",false)?"vs DMSO":"Off","Fold change"))+lab(col("Colour & split"),go("","Dose · none",col("Colour & split")))+fixed()+'</div>'+
+ '<div class="card"><div class="r"><span class="t-sec">GFP mean intensity</span><span class="t-help">t = 0 h</span><span class="sp"></span><span class="chip"><span class="dot"></span>4 wells</span>'+(V("fc",false)?'<span class="chip">Fold change vs DMSO <button class="x" data-a="t" data-v="fc" title="Remove fold change" aria-label="Remove fold change">'+XI+'</button></span>':'')+'</div><div class="plot">'+bars()+'</div><span class="t-help">One bar per selected well. Error bars are '+["SEM","SD","hidden"][V("err",0)]+'.</span></div>'};
+P.nano=function(){return '<div class="tabs">'+["Distribution","QC","Array","Trajectories","Position","Extremes","Identity","Statistics"].map(function(t){return '<button class="'+(t===S.ntab?"on":"")+'" data-a="ntab" data-v="'+t+'">'+t+'</button>'}).join("")+'</div>'+
+ '<div class="r">'+lab("Metric",fld("Cell count",{c:1}))+lab("Channel",fld("GFP",{c:1}))+lab("Subset",go("",["All nanowells","Starting cells ≥ 1","Starting cells = 1"][V("subset",0)],"Subset"))+fixed()+'</div>'+
+ '<div class="card"><div class="r"><span class="t-sec">Cell count by nanowell</span><span class="sp"></span><span class="t-help">22 of 24 values used</span><button class="chip '+(V("fa",false)?"on":"")+'" data-a="t" data-v="fa"><span class="dot w"></span>2 alerts</button><button class="chip '+(V("fn",false)?"on":"")+'" data-a="t" data-v="fn">3 notes</button></div>'+(V("fa",false)?'<div class="note w"><span class="dot w"></span><span><b>2 nanowells lost focus after 5 h.</b> C4 site 0182 and F9 site 0040 are drawn hollow.</span></div>':'')+'<div class="plot">'+nanoPlot()+'</div><span class="t-help">Excluded 2 (occluded) · 3 wells'+(V("rim",true)?' · rim focus 75':'')+'</span></div>'};
+P.stats=function(){return '<div class="r">'+lab("Channel",fld("GFP",{c:1}))+lab("Property",fld("Mean intensity",{c:1}))+lab("Statistic",fld("Mean above threshold",{c:1}))+lab("Test",fld("Welch t-test",{c:1}))+'<span class="sp"></span>'+btn("Run test","p","stats")+'</div>'+
+ '<div class="card"><div class="r"><span class="t-sec">Comparison groups</span><span class="t-help">2 groups</span><span class="sp"></span>'+btn("Clear all","q")+btn("Load from replicates")+btn("Add group")+'</div>'+irow("Ctrl",'<span class="t-help">A01, A02</span>'+btn("Rename…","q")+btn("Remove","q"))+irow("Drug",'<span class="t-help">B01, B02</span>'+btn("Rename…","q")+btn("Remove","q"))+'</div>'+
+ '<div class="card"><span class="t-sec">Result</span>'+(S.stats?'<table class="res"><tr><th>Comparison</th><th>t</th><th>p</th><th>Hedges g</th><th>Difference (95 % CI)</th><th></th></tr><tr><td>Ctrl vs Drug</td><td class="t-num">−2.83</td><td class="t-num">0.106</td><td class="t-num">−1.62</td><td class="t-num">−20  [−50.4, 10.4]</td><td><span class="chip">Not significant</span></td></tr></table><span class="t-help">Per-well samples, n = 2 per group, t = 0 h, threshold 50.</span>':'<div class="note"><span class="dot"></span><span>Choose groups and press Run test.</span></div>')+'</div>'};
+P.batch=function(){return '<div class="r"><span class="t-page">Batch export · Bar</span><span class="sp"></span>'+btn("Sync from app","q")+btn("Export","p","t","exported")+'</div>'+(V("exported",false)?'<div class="note g"><span class="dot ok"></span><span><b>Exported 3 figures</b> to /data/plates/plate_0412/export.</span></div>':'')+
+ '<div style="display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:12px"><div class="card"><div class="r"><span class="t-sec">Groups</span><span class="sp"></span>'+btn("Add group")+'</div><span class="t-help">Drag wells onto the plate to add them to the selected group.</span><div class="note"><span class="dot"></span><span>No export groups yet.</span></div></div>'+
+ '<div class="card"><span class="t-sec">Output</span><div class="grid2"><span class="t-lab">Write to</span><div class="r">'+ck("o1","Image files",true)+ck("o2","PowerPoint deck",false)+ck("o3","Saved Plots",false)+'</div><span class="t-lab">Folder</span><div class="r">'+fld("/data/plates/plate_0412/export",{flex:1,num:1})+btn("Browse…")+'</div><span class="t-lab">Format</span><div class="r">'+fld("PNG",{c:1})+'<span class="t-help">300 DPI raster</span></div></div><span class="t-sec">Plot</span><div class="grid2"><span class="t-lab">Error band</span><div class="r">'+seg("berr",["SEM","SD","Off"])+'</div><span class="t-lab">Points</span><div class="r">'+ck("bfov","Draw one point per field of view",false)+'</div></div></div></div>'};
+P.analyze=function(){var ready=!!S.folder,running=S.run==="running";
+ return '<div style="display:grid;grid-template-columns:430px minmax(0,1fr);gap:12px;align-items:start"><div style="display:flex;flex-direction:column;gap:12px"><div class="r"><span class="t-page">New run</span><span class="sp"></span>'+btn('Presets <i style="font-style:normal;font-size:10px">▾</i>',"q")+'</div>'+
+ '<div class="card"><span class="t-sec">Input</span><div class="grid2"><span class="t-lab">Folder</span><div class="r">'+fld(S.folder||"not set",{ph:!S.folder,flex:1,num:!!S.folder})+btn("Browse…","","folder")+'</div></div></div>'+
+ '<div class="card"><span class="t-sec">Channels</span><div class="grid2"><span class="t-lab">Plate type</span><div class="r">'+seg("ptype",["Standard plate","Nanowell array"])+'</div><span class="t-lab">In the filenames</span><div class="r">'+fld("GFP",{flex:1})+fld("Quantify",{c:1})+'</div><span></span><div class="r">'+ck("auto","Also add channels found at run time",false)+'</div></div></div>'+
+ '<div class="card"><span class="t-sec">Segmentation</span><div class="grid2"><span class="t-lab">Method</span><div class="r">'+fld("StarDist, nuclei",{c:1})+'</div><span class="t-lab">Channel</span><div class="r">'+fld("NIR",{c:1})+'</div></div><div class="note w"><span class="dot w"></span><span><b>NIR is not one of the channels above.</b> It will be read as a separate channel.</span></div></div>'+
+ '<div class="card" style="gap:10px"><div class="r"><span class="t-lab">Run on</span>'+fld("This computer",{c:1})+'<span class="sp"></span>'+btn("Add to queue","","addjob","Analyze run",!ready)+(running?btn("Stop","d","stop"):btn("Run pipeline","p","run","",!ready))+'</div>'+(ready?'':'<span class="t-help">Choose an input folder to run.</span>')+'</div></div>'+
+ '<div class="card"><div class="r"><span class="t-sec">Run</span><span class="chip"><span class="dot '+(S.run==="done"?"ok":running?"a":"")+'"></span>'+({idle:"Idle",running:"Processing",done:"Complete",stopped:"Stopped"})[S.run]+'</span><span class="sp"></span>'+btn(V("showlog",false)?"Hide log":"Show log","q","t","showlog")+'</div><div class="bar"><i style="width:'+S.prog+'%"></i></div>'+
+ '<div style="display:flex;gap:24px;flex-wrap:wrap"><div style="min-width:150px"><span class="t-eye">Stages</span>'+irow("Ready",'<span class="t-num">'+Math.min(4,Math.ceil(S.prog/20))+' / 4</span>')+irow("Process",'<span class="t-num">'+Math.floor(S.prog/25)+' / 4</span>')+irow("Threshold",'<span class="t-num">'+(S.prog>=100?4:0)+' / 4</span>')+'</div><div><span class="t-eye">Wells</span><div class="r"><span class="dot"></span>Pending</div><div class="r"><span class="dot a"></span>Processing</div><div class="r"><span class="dot ok"></span>Complete</div><div class="r"><span class="dot e"></span>Failed</div></div></div>'+
+ (V("showlog",false)||running?'<div class="log">'+(S.log.length?e(S.log.join("\n")):"Nothing has run yet.")+'</div>':'')+'</div></div>'};
+P.subset=function(){var n=Object.keys(S.wells).length,ready=S.src&&S.dst&&n,pl='';for(var i=0;i<96;i++)pl+='<button class="'+(S.wells[i]?"on":"")+'" data-a="well" data-v="'+i+'" aria-label="well"></button>';
+ return '<div style="max-width:720px;display:flex;flex-direction:column;gap:12px"><div><div class="t-page">Subset or split a dataset</div><div class="t-help">Copy chosen wells, timepoints or fields of view into a new folder. The source is left untouched.</div></div>'+
+ '<div class="card"><span class="t-sec">Folders</span><div class="grid2"><span class="t-lab">Source dataset</span><div class="r">'+fld(S.src||"not set",{ph:!S.src,flex:1,num:!!S.src})+btn("Browse…","","src")+'</div><span class="t-lab">Destination</span><div class="r">'+fld(S.dst||"not set",{ph:!S.dst,flex:1,num:!!S.dst})+btn("Browse…","","dst")+'</div></div></div>'+
+ '<div class="card"><div class="r"><span class="t-sec">What to copy</span><span class="sp"></span><span class="t-help t-num">'+n+' of 96 wells</span></div><div style="display:flex;gap:20px;flex-wrap:wrap"><div style="display:flex;flex-direction:column;gap:8px"><div class="plate">'+pl+'</div><div class="r">'+btn("All","","wall")+btn("Invert","","winv")+btn("Clear","q","wnone")+'</div></div><div style="flex:1;min-width:200px"><span class="t-eye">Timepoints</span><div class="t-help">'+(S.src?'<div class="r" style="padding-top:6px">'+ck("tp0","0 h",true)+ck("tp1","24 h",true)+ck("tp2","48 h",true)+'</div>':"Shown once a source dataset is chosen.")+'</div></div></div></div>'+
+ '<div class="r"><span class="t-help">'+(ready?"":!n?"Select at least one well.":"Choose a source and a destination to continue.")+'</span><span class="sp"></span>'+btn("Add to queue","","addjob","Subset",!ready)+btn("Create subset","p","t","subdone",!ready)+'</div>'+(V("subdone",false)&&ready?'<div class="note g"><span class="dot ok"></span><span><b>Subset created.</b> '+n+' wells copied.</span></div>':'')+'</div>'};
+P.queue=function(){var running=S.queue==="running";
+ return '<div class="r"><span class="t-page">Job queue</span><span class="sp"></span>'+(S.jobs.length?btn("Clear all","q","qclear"):"")+btn("Add job","","addjob","Convert ND2")+(running?btn("Stop job","d","qstop"):btn("Start queue","p","qstart","",!S.jobs.some(function(j){return j.s==="Queued"})))+'</div>'+
+ (S.jobs.length?'<div class="card" style="padding:4px 16px"><table class="res"><tr><th>Job</th><th>Status</th><th></th></tr>'+S.jobs.map(function(j,i){return '<tr><td>'+e(j.n)+'</td><td><span class="chip"><span class="dot '+(j.s==="Done"?"ok":j.s==="Running"?"a":"")+'"></span>'+j.s+'</span></td><td style="text-align:right">'+btn("Remove","q","qrm",i)+'</td></tr>'}).join("")+'</table></div>':
+ '<div class="card" style="align-items:center;text-align:center;padding:40px 16px"><span class="t-sec">No jobs queued</span><span class="t-help" style="max-width:52ch">Add a job here, or choose "Add to queue" on any Analyze run or Datasets tool. Jobs run one at a time, in order, without stopping to ask.</span>'+btn("Add job","","addjob","Convert ND2")+'</div>')};
+
+// ── inspector ──
+function inspBody(){
+ if(S.ipage==="Subset")return ["All nanowells","Starting cells ≥ 1","Starting cells = 1"].map(function(o,i){return '<button class="irow" style="width:100%" data-a="s" data-v="subset:'+i+'"><span>'+o+'</span><span>'+(V("subset",0)===i?"✓":"")+'</span></button>'}).join("")+'<div class="irow"><span>Custom subset</span><span class="t-lab">3 conditions ›</span></div>';
+ if(S.ipage==="Fold change")return irow("Fold change",sw("fc",false))+irow("Relative to",seg("fcrel",["Control","Baseline"]),"t-lab")+irow("Control",fld("DMSO",{c:1,h:1}),"t-lab")+irow("Per-sample control",'<span class="t-lab">4 pairs set ›</span>');
+ if(S.ipage==="Timepoints")return '<div class="r">'+btn("All")+btn("None")+'</div>'+irow("0 h",ck("t0","",true))+irow("24 h",ck("t1","",false))+irow("48 h",ck("t2","",false));
+ if(S.ipage)return irow(col("Colour by"),fld("Dose",{c:1,h:1}),"t-lab")+irow("Split by",fld("none",{c:1,h:1}),"t-lab");
+ if(S.itab==="Style")return '<span class="t-eye">Figure</span>'+irow("Profile",fld("Publication",{c:1,h:1}),"t-lab")+irow("Axes",'<span class="t-lab">Auto ›</span>')+irow(col("Colours"),'<span class="t-lab">Sample map ›</span>')+irow("Legend",'<span class="t-lab">Right ›</span>')+irow("Show grid",sw("grid",false))+'<div class="r" style="padding-top:8px">'+btn("Reset","q")+btn("Save preset")+'</div>';
+ if(S.page==="nano")return '<span class="t-eye">Plot</span>'+irow("Along x",seg("nx",["Time","Wells"]),"t-lab")+'<span class="t-lab">Show</span><div class="wide">'+seg("nshow",["Auto","Beeswarm","Violin","Histogram"])+'</div><span class="t-eye">Cohort</span>'+irow("Use rim focus",fld("75",{num:1,h:1})+sw("rim",true))+irow("Fix cohort",sw("fixed",false))+'<span class="t-eye">Baseline</span>'+irow("Baseline",fld("Earliest",{c:1,h:1}),"t-lab")+irow("Average over",fld("1",{num:1,h:1}),"t-lab")+'<span class="t-eye">Smoothing</span>'+irow("Moving average",fld("1",{num:1,h:1}),"t-lab")+irow("Responding above",fld("not set",{ph:1,h:1}),"t-lab");
+ return '<span class="t-eye">Marks</span>'+irow("Show",seg("show",["Bars","Points","Both"],2),"t-lab")+irow("Error band",seg("err",["SEM","SD","Off"]),"t-lab")+'<span class="t-eye">Annotations</span>'+irow("Show significance",sw("sig",true))+irow("Pool replicates",sw("pool",false))}
+function insp(){if(!S.insp)return "";
+ return '<div class="insp"><div class="r">'+(S.ipage?ic(BI,"Back","iback"):"")+'<span class="t-sec">'+e(S.ipage||"Inspector")+'</span><span class="sp"></span>'+ic(XI,"Close","iclose")+'</div>'+(S.ipage?"":'<div class="tabs"><button class="'+(S.itab==="Display"?"on":"")+'" data-a="itab" data-v="Display">Display</button><button class="'+(S.itab==="Style"?"on":"")+'" data-a="itab" data-v="Style">Style</button></div>')+inspBody()+'</div>'}
+
+var NAV={review:[["home","Home"],["","Analysis"],["plot","Plotting"],["stats","Statistics"],["","Assays"],["nano","Nanowells"],["","Output"],["batch","Batch export"]],
+ datasets:[["","Combine"],["x1","Concatenate"],["x2","Merge plates"],["subset","Subset or split"],["","Convert"],["x3","OME-TIFF"],["x4","ND2"],["","Maintain"],["queue","Job queue"]]};
+function render(){
+ app.dataset.pal=S.pal;app.dataset.shell=S.shell;
+ var h='<div class="top"><span class="brand"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><rect width="22" height="22" rx="6" fill="var(--raised)"/><circle cx="7.5" cy="7.5" r="3" fill="#6AB2FB"/><circle cx="14.5" cy="7.5" r="3" fill="#3FB950"/><circle cx="7.5" cy="14.5" r="3" fill="#2D8CEB"/><circle cx="14.5" cy="14.5" r="3" fill="#F04747"/></svg>All-Well</span><span class="seg">'+[["review","Review"],["analyze","Analyze"],["datasets","Datasets"]].map(function(m){return '<button class="'+(S.mode===m[0]?"on":"")+'" data-a="mode" data-v="'+m[0]+'">'+m[1]+'</button>'}).join("")+'</span><span class="sp"></span>'+btn("Split","q")+btn("Refresh","q")+btn("Remote","q")+btn("Help","q")+'</div><div class="body'+(S.mode==="analyze"?" norail":"")+'">';
+ if(S.mode!=="analyze"){h+='<div class="rail">'+(S.mode==="review"?'<button class="dsb" data-a="menu" data-v="ds"><span><b>plate_0412</b><small>4 wells · 3 timepoints</small></span><i>▾</i></button>':"");
+  NAV[S.mode].forEach(function(n){h+=n[0]?'<button class="nav '+(S.page===n[0]?"on":"")+'" data-a="page" data-v="'+n[0]+'">'+n[1]+'</button>':'<span class="t-eye" style="padding:8px 10px 2px">'+n[1]+'</span>'});h+='</div>';}
+ var pg=S.mode==="analyze"?"analyze":S.page;
+ h+='<div class="main">'+(P[pg]?P[pg]():'<div class="card" style="align-items:center;padding:40px"><span class="t-sec">Not drawn in this example</span><span class="t-help">It follows the same page skeleton as Subset or split.</span></div>')+'</div>'+(S.mode==="review"&&(pg==="plot"||pg==="nano")?insp():"")+'</div>';
+ if(S.menu){h+='<div class="veil" data-a="nomenu"></div>';
+  if(S.menu==="share")h+='<div class="menu" style="right:'+(S.insp?290:18)+'px;top:140px"><button data-a="nomenu">Save figure…</button><button data-a="nomenu">Copy figure</button><button data-a="nomenu">Save data as CSV…</button><hr><button data-a="nomenu">Add to Saved Plots</button></div>';
+  if(S.menu==="ds")h+='<div class="menu" style="left:12px;top:102px"><button data-a="nomenu">Open…</button><button data-a="nomenu">plate_0409</button><hr><button data-a="nomenu">Copy analysis…</button><button data-a="nomenu">Storage…</button><hr><button class="d" data-a="alert">Reset view…</button></div>';}
+ if(S.alert)h+='<div class="scrim"><div class="alert" role="alertdialog" aria-labelledby="alT"><span class="t-sec" id="alT">Reset the view for plate_0412?</span><span style="color:var(--text2)">Zoom, sort order and hidden wells go back to their defaults. This cannot be undone. Your analysis is not changed.</span><div class="r" style="justify-content:flex-end;padding-top:6px">'+btn("Cancel","","noalert")+btn("Reset view","d","noalert")+'</div></div></div>';
+ app.innerHTML=h;why();
+ [["qShell","shell"],["qPal","pal"],["qWell","well"],["qSpell","spell"]].forEach(function(q){[].forEach.call(document.getElementById(q[0]).children,function(b){b.classList.toggle("on",b.dataset.v===S[q[1]])})});
+}
+
+var A="Apple",N="NN/g",M="Microsoft",G="Material";
+var COMMON=[["Sentence-style capitals on every label.","Microsoft: “Capitalize the start of every string of text in your app.”",M],
+ ["One accent-filled button at most, at the trailing end.","Apple: “Only specify one primary action, and put it on the trailing side.” Material: the filled style is “ideally for only one action on a page.”",A+" · "+G],
+ ["Buttons are named with a verb, in two to four words.","Apple: “it's almost always best to use a verb.” NN/g: “no more than 2–4 words.”",A+" · "+N]];
+var WHY={
+ plot:[["Switches sit only in the inspector's rows and change the plot at once.","NN/g: a switch “should take immediate effect.” Apple: use the switch style “only in a list row.”",N+" · "+A],
+  ["A switch's label names what is true when it is on: “Show significance”.","NN/g: write the label so it describes the on state.",N],
+  ["Show and Error band are segmented controls of three nouns.","Apple: for “closely related choices that affect an object, state, or view”; “use nouns or noun phrases for segment labels.”",A],
+  ["Every field's label sits outside it and stays visible.","NN/g: labels belong outside the field. Apple: “include a separate label describing the field.”",N+" · "+A],
+  ["The panel is an inspector, and its buttons are at the toolbar's trailing end.","Apple: an inspector “displays the details of the currently selected item, automatically updating its contents when the item changes.”",A],
+  ["Close and Back are symbols with tooltips, and always visible.","Apple: do not use a text label that says Back or Close. NN/g: always include a visible close control.",A+" · "+N],
+  ["Share is a pull-down of commands; “…” marks the ones that open another window.","Apple: a pull-down presents “commands or items that are directly related to the button's action”, with at least three.",A],
+  ["Turn fold change on and its chip has an ✕ to remove it.","Material: an input chip “represents user-provided information”, with a control to remove it.",G]],
+ nano:[["The eight views are tabs, not a segmented control.","Apple: “Use a tab view in the main window area — instead of a segmented control — for view switching.”",A],
+  ["Amber appears once, on the alerts chip, beside the word “alerts”.","NN/g: “Reserve warm bright colors, like red, for warnings or errors.” Apple: “Avoid relying solely on color.”",N+" · "+A],
+  ["“2 alerts” and “3 notes” are filter chips you can press; the count beside them is plain text.","Material: a filter chip refines content and has a selected state.",G],
+  ["Three controls stay in the toolbar, in one row; the rest are grouped in the inspector.","Apple: “Choose items deliberately to avoid overcrowding”; aim for at most three groups.",A],
+  ["Subset shows its current value and opens a short list.","Apple: give a pop-up “a useful default selection” and a label that predicts its options.",A]],
+ stats:[["Run test is the page's one primary action.","Apple: the primary button is “the button people are most likely to choose.”",A],
+  ["Rename… ends in an ellipsis; Remove does not.","Apple and NN/g: an ellipsis marks a command that needs more input before it acts.",A+" · "+N],
+  ["The result is a table with one size of type; rank comes from weight and ink.","Apple: “Adjust font weight, size, and color as needed to emphasize important information.”",A]],
+ batch:[["Every on/off choice here is a checkbox, because nothing happens until Export.","NN/g: where a setting cannot take effect immediately, use a checkbox. Apple: “In general, don't replace a checkbox with a switch.”",N+" · "+A],
+  ["Checkbox labels are positive and say what will happen.","NN/g: use “positive and active wording.”",N],
+  ["The result of Export is reported in the page, not in a pop-up.","Apple: “Avoid using an alert merely to provide information.”",A]],
+ home:[["The warning is one notice in the page with one button named for what it does.","Apple: “Use alerts sparingly.” Microsoft: a button is at most “a couple short words.”",A+" · "+M],
+  ["State is never colour alone: each dot has a word beside it.","Apple: “Avoid relying solely on color to differentiate between objects.”",A],
+  ["A missing value says “not recorded”; it is not left as a dash.","Apple: “Be clear about what someone can do” and what the state is.",A]],
+ analyze:[["Run pipeline is disabled until it can run, and the reason is written beside it.","Apple: “Show errors right next to the field.”",A],
+  ["The caution about NIR is a notice next to the field it concerns, not grey prose.","Apple: “avoid blame” and be clear about what happens next.",A],
+  ["The log button names the state it will move to: Show log, then Hide log.","NN/g: a command should describe the state the system will move into.",N],
+  ["While running, the status dot is the accent colour, not amber.","Apple: “Avoid using the same color to mean different things.” Amber is kept for things that need attention.",A],
+  ["Stop is red text, never the filled button.","Apple: “Don't assign the primary role to a button that performs a destructive action.”",A]],
+ subset:[["The sidebar has two levels: a group and its tools.","Apple: “show no more than two levels of hierarchy in a sidebar.”",A],
+  ["Fields are as wide as a path needs, not as wide as the window.","Apple: match a field's width to the input expected.",A],
+  ["Browse… ends in an ellipsis because it opens a system window.","Apple: an ellipsis when the button opens another window.",A]],
+ queue:[["The same command has the same name wherever it appears: Add to queue.","NN/g: use the same label for the same command everywhere.",N],
+  ["Empty, the page says what it is for and offers the one thing to do.","Apple: describe what someone can do next.",A],
+  ["Running is the accent colour, done is green, each with its word.","Apple: do not rely on colour alone; one colour, one meaning.",A]],
+ alert:[["An alert, because resetting is uncommon and cannot be undone.","Apple: avoid alerts “for common, undoable actions, even when they're destructive.”",A],
+  ["The title is a full question in sentence style, and the buttons answer it.","Apple: a complete-sentence title takes sentence-style capitals and its punctuation. Microsoft: buttons are “clear answers to the question posed by the title.”",A+" · "+M],
+  ["The buttons are Cancel and a verb, never OK, Yes or No.","Apple: “Always use ‘Cancel’ to title a button that cancels the alert's action”; avoid Yes and No.",A],
+  ["The destructive button is red text and is not the default.","Apple: a destructive button is not given the primary role.",A],
+  ["In the menu, Reset view… is red and set apart by a divider.","Apple: destructive menu items show red text and lead to a confirmation.",A]]};
+function why(){var k=S.alert?"alert":S.mode==="analyze"?"analyze":S.page,L=(WHY[k]||[]).concat(S.alert?[]:COMMON);
+ document.getElementById("whyT").textContent="Rules this "+(S.alert?"alert":"page")+" follows";
+ document.getElementById("why").innerHTML=L.map(function(r){return '<li><b>'+r[0]+'</b> '+r[1]+'<span class="src">'+r[2]+'</span></li>'}).join("")}
+var timer=null;
+function tick(){S.prog=Math.min(100,S.prog+10);var w=["A01","A02","B01","B02"][Math.min(3,Math.floor(S.prog/26))];S.log.push(S.prog<100?"segmenting "+w+" · "+S.prog+" %":"done · 4 wells, 0 failed");
+ if(S.prog>=100){clearInterval(timer);timer=null;S.run="done"}render()}
+function qtick(){var j=S.jobs.filter(function(x){return x.s==="Running"})[0];if(j)j.s="Done";var n=S.jobs.filter(function(x){return x.s==="Queued"})[0];if(n)n.s="Running";else{clearInterval(qt);qt=null;S.queue="idle"}render()}
+var qt=null;
+app.addEventListener("click",function(ev){var el=ev.target.closest("[data-a]");if(!el||el.disabled)return;var a=el.dataset.a,v=el.dataset.v;
+ if(a==="t")S.v[v]=!V(v,false);
+ else if(a==="s"){var p=v.split(":");S.v[p[0]]=+p[1]}
+ else if(a==="mode"){S.mode=v;S.page=v==="datasets"?"subset":"plot";S.insp=null;S.ipage=null;S.menu=null}
+ else if(a==="page"){S.page=v;S.ipage=null;if(v!=="plot"&&v!=="nano")S.insp=null;else if(S.insp)S.itab="Display"}
+ else if(a==="ntab")S.ntab=v;
+ else if(a==="itab"){if(S.insp&&!S.ipage&&S.itab===v&&el.classList.contains("b"))S.insp=null;else{S.insp=1;S.itab=v;S.ipage=null}}
+ else if(a==="ipage"){S.insp=1;S.ipage=v}
+ else if(a==="iback")S.ipage=null;
+ else if(a==="iclose"){S.insp=null;S.ipage=null}
+ else if(a==="menu")S.menu=S.menu===v?null:v;
+ else if(a==="nomenu")S.menu=null;
+ else if(a==="alert"){S.menu=null;S.alert=1}
+ else if(a==="noalert")S.alert=null;
+ else if(a==="stats")S.stats=true;
+ else if(a==="folder")S.folder="/data/raw/plate_0412";
+ else if(a==="src")S.src="/data/plates/plate_0412";
+ else if(a==="dst")S.dst="/data/plates/plate_0412_subset";
+ else if(a==="run"){S.run="running";S.prog=0;S.log=["reading /data/raw/plate_0412 · 4 wells"];if(timer)clearInterval(timer);timer=setInterval(tick,450)}
+ else if(a==="stop"){clearInterval(timer);timer=null;S.run="stopped";S.log.push("stopped by you")}
+ else if(a==="well"){if(S.wells[v])delete S.wells[v];else S.wells[v]=1}
+ else if(a==="wall"){for(var i=0;i<96;i++)S.wells[i]=1}
+ else if(a==="wnone")S.wells={};
+ else if(a==="winv"){var n={};for(var k=0;k<96;k++)if(!S.wells[k])n[k]=1;S.wells=n}
+ else if(a==="addjob"){S.jobs.push({n:v+" · plate_04"+(12+S.jobs.length),s:"Queued"});if(S.mode!=="datasets"||S.page!=="queue"){S.mode="datasets";S.page="queue"}}
+ else if(a==="qrm")S.jobs.splice(+v,1);
+ else if(a==="qclear")S.jobs=[];
+ else if(a==="qstart"){S.queue="running";qtick();if(qt)clearInterval(qt);qt=setInterval(qtick,900);return}
+ else if(a==="qstop"){clearInterval(qt);qt=null;S.queue="idle";S.jobs.forEach(function(j){if(j.s==="Running")j.s="Queued"})}
+ render()});
+[["qShell","shell"],["qPal","pal"],["qWell","well"],["qSpell","spell"]].forEach(function(q){document.getElementById(q[0]).addEventListener("click",function(ev){var b=ev.target.closest("button");if(!b)return;S[q[1]]=b.dataset.v;render()})});
+S.insp=1;render();
+})();
+</script>
+</body>
+</html>

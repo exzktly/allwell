@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -21,9 +20,9 @@ from PySide6.QtWidgets import (
 from ui import theme
 from review.core.sidebar_view import build_sidebar
 from review.core.status_view import build_bottom
-from widgets.separator import build_hline_separator
 from review.domain.dataset_name import dataset_display_name
 from widgets.owned_action import owned_action
+from ui import buttons
 
 
 #: The left panel's width, shared by all three modes — Review's own rail,
@@ -69,7 +68,7 @@ def _dataset_button(win, parent):
     Home had known the answer the whole time.
     """
     from PySide6.QtWidgets import QMenu, QToolButton
-    btn = QToolButton(parent)
+    btn = buttons.tool_button(parent)
     btn.setObjectName("DatasetButton")
     btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
     btn.setPopupMode(QToolButton.InstantPopup)
@@ -85,6 +84,15 @@ def _dataset_button(win, parent):
     _fill_dataset_menu(win, menu)
     btn.setMenu(menu)
     win._dataset_menu = menu
+    # The second line (window style W1, design language §3.1): how many wells and timepoints the dataset holds,
+    # in the help role under the name. A label on the button, placed by ``_DatasetDetailPlacement``; the button's
+    # ``detail`` property gives the line its room.
+    from ui import text_roles
+    detail = text_roles.help_text("", btn)
+    detail.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    detail.hide()
+    win._dataset_detail = detail
+    btn.installEventFilter(_DatasetDetailPlacement(btn, detail))
     # Assign before refreshing: ``refresh_dataset_button`` reads the button off
     # ``win``, so refreshing here would silently no-op and leave it text-less
     # until the first dataset load.
@@ -100,7 +108,7 @@ RECENTS_IN_MENU = 6
 
 
 def _fill_dataset_menu(win, menu) -> None:
-    """``Open…``, then the datasets this user opened recently.
+    """``Open…``, the datasets this user opened recently, the ``Palette`` choice, then the dataset tools.
 
     Rows come from ``core.recent_view.entry_rows``, the same function Home's
     card and its placeholder draw from, so a folder that has gone missing reads
@@ -118,7 +126,17 @@ def _fill_dataset_menu(win, menu) -> None:
     menu.setToolTipsVisible(True)
     owned_action(menu, "Open…").triggered.connect(lambda _=False: win._browse())
     _add_recent_datasets(win, menu)
+    _add_palette(menu)
     _add_dataset_tools(win, menu)
+
+
+def _add_palette(menu) -> None:
+    """The ``Palette`` choice: the application's setting, not the dataset's, set apart by a separator, and before the
+    dataset tools so the menu still ends in them. The one place the window offers settings."""
+    from ui.palette_setting import add_palette_entries
+
+    menu.addSeparator()
+    add_palette_entries(menu)
 
 
 #: The widget-registry key of the callable that lists the window's dataset
@@ -128,9 +146,8 @@ DATASET_TOOLS_KEY = "_dataset_tools"
 
 
 def _add_dataset_tools(win, menu) -> None:
-    """The last group of the menu: the commands about the open dataset — copy
-    analysis, reveal folder, storage and the two resets — under a caption.
-    They were five unlabelled icons in the title bar."""
+    """The commands about the open dataset — copy analysis, reveal folder, storage and the two resets — under a
+    caption. They were five unlabelled icons in the title bar."""
     registry = getattr(getattr(win, "_ctx", None), "widgets", None)
     provider = registry.get_or_none(DATASET_TOOLS_KEY) if registry is not None else None
     tools = list(provider()) if callable(provider) else []
@@ -147,6 +164,7 @@ def _add_dataset_tools(win, menu) -> None:
 
 
 def _add_recent_datasets(win, menu) -> None:
+    """The datasets this user opened recently, under a ``Recent`` heading; nothing when there are none."""
     from review.core.recent_view import entry_rows
 
     ctx = getattr(win, "_ctx", None)
@@ -178,9 +196,11 @@ def refresh_dataset_button(win) -> None:
     state = getattr(win, "_app_state", None)
     dataset = getattr(state, "dataset", None) if state is not None else None
     path = str(getattr(dataset, "data_dir", "") or "")
+    detail = getattr(win, "_dataset_detail", None)
     if not path:
-        btn.setText("No dataset — Open")
+        btn.setText("No dataset — open one")
         btn.setToolTip("No dataset loaded. Choose a folder to review.")
+        _show_dataset_detail(btn, detail, "")
         return
     # ``dataset_display_name`` holds the rule: the standard Analyze-pipeline
     # layout loads ``<dataset_root>/out`` as ``data_dir``, so the folder's own
@@ -192,6 +212,48 @@ def refresh_dataset_button(win) -> None:
     room = max(btn.width() - 64, 80)
     btn.setText(metrics.elidedText(name, Qt.ElideMiddle, room))
     btn.setToolTip(path)
+    _show_dataset_detail(btn, detail, dataset_detail_text(dataset))
+
+
+def dataset_detail_text(dataset) -> str:
+    """"4 wells · 3 timepoints" for the loaded *dataset*; "" when it holds no wells yet."""
+    wells = len(getattr(dataset, "well_paths", None) or {})
+    if not wells:
+        return ""
+    points = len(set(getattr(dataset, "all_timepoints_cache", None) or ()))
+    parts = [f"{wells} well{'s' if wells != 1 else ''}"]
+    if points:
+        parts.append(f"{points} timepoint{'s' if points != 1 else ''}")
+    return " \u00b7 ".join(parts)
+
+
+def _show_dataset_detail(btn, detail, text: str) -> None:
+    if detail is None:
+        return
+    detail.setText(text)
+    detail.setVisible(bool(text))
+    if bool(btn.property("detail")) != bool(text):
+        btn.setProperty("detail", bool(text))
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        btn.updateGeometry()
+
+
+class _DatasetDetailPlacement(QObject):
+    """Keeps the dataset button's second line under its name as the button resizes."""
+
+    def __init__(self, btn, detail) -> None:
+        super().__init__(btn)
+        self._btn, self._detail = btn, detail
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.Resize, QEvent.Show, QEvent.StyleChange):
+            b, d = self._btn, self._detail
+            d.adjustSize()
+            x = theme.Spacing.sm + theme.Spacing.md + b.iconSize().width() + theme.Spacing.xs
+            y = b.height() - theme.Spacing.sm - theme.Spacing.sm - d.height()
+            d.move(x, max(0, y))
+        return False
 
 
 class _RailTogglePlacement(QObject):
@@ -503,15 +565,21 @@ def build_ui(win) -> None:
     # height it cost 43px on every Review tab to show one icon; at the tab bar's
     # height the band lines up with the tab row beside it and costs 10px less.
     from widgets.mode_bar import tab_bar_height as _tab_bar_height
+    # The shell's regions are named where they are built, so the theme's W1 rules (``ui/shell_frame``) reach them
+    # at their first polish.
     top = QWidget()
+    top.setObjectName("ShellBand")
     top.setFixedHeight(_tab_bar_height())
     top_layout = QHBoxLayout(top)
     top_layout.setContentsMargins(0, 0, theme.Spacing.md, 0)
     top_layout.setSpacing(theme.Spacing.sm)
     win._top_bar = top
-    top_layout.addWidget(build_page_tabs_host(win, top), 1)
+    # The page tabs are the first row of the page panel (window style W1), not a strip of chrome beside the mode
+    # switch: built here, placed at the head of Review's centre pane below.
+    tabs_host = build_page_tabs_host(win, top)
+    top_layout.addStretch(1)
     win._dir_label = QLabel("No data loaded")
-    win._dir_label.setObjectName("Muted")
+    win._dir_label.setProperty("textRole", "help")
     win._dir_label.hide()
     top_layout.addWidget(win._dir_label)
     # The rail's collapse toggle is not in this band — it floats on the rail's
@@ -523,15 +591,16 @@ def build_ui(win) -> None:
     # window and a caption at the other.
     outer.addWidget(top)
 
-    # Hairline under the topbar, matching the app-header separator above it.
-    win._top_sep = build_hline_separator(None)
-    outer.addWidget(win._top_sep)
+    # No hairline under the band: the shell's regions sit on the window's ground with no dividing lines, and the
+    # page below is a panel of its own (``ui/shell_frame``).
 
     # ── Horizontal splitter: sidebar | plots ───────────────────────────
     win._h_pane = QSplitter(Qt.Horizontal)
+    win._h_pane.setObjectName("ShellSplit")
     outer.addWidget(win._h_pane, 1)
 
     sidebar = QWidget()
+    sidebar.setObjectName("ShellRail")
     # The sidebar rail is a FIXED width — it must never change with the active
     # tab or its content (a wide row wraps/scales to fit instead of stretching
     # the rail). A single fixed value (min == max) keeps every tab's rail
@@ -545,7 +614,10 @@ def build_ui(win) -> None:
     # (section headers word-wrap, the plate scales to the rail). ``sidebar_layout``
     # stays the content's layout, so every ``sidebar_layout.addWidget(...)`` below
     # is unchanged.
-    _sidebar_scroll = QScrollArea(sidebar)
+    # A settling scroll area, because the rail plate is height-for-width: a plain one re-sizes it each time its
+    # scroll bar comes and goes, synchronously, and at some sizes never stops (``widgets/settling_scroll_area``).
+    from widgets.settling_scroll_area import SettlingScrollArea
+    _sidebar_scroll = SettlingScrollArea(sidebar)
     _sidebar_scroll.setWidgetResizable(True)
     _sidebar_scroll.setFrameShape(QFrame.NoFrame)
     _sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
@@ -580,7 +652,6 @@ def build_ui(win) -> None:
     win._dataset_btn = _dataset_button(win, sidebar)
     sidebar_layout.addWidget(win._dataset_btn)
     sidebar_layout.addWidget(win._section_nav)
-    sidebar_layout.addWidget(build_hline_separator(None))
 
     # One place for the well picker, above every section that offers one. The
     # three pickers (main / Segmentation / Image Table) are mounted here rather
@@ -604,7 +675,9 @@ def build_ui(win) -> None:
     # the tab contributes no section and no well picker here.
     for _sec in win._ctx.features.rail_sections():
         _frame = win._ctx.widgets.register(_sec.key, QWidget())
-        QVBoxLayout(_frame).setContentsMargins(0, 0, 0, 0)
+        # Inset as the rail's rows are (window style W1): a frame's cards and lists sit inside the rail, not
+        # against its edges.
+        QVBoxLayout(_frame).setContentsMargins(theme.Spacing.sm, 0, theme.Spacing.sm, 0)
         sidebar_layout.addWidget(_frame, _sec.stretch)
         _frame.hide()
     win._ctx.widgets.get("_sidebar_main_frame").setVisible(True)
@@ -640,8 +713,12 @@ def build_ui(win) -> None:
     # rail and the user can always switch back from Analyze).
     from PySide6.QtWidgets import QStackedWidget as _QStackedWidget
     win._central_pane_stack = _QStackedWidget()
+    win._central_pane_stack.setObjectName("ShellPage")
     centre = QWidget()
-    QVBoxLayout(centre).setContentsMargins(0, 0, 0, 0)
+    centre_layout = QVBoxLayout(centre)
+    centre_layout.setContentsMargins(0, 0, 0, 0)
+    centre_layout.setSpacing(0)
+    centre_layout.addWidget(tabs_host)
     win._central_pane_stack.addWidget(centre)
     win._central_pane_stack.currentChanged.connect(win._on_central_pane_changed)
     win._h_pane.addWidget(win._central_pane_stack)

@@ -22,7 +22,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from analyze.advanced_section import AnalyzeAdvancedSectionMixin
@@ -50,9 +50,10 @@ from analyze.seg_params import AnalyzeSegParamsMixin
 # to replace. The picker widget itself is shared with the Datasets pane's Zip
 # Loose Folder page — see widgets/schema_picker.py.
 # ---------------------------------------------------------------------------
-from widgets.flow_layout import FlowLayout, sync_flow_height
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
+from ui import buttons, theme
+from ui.text_roles import NOT_SET
 
 
 #: The nanowell section, or a stand-in that is nothing, by the build's profile (``analyze.nanowell_hook``).
@@ -74,6 +75,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         to segment, how to correct, what to measure, which wells, and the
         rarely-changed rest. The run controls are not a section: they are the
         footer pinned under the form (``analyze.run_footer``)."""
+        self._build_page_header(parent)
         self._build_banner_strips(parent)
         self._build_data_section(parent)
         self._build_schema_section(parent)
@@ -97,66 +99,50 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         from core import wheel_guard
         wheel_guard.keep_guarding(parent)
 
-    def _build_data_section(self, parent: QWidget) -> None:
-        """The input folder, what it resolves to, and the one shortcut that
-        fills the whole form: the settings of a previous run."""
-        sec = self._section(parent, "Data")
+    def _build_page_header(self, parent: QWidget) -> None:
+        """The page's title, with the two shortcuts that fill the whole form as quiet commands beside it: a
+        previous run's settings (its pipeline_info.json, input folder included — to re-run a failed run or append
+        new data) and the user's own named presets (``analyze/presets.py``)."""
+        from ui.page_chrome import PageHeader
 
-        # Restore a prior run's settings (input path included) from its
-        # pipeline_info.json — to re-run a failed run or append new data. First
-        # in the section, above the folder it sets (as asked for), and inside
-        # it rather than floating above every section as it used to.
-        self._open_pinfo_btn = QPushButton("Use settings from a previous run…", sec)
-        self._open_pinfo_btn.setProperty("variant", "secondary")
+        self._open_pinfo_btn = buttons.quiet("Copy from a run…")
         self._open_pinfo_btn.setToolTip(
             "Open a run's pipeline_info.json and fill the whole form from it, "
             "input folder included.")
         self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
-        # A flow, not a fixed row, whose minimum would be both buttons' widths: in a wider font that held the
-        # form past Metrics.rail_w. Presets wraps under the first button instead (test_labelfree_phase.py).
-        pin_row = QWidget(sec)
-        prl = FlowLayout(pin_row)
-        prl.setContentsMargins(0, 0, 0, 4)
-        prl.addWidget(self._open_pinfo_btn)
-        # Named presets: the user's own saved settings, offered on every dataset (analyze/presets.py).
-        prl.addWidget(self._build_presets_button(pin_row))
-        sync_flow_height(pin_row)
-        sec.layout().addWidget(pin_row)
+        presets = self._build_presets_button(None)
+        buttons.set_kind(presets, buttons.QUIET)
+        parent.layout().addWidget(PageHeader("New run", parent, commands=(self._open_pinfo_btn, presets)))
 
-        in_lbl = QLabel("Input folder", sec)
-        in_lbl.setObjectName("Muted")
-        in_lbl.setWordWrap(True)
-        sec.layout().addWidget(in_lbl)
+    def _build_data_section(self, parent: QWidget) -> None:
+        """The input folder and what it resolves to."""
+        sec = self._section(parent, "Data")
 
-        in_pick = QWidget(sec)
-        ipl = QHBoxLayout(in_pick)
-        ipl.setContentsMargins(0, 0, 0, 4)
-        ipl.setSpacing(4)
+        in_pick = self._row(sec, "Input folder")
+        ipl = in_pick.layout()
         self._input_edit = QLineEdit(in_pick)
         self._input_edit.setReadOnly(True)
-        self._input_edit.setPlaceholderText("(not set)")
+        self._input_edit.setPlaceholderText(NOT_SET)
         self._input_edit.setMinimumWidth(0)
         self._input_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         ipl.addWidget(self._input_edit, 1)
         # Never disabled: choosing a folder is what lets the schema be detected,
         # so a lock on the folder until the schema was valid pointed each half
         # of the form at the other. A schema problem stops Run instead.
-        self._browse_btn = QPushButton("Browse…", in_pick)
-        self._browse_btn.setProperty("variant", "secondary")
+        self._browse_btn = buttons.default("Browse…", in_pick)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
-        sec.layout().addWidget(in_pick)
 
         # Where the run writes, once the input resolves to an output folder:
         # "—" on its own said nothing, so the row is hidden until then.
         self._output_row = QWidget(sec)
         orl = QHBoxLayout(self._output_row)
         orl.setContentsMargins(0, 0, 0, 0)
-        orl.setSpacing(4)
+        orl.setSpacing(theme.Spacing.xs)
         out_cap = QLabel("Output to", self._output_row)
-        out_cap.setObjectName("Muted")
+        out_cap.setProperty("textRole", "help")
         orl.addWidget(out_cap, 0, Qt.AlignTop)
-        self._output_lbl = QLabel("—", self._output_row)
+        self._output_lbl = QLabel("", self._output_row)    # hidden until a folder is chosen
         self._output_lbl.setWordWrap(True)
         self._output_lbl.setMinimumWidth(0)
         orl.addWidget(self._output_lbl, 1)
@@ -166,7 +152,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._layout_lbl = QLabel("", sec)
         self._layout_lbl.setWordWrap(True)
         sec.layout().addWidget(self._layout_lbl)
-        self._set_status(self._layout_lbl, "", quiet="")
+        self._set_status(self._layout_lbl, "", quiet=False)
 
 
         self._input_edit.textChanged.connect(lambda _: (self.forget_carried_run_problems(), self._refresh_output()))
@@ -191,7 +177,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._fluor_frame = QWidget(sec)
         self._fluor_frame_layout = QVBoxLayout(self._fluor_frame)
         self._fluor_frame_layout.setContentsMargins(0, 0, 0, 0)
-        self._fluor_frame_layout.setSpacing(2)
+        self._fluor_frame_layout.setSpacing(theme.Spacing.xs)
         sec.layout().addWidget(self._fluor_frame)
         self._fluor_add_row("GFP")
         self._build_channel_list_controls(sec)
@@ -221,7 +207,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         # turns into the segmentation error, in the error style, while the
         # method cannot run.
         self._segmentation_hint_lbl = QLabel("", sec)
-        self._segmentation_hint_lbl.setObjectName("Muted")
+        self._segmentation_hint_lbl.setProperty("textRole", "help")
         self._segmentation_hint_lbl.setWordWrap(True)
         sec.layout().addWidget(self._segmentation_hint_lbl)
         self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())

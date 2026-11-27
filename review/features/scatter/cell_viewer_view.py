@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -45,6 +44,7 @@ from PySide6.QtWidgets import (
 from review.data.cell_crop import AUTO_WINDOW, display_window, normalise
 from review.data.data_loading import get_rows
 from ui import theme
+from ui import buttons
 
 _logger = logging.getLogger(__name__)
 
@@ -137,25 +137,23 @@ class ScatterCellViewer(QWidget):
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 10)
+        layout.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.sm)
 
         head = QHBoxLayout()
         self._title_label = QLabel("Cell")
-        tfont = self._title_label.font()
-        tfont.setBold(True)
-        self._title_label.setFont(tfont)
+        self._title_label.setProperty("textRole", "sectionHeading")
         # No close of its own: the viewer is the inspector's Detail tab, and
         # the inspector's header holds the one Close.
         head.addWidget(self._title_label, 1)
         layout.addLayout(head)
 
         ctrl = QHBoxLayout()
-        ctrl.addWidget(QLabel("Channel:"))
+        ctrl.addWidget(QLabel("Channel"))
         self._channel_dropdown = QComboBox()
         self._channel_dropdown.currentIndexChanged.connect(self._display_current_image)
         ctrl.addWidget(self._channel_dropdown)
         ctrl.addSpacing(10)
-        ctrl.addWidget(QLabel("Source:"))
+        ctrl.addWidget(QLabel("Source"))
         self._source_dropdown = QComboBox()
         self._source_dropdown.addItem("Raw", "raw")
         self._source_dropdown.addItem("Corrected", "corrected")
@@ -174,22 +172,22 @@ class ScatterCellViewer(QWidget):
         layout.addWidget(self._img_label, 1)
 
         self._window_note = QLabel("")
-        self._window_note.setObjectName("Muted")
+        self._window_note.setProperty("textRole", "help")
         self._window_note.setWordWrap(True)
         layout.addWidget(self._window_note)
 
         lut = QHBoxLayout()
-        lut.addWidget(QLabel("Brightness min:"))
+        lut.addWidget(QLabel("Brightness min"))
         self._lut_min_edit = QLineEdit("")
         self._lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
         self._lut_min_edit.editingFinished.connect(self._on_lut_typed)
         lut.addWidget(self._lut_min_edit)
-        lut.addWidget(QLabel("max:"))
+        lut.addWidget(QLabel("max"))
         self._lut_max_edit = QLineEdit("")
         self._lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
         self._lut_max_edit.editingFinished.connect(self._on_lut_typed)
         lut.addWidget(self._lut_max_edit)
-        self._auto_btn = QPushButton("Auto")
+        self._auto_btn = buttons.default("Auto")
         self._auto_btn.setToolTip("Forget this channel's shared brightness and stretch each cell "
                                   "to its own 1st–99th percentile")
         self._auto_btn.clicked.connect(self._auto_lut)
@@ -198,8 +196,7 @@ class ScatterCellViewer(QWidget):
         layout.addLayout(lut)
 
         jump = QHBoxLayout()
-        self._show_in_seg_btn = QPushButton("Show in Segmentation")
-        self._show_in_seg_btn.setProperty("variant", "secondary")
+        self._show_in_seg_btn = buttons.default("Show in Segmentation")
         self._show_in_seg_btn.setToolTip("Open this cell's field in Image Browser → Segmentation, "
                                          "with the cell outlined")
         self._show_in_seg_btn.clicked.connect(self._show_in_segmentation)
@@ -292,7 +289,7 @@ class ScatterCellViewer(QWidget):
         finally:
             self._channel_dropdown.blockSignals(blocked)
         if not crops.crops:
-            self._show_problem("No channel could be shown: "
+            self._show_problem("No channel could be shown — "
                                + "; ".join(crops.missing.values()) + ".")
             return
         self._display_current_image()

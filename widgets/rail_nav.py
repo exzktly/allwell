@@ -1,12 +1,9 @@
-"""RailNav — vertical accent-bar navigation for the left rail.
+"""RailNav — vertical navigation for the left rail.
 
-Mockup target: the eight section items (Plotting / smFISH / Statistics /
-Image Table / Segmentation / Review CSV / Home / Batch Export)
-between the rail's mode-seg and the plate. Each row carries a leading
-Lucide icon + label + optional trailing count chip. The active row has a
-``--accent-dim`` background **and** a 2-px left accent bar drawn via
-``::before`` in the mockup CSS — here we paint that as a ``QLabel`` strip
-inside the row widget so QSS handles it without a custom ``paintEvent``.
+The rail's pages, each a row with a leading icon, a label and an optional trailing count, grouped under
+eyebrow captions. In window style W1 (design language §3.1) a row has 7-pixel corners and the selected one is
+the selected fill in its ink, with no accent bar; the strip a bar once drew in is kept, empty, so the rows'
+geometry did not move.
 
 One-of-N selection model. Emits ``currentChanged(key)`` when the active row
 changes (either by user click or by ``setCurrentKey``). Items carry an
@@ -48,7 +45,6 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from widgets import icons
-from widgets.selection_chip import SelectionChip
 
 
 #: The active row's accent strip is never thinner than this, whatever the font.
@@ -125,7 +121,10 @@ class _RailNavRow(QFrame):
         self._label.setProperty("active", False)
         self._label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
 
-        self._chip = SelectionChip("", variant="muted", parent=body)
+        # The trailing count, plain text in the number role (design language D21): a count only reports, and a
+        # chip round it read as something to press.
+        self._chip = QLabel("", body)
+        self._chip.setProperty("textRole", "number")
         self._chip.setVisible(False)
 
         bl.addWidget(self._glyph, 0, Qt.AlignVCenter)
@@ -187,7 +186,7 @@ class _RailNavRow(QFrame):
         if not self._icon_name:
             return
         active = bool(self.property("active"))
-        token = "accent" if active else "text_muted"
+        token = "selected_fg" if active else "text_secondary"
         dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
         self._glyph.setPixmap(
             icons.make_pixmap(self._icon_name, token, self._glyph_px, dpr or 1.0)
@@ -227,7 +226,7 @@ class RailNav(QFrame):
 
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.setSpacing(1)
+        self._lay.setSpacing(theme.Metrics.hairline)
         # Never taller than its rows need. A nav is a list of links, not a
         # region to fill: nothing here has a reason to grow, and the rows
         # carry no height of their own, so surplus height would be divided
@@ -249,7 +248,6 @@ class RailNav(QFrame):
         # lays out, and how a caption knows which rows are its group.
         self._entries: list[QWidget] = []
 
-        self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
     def addItem(self, label: str, *, icon: str | None = None,
@@ -371,7 +369,7 @@ class RailNav(QFrame):
         holder.deleteLater()
         lay = kind(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(1)
+        lay.setSpacing(theme.Metrics.hairline)
         self._lay = lay
         return lay
 
@@ -428,79 +426,6 @@ class RailNav(QFrame):
         if emit:
             self.currentChanged.emit(key)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        QFrame#RailNav {{
-            background: transparent;
-            border: 0;
-        }}
-        QFrame#RailNavRow {{
-            background: transparent;
-        }}
-        QFrame#RailNavRow:disabled {{ color: {c.text_faint}; }}
-        QFrame#RailNavRowStrip {{
-            background: transparent;
-            border: 0;
-        }}
-        QFrame#RailNavRowStrip[active="true"] {{
-            background-color: {c.accent};
-            border-top-right-radius: 2px;
-            border-bottom-right-radius: 2px;
-        }}
-        QFrame#RailNavRowBody {{
-            background-color: transparent;
-            border-radius: {r.sm}px;
-            margin: 0 4px 0 6px;
-        }}
-        QFrame#RailNavRowBody:hover {{
-            background-color: {c.panel};
-        }}
-        QFrame#RailNavRowBody[active="true"] {{
-            background-color: {c.accent_dim};
-        }}
-        QFrame#RailNavRowBody[active="true"]:hover {{
-            background-color: {c.accent_dim};
-        }}
-        QLabel#RailNavRowLabel {{
-            color: {c.text_secondary};
-            font-family: {t.family};
-            font-size: {t.emph_size}px;
-            font-weight: 500;
-            background: transparent;
-        }}
-        /* No `:hover` rule for the label, deliberately. Qt resolves a
-           *descendant* rule by baking its colour into the label's stylesheet
-           palette, and a palette has no notion of ":hover" — so
-           `QFrame#RailNavRow:hover QLabel#RailNavRowLabel` applies always,
-           whatever else is written beside it, and overrides the
-           `text_secondary` base above. Every row then drew at full strength
-           and the active one was not distinguished from the rest, which is the
-           whole job of this rail. Measured (Qt 6.7.3, inactive/active): the
-           [active] rule alone gives #98a2b3 / #e6e9ef; adding the :hover rule
-           gives #e6e9ef / #e6e9ef whether the two are one comma group or two
-           separate rules — splitting the group changes nothing, which is why
-           the rule is gone rather than rewritten.
-
-           Hover is still signalled, by `QFrame#RailNavRowBody:hover` above:
-           that one styles the widget it names rather than a descendant of it,
-           so the pseudo-state resolves normally. */
-        QLabel#RailNavRowLabel[active="true"] {{
-            color: {c.text_primary};
-        }}
-        /* A group caption: the row label's left edge (the 6px body margin,
-           the accent strip and the body's own md padding), muted caption type,
-           a gap above it that separates the group from the one before. */
-        QLabel#RailNavCaption {{
-            color: {c.text_muted};
-            font-family: {t.family};
-            font-size: {t.caption_size}px;
-            font-weight: 600;
-            letter-spacing: 0.08em;
-            background: transparent;
-            padding: {theme.Spacing.sm}px 0 {theme.Spacing.xs}px {theme.Spacing.md + 8}px;
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -516,15 +441,12 @@ if __name__ == "__main__":
     host.setWindowTitle("RailNav — demo")
     host.resize(280, 480)
     lay = QVBoxLayout(host)
-    lay.setContentsMargins(8, 12, 8, 12)
-    lay.setSpacing(8)
+    lay.setContentsMargins(theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md)
+    lay.setSpacing(theme.Spacing.sm)
 
     head = QLabel("SECTION", host)
-    head.setStyleSheet(
-        f"color: {theme.Colors.text_muted}; font-size: {theme.Typography.caption_size}px; "
-        f"letter-spacing: 0.08em; font-weight: 600;"
-    )
-    head.setContentsMargins(9, 0, 0, 0)
+    head.setProperty("textRole", "eyebrow")
+    head.setContentsMargins(theme.Spacing.sm, 0, 0, 0)
     lay.addWidget(head)
 
     nav = RailNav(host)
@@ -540,9 +462,85 @@ if __name__ == "__main__":
     lay.addStretch(1)
 
     out = QLabel("Active: Plotting", host)
-    out.setStyleSheet(f"color: {theme.Colors.text_muted}; padding: 0 9px;")
+    out.setProperty("textRole", "label")
     nav.currentChanged.connect(lambda k: out.setText(f"Active: {k}"))
     lay.addWidget(out)
 
     host.show()
     _sys.exit(app.exec())
+
+
+#: A row's corners (§3.1: 7 pixels).
+_ROW_RADIUS = 7
+
+
+def qss() -> str:
+    c, t = theme.Colors, theme.Typography
+    return f"""
+    QFrame#RailNav {{
+        background: transparent;
+        border: 0;
+    }}
+    QFrame#RailNavRow {{
+        background: transparent;
+    }}
+    QFrame#RailNavRow:disabled {{ color: {c.text_disabled}; }}
+    QFrame#RailNavRowStrip {{
+        background: transparent;
+        border: 0;
+    }}
+    /* No accent bar on the selected row (design language §3.1, W1): the selected fill alone says it. */
+    QFrame#RailNavRowBody {{
+        background-color: transparent;
+        border-radius: {_ROW_RADIUS}px;
+        margin: 0 4px 0 6px;
+    }}
+    QFrame#RailNavRowBody:hover {{
+        background-color: {c.control};
+    }}
+    QFrame#RailNavRowBody[active="true"] {{
+        background-color: {c.selected};
+    }}
+    QFrame#RailNavRowBody[active="true"]:hover {{
+        background-color: {c.selected};
+    }}
+    QLabel#RailNavRowLabel {{
+        color: {c.text_secondary};
+        font-family: {t.family};
+        font-size: {t.emph_size}px;
+        font-weight: 500;
+        background: transparent;
+    }}
+    /* No `:hover` rule for the label, deliberately. Qt resolves a
+       *descendant* rule by baking its colour into the label's stylesheet
+       palette, and a palette has no notion of ":hover" — so
+       `QFrame#RailNavRow:hover QLabel#RailNavRowLabel` applies always,
+       whatever else is written beside it, and overrides the
+       `text_secondary` base above. Every row then drew at full strength
+       and the active one was not distinguished from the rest, which is the
+       whole job of this rail. Measured (Qt 6.7.3, inactive/active): the
+       [active] rule alone gives #98a2b3 / #e6e9ef; adding the :hover rule
+       gives #e6e9ef / #e6e9ef whether the two are one comma group or two
+       separate rules — splitting the group changes nothing, which is why
+       the rule is gone rather than rewritten.
+
+       Hover is still signalled, by `QFrame#RailNavRowBody:hover` above:
+       that one styles the widget it names rather than a descendant of it,
+       so the pseudo-state resolves normally. */
+    QLabel#RailNavRowLabel[active="true"] {{
+        color: {c.selected_fg};
+        font-weight: {t.semibold};
+    }}
+    /* A group caption: the row label's left edge (the 6px body margin,
+       the accent strip and the body's own md padding), muted caption type,
+       a gap above it that separates the group from the one before. */
+    QLabel#RailNavCaption {{
+        color: {c.text_secondary};
+        font-family: {t.family};
+        font-size: {t.caption_size}px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        background: transparent;
+        padding: {theme.Spacing.sm}px 0 {theme.Spacing.xs}px {theme.Spacing.md + 8}px;
+    }}
+    """

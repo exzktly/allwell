@@ -32,6 +32,16 @@ pytestmark = pytest.mark.qt
 _VALUE_INK = "#6AB2FB"
 
 
+
+@pytest.fixture(autouse=True)
+def _application_sheet(qapp):
+    """The widget's rules are part of the application sheet (``ui/component_qss.py``), as in the app."""
+    from ui import theme
+
+    qapp.setStyleSheet(theme.qss())
+    yield
+    qapp.setStyleSheet("")
+
 def _plate(qtbot, *, rim: bool, selected: list[str]):
     plate = WellPlateSelector()
     qtbot.addWidget(plate)

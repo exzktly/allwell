@@ -14,10 +14,11 @@ not draw cannot be inside the lasso however they would have plotted.
 from __future__ import annotations
 
 import numpy as np
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QToolButton
 
 from review.core.cell_picking import cells_of
 from review.core.cell_sets_state import CellSet
+from ui import buttons
 
 
 def cells_inside(cells, verts) -> np.ndarray:
@@ -45,13 +46,12 @@ def save_lassoed(ctx, cells, verts, *, source: str) -> CellSet | None:
                           int(cells.nids[i])) for i in idx], source=source, note=note)
 
 
-def make_lasso_button(ctx, parent, canvas_key: str, *, source: str) -> QPushButton:
-    """A checkable *Lasso cells* button for the plot whose canvas is registered as *canvas_key*."""
+def make_lasso_button(ctx, parent, canvas_key: str, *, source: str) -> QToolButton:
+    """The *Lasso cells* tool for the plot whose canvas is registered as *canvas_key*: pressed in while a drag on
+    the plot draws a lasso (``ui.buttons.mode_tool``)."""
     from matplotlib.widgets import LassoSelector
 
-    btn = QPushButton("Lasso cells", parent)
-    btn.setCheckable(True)
-    btn.setProperty("variant", "secondary")
+    btn = buttons.mode_tool("Lasso cells", parent)
     btn.setToolTip("Draw round cells on the plot to save them as a set of saved cells. "
                    "Saving changes no number: use the set in the Cell Browser, or exclude "
                    "it under Cell Gating → Saved cells.")

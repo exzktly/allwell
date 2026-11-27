@@ -47,7 +47,7 @@ def _chip_groups(row) -> list[ChipGroup]:
 
 def _captions(row) -> list[str]:
     return [w.text() for w in row.findChildren(QLabel)
-            if w.objectName() == "Caption"]
+            if w.property("textRole") == "label"]
 
 
 def test_the_wells_are_drawn_as_chips_carrying_their_own_tokens(qapp):

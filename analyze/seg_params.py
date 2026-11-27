@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 from util.channel_roles import LABELFREE_METHODS, phase_role_conflicts
 from widgets.text_combo import TextCombo
 from widgets.value_combo import ValueCombo
+from ui import theme
 
 #: The widths of the Segmentation channel and Cytoplasm channel fields, in pixels.
 _SEG_CHANNEL_FIELD_W = 160
@@ -112,7 +113,7 @@ class AnalyzeSegParamsMixin:
             p = QWidget()
             v = QVBoxLayout(p)
             v.setContentsMargins(0, 0, 0, 0)
-            v.setSpacing(2)
+            v.setSpacing(theme.Spacing.xs)
             return p
 
         # StarDist (nuclei): no extra parameters beyond the shared thresholds.
@@ -131,7 +132,7 @@ class AnalyzeSegParamsMixin:
         area_cell = self._row(ws, "Min nucleus area")
         self._min_nucleus_area_edit = self._entry(area_cell, "50", width=60)
         _px = QLabel("pixels", area_cell)
-        _px.setObjectName("Muted")
+        _px.setProperty("textRole", "help")
         area_cell.layout().addWidget(_px)
         area_cell.layout().addStretch(1)
         self._min_nucleus_area_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
@@ -161,7 +162,7 @@ class AnalyzeSegParamsMixin:
         lf = _page()
         lf_lbl = QLabel("Segments the channel marked 'Phase' above with Cellpose-SAM (cpsam), which reads "
                         "brightfield and phase contrast.", lf)
-        lf_lbl.setObjectName("Muted")
+        lf_lbl.setProperty("textRole", "help")
         lf_lbl.setWordWrap(True)
         lf.layout().addWidget(lf_lbl)
         self._labelfree_note = lf_lbl
@@ -172,7 +173,7 @@ class AnalyzeSegParamsMixin:
         self._nanowell_count_box = QWidget(lf)
         box = QVBoxLayout(self._nanowell_count_box)
         box.setContentsMargins(0, 0, 0, 0)
-        box.setSpacing(2)
+        box.setSpacing(theme.Spacing.xs)
         lf.layout().addWidget(self._nanowell_count_box)
         self._nanowell_count_box.hide()
         self._seg_param_stack.addPage("cellpose_labelfree", lf)
@@ -381,7 +382,7 @@ class AnalyzeSegParamsMixin:
                       "own threshold. Lower finds more (dimmer) nuclei; higher "
                       "overlap keeps more touching nuclei apart. Tune against a "
                       "real frame in Review → Image Browser → Playground.", sec)
-        hint.setObjectName("Muted")
+        hint.setProperty("textRole", "help")
         hint.setWordWrap(True)
         sec.layout().addWidget(hint)
 
@@ -507,9 +508,11 @@ class AnalyzeSegParamsMixin:
             "The channel the cells are found in. Type its name as it appears in the filenames, or pick one of the "
             "channels listed above. A name that is not listed above is a separate channel, used only to find the cells.")
         row.layout().addWidget(self._nuclear_token_edit)
-        self._seg_channel_note = QLabel("", section)
-        self._seg_channel_note.setObjectName("Muted")
-        self._seg_channel_note.setWordWrap(True)
+        # What the typed name is, as a notice (``widgets.notice``): a caution in the attention severity when the
+        # name is not a listed channel, plain information when it is.
+        from widgets.notice import Notice
+        self._seg_channel_note = Notice(parent=section)
+        self._seg_channel_note.hide()
         section.layout().addWidget(self._seg_channel_note)
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_seg_channel_options())
 
@@ -529,14 +532,17 @@ class AnalyzeSegParamsMixin:
             phase_locked = self._seg_method() == "cellpose_labelfree" if hasattr(self, "_seg_method_cb") else False
         token = edit.text().strip()
         if not token or phase_locked:
-            text = ""
-        elif token.lower() in {t.lower() for t in listed}:
-            text = f"{token} is also one of the channels listed above."
+            note.setVisible(False)
+            return
+        if token.lower() in {t.lower() for t in listed}:
+            note.setSeverity("information")
+            note.setMessage(f"{token} is also one of the channels listed above.")
         else:
-            text = (f"{token} is not one of the channels listed above: it is a separate channel, the one the cells are "
-                    "found in. Pick a listed channel from the dropdown to segment that one instead.")
-        note.setText(text)
-        note.setVisible(bool(text))
+            note.setSeverity("attention")
+            note.setMessage(f"{token} is not one of the channels listed above.",
+                            "It is a separate channel, the one the cells are found in. Pick a listed channel from "
+                            "the dropdown to segment that one instead.")
+        note.setVisible(True)
 
     def _refresh_segmentation_hints(self) -> None:
         # The hint label is built under the picker, before the method pages it

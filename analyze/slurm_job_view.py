@@ -59,7 +59,7 @@ class SlurmJobIndicator(QLabel):
         self.setVisible(state != sj.NONE)
         color = (theme.Colors.success if state == sj.OPEN
                  else theme.Colors.warn if state == sj.UNKNOWN
-                 else theme.Colors.text_muted)
+                 else theme.Colors.text_secondary)
         dpr = self.devicePixelRatioF() if self.isVisible() else 1.0
         self.setPixmap(make_pixmap("server", color, _ICON_PX, dpr))
         self.setToolTip(sj.tooltip(self._job))

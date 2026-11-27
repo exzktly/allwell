@@ -66,7 +66,11 @@ _IGNORED_DIRS = {".git", "__pycache__", "build", "dist", ".venv", "venv",
 #: `datasets/subset/view.py` of misnaming the `<dataset>/out/pipeline_info.json`
 #: a user's own dataset holds, which is not a repository path at all. Indexing
 #: fixtures would make the guard loudest exactly where it knows least.
-_IGNORED_PREFIXES = ("tests/fixtures/",)
+_IGNORED_PREFIXES = ("tests/fixtures/",
+                     # Git worktrees an assistant checks out inside the repository (ignored by .gitignore): each is
+                     # a whole second copy of the tree, so every basename would be found twice, once in the wrong
+                     # place.
+                     ".claude/worktrees/")
 
 
 def _repo_files_by_name() -> dict[str, list[str]]:

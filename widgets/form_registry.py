@@ -88,6 +88,11 @@ def declare(widget: QWidget, kind: str) -> None:
 def register(widget: QWidget, apply: Callable[[bool], None]) -> None:
     """Give *widget* a form of its own: ``apply(True)`` puts it in the alternate
     form, ``apply(False)`` back in the default one. Kind :data:`CUSTOM`."""
+    # A bound method of *widget* itself (``FormGrid._arrange``) is held weakly too: stored as it is, the value
+    # would hold its own key and the weak dictionary would keep every such widget alive for the process.
+    import inspect
+    if inspect.ismethod(apply) and apply.__self__ is widget:
+        apply = weakref.WeakMethod(apply)
     _custom[widget] = apply
     declare(widget, CUSTOM)
 
@@ -103,7 +108,10 @@ def kind_of(widget: QWidget) -> str | None:
 
 def custom_apply(widget: QWidget) -> Callable[[bool], None] | None:
     """The callable :func:`register` stored for *widget*, or ``None``."""
-    return _custom.get(widget)
+    apply = _custom.get(widget)
+    if isinstance(apply, weakref.WeakMethod):
+        apply = apply()
+    return apply
 
 
 def declared(kind: str | None = None) -> list[QWidget]:

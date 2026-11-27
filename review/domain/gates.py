@@ -2,7 +2,7 @@
 
 A gate is a rectangle the user drew on the per-cell scatter, stamped with the
 two metric columns it was drawn over (``x_col`` / ``y_col``). Three places ask
-which cells it holds: the Scatter tab (its *Apply gates* filter and the CSV
+which cells it holds: the Scatter tab (its *Plot only the gated cells* filter and the CSV
 export's ``plot_in_gate`` marker), Cell Gating's pass (``Gate_Pass`` and the
 thresholding layer's ``Gate_On``), and the Cell Browser's gate source. They ask
 here, so a cell cannot be inside a gate on one page and outside it on another.

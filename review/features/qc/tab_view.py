@@ -21,8 +21,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QVBoxLayout, QWidget,
+    QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
 from review.data.field_quality_cache import (
@@ -45,6 +44,8 @@ from core.safe import swallowed
 from ui import theme
 from widgets.capped_label import CappedLabel
 from widgets.flow_layout import FlowLayout, flow_group
+from ui import text_roles
+from ui import buttons
 
 # Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
 # written inline at a call site).
@@ -132,8 +133,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     """
     row = QWidget(parent)
     outer = QVBoxLayout(row)
-    outer.setContentsMargins(8, 2, 8, 2)
-    outer.setSpacing(4)
+    outer.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
+    outer.setSpacing(theme.Spacing.xs)
 
     params = get_qc_params(ctx)
 
@@ -149,7 +150,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     head_layout.addWidget(enable_cb)
     head_layout.addSpacing(12)
     status = QLabel("", head)
-    status.setObjectName("Muted")
+    status.setProperty("textRole", "help")
     head_layout.addWidget(status)
     head_layout.addStretch(1)
     outer.addWidget(head)
@@ -181,27 +182,29 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     grid = QWidget(row)
     gl = QGridLayout(grid)
     gl.setContentsMargins(_GRID_INDENT, 0, 0, 0)
-    gl.setHorizontalSpacing(10)
-    gl.setVerticalSpacing(3)
+    gl.setHorizontalSpacing(theme.Spacing.sm)
+    gl.setVerticalSpacing(theme.Spacing.xs)
     gl.setColumnMinimumWidth(0, _QUANTITY_LBL_W)
     gl.setColumnStretch(3, 1)
     for col, cap in ((1, "min"), (2, "max")):
         head_lbl = QLabel(cap, grid)
-        head_lbl.setObjectName("Muted")
+        head_lbl.setProperty("textRole", "help")
         gl.addWidget(head_lbl, 0, col)
 
     def _field(value, tip: str) -> QLineEdit:
         edit = QLineEdit(_fmt(value), grid)
         edit.setFixedWidth(theme.Metrics.num_field_w)
-        edit.setPlaceholderText("none")
+        edit.setPlaceholderText(text_roles.NOT_SET)
         edit.setToolTip(tip)
         return edit
 
     def _absent() -> QLabel:
-        """The column a quantity has no bound for. An em-dash, not a gap: a
-        bound that does not exist should not look like one left blank."""
-        lbl = QLabel("—", grid)
-        lbl.setObjectName("Muted")
+        """The column a quantity has no bound for. Marked, not a gap: a bound
+        that does not exist should not look like one left blank, nor like one
+        not set yet (``text_roles.NOT_APPLICABLE``)."""
+        lbl = QLabel(grid)
+        lbl.setProperty("textRole", "help")
+        text_roles.show_not_applicable(lbl)
         return lbl
 
     min_area_edit = _field(params.min_area, _area_tip)
@@ -252,8 +255,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # was flagged rather than discovered afterwards.
     fq = QWidget(row)
     fq_layout = QVBoxLayout(fq)
-    fq_layout.setContentsMargins(0, 6, 0, 0)
-    fq_layout.setSpacing(2)
+    fq_layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    fq_layout.setSpacing(theme.Spacing.xs)
     fq_head = QWidget(fq)
     fq_head_layout = QHBoxLayout(fq_head)
     fq_head_layout.setContentsMargins(0, 0, 0, 0)
@@ -272,7 +275,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # either way — which left the panel saying nothing at all about what
     # ticking it did.
     fq_effect = CappedLabel("", fq)
-    fq_effect.setObjectName("Muted")
+    fq_effect.setProperty("textRole", "help")
     fq_effect.setWordWrap(True)
     fq_effect.setMaximumWidth(_FQ_TEXT_W)
     fq_layout.addWidget(fq_effect)
@@ -302,8 +305,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # the Playground is where a user finds theirs.
     foc = QWidget(row)
     foc_layout = QVBoxLayout(foc)
-    foc_layout.setContentsMargins(0, 6, 0, 0)
-    foc_layout.setSpacing(2)
+    foc_layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    foc_layout.setSpacing(theme.Spacing.xs)
     foc_head = QWidget(foc)
     # A flow row: the checkbox, its cut and the curve button together are wider
     # than a phone, and a horizontal row would hold the whole page that wide.
@@ -314,14 +317,14 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     foc_cb.setToolTip(_FOCUS_TOOLTIP)
     foc_head_layout.addWidget(foc_cb)
     foc_below = QLabel("below", foc_head)
-    foc_below.setObjectName("Muted")
+    foc_below.setProperty("textRole", "help")
     # The cut sits ON the checkbox's own row rather than under it: it is the
     # checkbox's operand, and every other number on this panel that qualifies
     # a rule sits beside the rule. A row of its own read as a fifth debris
     # bound, which is a rule about cells rather than about the imaging.
     foc_edit = QLineEdit(_fmt(params.focus_min), foc_head)
     foc_edit.setFixedWidth(_FOCUS_EDIT_W)
-    foc_edit.setPlaceholderText("none")
+    foc_edit.setPlaceholderText(text_roles.NOT_SET)
     foc_edit.setToolTip(
         "The per-cell focus value below which a cell counts as out of focus. "
         "Seeded from this dataset's own run when it recorded one.\n"
@@ -340,7 +343,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # a per-WELL curve is the one that answers "what will this do to my data".
     # Pooling every field and timepoint the well holds, from the column the
     # run already wrote -- no image decode.
-    foc_curve_btn = QPushButton("Distribution…", foc_head)
+    foc_curve_btn = buttons.default("Distribution…", foc_head)
     foc_curve_btn.setToolTip(
         "Plot the selected well's per-cell focus as a cumulative curve, with "
         "your cut marked and a live count of what it keeps and drops.\n"
@@ -357,7 +360,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     foc_status.setMaximumWidth(_FQ_TEXT_W)
     foc_layout.addWidget(foc_status)
     foc_effect = CappedLabel("", foc)
-    foc_effect.setObjectName("Muted")
+    foc_effect.setProperty("textRole", "help")
     foc_effect.setWordWrap(True)
     foc_effect.setMaximumWidth(_FQ_TEXT_W)
     foc_layout.addWidget(foc_effect)
@@ -382,14 +385,14 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # debris gate's enable box for the same reason.
     brd = QWidget(row)
     brd_layout = QVBoxLayout(brd)
-    brd_layout.setContentsMargins(0, 6, 0, 0)
-    brd_layout.setSpacing(2)
+    brd_layout.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    brd_layout.setSpacing(theme.Spacing.xs)
     brd_cb = QCheckBox("Exclude cells touching the image border", brd)
     brd_cb.setChecked(bool(params.exclude_border_cells))
     brd_cb.setToolTip(_BORDER_TOOLTIP)
     brd_layout.addWidget(brd_cb)
     brd_status = CappedLabel("", brd)
-    brd_status.setObjectName("Muted")
+    brd_status.setProperty("textRole", "help")
     brd_status.setWordWrap(True)
     brd_status.setMaximumWidth(_FQ_TEXT_W)
     brd_status.setIndent(_FQ_TEXT_INDENT)
@@ -678,7 +681,7 @@ def _refresh_field_quality_status(ctx, w) -> None:
     # heading of the radio group beneath it. The registers stay three because
     # they are three statements; the styling is a separate decision and this
     # is the one the render supports.
-    label.setObjectName("Notice" if register == REGISTER_PROBLEM else "Muted")
+    text_roles.set_role(label, text_roles.HELP, tone=text_roles.ATTENTION if register == REGISTER_PROBLEM else None)
     label.style().unpolish(label)
     label.style().polish(label)
     effect = w.get("field_quality_effect")
@@ -750,7 +753,7 @@ def _refresh_focus_status(ctx, w) -> None:
         return
     text, register = focus_status(ctx)
     label.setText(text)
-    label.setObjectName("Notice" if register == REGISTER_PROBLEM else "Muted")
+    text_roles.set_role(label, text_roles.HELP, tone=text_roles.ATTENTION if register == REGISTER_PROBLEM else None)
     label.style().unpolish(label)
     label.style().polish(label)
     effect = w.get("focus_effect")
@@ -787,7 +790,7 @@ def _refresh_border_status(ctx, w) -> None:
         return
     text, is_problem = border_status(ctx)
     label.setText(text)
-    label.setObjectName("Notice" if is_problem else "Muted")
+    text_roles.set_role(label, text_roles.HELP, tone=text_roles.ATTENTION if is_problem else None)
     label.style().unpolish(label)
     label.style().polish(label)
 

@@ -113,7 +113,7 @@ def test_a_blank_numeric_field_is_not_an_error():
     (RawFields(well_source="grid", rows="two", cols="2"), "positive whole"),
     (RawFields(fovs="0"), "FOVs per well"),
     (RawFields(workers="-1"), "Worker threads"),
-    (RawFields(timepoint_stride="x"), "Keep every Nth timepoint"),
+    (RawFields(timepoint_stride="x"), "Keep every nth timepoint"),
     (RawFields(well_source="scenes"), "Unknown well source"),
 ])
 def test_a_field_that_cannot_be_used_says_which_one(fields, fragment):

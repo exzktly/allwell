@@ -37,7 +37,6 @@ class BrandTile(QWidget):
         # ``QPainter.setBrush(...)``, so the raw hex strings from
         # ``theme.Colors.trace`` crash the paintEvent.
         self._colors = [QColor(c) for c in theme.Colors.trace]
-        self.setStyleSheet("#BrandTile { background: transparent; }")
 
     def setColors(self, colors) -> None:
         cs = [QColor(c) for c in colors if QColor(c).isValid()]
@@ -66,8 +65,8 @@ class BrandTile(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         # rounded backplate
-        p.setPen(QColor(c.border))
-        p.setBrush(QColor(c.panel_elevated))
+        p.setPen(QColor(c.hairline))
+        p.setBrush(QColor(c.control))
         radius = s * (theme.Radii.xs / 12.0) + s * 0.12
         p.drawRoundedRect(rect, radius, radius)
 
@@ -106,7 +105,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.md)
 
     title = QLabel("BrandTile")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
     row = QHBoxLayout()
@@ -116,7 +115,7 @@ if __name__ == "__main__":
     # titlebar-style row
     tile = BrandTile()
     word = QLabel("All-Well")
-    word.setObjectName("Title")
+    word.setProperty("textRole", "pageTitle")
     row.addSpacing(theme.Spacing.lg)
     row.addWidget(tile)
     row.addWidget(word)

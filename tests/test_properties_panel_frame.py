@@ -37,7 +37,7 @@ def _button(sidebar, text: str):
 
 @pytest.mark.parametrize(("text", "method"), [
     ("Reset", "_reset_defaults"),
-    ("Save Preset", "_save_preset"),
+    ("Save preset", "_save_preset"),
     ("Export…", "_export"),
 ])
 def test_each_footer_button_reaches_its_action(qtbot, monkeypatch, text, method):

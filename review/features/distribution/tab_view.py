@@ -18,8 +18,9 @@ from review.core.ui_helpers import (
 from review.features.export.service import (
     export_cell_data_from, export_distribution_data)
 from review.features.distribution.cell_scope_compute import cell_scope
+from review.features.distribution.controller import LEFT_MARGIN
 from review.data.data_loading import get_all_timepoints
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from widgets.spin_box import SpinBox
 
 
@@ -57,19 +58,30 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     )
     chan_cb.hide()
 
-    tp_cb = reg.register("_distribution_tp_cb", LabeledComboBox("Timepoint", ctrl))
+    tp_cb = reg.register("_distribution_tp_cb", unlabelled("Timepoint", ctrl))
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
-    ctrl.add_scope("", tp_cb)
+    ctrl.add_scope("Timepoint", tp_cb)
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget
 
-    mode_cb = reg.register("_distribution_mode_cb", QComboBox(ctrl))
+    # How the distribution is drawn — Mode, Bins, Layout, the log axes, pooling — is on the page's Display page, not
+    # the band (the user's decision, tracker §9.1 step 20): the band keeps what is plotted on one row.
+    from review.core.inspector_panels import make_popover_button
+    from widgets.form_grid import FormGrid
+
+    display_btn, display_panel, display_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
+    display_btn.setToolTip("How the distribution is drawn: mode, bins, layout, log axes, pooling")
+    reg.register("_distribution_display_btn", display_btn)
+    display_form = FormGrid(display_panel)
+    display_lay.addWidget(display_form)
+
+    mode_cb = reg.register("_distribution_mode_cb", QComboBox(display_panel))
     mode_cb.addItems(_MODE_OPTIONS)
     mode_cb.setCurrentText("Histogram + KDE")
     mode_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
-    ctrl.add_scope("Mode", mode_cb)
+    display_form.add_row("Mode", mode_cb)
     reg.register("_distribution_mode_var", mode_cb)   # legacy alias → same widget
 
-    bins_spin = reg.register("_distribution_bins_spin", SpinBox(ctrl))
+    bins_spin = reg.register("_distribution_bins_spin", SpinBox(display_panel))
     # No practical upper bound — fine-grained / over-sampled histograms are
     # a legitimate request when distributions are concentrated in a narrow
     # window of the channel's dynamic range. Qt's QSpinBox tops out at
@@ -82,21 +94,21 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         ctx.state.distribution.bins = int(val)
         _on_changed(ctx)
     bins_spin.valueChanged.connect(_on_bins_changed)
-    ctrl.add_scope("Bins", bins_spin)
+    display_form.add_row("Bins", bins_spin)
 
     # Histogram layout: overlay every group on one axis (default), or
     # face one axis per group stacked vertically with minimal padding.
     # The combo is always visible but only has an effect for the
     # ``Histogram`` / ``Histogram + KDE`` modes; the renderer ignores it
     # for KDE-only, CDF, and Violin layouts.
-    layout_cb = reg.register("_distribution_layout_cb", QComboBox(ctrl))
+    layout_cb = reg.register("_distribution_layout_cb", QComboBox(display_panel))
     layout_cb.addItems(_LAYOUT_OPTIONS)
     layout_cb.setCurrentText("Overlay")
     layout_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
-    ctrl.add_scope("Layout", layout_cb)
+    display_form.add_row("Layout", layout_cb)
     reg.register("_distribution_layout_var", layout_cb)   # legacy alias → same widget
 
-    log_x_cb = reg.register("_distribution_log_x_cb", QCheckBox("log x", ctrl))
+    log_x_cb = reg.register("_distribution_log_x_cb", QCheckBox("log x", display_panel))
 
     def _on_log_changed(state: int) -> None:
         # Single source of truth: the per-figure axis pref (``x_log``) — the same
@@ -106,21 +118,21 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         _set_distribution_log(ctx, "x", bool(state))
         _on_changed(ctx)
     log_x_cb.stateChanged.connect(_on_log_changed)
-    ctrl.add_scope("", log_x_cb)
+    display_lay.addWidget(log_x_cb)
 
-    log_y_cb = reg.register("_distribution_log_y_cb", QCheckBox("log y", ctrl))
+    log_y_cb = reg.register("_distribution_log_y_cb", QCheckBox("log y", display_panel))
 
     def _on_log_y_changed(state: int) -> None:
         _set_distribution_log(ctx, "y", bool(state))
         _on_changed(ctx)
     log_y_cb.stateChanged.connect(_on_log_y_changed)
-    ctrl.add_scope("", log_y_cb)
+    display_lay.addWidget(log_y_cb)
 
     # With replicate sets on the plate, a well click shows its whole set and the
     # figure pools the set's wells into one series. Unticked, each of those
     # wells is drawn as its own series instead — same wells, one curve each.
     # Disabled while no set is active (``controller.sync_pool_checkbox``).
-    pool_cb = reg.register("_distribution_pool_cb", QCheckBox("Pool replicates", ctrl))
+    pool_cb = reg.register("_distribution_pool_cb", QCheckBox("Pool replicates", display_panel))
     pool_cb.setChecked(bool(ctx.state.distribution.pool_replicates))
     pool_cb.setToolTip(
         "On: each replicate set is one series of its wells' pooled values.\n"
@@ -130,7 +142,9 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         ctx.state.distribution.pool_replicates = bool(state)
         _on_changed(ctx)
     pool_cb.stateChanged.connect(_on_pool_changed)
-    ctrl.add_scope("", pool_cb)
+    display_lay.addWidget(pool_cb)
+    display_lay.addStretch(1)
+    ctrl.add_action(display_btn)
 
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
         ctx, ctrl,
@@ -154,7 +168,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_card", card)
     fig = reg.register("_distribution_fig", card.figure)
     reg.register("_distribution_ax", fig.add_subplot(1, 1, 1))
-    fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
+    fig.subplots_adjust(top=0.93, bottom=0.12, left=LEFT_MARGIN, right=0.97)
     reg.register("_distribution_canvas", card.canvas)
     # NOTE: no shared SEM/SD band control here. The card's controls row stays
     # hidden because this tab draws per-group histograms / KDEs / violins and

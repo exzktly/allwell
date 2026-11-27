@@ -28,11 +28,12 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
+    QListWidgetItem, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ui import theme
 from review.domain.sample_variables import NUMBER, TEXT
+from ui import buttons as ui_buttons
 
 #: Side of the square swatch on a value row, in pixels.
 _SWATCH = 11
@@ -79,8 +80,7 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     listing.setMaximumHeight(_RAIL_H)
     column.addWidget(listing)
 
-    add = reg.register("_var_add", QPushButton("+ Variable", host))
-    add.setObjectName("HomeAction")
+    add = reg.register("_var_add", ui_buttons.default("Add variable", host))
     column.addWidget(add)
 
     body = reg.register("_var_body", QWidget(host))
@@ -148,8 +148,7 @@ def _build_value_list(ctx, body: QWidget, column, reg) -> None:
     # well as "here is what one value looks like".
     entry.setPlaceholderText("0, 0.1, 1 — commas add several")
     add_row.addWidget(entry, 1)
-    add = reg.register("_var_value_add", QPushButton("Add", body))
-    add.setObjectName("HomeAction")
+    add = reg.register("_var_value_add", ui_buttons.default("Add", body))
     add_row.addWidget(add)
     column.addLayout(add_row)
 
@@ -170,15 +169,14 @@ def _build_value_list(ctx, body: QWidget, column, reg) -> None:
         ("_var_value_remove", "Remove value",
          "Drop this value. Wells holding it become unassigned."),
     ):
-        button = reg.register(name, QPushButton(text, body))
-        button.setObjectName("HomeAction")
+        button = reg.register(name, ui_buttons.default(text, body))
         button.setToolTip(tip)
         buttons.addWidget(button)
     buttons.addStretch(1)
     column.addLayout(buttons)
 
     note = reg.register("_var_note", QLabel("", body))
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     note.setWordWrap(True)
     column.addWidget(note)
 
@@ -195,7 +193,7 @@ def swatch_icon(colour: str) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.setBrush(QColor(colour))
-    painter.setPen(QColor(theme.Colors.border))
+    painter.setPen(QColor(theme.Colors.hairline))
     painter.drawRoundedRect(0, 0, _SWATCH - 1, _SWATCH - 1, 2, 2)
     painter.end()
     return QIcon(pixmap)
@@ -272,7 +270,7 @@ def variable_row(name: str, variable_id: str, annotated: int,
     label = QLabel(item.text(), row)
     layout.addWidget(label, 1)
 
-    close = QPushButton("✕", row)
+    close = ui_buttons.icon_button("x", "Delete this variable", row)
     close.setObjectName("VariableRowDelete")
     close.setFixedSize(QSize(_ROW_X, _ROW_X))
     close.setCursor(Qt.PointingHandCursor)
@@ -300,7 +298,7 @@ def variable_row(name: str, variable_id: str, annotated: int,
     return item, row
 
 
-def row_delete_button(listing, row: int) -> QPushButton | None:
+def row_delete_button(listing, row: int) -> QToolButton | None:
     """The × on rail row *row*, or ``None``.
 
     A named accessor rather than each caller reaching through
@@ -312,7 +310,7 @@ def row_delete_button(listing, row: int) -> QPushButton | None:
     widget = listing.itemWidget(item) if item is not None else None
     if widget is None:
         return None
-    return widget.findChild(QPushButton, "VariableRowDelete")
+    return widget.findChild(QToolButton, "VariableRowDelete")
 
 
 def row_label_text(listing, row: int) -> str:

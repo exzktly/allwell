@@ -158,3 +158,12 @@ class LabeledComboBox(QComboBox):
         opt.currentText = self._painted_text()
         painter.drawComplexControl(QStyle.CC_ComboBox, opt)
         painter.drawControl(QStyle.CE_ComboBoxLabel, opt)
+
+
+def unlabelled(label: str, parent=None) -> LabeledComboBox:
+    """A box that sizes to its current entry and paints no prefix, for a host that sets *label* beside it
+    (``ControlBand.add_scope(label, box)``): the design language puts a field's label outside the control.
+    *label* is still the box's :meth:`~LabeledComboBox.label`, so it keeps its name."""
+    box = LabeledComboBox(label, parent)
+    box.setLabelShown(False)
+    return box

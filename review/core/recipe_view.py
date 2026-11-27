@@ -70,7 +70,7 @@ class CopyAnalysisDialog(QDialog):
             box.setEnabled(usable)
             row_layout.addWidget(box)
             detail = QLabel(fit.describe(), row)
-            detail.setObjectName("Muted")
+            detail.setProperty("textRole", "help")
             detail.setWordWrap(True)
             detail.setContentsMargins(theme.Spacing.lg, 0, 0, 0)
             row_layout.addWidget(detail)

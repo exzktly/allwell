@@ -124,11 +124,11 @@ class ToggleSwitch(QCheckBox):
         p.setRenderHint(QPainter.Antialiasing, True)
 
         enabled = self.isEnabled()
-        off_fill = QColor(c.panel if not enabled else c.panel_elevated)
-        on_fill = QColor(c.accent_dim if not enabled else c.accent)
+        off_fill = QColor(c.card if not enabled else c.control)
+        on_fill = QColor(c.selected if not enabled else c.accent)
         track_fill = lerp_color(off_fill, on_fill, self._pos)
         track_border = lerp_color(
-            QColor(c.border), QColor(c.accent if enabled else c.border_strong), self._pos
+            QColor(c.field_edge), QColor(c.accent if enabled else c.border_strong), self._pos
         )
 
         track_rect = QRectF(x0, y0, tw, th)
@@ -141,7 +141,7 @@ class ToggleSwitch(QCheckBox):
         knob_x = x0 + margin + (tw - 2.0 * margin - knob_d) * self._pos
         knob_y = y0 + margin
         if not enabled:
-            knob_color = QColor(c.text_muted)
+            knob_color = QColor(c.text_disabled)
         else:
             knob_color = lerp_color(QColor(c.text_secondary), QColor(c.ink_light), self._pos)
         p.setPen(Qt.NoPen)
@@ -158,7 +158,7 @@ class ToggleSwitch(QCheckBox):
             )
 
         if self.text():
-            p.setPen(QColor(c.text_primary if enabled else c.text_muted))
+            p.setPen(QColor(c.text_primary if enabled else c.text_disabled))
             p.setFont(self.font())
             tx = x0 + tw + self._text_gap()
             p.drawText(QRectF(tx, 0.0, max(0.0, self.width() - tx), float(self.height())),
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                              theme.Spacing.lg, theme.Spacing.lg)
     title = QLabel("ToggleSwitch")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     form = QFormLayout()
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     outer.addLayout(form)
 
     echo = QLabel("toggled → (interact above)")
-    echo.setObjectName("Secondary")
+    echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     on.toggled.connect(lambda v: echo.setText(f"'On by default' toggled → {v}"))
     off.toggled.connect(lambda v: echo.setText(f"'Off by default' toggled → {v}"))

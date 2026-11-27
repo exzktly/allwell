@@ -25,12 +25,13 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QToolButton
 
 from core.safe import swallow
 from review.domain import sample_variables as sv
 from review.domain import variable_series as vseries
 from review.domain.plate_layout import wells_in_fill_lines
+from ui import buttons
 
 _logger = logging.getLogger("review")
 
@@ -197,7 +198,7 @@ def _paint_rail(ctx, listing, vset, wells, keep) -> None:
                                  listing)
         listing.addItem(item)
         listing.setItemWidget(item, row)
-        close = row.findChild(QPushButton, "VariableRowDelete")
+        close = row.findChild(QToolButton, "VariableRowDelete")
         if close is not None:
             # Bound to *this row's* id, not to whatever the rail has selected.
             # A delete that reads the selection can act on a different variable
@@ -732,7 +733,6 @@ def _selection_sentence(vset, variable_id, picked) -> str:
 
 def _paint_chips(ctx, variable) -> None:
     """One chip per value, plus a No value. Select wells, then click a chip."""
-    from PySide6.QtWidgets import QPushButton
 
     from .plate_view import value_chip
 
@@ -758,8 +758,7 @@ def _paint_chips(ctx, variable) -> None:
         # "No value", not "Clear". It is the state the plots already name
         # ``no value``, and "Clear" beside a "Delete this variable" and a
         # "Remove value" was a third destructive word for a third scope.
-        clear = QPushButton("No value", host)
-        clear.setObjectName("HomeAction")
+        clear = buttons.default("No value", host)
         clear.setToolTip("Unassign the selected wells — they go back to being "
                          "ringed and uncounted.")
         clear.clicked.connect(lambda: assign_selected(ctx, None))
@@ -1114,7 +1113,7 @@ def _clear_plate(ctx, wells) -> None:
     With no variable defined there is no plate to show: a full ninety-six well
     grid greyed out around a two-paragraph explainer reads as software that has
     broken, not as software waiting to be told what the plate is about. The one
-    thing a user can do here is press ``+ Variable``, and that is what is left
+    thing a user can do here is press ``Add variable``, and that is what is left
     on screen.
     """
     from PySide6.QtWidgets import QListWidget

@@ -59,6 +59,14 @@ _GLYPHS: dict[str, str] = {
                       '<line x1="6" y1="16" x2="6.01" y2="16"/>'
                       '<line x1="10" y1="16" x2="10.01" y2="16"/>'),
     "plus":          '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+    # Lucide "minus" — the zoom-out and step-down half of a +/− pair.
+    "minus":         '<line x1="5" y1="12" x2="19" y2="12"/>',
+    # Lucide "pencil" — edit the thing in this row.
+    "pencil":        ('<path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>'
+                      '<path d="m15 5 4 4"/>'),
+    # Lucide "arrow-left-right" — swap the two sides (a LUT's ends, two datasets).
+    "arrow-left-right": ('<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/>'
+                         '<path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>'),
     "search":        '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
     "sliders":       ('<line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/>'
                       '<line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/>'
@@ -274,7 +282,7 @@ def make_pixmap(name: str, color, size_px: int, dpr: float = 1.0) -> QPixmap:
 
 def make_icon(name: str, size_px: int = 16, *,
               normal="text_secondary", active="text_primary",
-              checked="accent", disabled="text_faint", dpr: float = 1.0) -> QIcon:
+              checked="accent", disabled="text_disabled", dpr: float = 1.0) -> QIcon:
     """A ``QIcon`` with state-dependent token colors:
 
     Normal/Off → *normal*, Active (hover) → *active*, On (checked) → *checked*,
@@ -305,7 +313,7 @@ if __name__ == "__main__":
     pad = theme.Spacing.lg
     outer.setContentsMargins(pad, pad, pad, pad)
     title = QLabel("Inline icon set")
-    title.setObjectName("Title")
+    title.setProperty("textRole", "pageTitle")
     outer.addWidget(title)
 
     grid_host = QWidget()
@@ -318,7 +326,7 @@ if __name__ == "__main__":
         glyph.setPixmap(make_pixmap(name, "text_primary", 20, dpr))
         glyph.setAlignment(Qt.AlignCenter)
         cap = QLabel(name)
-        cap.setObjectName("Caption")
+        cap.setProperty("textRole", "label")
         cap.setAlignment(Qt.AlignCenter)
         cell.addWidget(glyph)
         cell.addWidget(cap)

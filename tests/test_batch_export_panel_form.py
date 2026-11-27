@@ -286,7 +286,7 @@ def test_the_deck_and_the_gallery_are_told_apart_by_their_verbs():
 def test_the_summary_says_where_groups_come_from():
     inline = _FormStub(_spec())
     inline._refresh_run_summary()
-    assert "Groups are defined in the left panel." in inline._summary_lbl.text
+    assert "Groups are defined in the Groups card." in inline._summary_lbl.text
     sidebar = _FormStub(_spec(), sidebar=True)
     sidebar._refresh_run_summary()
     assert ("Groups come from Home → Sample Map → Replicates."
@@ -353,20 +353,21 @@ def test_the_modes_whose_axes_are_a_choice_place_the_block_themselves():
     chosen, and Scatter carried two rows labelled "X:" meaning different
     things.
     """
+    import inspect
     for cls in (ScatterBatchExportPanel, ResponseBatchExportPanel):
-        assert cls._AXES_FOLLOW_HEADER is False, cls.__name__
-        source = cls._build_output_panel.__code__.co_names
+        source = inspect.getsource(cls._build_output_panel)
         assert "_build_output_tail" in source, cls.__name__
-    for cls in (BatchExportPanel, BarBatchExportPanel):
-        assert cls._AXES_FOLLOW_HEADER is True, cls.__name__
+        # After the rows that choose the axes, not before them.
+        chooser = "_build_axis_row" if cls is ScatterBatchExportPanel else "_build_variable_rows"
+        assert source.index(chooser) < source.index("_build_output_tail"), cls.__name__
 
 
 def test_every_mode_names_its_own_x_axis():
     """"X:" over a row of numbers says nothing about what unit to type."""
     labels = {cls: cls._X_ROW_LABEL for cls in _MODES}
-    assert labels[BatchExportPanel] == "X (time, h):"
-    assert labels[ResponseBatchExportPanel] == "X (dose):"
-    assert labels[ScatterBatchExportPanel] == "X range:"
+    assert labels[BatchExportPanel] == "X (time, h)"
+    assert labels[ResponseBatchExportPanel] == "X (dose)"
+    assert labels[ScatterBatchExportPanel] == "X range"
     # And no two modes with different x axes share a label by inheritance.
     assert len({labels[BatchExportPanel], labels[ResponseBatchExportPanel],
                 labels[ScatterBatchExportPanel]}) == 3

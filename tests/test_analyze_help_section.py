@@ -37,7 +37,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from ui import help_topics
 
@@ -73,10 +73,9 @@ def _settle(app, n: int = 10) -> None:
 def _expand_every_section(qapp, tab) -> None:
     """Open the collapsed sections — a hidden widget cannot take focus, so the
     focus branch is untestable while its section's body is folded."""
-    carets = [w for w in tab.findChildren(QLabel)
-              if w.objectName() == "SectionTitle" and w.text() == "▸"]
-    for caret in carets:
-        QTest.mouseClick(caret.parentWidget(), Qt.LeftButton)
+    for card in tab._section_cards.values():
+        if not card.isExpanded():
+            QTest.mouseClick(card.header(), Qt.LeftButton)     # the header a user clicks
     _settle(qapp)
 
 
@@ -241,8 +240,9 @@ def test_a_collapsed_sidebar_reports_nothing(qapp, analyze_tab):
 
 
 def test_the_resume_and_preflight_banners_head_the_form_above_data(analyze_tab):
-    """Reported: the Folders section appeared above the sidebar's banners, which it should not. The banners (resume
-    and preflight, one holder) are the form's first item, and Folders — still the first section — comes after them."""
+    """Reported: the Folders section appeared above the sidebar's banners, which it should not. The page's title
+    row comes first (the design language's Analyze page, tracker row D22), then the banners (resume and preflight,
+    one holder), then Data — still the first section."""
     holder = analyze_tab._preflight_banner.parentWidget()
     assert holder is analyze_tab._resume_banner.parentWidget()
     form = holder.parentWidget().layout()
@@ -252,14 +252,17 @@ def test_the_resume_and_preflight_banners_head_the_form_above_data(analyze_tab):
             widget = widget.parentWidget()
         return form.indexOf(widget)
 
-    assert row(holder) == 0
+    assert row(analyze_tab._open_pinfo_btn) == 0               # the title row, "New run"
+    assert row(holder) == 1
     assert row(analyze_tab._section_widgets["Data"]) > row(holder)
     assert row(analyze_tab._section_widgets["Data"]) < row(analyze_tab._section_widgets["Filename schema"])
 
 
-def test_load_settings_from_a_run_sits_above_the_folder_under_the_banners(analyze_tab):
-    """Asked for: "Load settings from a run…" above the folder selection (it sets the input folder), and still below
-    the banners that head the form."""
+def test_copy_from_a_run_sits_in_the_title_row_above_the_folder(analyze_tab):
+    """Asked for: the shortcut that fills the form from a previous run ("Copy from a run…") above the folder
+    selection, since it sets the input folder. The design language puts it in the page's title row, a quiet
+    command beside "New run" and Presets (tracker row D22) — which is above the banners too, where the earlier
+    request had it just under them; the prototype's order is the later decision."""
     holder = analyze_tab._preflight_banner.parentWidget()
     form = holder.parentWidget().layout()
 
@@ -268,10 +271,6 @@ def test_load_settings_from_a_run_sits_above_the_folder_under_the_banners(analyz
             widget = widget.parentWidget()
         return form.indexOf(widget)
 
-    # It is the Data section's first row now, so it sits above the input
-    # folder inside the section that holds it.
-    load = row(analyze_tab._open_pinfo_btn)
-    assert row(holder) < load == row(analyze_tab._section_widgets["Data"])
-    data = analyze_tab._section_widgets["Data"]
-    assert (analyze_tab._open_pinfo_btn.mapTo(data, analyze_tab._open_pinfo_btn.rect().topLeft()).y()
-            < analyze_tab._input_edit.mapTo(data, analyze_tab._input_edit.rect().topLeft()).y())
+    assert row(analyze_tab._open_pinfo_btn) < row(holder) < row(analyze_tab._section_widgets["Data"])
+    assert analyze_tab._open_pinfo_btn.text() == "Copy from a run…"
+    assert analyze_tab._open_pinfo_btn.property("variant") == "quiet"

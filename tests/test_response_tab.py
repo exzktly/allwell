@@ -91,7 +91,7 @@ def tab(qtbot, monkeypatch):
                       "Events above threshold"])
     y_combo.currentIndexChanged.connect(
         lambda *_: rctl.on_response_metric_changed(ctx))
-    tp_button = QPushButton("Timepoints: 0 selected")
+    tp_button = QPushButton("Timepoints: none")
     qtbot.addWidget(tp_button)
     # A bare ``Figure``, not ``pyplot.subplots``: pyplot would build a Qt canvas
     # and a navigation toolbar this test never shows, and tearing those down
@@ -500,7 +500,7 @@ def test_it_opens_on_one_timepoint_not_all_of_them(tab):
     assert rctl.timepoints_for(tab.ctx) == [24.0], (
         "the picker seeded with something other than the shared focus timepoint"
     )
-    assert tab.w("_response_tp_button").text() == "Timepoints: 1/4 selected"
+    assert tab.w("_response_tp_button").text() == "Timepoints: 1 of 4"
 
 
 def test_a_plate_with_no_timepoint_field_still_has_a_timepoint_to_draw(tab):
@@ -530,7 +530,7 @@ def test_a_plate_with_no_timepoint_field_still_has_a_timepoint_to_draw(tab):
     assert rctl.timepoints_for(tab.ctx) == [0.0], (
         "the picker offered no timepoint on a plate whose points are all at 0.0"
     )
-    assert tab.w("_response_tp_button").text() == "Timepoints: All 1 selected"
+    assert tab.w("_response_tp_button").text() == "Timepoints: all 1"
     assert tab.ax.has_data(), "the figure is empty on a plate that has data"
 
 
@@ -592,12 +592,12 @@ def test_the_button_says_how_many_of_how_many(tab):
     _load(tab, variable, {"A01": "v0"}, [("a", ["A01"])],
           timepoints=(0.0, 24.0, 48.0))
     rctl.redraw_response(tab.ctx)
-    assert tab.w("_response_tp_button").text() == "Timepoints: 1/3 selected"
+    assert tab.w("_response_tp_button").text() == "Timepoints: 1 of 3"
 
     tab.ctx.state.feature_slice("response").tp_selections = {
         "0": True, "24": True, "48": True}
     rctl.update_timepoint_button(tab.ctx)
-    assert tab.w("_response_tp_button").text() == "Timepoints: All 3 selected"
+    assert tab.w("_response_tp_button").text() == "Timepoints: all 3"
 
 
 def test_the_shared_focus_timepoint_is_never_written(tab):
@@ -648,7 +648,7 @@ def test_turning_every_timepoint_off_is_a_choice_and_is_left_alone(tab):
 
     rctl.redraw_response(tab.ctx)
     assert rctl.timepoints_for(tab.ctx) == []
-    assert tab.w("_response_tp_button").text() == "Timepoints: 0/2 selected"
+    assert tab.w("_response_tp_button").text() == "Timepoints: 0 of 2"
 
 
 def test_a_timepoint_the_new_dataset_lacks_is_dropped_from_the_selection(tab):

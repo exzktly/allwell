@@ -259,7 +259,7 @@ def test_a_stale_tile_size_does_not_block_a_cellpose_run(tab):
         "...and it must still be checked when StarDist is the routine")
 
 
-# ── "+ Queue" is the same gate as Run ────────────────────────────────────────
+# ── "Add to queue" is the same gate as Run ────────────────────────────────────────
 #
 # The queue button handed the sink whatever the form produced and validated
 # nothing, so an unrunnable form became a queue entry indistinguishable from a
@@ -272,7 +272,7 @@ def refusals(run_refusals):
 
 
 def _queued(tab):
-    """Press the real "+ Queue" button; return what reached the sink."""
+    """Press the real "Add to queue" button; return what reached the sink."""
     jobs: list[dict] = []
     tab.set_queue_sink(jobs.append)
     tab._queue_btn.click()

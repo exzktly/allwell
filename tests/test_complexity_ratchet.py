@@ -38,7 +38,7 @@ THRESHOLD = 40
 # 682 -> 681: one allowlisted function lost a point of complexity in the page-render fixes (the ratchet reports
 # only the total, so no single function is named here).
 # 676 -> 674: Batch Export's Bar ``_run_batch`` reads its display mode through ``_display_choice``.
-TOTAL_ALLOWLISTED_CC_BUDGET = 673
+TOTAL_ALLOWLISTED_CC_BUDGET = 671
 
 _DECISION = (
     ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler,
@@ -166,7 +166,7 @@ ALLOWLIST = {
     # denominators moved behind ``fold_change_pairing.ControlDenominators`` and
     # the per-member normalize call became ``normalize_member_pts``, shared with
     # the batch line runner. Removed from the allowlist.
-    # DONE: draw_per_cell_bar_mode dropped below the threshold once the "Pooled"
+    # DONE: draw_per_cell_bar_mode dropped below the threshold once the "Pool replicates"
     # toggle unified the two rset base-column branches (the old pool_rset_cells
     # and pool_reps branches merged into one). Removed from the allowlist.
     "review/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",

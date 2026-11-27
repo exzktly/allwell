@@ -80,9 +80,11 @@ def test_action_zone_is_top_aligned_when_the_scope_zone_wraps(styled_app):
                for i in range(band.action_count())]
     top_margin = band.layout().contentsMargins().top()
     for a in actions:
-        assert a.geometry().top() <= top_margin + 4, (
+        # Level with the first line's controls: under where a label sits, never further down the band.
+        first_line = top_margin + band.caption_height() + theme.Spacing.xs
+        assert a.geometry().top() <= first_line + 4, (
             f"action '{a.text()}' sits {a.geometry().top()}px down; "
-            "it should hug the top of the band"
+            "it should sit level with the first line's controls"
         )
 
 
@@ -233,7 +235,7 @@ def test_the_band_paints_one_continuous_fill(styled_app):
         f"{img.pixelColor(inside, y).name()} at x={inside}, over the scope "
         "host — a container is painting its own background"
     )
-    assert img.pixelColor(margin, y).name().lower() != theme.Colors.surface.lower(), (
+    assert img.pixelColor(margin, y).name().lower() != theme.Colors.canvas.lower(), (
         "the band is painted in the canvas colour; it has no fill of its own"
     )
 
@@ -288,7 +290,7 @@ def test_mode_segments_carry_full_strength_text(styled_app):
     bar = _mode_bar(styled_app)
     bar.show()
     styled_app.processEvents()
-    muted = theme.Colors.text_muted.lower()
+    muted = theme.Colors.text_secondary.lower()
     for i in range(bar.count()):
         seg = bar.layout().itemAt(i).widget()
         for lbl in seg.findChildren(QLabel):
@@ -353,7 +355,9 @@ def test_mode_bar_selection_round_trips(styled_app):
 
 
 def test_mode_bar_segments_are_flush(styled_app):
-    """No gutters: the bar is one band, not three chips."""
+    """No gutters between segments: one pill, its segments side by side on a track (window style W1, design
+    language §3.1) — the track the same width all round."""
+    from widgets.mode_bar import _TRACK_INSET
     bar = _mode_bar(styled_app)
     bar.show()
     bar.setFixedWidth(340)
@@ -361,7 +365,7 @@ def test_mode_bar_segments_are_flush(styled_app):
     styled_app.processEvents()
     assert bar.layout().spacing() == 0
     m = bar.layout().contentsMargins()
-    assert (m.left(), m.top(), m.right(), m.bottom()) == (0, 0, 0, 0)
+    assert (m.left(), m.top(), m.right(), m.bottom()) == (_TRACK_INSET,) * 4
     segs = [bar.layout().itemAt(i).widget() for i in range(bar.count())]
     for a, b in zip(segs, segs[1:]):
         assert b.geometry().left() - a.geometry().right() <= 1, "gutter between segments"

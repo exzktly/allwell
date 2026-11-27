@@ -20,6 +20,7 @@ from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
+from ui import theme as _theme
 
 #: The Parameter column never takes less than this, however narrow the page.
 _PARAM_COLUMN_MIN_W = 120
@@ -84,12 +85,12 @@ def _fmt(value) -> str:
 
 def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     layout = parent.layout() or QVBoxLayout(parent)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(6)
+    layout.setContentsMargins(_theme.Spacing.md, _theme.Spacing.md, _theme.Spacing.md, _theme.Spacing.md)
+    layout.setSpacing(_theme.Spacing.xs)
 
-    hdr = QHBoxLayout(); hdr.setSpacing(8)
-    title = QLabel("Pipeline Info", parent)
-    title.setStyleSheet("font-weight:600;")
+    hdr = QHBoxLayout(); hdr.setSpacing(_theme.Spacing.sm)
+    title = QLabel("Pipeline info", parent)
+    title.setProperty("textRole", "sectionHeading")
     hdr.addWidget(title)
     hdr.addStretch(1)
     from widgets.icon_button import IconButton as _IconButton
@@ -110,17 +111,8 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     # the text stayed light). Drop it and pin themed colours explicitly so every
     # row is the dark panel background with high-contrast text, regardless of any
     # ambient palette.
-    from ui import theme as _theme
     _c = _theme.Colors
     tree.setAlternatingRowColors(True)
-    tree.setStyleSheet(
-        f"QTreeWidget#PipelineInfoTree {{ background:{_c.panel}; "
-        f"alternate-background-color:{_c.surface}; color:{_c.text_primary}; }}"
-        f"QTreeWidget#PipelineInfoTree::item {{ color:{_c.text_primary}; "
-        f"padding:3px 6px; }}"
-        f"QTreeWidget#PipelineInfoTree::item:selected {{ "
-        f"background:{_c.accent}; color:{_c.ink_dark}; }}"
-    )
     tree.header().setStretchLastSection(True)
     fitter = _ParameterColumnFit(tree)
     layout.addWidget(tree, 1)

@@ -90,7 +90,7 @@ def test_the_planner_refuses_a_folder_too_large_to_be_a_plate(tmp_path, monkeypa
     plan = irs.plan_input_layout(root)
     assert plan.action == irs.TOO_LARGE
     assert not plan.runnable
-    assert plan.message == ("⚠ home/ holds more than 10 folders — more than one plate's input. Choose the "
+    assert plan.message == ("home/ holds more than 10 folders — more than one plate's input. Choose the "
                             "plate's own folder: the one holding in/, or the per-well zips.")
     assert len(listed) <= 10, f"the planner listed {len(listed)} folders against a budget of 10"
 
@@ -106,7 +106,7 @@ def test_the_planner_bounds_the_walk_inside_in_too(tmp_path, monkeypatch, listed
 
 def test_the_root_of_a_volume_is_named_as_itself(tmp_path, monkeypatch):
     """``Path("/").name`` is empty; the readout must still say which folder it refused."""
-    assert irs._too_large_plan(str(irs.Path("/"))).message.startswith("⚠ / holds more than")
+    assert irs._too_large_plan(str(irs.Path("/"))).message.startswith("/ holds more than")
 
 
 def test_the_analyze_pane_says_so_when_pointed_at_one(qtbot, tmp_path, monkeypatch):
@@ -119,7 +119,7 @@ def test_the_analyze_pane_says_so_when_pointed_at_one(qtbot, tmp_path, monkeypat
     tab = AnalyzeTab()
     qtbot.addWidget(tab)
     tab._input_edit.setText(str(root))
-    assert tab._layout_lbl.text().startswith("⚠ home/ holds more than 10 folders")
+    assert tab._layout_lbl.text().startswith("home/ holds more than 10 folders")
     assert not tab._output_row.isVisibleTo(tab)
 
 

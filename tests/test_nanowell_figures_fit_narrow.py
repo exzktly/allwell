@@ -45,7 +45,13 @@ def test_a_message_is_broken_to_the_figure_it_is_shown_at_not_the_one_it_was_dra
 
 
 def test_a_fitted_text_is_made_smaller_before_it_is_broken():
-    fig = _figure(1.6, 2.0)                        # 147 px of room for ~200 px of 12 pt text
+    # A figure whose room (92% of its width) is 80% of the text's width at 12 pt, measured in whatever face this
+    # machine draws in: a fixed width fitted the app's font and was too narrow for the CI runner's wider DejaVu Sans.
+    probe = _figure(10.0, 2.0)
+    wide = probe.text(0, 0, "Cells at baseline (earliest):", fontsize=12)
+    probe.canvas.draw()
+    needed_px = wide.get_window_extent(probe.canvas.get_renderer()).width
+    fig = _figure(0.8 * needed_px / 0.92 / 100.0, 2.0)
     ax = fig.add_subplot(1, 1, 1)
     item = renderer._fitted_text_class()(0.5, 0.5, "Cells at baseline (earliest):", ha="center", fontsize=12,
                                          transform=ax.transAxes, smallest=0.5)

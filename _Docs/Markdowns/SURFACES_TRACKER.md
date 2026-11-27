@@ -7,12 +7,15 @@ is written to be handed to another assistant session that has not seen the
 conversation that produced it, so it states the decisions, the reasons for them,
 the code each part touches, and how each part is proved.
 
-**All of this work is one pull request**, the one this file arrived in: the
-user asked for the menu and organisation changes as a single pull request, with
-the design language as a second one (`DESIGN_LANGUAGE_TRACKER.md`, on its own
-branch). So this tracker lives on that pull request's branch and is worked
-there; the commit that closes the last row deletes it, before the pull request
-merges, and the body says so. Counts are derived from the rows (§12 gives the
+**All of this work is one pull request**: the user asked for the menu and
+organisation changes as a single pull request, with the design language as a
+second one (`DESIGN_LANGUAGE_TRACKER.md`, on its own branch). The pull request
+this file arrived in (#1372) was **closed at the user's request**, so that
+pushes made while the work is in progress start no billed CI run; the work is
+on the branch `claude/cool-mayer-zhdo2q`, which holds that pull request's
+commits, and **a new pull request is opened once, when the last row closes**.
+The commit that closes the last row deletes this tracker, and the pull request
+body says so. Counts are derived from the rows (§12 gives the
 command); no total is typed anywhere in this file.
 
 Read before starting: `CLAUDE.md` (all of it — §2 on test lanes, §3 on where a
@@ -400,10 +403,11 @@ it, when changed, changes the state or the spec the plot is drawn from; and
 
 ## 6. How to work this plan
 
-- **One pull request for the whole plan**, already open: commit on its branch
-  and stack every phase there. Because the pull request is open, every push
-  starts a billed CI run (CLAUDE.md §2), so push by round: finish a phase,
-  verify it locally, push it once. Keep the pull request's body describing the
+- **One pull request for the whole plan**, opened last: commit on the branch
+  and stack every phase there. No pull request is open while the work is in
+  progress, so a push starts no CI run and each round is pushed as it is
+  verified (CLAUDE.md §2); once the pull request exists, every push to it is
+  billed, so push by round from then on. Keep the pull request's body describing the
   branch as it stands, and label it `minor`, since it changes what users see.
   Merge `origin/main` into the branch at the start of each phase and before
   each push; never rebase or force-push it.

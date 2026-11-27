@@ -375,7 +375,7 @@ layout (`desk_only`). The page's own controls are in a
 52 pt strip (`PhoneStrip`) at the **foot** of the window — added last to the
 band's parent layout, so in Analyze it sits under the run bar — because the foot
 is what a thumb reaches without shifting its grip, and it is the edge the two
-sheets rise from. It holds the page menu, **Wells** and **⚙ Controls**. Sideways
+sheets rise from. It holds four permanent buttons — the page menu, **Wells**, **⚙ Controls** and **Share** — each disabled, never removed, on a page that cannot use it. Sideways
 the strip's three buttons join the bar (`_place_page_controls`), vertically
 centred, and the strip is hidden.
 
@@ -782,10 +782,56 @@ layout is on (`ui_helpers.phone_wording`, applied in `_apply_reason`, the one
 writer of a placeholder's hint, and re-applied on every switch by a
 `phone_layout` listener `follow_phone_layout` adds per window).
 
-**The Properties sheet.** A plot's right-hand panel — the Properties
-(export-style) sidebar, or the Scatter cell viewer that shares its slot — opens
-at the desk in the plot's right dock, a layout sibling of the figure
-(`ui_helpers.make_plot_with_right_dock`). In phone layout that dock would be
+**Style, Detail and Share.** The figure's export-style panel
+(`features/export/properties_view.ExportStyleSidebar`) is the inspector's
+**Style** tab in both layouts. The band's Style button
+(`ui_helpers.make_properties_button`) is built with the key of the figure it
+styles; `review/core/style_tab.py` opens the tab on that figure's panel, closes
+it on a second press, and — as the inspector service's root finder — supplies
+the panel of the page on screen when no Style button was pressed (a page change
+with the column open; the phone's Controls sheet). The panel is the feature
+layer's, so core asks the feature registry for it (`export_style.sidebar`). It
+is built once per figure in a hidden park on the window and lent from there;
+it has no title, close or width of its own; and its sections are **rows**: a
+section's folded header opens its controls as a page
+(`CollapsibleSection.setOpener`), so the tab's first page is a list that fits
+one screen. The picked Scatter cell (`features/scatter/cell_viewer_view.py`) is
+the **Detail** tab (`inspector_service.show_detail` / `clear_detail`): one
+viewer per window, updated in place when another point is picked. **Share** is
+the band's menu of commands (`ui_helpers.build_plot_save_menu`, and the Image
+Table's and Saved Plots' own menus, each carrying the `share` role); in phone
+layout it is the fourth permanent button of the foot strip
+(`PhoneShell.strip_buttons`: page, Wells, Controls, Share — each shown on every
+Review page and disabled where the page cannot use it), which pops the page's
+own menu after closing the sheets. A record a module keeps about a widget —
+which panel a button opens, which figure a Style button styles, which picker a
+button owns — lives **on the widget**, with the module holding only a weak set:
+a module-level mapping from a widget to a record that names the context is a
+chain to the window that no closed window ever breaks
+(`tests/test_a_closed_review_app_is_freed.py`).
+
+**One page for each kind of choice.** Picking several of a list is
+`widgets/multi_select.MultiSelect`, shown through
+`review/core/inspector_pages.open_multi_select`: rows of ticks under All and
+None, applied as a box is ticked. A choice whose application is a pass over
+every cell behind a progress popup (Cell Gating's fields of view and gate
+filters) passes `settle_ms`: it is applied once, that long after the last tick
+of a burst, and at once when the page is left with a change pending. A range is
+`widgets/range_page.RangePage` (minimum, maximum, Auto, Reset), which the
+Nanowells display range uses.
+
+**Dataset tools.** The commands about the open dataset — copy analysis, reveal
+folder, storage, reset view, reset analysis — are one list
+(`ui/dataset_tools.py`), which the window builds (`AllWellApp._dataset_tools`)
+and registers in Review's widget registry. At the desk it is the last group of
+the dataset menu at the head of the rail (`app_shell_view._add_dataset_tools`);
+in phone layout it is a full-screen list behind ⋯, in which a tool closes the
+list before it runs and each reset asks first in an alert.
+
+**The plot's right dock.** Two panels still open at the desk in the plot's
+right dock, a layout sibling of the figure
+(`ui_helpers.make_plot_with_right_dock`): the Heat Map's Layout panel and the
+Image Table's own Properties. In phone layout that dock would be
 `Metrics.dock_w` wide on a screen barely wider, and it is opened from the
 Controls sheet, which is drawn over the page. So `ui_helpers.mount_widget_in_plot_dock`
 (and the Image Table's own Properties toggle) call
@@ -1829,8 +1875,12 @@ review/
 │   │                                    the inspector — a tab's root, a Data row, a Display row (§2)
 │   ├── band_fixed_actions.py         ← finish_band: the one factory that ends every band's action
 │   │                                    row in Display · Style · Share (§2)
-│   ├── phone_panel_sheet.py          ← phone layout's Properties sheet: lends a plot's right dock to a
-│   │                                    full-width Drawer over the page and gives it back (§2)
+│   ├── style_tab.py                  ← which figure's style panel the inspector's Style tab shows (§2)
+│   ├── inspector_pages.py            ← open_multi_select: the one multi-select page, with settled
+│   │                                    application for an expensive choice (§2)
+│   ├── phone_panel_sheet.py          ← phone layout's sheet for a panel still in a plot's right dock
+│   │                                    (Heat Map Layout, the Image Table's Properties): lends the dock
+│   │                                    to a full-width Drawer over the page and gives it back (§2)
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
 │   ├── lazy.py                       ← call-time proxy so core never imports a feature
 │   ├── frame_render.py               ← build_frame_rgb: one frame + label mask → RGB

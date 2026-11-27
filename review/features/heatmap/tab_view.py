@@ -103,11 +103,11 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # StyledSlider; unified to a combo so scrubbing to an exact timepoint
     # doesn't depend on pixel-precise dragging and the control matches its
     # siblings (Stats, Distribution, …) instead of being the one holdout.
-    from widgets.labeled_combo import LabeledComboBox
-    tp_cb = reg.register("_heatmap_tp_cb", LabeledComboBox("Timepoint"))
+    from widgets.labeled_combo import unlabelled
+    tp_cb = reg.register("_heatmap_tp_cb", unlabelled("Timepoint"))
     tp_cb.addItem("—")
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed(ctx))
-    band.add_scope("", tp_cb)
+    band.add_scope("Timepoint", tp_cb)
 
     # ── Display popover: everything about how the grid is drawn ─────────────
     # These change the figure's appearance rather than what it is showing, and

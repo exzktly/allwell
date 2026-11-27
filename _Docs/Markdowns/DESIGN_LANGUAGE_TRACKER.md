@@ -495,7 +495,15 @@ Step log (newest last):
    moved beside its box widens a band, so `band rows` may appear on a page not yet pending — check that first).
    Left for later: the Nanowells Timepoint (`nanowell/tab_view.py:380`, shares one scope with the well part),
    the Donor box inside the Compare scope (`statistics_view.py:99`), the decoration combos in a panel
-   (`variables_view.py:77`), and the Plotting sites (D14). Ruff and 402 fast tests of those pages green.
+   (`variables_view.py:77`), and the Plotting sites (D14). Commit `ea4c740`. Ruff and 402 fast tests of those pages green.
+5. D14 (part), labels outside the boxes on the Plotting band: Heat Map and Distribution Timepoint, Response X /
+   Channel / Property, the shared Population box (`review/core/population_band.py`), the nanowell Metric
+   (`review/core/observation_band.py`) and the Scatter observation boxes X, Y, Subset, Baseline
+   (`scatter/_observations.py`). All six Plotting `label inside` entries removed from `DESIGN_PENDING` — to be
+   confirmed by the every-page run. Not converted, because they are inside Display / inspector panels rather than a
+   band and no page tour opens them: Response's Model and Compare EC50 to (`response/tab_view.py:201,227`), Bar's
+   significance Label (`barplot/tab_view.py:247`). D14's other half, each Plotting band on one row, is still open.
+   Ruff and 914 fast Plotting tests green.
 
 ## 10. Rows
 

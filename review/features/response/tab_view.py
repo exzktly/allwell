@@ -43,7 +43,7 @@ _FIG_W, _FIG_H, _DPI = 7.2, 4.6, 100
 
 
 def build_response_tab(ctx, parent: QWidget) -> None:
-    from widgets.labeled_combo import LabeledComboBox
+    from widgets.labeled_combo import unlabelled
     from widgets.plot_card import PlotCard
 
     from review.core.ui_helpers import (
@@ -58,9 +58,9 @@ def build_response_tab(ctx, parent: QWidget) -> None:
 
     # The x source is **scope**, not an action: it says what the figure is of,
     # like Channel and Property beside it, rather than doing something to it.
-    x_combo = reg.register("_response_x_cb", LabeledComboBox("X"))
+    x_combo = reg.register("_response_x_cb", unlabelled("X"))
     x_combo.currentIndexChanged.connect(lambda *_: on_x_variable_changed(ctx))
-    band.add_scope("", x_combo)
+    band.add_scope("X", x_combo)
 
     # This tab's **own** Channel and Property, as the aggregate Scatter tab has
     # its own: only a tab that owns the pair can offer `Fraction above
@@ -69,20 +69,20 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # fail to read. They fall back to the shared choice until the user touches
     # them, so a tab nobody has configured still follows the plate they picked
     # on the band.
-    ch_combo = reg.register("_response_ch_cb", LabeledComboBox("Channel"))
+    ch_combo = reg.register("_response_ch_cb", unlabelled("Channel"))
     ch_combo.setToolTip("The channel this tab measures — its own, not the band's")
     ch_combo.currentIndexChanged.connect(
         lambda *_: on_response_channel_changed(ctx))
-    band.add_scope("", ch_combo)
+    band.add_scope("Channel", ch_combo)
 
-    metric_combo = reg.register("_response_metric_cb", LabeledComboBox("Property"))
+    metric_combo = reg.register("_response_metric_cb", unlabelled("Property"))
     metric_combo.setToolTip(
         "What the curves measure, including the fraction and the number of "
         "cells above the ON cutoff — which is set on Home → Cell Gating, since this tab "
         "measures its own channel rather than the band's")
     metric_combo.currentIndexChanged.connect(
         lambda *_: on_response_metric_changed(ctx))
-    band.add_scope("", metric_combo)
+    band.add_scope("Property", metric_combo)
 
     # Scope, beside X and for the same reason: it says what the figure is *of*.
     # One curve per combination of the chosen variables' values per timepoint,

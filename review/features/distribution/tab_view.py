@@ -20,7 +20,7 @@ from review.features.export.service import (
 from review.features.distribution.cell_scope_compute import cell_scope
 from review.features.distribution.controller import LEFT_MARGIN
 from review.data.data_loading import get_all_timepoints
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
 from widgets.spin_box import SpinBox
 
 
@@ -58,9 +58,9 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     )
     chan_cb.hide()
 
-    tp_cb = reg.register("_distribution_tp_cb", LabeledComboBox("Timepoint", ctrl))
+    tp_cb = reg.register("_distribution_tp_cb", unlabelled("Timepoint", ctrl))
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
-    ctrl.add_scope("", tp_cb)
+    ctrl.add_scope("Timepoint", tp_cb)
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget
 
     mode_cb = reg.register("_distribution_mode_cb", QComboBox(ctrl))

@@ -78,9 +78,9 @@ def build_observation_controls(ctx, band) -> None:
     static_group.setVisible(False)
     ctx.widgets.register("_plotting_observations_static", static_group)
     # Under Nanowells, one Metric picker stands in for Channel / Property / ON threshold (they describe a cell).
-    from widgets.labeled_combo import LabeledComboBox
+    from widgets.labeled_combo import unlabelled
 
-    metric = ctx.widgets.register("_plotting_nw_metric_cb", LabeledComboBox("Metric"))
+    metric = ctx.widgets.register("_plotting_nw_metric_cb", unlabelled("Metric"))
 
     def _on_metric(_idx: int) -> None:
         key = metric.currentData()
@@ -91,7 +91,7 @@ def build_observation_controls(ctx, band) -> None:
             redraw_every_scope(ctx)
 
     metric.currentIndexChanged.connect(_on_metric)
-    metric_group = band.add_scope("", metric)
+    metric_group = band.add_scope("Metric", metric)
     metric_group.setVisible(False)
     ctx.widgets.register("_plotting_nw_metric_grp", metric_group)
 

@@ -39,6 +39,7 @@ from services.job_kinds import (
     describe,
     input_label,
     input_targets,
+    linkable_targets,
     planned_output,
     short_label,
 )
@@ -267,7 +268,7 @@ class QueueSession:
         queue = self._bridge.queue
         pending: dict[str, str] = {}
         projection = None
-        for target in input_targets(kind):
+        for target in linkable_targets(kind):
             if target not in self._links:
                 continue
             source = queue.get(self._links[target][0])
@@ -394,7 +395,9 @@ class QueueSession:
         kind = self._session[0] if self._session else ""
         kept: list[ChainLink] = []
         claimed: set[str] = set()
-        for target in input_targets(kind):
+        # Every input a link can fill, the file-reading ones included: a
+        # converter linked to a Watch folder job keeps that link on Save.
+        for target in linkable_targets(kind):
             value = _dotted(spec, target)
             for source_target, (source, path) in self._links.items():
                 if source_target in claimed or not _same_path(value, path):
@@ -411,7 +414,7 @@ class QueueSession:
         job = self._bridge.queue.get(job_id)
         current = {link.target: link.source for link in job.links()} if job else {}
         refused = []
-        for target in input_targets(kind):
+        for target in linkable_targets(kind):
             if wanted.get(target) == current.get(target):
                 continue
             if not self._bridge.set_link(job_id, target, wanted.get(target, "")):

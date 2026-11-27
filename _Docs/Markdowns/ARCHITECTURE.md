@@ -1415,7 +1415,9 @@ allwell/
 │   │                              concurrency, log_panel, tool_controller,
 │   │                              dataset_fields, equation_row, convert_marker, well_block,
 │   │                              raw_dataset (an in-only dataset, for Concatenate and Subset),
-│   │                              pending_inputs (an input a queued job has still to write)
+│   │                              pending_inputs (an input a queued job has still to write),
+│   │                              watched_source (which file a converter handed a watched
+│   │                              folder reads)
 │   ├── concatenate/            ← Concatenate datasets (compute/apply/in_place/worker/view/controller/dashboard)
 │   ├── merge_plates/           ← Merge two plates into one, remapping wells
 │   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint (and, for an
@@ -1425,9 +1427,15 @@ allwell/
 │   │                              zipper.py spawns pipeline/well_plate_zipper.py for the
 │   │                              in-place mode
 │   ├── validate/               ← Validate & Repair an existing dataset
-│   ├── job_queue/              ← the queue the eight tools (and Analyze) submit runs to,
-│   │                              and projection.py: what a queued job will write, for
-│   │                              the next step set up before it runs
+│   ├── watch_folder/           ← Watch a folder until it stops receiving files, as the
+│   │                              first step of a queued chain
+│   ├── job_queue/              ← the queue the ten tools (and Analyze) submit runs to;
+│   │                              projection.py: what a queued job will write, for
+│   │                              the next step set up before it runs; recipe_actions.py:
+│   │                              the recipe store's actions; automation_view.py: the
+│   │                              Automation page (Queue · Recipes · Runs tabs);
+│   │                              recipes_view.py + runs_view.py + recipes_controller.py:
+│   │                              the Recipes and Runs tabs
 │   ├── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
 │   ├── czi_import/             ← Convert CZI (a Zeiss .czi plate scan, or a folder of
 │   │                              per-scene ones → dataset folder; wells read from the
@@ -1614,6 +1622,9 @@ allwell/
 │   ├── safe.py                 ← swallow() / swallowed(): the logged suppression every module
 │   │                              reaches for (util/aw_safe.py is its pipeline-side twin, which
 │   │                              exists because util/ may not import Qt)
+│   ├── user_activity.py        ← when the person last used the app (the mouse position,
+│   │                              sampled), and review_hand_off: whether a recipe run's
+│   │                              result may move the window to Review
 │   ├── app_settings.py         ← the one QSettings wrapper
 │   ├── profile.py              ← reads ALLWELL_PROFILE and resolves profiles/<name>.toml
 │   ├── debug_flags.py          ← the per-tab debug toggles, all shipping off
@@ -20645,6 +20656,41 @@ through the well map before the `seg_fp` restamp (from the destination
 `<well>_out.zip`, as the last write to that archive) — Concatenate's own
 precedent, not reinvented.
 
+**Watch Folder** (`datasets/watch_folder/`) is the one Datasets tool that
+changes no data: a queueable job that succeeds once a folder has stopped
+receiving files, so the jobs chained after it run when an acquisition is
+complete. It fires once; queueing it again for the next acquisition is what a
+recipe (`services/job_recipes.py`, under the Job Queue below) is for. A queued
+watch resumed after a Pause or an app restart is handed its job's
+`first_started_at` as `armed_at` (`QueueBridge._dispatch`, for a runner with
+`resumes_from_first_start`), and `SettleTracker` counts a file modified at or
+after it as the change `require_change` waits for — so an acquisition that
+finished while the app was down settles after one quiet period. It compares
+the share's modification times with this computer's clock; a server clock far
+behind still hides the change, and the row then keeps saying it is waiting.
+Retry clears `first_started_at` (`JobQueue._reset`), so a retried watch waits
+for new files.
+
+| Module | Role |
+|--------|------|
+| `watch_folder_compute.py` | Qt-free. `snapshot(folder)` — every data file below the folder as relative path → `(size, mtime_ns)`, or `None` for a folder that does not exist (a watch can be set up before the acquisition software creates it); housekeeping files and hidden folders are left out through `datasets.core.watched_source.is_ignored`, so Finder's `.DS_Store` does not restart the countdown each time someone looks. `SettleTracker(quiet_seconds, require_change=)` is fed one snapshot per poll with a monotonic time and answers a `WatchStatus` whose phase is `missing`, `waiting` (no change yet, with `require_change`), `settling` or `settled`: settled once the folder holds at least one file and nothing has changed for the quiet period, and with `require_change` only after at least one change since the watch began, so a watch armed before an acquisition never fires on the previous one's files. Settled is final. Polling rather than OS change notifications is deliberate: the folders are usually network shares or USB drives, where notifications are unreliable, and a watch that silently never fires is the worse failure. `poll_interval` stretches the interval to twice a slow scan. |
+| `worker.py` | `WatchFolderWorker(QThread)`: snapshot, observe, emit `status` and a log line per phase change, sleep in 100 ms slices so a Stop is answered at once. Ends with `succeeded(folder, summary)`, or `failed` — "Cancelled — …" for a Stop, which the bridge reads as a cancellation, and "Gave up after …" when the give-up time passes. |
+| `view.py` | `WatchFolderPage`: folder (a path that does not exist yet is valid and says so in a muted note), quiet minutes, **Wait for new files before counting**, **Give up after (hours, 0 = never)**, **▶ Start watching** / **+ Queue**, a live status line, and the shared raw log. |
+| `controller.py` | `WatchFolderController(DatasetToolController)`. Declares `resumes_from_first_start`. `start_from_queue` passes the queued spec straight to the worker rather than reading it back off the page, whose spin boxes round to one decimal; a spec may carry `poll_seconds`, which only tests set. Reports the watched folder as the job's output, and each status sentence through `statusText` for its queue row. `suspend` / `was_suspended` make the queue's Pause a pause for a watch: without them Pause fell back to Stop, which cancelled the watch and blocked every job chained after it. A resumed watch counts files written since its first start (above). |
+
+A converter linked to a watch is handed the watched folder as its `source`.
+`datasets/core/watched_source.py` decides what that means when the conversion
+starts (`PackedConverterController.start_from_queue`): with
+`ConverterSpec.folder_is_a_source` (CZI, whose folder is a split-scene plate)
+the folder is read whole; otherwise the folder must hold exactly one file
+ending in one of `ConverterSpec.source_suffixes` (`.nd2`; `.ome.tif` /
+`.ome.tiff`), searched in subfolders too, and the job fails naming the count
+and the first five names when there is none or more than one. It never picks
+the newest or the largest: converting one of several plates and reporting
+success is a complete-looking result for part of the input (§7). The choice is
+logged. Zip loose takes the watched folder as the loose-image folder it
+already reads.
+
 **Job Queue** (`datasets/job_queue/`) lines up Analyze and Datasets-tool runs
 to work through unattended, built on a Qt-free scheduler
 (`services/job_queue.py`) so ordering/gating logic is unit-testable with no
@@ -20823,6 +20869,24 @@ Qt event loop. Four layers:
   carries the real answer, and `materialise` replaces the planned path with
   the folder the job reported.
 
+  **A watched folder is the one output that is files rather than a dataset.**
+  `FOLDER_SOURCE_KINDS` (`watch_folder`) names the kinds whose output is a
+  plain folder, and `FOLDER_INPUT_TARGETS` the inputs only such a job can fill:
+  `source` on the three converters and on Zip loose, the kinds `INPUT_TARGETS`
+  leaves out because no other job's output can be their input. They are kept
+  apart from `INPUT_TARGETS` rather than added to it so that every menu and
+  session built on "this input takes a dataset" stays as it is; the places
+  that must also see the file-reading inputs ask for them by name.
+  `linkable_targets(kind)` is both lists, `accepts_link(kind, target,
+  source_kind)` is the check `QueueBridge.set_link` makes before linking, and
+  `chain_target(kind, source_kind)` is what "Input from ▸" fills — the
+  `CHAIN_TARGET` entry, or for a file-reading kind the folder target when the
+  source is a watch. `JobQueuePage._sources_for` narrows a file-reading row's
+  "Input from ▸" to the Watch folder jobs, and the edit session walks
+  `linkable_targets` when it keeps or re-makes links on Save, so editing a
+  conversion linked to a watch keeps the link. The watch reports its folder as
+  `dataset_root` (`produced_for`'s default) and `planned_output` is the folder.
+
   `CONVERTER_KINDS` and `produced_layout(kind, spec, upstream)` are the other
   thing a finished job can hand along a chain. The three converters name every image
   themselves, `<experiment>_<channel>_<well>_f<fov>_<tp>` with each token
@@ -20871,9 +20935,14 @@ Qt event loop. Four layers:
   row reading plain "Analyze" is indistinguishable from a well-formed job.
 
 - **`services/job_lanes.py`** — which jobs may run at the same time, Qt-free:
-  `run_lane(kind, spec)` (`remote` for an Analyze with a remote host, `local`
-  for everything else), `folders(kind, spec)` (the paths a job reads and
-  writes) and `conflicts(a, b)`. `JobQueue.next_to_start` applies them; the
+  `run_lane(kind, spec)` (`remote` for an Analyze with a remote host, `watch`
+  for a Watch folder job, `local` for everything else), `folders(kind, spec)`
+  (the paths a job reads and writes) and `conflicts(a, b)`. A watch has a lane
+  of its own because it runs for as long as an acquisition takes while doing
+  almost nothing — listing a folder every few seconds — and in the local lane
+  it would hold every conversion behind it for hours. It counts as reading its
+  folder and writing nothing (`_READ_ONLY_KINDS`), so a job that only reads the
+  watched folder can run beside it and a job that writes into it waits. `JobQueue.next_to_start` applies them; the
   bridge entry below says how. `describe_detail` names a remote Analyze's
   host on its row ("runs on “cluster”"), since the host decides what may run
   beside it.
@@ -20892,16 +20961,26 @@ Qt event loop. Four layers:
   skip the interactive restart/in-place confirmation a queued, unattended run
   has no one to answer); so does `AnalyzeTab`.
 
+  A runner may also declare a `statusText(str)` signal; `register` connects it
+  to `_on_status_text`, which puts the text on the running job's row as its
+  message without saving on each tick. The watch uses it for its countdown,
+  which can run for hours. `suspend_current` and the suspended branch of
+  `_on_job_finished` take a runner's own `suspending_message` /
+  `suspended_message` when it has them, since "finishing the current field" is
+  Analyze's wording.
+
   `QueueBridge` owns the persisted `JobQueue` and a `kind -> QueueableController`
   registry, and is the only thing that actually starts a job. It runs at
   most one job per **lane** (`services/job_lanes.py`): `run_lane` puts an
-  Analyze job with a `remote_name` in the `remote` lane and every other job —
-  a local Analyze, every Datasets tool — in the `local` one, so a remote
-  Analyze, whose pipeline runs on the remote host, can run beside one local
-  job, and two local jobs, each of which works this computer hard, never run
-  together. `_advance` asks each free lane for its next job
+  Analyze job with a `remote_name` in the `remote` lane, a Watch folder job in
+  the `watch` lane, and every other job — a local Analyze, every other
+  Datasets tool — in the `local` one, so a remote Analyze, whose pipeline runs
+  on the remote host, and a watch, which only lists a folder, can each run
+  beside one local job, and two local jobs, each of which works this computer
+  hard, never run together. The bridge keys its in-flight jobs by kind, so one
+  watch runs at a time; a second waits for the first to settle. `_advance` asks each free lane for its next job
   (`JobQueue.next_to_start(lane, unavailable=…)`) and starts the earliest of
-  the answers in the queue first, repeating until neither lane can take one;
+  the answers in the queue first, repeating until no lane can take one;
   asking the lanes in a fixed order let a later local Analyze take the one
   Analyze pane ahead of an earlier remote one. `next_to_start` returns the
   first runnable job of that lane whose kind is not *unavailable* — its tool
@@ -21253,6 +21332,173 @@ Qt event loop. Four layers:
   result up through an injected `on_add_to_queue(kind, spec)` callback to
   `DatasetsTab._add_to_queue`.
 
+- **`services/job_recipes.py`** — recipes: a chain in the queue saved as a
+  template and queued again on a new input, Qt-free. `recipe_from_chain(name,
+  jobs, job_id)` takes the job's whole connected group (`connected`: every job
+  reachable through links in either direction, in queue order) — not its
+  `lineage`, which from one of two watches feeding a Concatenate left the other
+  watch out, so whether a chain could be saved depended on which job it was
+  saved from. It refuses a chain that starts from more than one job (a recipe
+  has one parameter, its input) or whose first job has no input set
+  (`ROOT_INPUT` says where each kind holds it), and records each step's `kind`,
+  a templated copy of its `spec`, and its links as `RecipeLink(target, step)` —
+  by position in the chain, never by job id. Every string in every spec is
+  templated on the input: the input itself becomes `{source}`, a path inside it
+  `{source}/…`, and a path beside it `{source_parent}/…` **only when it carries
+  the input's name** as a whole token (`source_name`, which takes a known file
+  extension off and leaves a folder's dots alone; `_replace_name`) — so
+  `/scope/run7_dataset` saved from `/scope/run7` comes back as
+  `/scope/run8_dataset`, while `/scope/reference_plate` is the protocol's and is
+  kept verbatim. `_relative_inside` handles a parent at a filesystem or drive
+  root, and `_fill_value` joins a placeholder back with `os.path.join`;
+  templating every path under the parent once rewrote every absolute path in a
+  chain whose input sat at `/` or `E:\`. `_check_outputs_follow` refuses a step
+  whose own new folder (`planned_output` equal to its `destination`) carries no
+  placeholder: a conversion set up on an earlier acquisition proposes that
+  acquisition's `<name>_dataset`, every use of the recipe would write there, and
+  the converter refuses a destination holding another plate's wells
+  (`convert_marker.destination_problem`), so it would fail from the second use
+  on.
+
+  `_drop_run_specific` removes what belongs to one acquisition, each with the
+  reason `DROPPED` states and a note on the recipe: a converter's
+  `experiment` (re-derived from the file name) and `timepoint_subset` (chosen
+  by the source's own tokens, which differ per file) and its `planned_wells`;
+  Analyze's `force_wells` and `force` and any `upstream_layout`. Everything else
+  — the well subset, the stride, the grid, the channel roles, a remote host,
+  `skip_wells` — is the protocol and is kept. Analyze steps are given
+  `auto_detect`, because their input is written by the steps before them and
+  does not exist when the recipe is applied (`services.run_detect`).
+
+  `instantiate(recipe, source, new_id)` fills the placeholders, sets each
+  linked input to its source step's `planned_output`, and returns
+  `(JobSpec, [ChainLink])` pairs in order, each linking only to jobs before
+  it; it refuses a recipe whose link points at a later step or at an input the
+  kind does not have, rather than queueing half of it. `Recipe.wants_file()`
+  says whether applying it asks for a file (a chain starting with Convert ND2
+  or Convert OME-TIFF, or a Convert CZI saved from a file). Persistence is
+  `job_recipes.json` beside the queue (`recipes_path`, the same
+  `default_state_dir()`); `load_recipes` treats an unreadable file as no
+  recipes and skips a malformed entry on its own, logging both, since the
+  Job Queue page builds at app start. `export_json` / `import_json` are the
+  shared file (`{"allwell_recipe": 1, "recipe": …}`); an import is refused,
+  naming why, when the marker or version is wrong, a step is a kind this
+  version does not have, or a link points at a later step or an input the kind
+  lacks. `unused_name` gives an import or a copy a name no recipe has.
+
+- **`services/recipe_journal.py`** — the log of one recipe application, Qt-free.
+  `summarise(run_id)` adds a journal up into a `RunSummary` (each step's state
+  from its last event, the folders the steps wrote, `done`, and `status` —
+  worst first, so a failure is what a run reads as), and `list_runs` returns
+  every run, newest first, optionally one recipe's; a retried step stops
+  offering what it wrote before.
+  The queue already survives a crash (`job_queue.json` rewritten on every
+  change, a running job reloaded `interrupted`); what it does not keep is the
+  run's story, or that its jobs belong together once some are cleared. Each
+  application gets `recipe_runs/<run>.jsonl` beside the queue: one JSON object
+  per line, appended and `fsync`-ed, never rewritten. `read_events` skips a
+  line cut off by a crash, and `append` starts a fresh line after one, so the
+  next event is not lost with it; `append` never raises (a journal that cannot
+  be written must not stop the job it describes) and logs instead. Run ids are
+  checked to be plain names before becoming file names. `EVENTS` lists the
+  kinds: `applied` (by `RecipeActions.apply`, before the jobs are added, so a
+  running queue's first `started` comes after it), `started` (with the folder
+  each link actually filled), `status`, `finished` (ok, cancelled, message,
+  what it wrote), `suspended`, `interrupted`, `retried`, `removed` — written by
+  `QueueBridge._journal`, which does nothing for a job not queued from a
+  recipe. A job's membership is `JobSpec.recipe` (`run`, `name`, `input`,
+  `step`, `steps`), persisted with the job; `JobQueue.duplicate` builds the
+  copy without it. A runner's `statusText` is journalled once per phase (its
+  leading phrase), not per tick; the converters use it to say which file they
+  chose from a watched folder. `QueueBridge._journal_restart` records
+  `interrupted` for each recipe job `from_json` repaired and saves the queue at
+  once, so the next launch does not record the same restart again.
+  `describe_event` / `render` turn the journal into the lines the row's
+  **Recipe log…** window shows (`RecipeActions.show_log`, a non-modal window
+  that re-reads the journal on every queue change).
+
+- **`datasets/job_queue/recipe_actions.py`** — `RecipeActions`, the one recipe
+  store both pages use: `save_from(job_id)` (refuses an unsavable chain before
+  asking for a name, then replaces a recipe of the same name),
+  `apply(name, source=None)`, `rename`, `duplicate`, `export_to`,
+  `import_from` and `delete`, each saving through `_changed`, which also calls
+  every `subscribe`d listener — the queue's Apply menu and the Recipes tab
+  both listen, so a change on either shows on the other. `run_of(job_id)` and
+  `run_log_text(run_id)` serve the run logs. The three questions are one method each — `_ask_name`
+  (`QInputDialog`), `_ask_input` (a file or folder dialog per `wants_file`) and
+  `_confirm_delete` — so a test answers them as a user would. Applying adds
+  the jobs one at a time **with** their links through `QueueBridge.add_job`, in
+  order, so a running queue never starts a later step on the placeholder path
+  its input shows. `JobQueueController` owns one as `self.recipes`. The queue
+  keeps only the queue's half of recipes: a **Recipes** header button (a plain
+  button opening a transient menu, like **+ Add job**, so it draws no menu
+  indicator) whose menu, `JobQueuePage.build_recipes_menu`, lists **Apply
+  “name”…** per recipe and **Manage recipes…**, and each row's ⋯ menu has
+  **Save chain as recipe…** and, for a job queued from a recipe, **Recipe
+  log…**. **Manage recipes…** opens the Recipes tab and **Recipe log…** the
+  Runs tab with that run selected, through the hook `DatasetsTab` installs
+  (`JobQueueController.set_recipes_page_hook`). Deleting a recipe and reading a
+  run's log are deliberately not offered in the queue as well: a plan and its
+  history have their own tabs, and the same action in two places is two things
+  to keep in step.
+
+- **`datasets/job_queue/review_handoff.py`** + `QueueBridge._open_result` — a
+  recipe's **Open the result in Review when the last Analyze step finishes**
+  (`Recipe.open_result`, a checkbox on the Recipes tab, saved and exported with
+  the recipe). `RecipeActions.apply` marks the job of `Recipe.result_step()` —
+  the last Analyze step — with `recipe["open_result"]`; when that job succeeds,
+  the bridge takes the dataset root it reported, checks it holds an analysed
+  dataset (`reviewable_root`: `out/pipeline_info.json`, which Analyze writes
+  last), and calls `review_hook(root, when_idle=True)`, which `DatasetsTab`
+  sets from the shell (`AllWellApp._show_result_in_review`). The shell asks
+  `core.user_activity.review_hand_off`: `switched` (nobody is using the app —
+  the mouse has not moved for `IDLE_AFTER_SECONDS`, or another application is
+  in front),
+  `loaded` (someone is working in another pane: the dataset loads behind them
+  and the window stays), or `held` (someone is reading Review itself: nothing
+  is loaded, since that would replace what they are reading). The outcome, in
+  `OUTCOME_MESSAGES`' words, is appended to the job's message, journalled as a
+  `status` event, and for `held` also toasted (`on_review_held`). A root with
+  nothing analysed is said, not opened. `core/user_activity.py`'s
+  `UserActivity` samples the mouse position every `SAMPLE_MS` (a moved cursor
+  is activity), started by the shell at launch so the idle clock runs from
+  then. It samples rather than installing an application-wide event filter:
+  a Python `eventFilter` on the `QApplication` runs for every event of every
+  widget, and one crashed the app natively under the page-tour test. The load itself is the shell's deferred
+  `_load_in_review_later`, so a dataset that then fails to load is reported by
+  Review. The option is a property of the recipe rather than a job of its own:
+  it has no settings beyond on and off, and a queue step for it would have
+  needed a page.
+
+- **`datasets/job_queue/automation_view.py`** — `AutomationPage`, the
+  **Automation** sidebar entry: a `QTabWidget` (tab bar `AutomationSubTabs`,
+  styled with the other sub-tab bars in `ui/theme.py`) holding three different
+  kinds of thing about unattended work — **Queue** (the jobs: `JobQueuePage`),
+  **Recipes** (the plans) and **Runs** (the record of each plan's uses) —
+  together because each leads to the next. `show_tab(name)` is the one way to
+  move between them. `datasets.tab._build_automation` builds it as the last
+  `_Feature` (no `kind`): it builds the Job Queue (`_build_job_queue`, which
+  must still come after every tool), then the `RecipesController` on the
+  queue's store and bridge, and installs the queue's hook. `_end_session`
+  returns to the Queue tab, since `_page_name_for(None)` is now Automation.
+
+- **`datasets/job_queue/recipes_view.py` + `runs_view.py` +
+  `recipes_controller.py`** — the Recipes and Runs tabs, one controller for
+  both. Recipes lists the recipes and shows the selected one's steps (each
+  `describe_detail` with its placeholders written as ‹input›, ‹input's folder›,
+  ‹input name› by `readable`, and "*input* from step *n*" per link), its notes,
+  and a line on its runs (how often applied, how the last run stands) with
+  **Show runs**, which opens Runs filtered to it (`show_runs_of`). Apply (which
+  then shows the Queue tab), Rename, Duplicate, Export, Import and Delete go to
+  the shared store; rename, export and import paths are asked through one seam
+  each (`_ask_rename`, `_ask_export_path`, `_ask_import_path`). Runs lists
+  `recipe_journal.list_runs`, newest first, all recipes or one (the filter also
+  offers names no saved recipe has any more, so a renamed or deleted recipe's
+  runs stay reachable), each "when · input · done/steps · status", and the
+  selected run's log (`RecipeActions.run_log_text`). Runs re-read on every
+  `queueChanged`, so a run in progress updates in place. `select_run(run_id)`
+  is what the queue's hook calls.
+
 - **`datasets/job_queue/projection.py`** — what a queued job is expected to
   write, before it has run, for the pages that build their controls from the
   input's contents: Subset's well, timepoint and FOV pickers and Analyze's
@@ -21382,8 +21628,8 @@ would leave it believing one was live and willing to save it later.
 
 `datasets/tab.py` wires all of this: each of the seven Datasets controllers is
 constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
-`tab._controllers[kind]`; the `"Job Queue"` `_Feature` entry is built **last**
-so `_build_job_queue` can register every already-built controller (plus the
+`tab._controllers[kind]`; the `"Automation"` `_Feature` entry, which holds the
+Job Queue, is built **last** so `_build_job_queue` can register every already-built controller (plus the
 injected `AnalyzeTab`, under kind `"analyze"`) against a single
 `JobQueueController`. `allwell.py` injects the already-built `AnalyzeTab` as
 `DatasetsTab(analyze_controller=...)` the same way it injects

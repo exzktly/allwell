@@ -36,18 +36,22 @@ from widgets.page_stack import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
 from datasets.import_loose.controller import ImportLooseController
 from datasets.job_queue.controller import JobQueueController
+from datasets.job_queue.automation_view import QUEUE, RECIPES, AutomationPage
+from datasets.job_queue.recipes_controller import RecipesController
 from datasets.merge_plates.controller import MergePlatesController
 from datasets.czi_import.controller import CziImportController
 from datasets.nd2_import.controller import Nd2ImportController
 from datasets.ome_import.controller import OmeImportController
 from datasets.subset.controller import SubsetController
 from datasets.validate.controller import ValidateController
+from datasets.watch_folder.controller import WatchFolderController
 
 # Kinds a Datasets controller can queue itself under — registered against the
 # Job Queue page once every controller (including Analyze, injected from
 # outside) has been built.
 _QUEUEABLE_KINDS = ("concatenate", "ome_import", "czi_import", "nd2_import",
-                    "validate", "subset", "import_loose", "merge_plates")
+                    "validate", "subset", "import_loose", "merge_plates",
+                    "watch_folder")
 
 
 @dataclass(frozen=True)
@@ -121,6 +125,46 @@ def _build_merge_plates(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None]
         on_open_in_review=tab._open_in_review, on_add_to_queue=tab._add_to_queue)
     tab._controllers["merge_plates"] = controller
     return controller.page, controller.shutdown
+
+
+def _build_watch_folder(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = WatchFolderController(on_add_to_queue=tab._add_to_queue)
+    tab._controllers["watch_folder"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_automation(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    """Automation: the Job Queue, Recipes and Runs as tabs of one page.
+
+    Built last, like the Job Queue it holds — every other feature's controller
+    already exists in ``tab._controllers`` when the queue registers them.
+    """
+    queue_page, queue_teardown = _build_job_queue(tab)
+    queue = tab._controllers["job_queue"]
+    holder: dict = {}
+
+    def show_tab(name: str) -> None:
+        tab._show_page("Automation")
+        holder["page"].show_tab(name)
+
+    recipes = RecipesController(queue.recipes, queue.bridge,
+                                state_dir=tab._queue_state_dir, show_tab=show_tab)
+    page = AutomationPage(queue_page, recipes.page, recipes.runs_page)
+    holder["page"] = page
+
+    def show_run(run_id: str) -> bool:
+        if run_id and recipes.select_run(run_id):
+            return True
+        show_tab(RECIPES)
+        return True
+
+    queue.set_recipes_page_hook(show_run)
+    # A recipe's "open the result in Review": the shell's hand-off, which moves
+    # the window only when nobody is using the app.
+    queue.bridge.review_hook = tab._on_show_in_review
+    tab._controllers["recipes"] = recipes
+    tab._automation = page
+    return page, queue_teardown
 
 
 def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
@@ -209,7 +253,9 @@ _FEATURES: tuple[_Feature, ...] = (
              kind="import_loose"),
     _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates,
              kind="merge_plates"),
-    _Feature(name="Job Queue", icon="waypoints", build=_build_job_queue),
+    _Feature(name="Watch Folder", icon="eye", build=_build_watch_folder,
+             kind="watch_folder"),
+    _Feature(name="Automation", icon="waypoints", build=_build_automation),
 )
 
 
@@ -221,6 +267,7 @@ class DatasetsTab(QWidget):
         parent: QWidget | None = None,
         *,
         on_open_in_review: Callable[[Path], None] | None = None,
+        on_show_in_review: Callable[..., str] | None = None,
         on_open_in_analyze: Callable[..., None] | None = None,
         on_reveal_analyze: Callable[[], bool] | None = None,
         on_reveal_datasets: Callable[[], bool] | None = None,
@@ -230,6 +277,10 @@ class DatasetsTab(QWidget):
         super().__init__(parent)
         self._on_open_in_review = on_open_in_review
         self._on_open_in_analyze = on_open_in_analyze
+        # "Load this finished result in Review, moving the window only if
+        # nobody is using the app" — a recipe's open-the-result hand-off
+        # (AllWellApp._show_result_in_review). None without a shell.
+        self._on_show_in_review = on_show_in_review
         # "Switch to the Analyze pane, change nothing on it." Analyze is the one
         # queueable kind with no rail entry here, so revealing its page means
         # leaving this pane entirely, which only the shell can do. None when a
@@ -354,6 +405,9 @@ class DatasetsTab(QWidget):
         queue_page = self._page_name_for(None)
         if queue_page is not None:
             self._show_page(queue_page)
+            automation = getattr(self, "_automation", None)
+            if automation is not None:
+                automation.show_tab(QUEUE)
 
     def _return_from_analyze(self, kind: str | None) -> None:
         """After the banner's Save or Cancel ended an Analyze session, go back

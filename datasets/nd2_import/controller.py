@@ -35,6 +35,7 @@ ND2_CONVERTER = ConverterSpec(
     # a crash to log a traceback for.
     refusals=(Nd2ImportError, ValueError),
     cancelled=Nd2ExplodeCancelled,
+    source_suffixes=(".nd2",),
 )
 
 

@@ -16,6 +16,7 @@ shape.
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from collections.abc import Callable
 from typing import Protocol
@@ -25,12 +26,15 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from services.job_kinds import (
     CHAIN_KIND,
-    CHAIN_TARGET,
+    accepts_link,
+    chain_target,
     describe,
     input_targets,
+    linkable_targets,
     produced_for,
     produced_layout,
 )
+from services import recipe_journal
 from services.job_lanes import LANES, run_lane
 from services.job_queue import (
     ChainLink,
@@ -41,6 +45,8 @@ from services.job_queue import (
     load_queue,
     save_queue,
 )
+from datasets.job_queue.recipe_actions import RecipeActions
+from datasets.job_queue.review_handoff import NOT_REVIEWABLE, OUTCOME_MESSAGES, reviewable_root
 from datasets.job_queue.session import QueueSession
 from datasets.job_queue.view import JobQueuePage
 
@@ -67,6 +73,16 @@ class QueueableController(Protocol):
     # def was_suspended(self) -> bool: ...
 
 
+def _dotted_get(spec: dict, dotted: str) -> object | None:
+    """The value at *dotted* in *spec*, or ``None``."""
+    cur: object = spec
+    for part in dotted.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
 class QueueBridge(QObject):
     """Owns the persisted queue and drives it against the controller
     registry. At most one job in flight per lane (``services.job_lanes``):
@@ -86,6 +102,42 @@ class QueueBridge(QObject):
         self._queue: JobQueue = load_queue(state_dir)
         # kind -> (job_id, lane) for every queue job in flight.
         self._running: dict[str, tuple[str, str]] = {}
+        # job_id -> the leading phrase of the last status journalled for it,
+        # so a countdown ticking every few seconds is journalled once a phase.
+        self._journalled_phase: dict[str, str] = {}
+        #: ``(root, *, when_idle) -> outcome`` — puts a finished result in
+        #: Review (``_open_result``). ``None`` without a shell.
+        self.review_hook: Callable[..., str] | None = None
+        #: Told when Review was left alone; the page's toast.
+        self.on_review_held: Callable[[str], None] | None = None
+        self._journal_restart()
+
+    # ── recipe journals ──────────────────────────────────────────────────
+    def _journal(self, job: JobSpec | None, event: str, **fields) -> None:
+        """Append *event* to the journal of the recipe run *job* belongs to.
+        A job not queued from a recipe has no journal; nothing is written."""
+        run = (job.recipe or {}).get("run") if job is not None else None
+        if not run:
+            return
+        recipe_journal.append(str(run), event, state_dir=self._state_dir,
+                              job=job.id, step=(job.recipe or {}).get("step"), **fields)
+
+    def _journal_restart(self) -> None:
+        """Record, once, that the app stopped while recipe jobs were running.
+
+        ``JobQueue.from_json`` has just turned each such job *interrupted* (or
+        *cancelled*, for one started on its own page). The file still says
+        *running* until it is saved, so it is saved here: otherwise every
+        launch until the queue next changed would journal the same restart.
+        """
+        restarted = [j for j in self._queue.jobs
+                     if j.state in (JobState.INTERRUPTED, JobState.CANCELLED)
+                     and j.message.startswith("interrupted by an app restart")]
+        if not self._queue.repair_notes or not restarted:
+            return
+        for job in restarted:
+            self._journal(job, "interrupted", message=job.message)
+        self._save()
 
     @property
     def queue(self) -> JobQueue:
@@ -109,6 +161,31 @@ class QueueBridge(QObject):
         started = getattr(runner, "runStarted", None)
         if started is not None:
             started.connect(lambda spec, k=kind: self._on_run_started(k, spec))
+        status = getattr(runner, "statusText", None)
+        if status is not None:
+            status.connect(lambda text, k=kind: self._on_status_text(k, text))
+
+    def _on_status_text(self, kind: str, text: str) -> None:
+        """Show a running job's own status line on its row.
+
+        Optional: a runner that has a one-line status worth reading from the
+        queue — a watch's countdown, which can run for hours — declares a
+        ``statusText(str)`` signal. Not saved on each tick; the next save
+        writes it, and finishing the job replaces it.
+        """
+        entry = self._running.get(kind)
+        job = self._queue.get(entry[0]) if entry else None
+        if job is None or job.state != JobState.RUNNING or job.message == text:
+            return
+        job.message = text
+        # Journalled when the phase changes, not on every tick: the leading
+        # phrase ("Receiving files", "Settled") names the phase, the rest is
+        # the count that moves.
+        phase = text.split(" — ")[0].split(" (")[0]
+        if self._journalled_phase.get(job.id) != phase:
+            self._journalled_phase[job.id] = phase
+            self._journal(job, "status", message=text)
+        self.queueChanged.emit()
 
     def _on_run_started(self, kind: str, spec: dict) -> None:
         """Take in a run started on its tool's own page.
@@ -161,6 +238,7 @@ class QueueBridge(QObject):
         job = self._queue.get(job_id)
         if job is not None and job.state == JobState.RUNNING:
             return  # can't remove the job currently in flight
+        self._journal(job, "removed")
         self._queue.remove(job_id)
         self._save()
         self.queueChanged.emit()
@@ -205,8 +283,13 @@ class QueueBridge(QObject):
         return True
 
     def retry_job(self, job_id: str, with_downstream: bool = False) -> bool:
+        before = {j.id: j.state for j in self._queue.jobs}
         if not self._queue.retry(job_id, with_downstream=with_downstream):
             return False
+        for job in self._queue.jobs:
+            if job.state == JobState.PENDING and before.get(job.id) in JobState.TERMINAL:
+                self._journal(job, "retried")
+                self._journalled_phase.pop(job.id, None)
         self._save()
         self.queueChanged.emit()
         self._advance()
@@ -244,7 +327,7 @@ class QueueBridge(QObject):
             self.queueChanged.emit()
             return True
         pred = self._queue.get(chain_from)
-        target = CHAIN_TARGET.get(job.kind)
+        target = chain_target(job.kind, pred.kind) if pred is not None else None
         if pred is None or target is None:
             return False
         try:
@@ -267,9 +350,18 @@ class QueueBridge(QObject):
         make a cycle — the caller says so.
         """
         job = self._queue.get(job_id)
-        if job is None or target not in input_targets(job.kind):
+        if job is None:
             return False
-        if source and self._queue.get(source) is None:
+        source_job = self._queue.get(source) if source else None
+        if source and source_job is None:
+            return False
+        # Unlinking is always allowed for an input that can be linked at all;
+        # linking also asks whether *this* source may fill it — a watched
+        # folder can be a converter's source, no other job's output can.
+        if source_job is not None:
+            if not accepts_link(job.kind, target, source_job.kind):
+                return False
+        elif target not in linkable_targets(job.kind):
             return False
         try:
             self._queue.set_link(job_id, target, source or None, kind=CHAIN_KIND)
@@ -447,8 +539,10 @@ class QueueBridge(QObject):
             # Marked here rather than waiting for jobFinished: the run may take
             # a while to wind down, and the row should say what is happening
             # now. _on_job_finished sees the state is already SUSPENDED and
-            # leaves it.
-            self._queue.mark_suspended(job_id, "suspending — finishing the current field")
+            # leaves it. A runner may say in its own words what winding down
+            # means for it (a watch has no field to finish).
+            self._queue.mark_suspended(job_id, getattr(
+                runner, "suspending_message", "suspending — finishing the current field"))
         if not suspended:
             return False
         self._save()
@@ -507,7 +601,15 @@ class QueueBridge(QObject):
             QTimer.singleShot(0, self._advance)
             return False
         self._running[job.kind] = (job.id, lane)
-        self._queue.mark_running(job.id)
+        self._queue.mark_running(job.id, now=time.time())
+        if getattr(runner, "resumes_from_first_start", False):
+            # A watch resumed after a Pause or a restart counts what arrived
+            # since it first started (``JobSpec.first_started_at``).
+            spec["armed_at"] = job.first_started_at
+        self._journal(job, "started", inputs={
+            link.target: _dotted_get(spec, link.target)
+            for link in job.links() if link.target})
+        self._journalled_phase.pop(job.id, None)
         self._save()
         self.queueChanged.emit()
         runner.start_from_queue(spec)
@@ -534,7 +636,9 @@ class QueueBridge(QObject):
             # Suspended, not cancelled: the job keeps its place and its
             # progress, its successors keep waiting rather than blocking, and
             # the queue stays paused until the user starts it again.
-            self._queue.mark_suspended(job_id)
+            self._queue.mark_suspended(
+                job_id, getattr(self._runners.get(kind), "suspended_message", ""))
+            self._journal(finished, "suspended", message=finished.message if finished else "")
             self._save()
             self.queueChanged.emit()
             self.pause()
@@ -543,11 +647,39 @@ class QueueBridge(QObject):
         self._queue.mark_finished(
             job_id, ok=ok, message=message, cancelled=cancelled, produced=produced,
         )
+        self._journal(finished, "finished", ok=ok, cancelled=cancelled, message=message,
+                      wrote=produced.get("dataset_root") or produced.get("out_dir"))
+        if ok and finished is not None and (finished.recipe or {}).get("open_result"):
+            self._open_result(finished, produced.get("dataset_root") or "")
         self._save()
         self.queueChanged.emit()
         if cancelled:
             self.pause()
         self._advance()
+
+    def _open_result(self, job: JobSpec, root_path: str) -> None:
+        """Hand a recipe run's analysed result to Review, as its recipe asked.
+
+        The shell decides whether the window moves (``review_hook``, installed
+        by ``DatasetsTab`` from ``AllWellApp._show_result_in_review``). What
+        happened is said on the job's row and in the run's journal; when Review
+        was left alone because someone was reading it, a toast says the result
+        is ready too (``on_review_held``)."""
+        root = reviewable_root(root_path)
+        if root is None:
+            text = NOT_REVIEWABLE.format(path=root_path or "(nothing reported)")
+            outcome = ""
+        elif self.review_hook is None:
+            text, outcome = "Not opened in Review: Review isn't available here.", ""
+        else:
+            outcome = self.review_hook(root, when_idle=True)
+            text = OUTCOME_MESSAGES.get(
+                outcome, "Not opened in Review: Review isn't available right now.").format(
+                    root=root)
+        job.message = f"{job.message} · {text}" if job.message else text
+        self._journal(job, "status", message=text)
+        if outcome == "held" and self.on_review_held is not None:
+            self.on_review_held(text)
 
     def _input_layouts(self, job: JobSpec) -> list[dict | None]:
         """What each of *job*'s inputs' source jobs recorded about its files.
@@ -641,6 +773,21 @@ class JobQueueController(QObject):
         self.page.moveDownRequested.connect(lambda job_id: self._on_move(job_id, 1))
         self.page.moveByRequested.connect(self._on_drag_move)
         self.page.showRequested.connect(self._on_show_requested)
+        self.recipes = RecipeActions(
+            self.bridge, state_dir=state_dir,
+            notify=lambda text, kind="warn": self._notify(text, kind),
+            parent_widget=lambda: self.page.window())
+        self.bridge.on_review_held = lambda text: self._notify(text, "warn")
+        self.page.saveRecipeRequested.connect(self._on_save_recipe)
+        self.page.applyRecipeRequested.connect(self._on_apply_recipe)
+        self.page.manageRecipesRequested.connect(lambda: self._show_recipe_run(""))
+        self.page.recipeLogRequested.connect(
+            lambda job_id: self._show_recipe_run(self.recipes.run_of(job_id)))
+        # Shown on the Recipes page, installed by DatasetsTab; the queue has
+        # no window of its own for a run's log.
+        self._recipes_page: Callable[[str], bool] = lambda _run: False
+        self.recipes.subscribe(self._show_recipes)
+        self._show_recipes()
         self.bridge.queueChanged.connect(self._refresh_page)
         self._refresh_page()
 
@@ -1014,6 +1161,24 @@ class JobQueueController(QObject):
         self._refresh_page()
 
     # ── plumbing ─────────────────────────────────────────────────────────
+    # ── recipes ──────────────────────────────────────────────────────────
+    def _show_recipes(self) -> None:
+        self.page.set_recipes([(r.name, r.summary()) for r in self.recipes.recipes])
+
+    def _on_save_recipe(self, job_id: str) -> None:
+        self.recipes.save_from(job_id)
+
+    def _on_apply_recipe(self, name: str) -> None:
+        self.recipes.apply(name)
+
+    def set_recipes_page_hook(self, show: Callable[[str], bool]) -> None:
+        """``DatasetsTab`` supplies "show the Recipes page, with this run open"."""
+        self._recipes_page = show
+
+    def _show_recipe_run(self, run_id: str) -> None:
+        if not self._recipes_page(run_id):
+            self._notify("The Recipes page isn't available in this build.", "warn")
+
     def _notify(self, text: str, kind: str = "warn") -> None:
         """One seam for every "that did nothing, and here is why".
 

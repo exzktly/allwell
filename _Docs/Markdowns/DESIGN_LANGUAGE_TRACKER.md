@@ -616,6 +616,13 @@ Step log (newest last):
     Curves and Axes rows (or eliding them), the Response fit hint off the band, Bar's Reset order to the Display
     page, and ON threshold's summary kept short. An unfinished agent attempt at labels-above is in local commit
     `51e8d3a` (branch `worktree-agent-a79c6ce415759c893`), untested.
+25. CI on `e44bd06`: one fast-lane failure — the Spatial one-row case needed two rows there (80 px at 1256 px):
+    the runner draws in a wider fallback font (the tests never register the bundled faces; the app does at start-up,
+    `allwell.py` → `startup.app_fonts.register_qt_fonts`, and `ui.theme.Typography.family` is `sans-serif` under
+    pytest). The one-row measurements moved to `tests/test_review_bands_fit_one_row.py`, rostered in
+    `tests/_lanes.py::UI_LANE_FILES` (local only, as every other geometry test); the placement checks stay in
+    `tests/test_review_bands_are_one_row.py`, which CI runs. The readout back on the Statistics band fails both. The
+    same font cause is the likeliest explanation of the Identity Diagnostics CI failure (step 11), still open.
 
 ## 10. Rows
 

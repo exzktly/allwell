@@ -374,9 +374,17 @@ def fit_label_to_axis(ax, renderer) -> bool:
                 if length() <= along and not _off(label.get_window_extent(renderer), ax.figure):
                     break
             else:
+                # Made smaller still, down to half its size, to stay on two lines; only a label two lines cannot hold
+                # even then takes a third. A label broken onto three after the layout was worked out reached under a
+                # phone's figure's foot.
                 prop = label.get_fontproperties()
-                label.set_text(_greedy(text, lambda t: renderer.get_text_width_height_descent(t, prop, ismath=False)[0],
-                                       along))
+                for share in (_SMALLEST, 0.55, 0.5):
+                    label.set_fontsize(size * share)
+                    broken = _greedy(text, lambda t: renderer.get_text_width_height_descent(t, prop, ismath=False)[0],
+                                     along)
+                    if broken.count("\n") <= 1:
+                        break
+                label.set_text(broken)
         label._aw_axis_out = (label.get_text(), label.get_fontsize())
         changed = changed or label._aw_axis_out != now
     return changed

@@ -320,3 +320,16 @@ def test_a_colour_bar_label_past_the_right_edge_pulls_the_right_margin_in():
     assert figure_fit.keep_labels_on_figure(fig, r)
     fig.canvas.draw()
     assert cax.yaxis.label.get_window_extent(fig.canvas.get_renderer()).x1 <= fig.bbox.width + 1
+
+
+def test_an_axis_label_is_made_smaller_to_stay_on_two_lines():
+    from review.core import figure_fit
+
+    # An axis 1.15 in long: the label takes three lines at 60% of its size and two at half (measured).
+    fig = _agg(1.15 / 0.6, 3.0)
+    ax = fig.add_axes((0.3, 0.3, 0.6, 0.6))
+    ax.set_xlabel("GFP Mean Intensity of cells", fontsize=20)
+    fig.canvas.draw()
+    figure_fit.fit_label_to_axis(ax, fig.canvas.get_renderer())
+    assert ax.xaxis.label.get_text().count("\n") == 1
+    assert ax.xaxis.label.get_text().split() == "GFP Mean Intensity of cells".split()

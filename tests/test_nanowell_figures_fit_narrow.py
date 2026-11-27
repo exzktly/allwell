@@ -158,3 +158,17 @@ def test_a_y_label_left_of_the_figure_moves_the_margin_until_it_is_on():
     fig.canvas.draw()
     assert ax.yaxis.label.get_window_extent(fig.canvas.get_renderer()).x0 >= -0.5
     assert not renderer.keep_labels_on_figure(fig, fig.canvas.get_renderer()), "it did not settle"
+
+
+def test_a_short_figure_keeps_room_for_its_plot_above_the_footer():
+    """On a phone on its side a footer allowed 38% of the height left the Position and Array axes a few pixels
+    tall: on a short figure the footer is cut to what leaves the plot its room, and says how much was left out."""
+    tall, short = _figure(9.0, 8.0), _figure(9.0, 3.3)
+    lines = [f"line {k}" for k in range(20)]
+    assert renderer._footer_share(tall) == renderer._FOOTER_MAX_SHARE
+    assert renderer._footer_share(short) < renderer._FOOTER_MAX_SHARE
+    kept = renderer._footer_that_fits(short, lines)
+    assert len(kept) * renderer._line_step(short) <= renderer._footer_share(short) + 1e-9
+    assert kept[-1].startswith("… ") and "more lines" in kept[-1]
+    plot_pt = (1.0 - renderer._footer_share(short)) * short.get_figheight() * 72.0
+    assert plot_pt >= renderer._PLOT_ROOM_PT - 1e-6

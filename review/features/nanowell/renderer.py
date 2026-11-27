@@ -410,12 +410,24 @@ def _wrapped_to_figure(fig, lines: list, *, left: float = 0.07, size_pt: float =
 _FOOTER_MAX_SHARE = 0.38
 
 
+#: Points of a figure's height kept for its plot, title and axis labels before a footer may have any: on a short figure
+#: (a phone on its side) a footer allowed 38% of the height left the Position and Array views' axes a few pixels tall.
+_PLOT_ROOM_PT = 170.0
+
+
+def _footer_share(fig, share: float = _FOOTER_MAX_SHARE) -> float:
+    """The most of *fig*'s height a footer may take: *share*, or less on a figure too short to keep
+    :data:`_PLOT_ROOM_PT` for the plot above it — never less than a line or two."""
+    height = max(_figure_pt(fig)[1], 1.0)
+    return min(share, max(0.12, 1.0 - _PLOT_ROOM_PT / height))
+
+
 def _footer_that_fits(fig, lines: list, share: float = _FOOTER_MAX_SHARE) -> list:
     """*lines* (already broken to the figure's width) cut to what *share* of the figure's height holds: the leading
     lines, then one saying how many were left out and how to read them. A phone's figure is a few hundred points tall
     and its footer is many lines of its narrow width, which was drawn over the panels' lowest part, the time axis
     included; a figure with room for every line is returned whole."""
-    fit = max(2, int(share / _line_step(fig)))
+    fit = max(2, int(_footer_share(fig, share) / _line_step(fig)))
     if len(lines) <= fit:
         return lines
     # The line saying how many were left out is broken to the figure's width like the lines it stands for, and the
@@ -1934,6 +1946,16 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     notes, _n = _wrapped_to_figure(fig, array_notes(scene, layers, label=label), left=_ARRAY_LEFT,
                                    size_pt=_ARRAY_FOOT_PT)
     step = _line_step(fig, _ARRAY_FOOT_PT)
+    # On a short figure the footer and the room kept for Notes are cut to what leaves the array its height
+    # (``_footer_share``): together they took the whole of a phone on its side, and the array was a sliver.
+    fit = max(2, int(_footer_share(fig) / step))
+    if len(lines) + len(notes) > fit:
+        lines = _footer_that_fits(fig, lines)
+        room = max(0, fit - len(lines))
+        if len(notes) > room:
+            # Said, not dropped: a Notes line cut for room is counted on the figure.
+            notes = notes[:room - 1] + [f"… {len(notes) - room + 1} more lines: enlarge the card to read them."] \
+                if room >= 1 else []
     # The colour bar's tick numbers and label sit to the axes' right, and take the room they need in points: a share
     # of the figure's width left them, on a narrow figure, with the label on the figure's edge.
     bar_room = 0.024 + _BAR_PT / max(_figure_pt(fig)[0], 1.0) + 0.01

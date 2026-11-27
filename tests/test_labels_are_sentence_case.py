@@ -36,6 +36,8 @@ PROPER = {
     "Linux", "Gaussian", "Otsu", "Poisson", "Welch", "Mann-Whitney", "Kruskal-Wallis", "Dunn", "Tukey",
     "Bonferroni", "Holm", "Benjamini-Hochberg", "Wilcoxon", "Pearson", "Spearman", "Hill", "Ripley", "Moran",
     "Student", "Šidák", "Ctrl", "Shift", "Cmd", "Esc", "Enter", "Tab",
+    # The app's single-word sections, which the sidebar names: a name, wherever a sentence mentions it.
+    "Home", "Plotting", "Statistics", "Multivariate", "Spatial", "Nanowells", "smFISH",
 }
 GLYPHS = set("✎✕▶⇄■⏸＋")
 _WORD = re.compile(r"[A-Za-zŠ][A-Za-z'’\-Šš]*")
@@ -55,13 +57,21 @@ def breaches(text: str) -> list[str]:
         out.append("glyph")
     if stripped.startswith(("+ ", "▶ ")):
         out.append("leading mark")
-    # Title Case: a capitalised word after the first, unless it starts a sentence or is a name.
+    # Title Case: a capitalised word after the first, unless it starts a sentence or is a name. Markup is read the
+    # way a reader sees it: an opening bold, italic or code tag quotes what follows, any other tag is a space.
+    stripped = re.sub(r"<(b|i|tt)>", '"', stripped)
+    stripped = re.sub(r"<[^>]*>", " ", stripped)
     words = list(_WORD.finditer(stripped))
     for prev, word in zip(words, words[1:]):
         w = word.group()
         between = stripped[prev.end():word.start()]
-        if (len(w) > 1 and w[0].isupper() and not w.isupper() and w not in PROPER
-                and not re.search(r"[.!?]\s*$", between)):
+        stem = re.sub(r"['’]s$", "", w)
+        if (len(stem) > 1 and stem[0].isupper() and not stem.isupper() and stem not in PROPER
+                # A capital past the first letter is an acronym or a product's own spelling: FOVs, TensorFlow.
+                and not any(ch.isupper() for ch in stem[1:])
+                and not re.search(r"[.!?]\s*$", between)
+                # The first word of a label quoted in prose (in bold, or in quotes) keeps the label's capital.
+                and not re.search(r"(<b>|<i>|<tt>|[\"“‘'])\s*$", between)):
             out.append("title case")
             break
     return out
@@ -102,5 +112,6 @@ def test_the_rule_reads_labels_the_way_a_reader_does():
     assert breaches("+ Add group") == ["leading mark"]
     assert breaches("▶ Run Pipeline") == ["glyph", "leading mark", "title case"]
     for fine in ("Mean intensity", "Open in Review", "StarDist, nuclei", "Browse…", "GFP", "Run pipeline",
-                 "No groups yet. Add one to start."):
+                 "No groups yet. Add one to start.", "All FOVs", "the CZI's channel names", "Analyze's tokens",
+                 "TensorFlow takes a while", "The <b>Background well</b> field follows it"):
         assert breaches(fine) == [], fine

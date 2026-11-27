@@ -315,4 +315,10 @@ def qss() -> str:
     #CollapsibleSectionValue, #CollapsibleSectionBody {{
         background: transparent;
     }}
+    /* The plain containers a body's rows are built from (exactly QWidget, not a subclass — a field or a
+       button keeps its own fill): left to the application's QWidget rule they paint the canvas, a dark band
+       across a card. */
+    #CollapsibleSectionBody .QWidget, #CollapsibleSectionHeader .QWidget {{
+        background: transparent;
+    }}
     """

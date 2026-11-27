@@ -362,19 +362,19 @@ def test_a_stacked_run_dashboard_keeps_a_key_to_its_well_colours(qapp):
     d.show()
     d.setStacked(True)
     assert d._legend_chips.isVisible()
-    assert _chip_labels(d) == ["pending", "processing", "processed", "complete",
-                               "partial / unfinished", "failed"]
+    assert _chip_labels(d) == ["Pending", "Processing", "Processed", "Complete",
+                               "Partial / unfinished", "Failed"]
     d.reset(remote=True, total=4)                # a remote run renames and adds rows
-    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
-                               "partial / unfinished", "failed"]
+    assert _chip_labels(d) == ["Pending", "Uploaded", "Processing", "On server", "Downloaded",
+                               "Partial / unfinished", "Failed"]
     assert d._legend_chips.isVisible()
     d.hide()
 
 
 def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp):
     """The chips show only while the plate they explain does: not in the
-    compact strip Analyze's Settings view shows above its form, and not in a
-    collapsed dashboard."""
+    compact strip Analyze's Settings view shows above its form. (The dashboard
+    no longer folds: tests/test_one_collapse_implementation.py.)"""
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard()
     d.show()
@@ -384,12 +384,6 @@ def test_the_colour_key_follows_the_dashboard_s_body_not_only_the_stacking(qapp)
     d.setCompact(True)
     assert not chips.isVisible()
     d.setCompact(False)
-    assert chips.isVisible()
-    d._toggle.setChecked(False)
-    d._on_toggle()
-    assert not chips.isVisible()
-    d._toggle.setChecked(True)
-    d._on_toggle()
     assert chips.isVisible()
     d.hide()
 
@@ -421,8 +415,8 @@ def test_sideways_the_colour_key_sits_above_the_plate_inside_the_dashboard(qapp)
     assert chips.isVisible()
     assert label_qss() == {f"color:{theme.Colors.text_primary}; "
                            f"font-size:{theme.Typography.caption_size}px;"}
-    assert _chip_labels(d) == ["pending", "uploaded", "processing", "on server", "downloaded",
-                               "partial / unfinished", "failed"]
+    assert _chip_labels(d) == ["Pending", "Uploaded", "Processing", "On server", "Downloaded",
+                               "Partial / unfinished", "Failed"]
     d.setRailBeside(True)                        # idempotent
     assert root.indexOf(chips) == root.indexOf(d._body) - 1
     d.setRailBeside(False)
@@ -749,7 +743,7 @@ def test_a_stacked_dashboard_is_the_page_and_says_what_a_tapped_well_is(qapp):
     d.show()
     cap = d._plate.maximumWidth()
     d.setStacked(True)
-    assert d._title_label.isHidden() and d._toggle.isHidden()
+    assert d._title_label.isHidden()
     assert d._plate.maximumWidth() > cap        # the desk cap is lifted
     d._plate.wellActivated.emit("C05")
     assert d._well_detail.text() == "C05: failed" and not d._well_detail.isHidden()

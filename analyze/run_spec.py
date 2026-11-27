@@ -23,7 +23,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
 from analyze.domain.job_edit import AnalyzeJobEditMixin
 from analyze.run_problems import AnalyzeRunProblemsMixin, RunProblem
@@ -37,7 +37,6 @@ from services.run_detect import (
     resolve_detection,
 )
 from services.run_spec import RunSpec, RunSpecError
-from widgets.flow_layout import FlowLayout
 from ui import buttons
 from ui import theme
 
@@ -181,35 +180,34 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
             btn.setVisible(sink is not None)
 
     def _build_run_row(self, parent: QWidget) -> QWidget:
-        """The whole run-controls row: Run, Suspend, + Queue, Stop.
+        """The whole run-controls row: Add to queue and Run pipeline at idle, Suspend and Stop while a run goes.
 
         Built here rather than in ``analyze/form.py`` because that file is
         at its line budget and the ratchet only moves down — moving the row out
-        wholesale lowers it.
-
-        The layout is a :class:`~widgets.flow_layout.FlowLayout`, not a
-        ``QHBoxLayout``. The four buttons want 398px and the panel they sit in
-        is ``theme.Metrics.rail_w`` (329) wide and fixed, so a box layout — which cannot wrap
-        — would compress them until their labels were unreadable. FlowLayout
-        also watches its children for show/hide, which matters here: "Add to queue"
-        appears only once the Datasets pane injects a sink, and the row has to
-        re-wrap when it does.
+        wholesale lowers it. A right-aligned box: the form column
+        (``theme.Metrics.form_column_w``) holds the two buttons shown at a time
+        side by side, and "Add to queue" appears only once the Datasets pane
+        injects a sink.
         """
         row = QWidget(parent)
-        layout = FlowLayout(row, margin=0)
-        layout.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(theme.Spacing.sm)
+        layout.addStretch(1)
 
-        self._run_btn = buttons.primary("Run pipeline", row)
-        self._run_btn.clicked.connect(self._run)
-        layout.addWidget(self._run_btn)
-
-        layout.addWidget(self._build_suspend_button(row))
+        # Right-aligned, the primary last: the order a dialog's buttons take, so "Run pipeline" sits where the
+        # eye ends the row. While a run goes, Suspend and Stop take its place.
         layout.addWidget(self._build_queue_button(row))
+        layout.addWidget(self._build_suspend_button(row))
 
         self._stop_btn = buttons.destructive("Stop", row)
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         layout.addWidget(self._stop_btn)
+
+        self._run_btn = buttons.primary("Run pipeline", row)
+        self._run_btn.clicked.connect(self._run)
+        layout.addWidget(self._run_btn)
         self._show_run_buttons(running=False)
         return row
 

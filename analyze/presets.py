@@ -1,6 +1,6 @@
 """The Analyze form's **Presets** menu: save the form's settings by name, load them back.
 
-Beside *Use settings from a previous run…* at the top of the Data section. That
+Beside *Copy from a run…* at the top of the Data section. That
 button reads a dataset's own record of how it was produced; a preset is the
 user's own record of how a kind of plate is analysed, kept in the app's folder
 and offered on every dataset. What a preset holds, what it leaves out and where

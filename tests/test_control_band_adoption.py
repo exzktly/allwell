@@ -19,9 +19,13 @@ is what would happen if a tab were reverted to its own row.
 There is exactly one legitimate reason to take an entry out, and it is not "the
 module stopped using the band": it is that the **page** the entry described no
 longer exists, and the module that now owns that page's row is listed in its
-place. Removing an entry any other way is the regression this file exists to
-catch, so a commit that does it says which page went away and which module
-inherited the row.
+place. The design language adds one more, decided per page by its row in
+``_Docs/Markdowns/DESIGN_LANGUAGE_TRACKER.md``: a page that is a form or a
+dashboard rather than a plot carries its controls in a card's heading, not in a
+band (§6) — Analyze's output pane became the Run card that way (row D22).
+Removing an entry any other way is the regression this file exists to catch, so
+a commit that does it says which page went away and which module inherited the
+row, or which tracker row made it a card.
 """
 
 import ast
@@ -40,7 +44,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot")
 
 ADOPTED = (
-    "analyze/log_pane.py",                       # Analyze — the output pane
     "datasets/tab.py",                          # Datasets — the tool pages
     "review/core/centre_view.py",          # Plotting — all five sub-tabs
     "review/features/barplot/tab_view.py",

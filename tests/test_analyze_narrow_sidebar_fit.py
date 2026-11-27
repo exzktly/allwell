@@ -1,4 +1,4 @@
-"""Analyze's form must actually fit inside theme.Metrics.rail_w (review/core/app_shell_view.py).
+"""Analyze's form must actually fit inside theme.Metrics.form_column_w (the design language's Analyze form column, ui/theme.py).
 
 Regression: unifying Review/Datasets/Analyze's left-panel width let Analyze's
 widest content (its per-channel rows, several label+field rows, and two wide
@@ -22,7 +22,7 @@ This drives every collapsible section open (real ``QTest.mouseClick``, not a
 direct call, so it exercises the exact code path a user's click does) and
 requires several fluorescent-channel rows (the worst case for the Channel
 Tokens section), then asserts the form's real, laid-out minimum width — not
-its un-realized ``QSize(0, 0)`` before a layout pass — fits inside theme.Metrics.rail_w.
+its un-realized ``QSize(0, 0)`` before a layout pass — fits inside theme.Metrics.form_column_w.
 """
 
 from __future__ import annotations
@@ -54,14 +54,14 @@ def _expand_every_collapsible_section(tab) -> None:
         QTest.mouseClick(card.header(), Qt.LeftButton)     # the header a user clicks
 
 
-def test_analyze_form_fits_rail_w_with_every_section_expanded(qapp):
+def test_analyze_form_fits_its_column_with_every_section_expanded(qapp):
     from analyze.tab import AnalyzeTab
     from ui import theme
-    # Locks the specific target (438 shrunk 25%), not just "whatever theme.Metrics.rail_w
-    # currently is" — a bare `width <= theme.Metrics.rail_w` check would pass trivially
+    # Locks the specific target (438 shrunk 25%), not just "whatever theme.Metrics.form_column_w
+    # currently is" — a bare `width <= theme.Metrics.form_column_w` check would pass trivially
     # against the pre-fix 438px width too, since that value was originally
     # sized to fit the pre-fix (wider) rows.
-    assert theme.Metrics.rail_w == 329
+    assert theme.Metrics.form_column_w == 430
 
     tab = AnalyzeTab()
     tab._fluor_add_row("RFP")
@@ -77,16 +77,16 @@ def test_analyze_form_fits_rail_w_with_every_section_expanded(qapp):
 
     form = tab._left_sidebar.widget()
     width = form.minimumSizeHint().width()
-    assert width <= theme.Metrics.rail_w, (
+    assert width <= theme.Metrics.form_column_w, (
         f"Analyze form's minimum width ({width}) exceeds the shared sidebar "
-        f"width theme.Metrics.rail_w ({theme.Metrics.rail_w}) once every collapsible section is expanded "
+        f"width theme.Metrics.form_column_w ({theme.Metrics.form_column_w}) once every collapsible section is expanded "
         "— some row doesn't fit."
     )
 
 
 def test_segmentation_and_auto_threshold_method_combos_fit_and_elide(qapp):
     """The two widest fixed-width combos in the form must be narrower than
-    theme.Metrics.rail_w's row budget, and still carry their full text on the tooltip since
+    theme.Metrics.form_column_w's row budget, and still carry their full text on the tooltip since
     Qt elides the closed box's label rather than showing it in full."""
     from analyze.tab import AnalyzeTab
 
@@ -102,15 +102,12 @@ def test_segmentation_and_auto_threshold_method_combos_fit_and_elide(qapp):
     assert thr_cb.width() <= 200
 
 
-def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
-    """The run row has to fit theme.Metrics.rail_w *with* "Add to queue" on it.
+def test_run_controls_fit_the_form_column_with_the_queue_button_shown(qapp):
+    """The run row fits the foot card *with* "Add to queue" on it, the primary last.
 
-    Regression: the button is hidden until the Datasets pane injects a queue
-    sink, so every existing check measured the row without it and passed. With
-    it shown the four buttons want 398px against a fixed 329px panel, and a
-    QHBoxLayout cannot wrap — it just compresses them until the labels are
-    unreadable. The row is a FlowLayout for that reason, and FlowLayout watches
-    its children for show/hide so the row re-wraps when the button appears.
+    Regression: the button is hidden until the Datasets pane injects a queue sink, so a check that measured the
+    row without it passed while the shown row overflowed. In the form column (``Metrics.form_column_w``) the two
+    buttons shown at a time sit side by side, right-aligned, with "Run pipeline" at the right end.
     """
     from analyze.tab import AnalyzeTab
     from ui import theme
@@ -123,12 +120,11 @@ def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
         assert tab._queue_btn.isVisibleTo(tab), "the sink should reveal the button"
 
         row = tab._run_btn.parentWidget()
-        assert row.minimumSizeHint().width() <= theme.Metrics.rail_w, (
-            f"run row needs {row.minimumSizeHint().width()}px, rail is {theme.Metrics.rail_w}px"
-        )
-        # And it fits by wrapping, not by squashing: at the rail's width the
-        # row is taller than a single button.
-        assert row.heightForWidth(theme.Metrics.rail_w) > tab._run_btn.sizeHint().height()
+        assert row.minimumSizeHint().width() <= row.width() <= theme.Metrics.form_column_w, (
+            f"run row needs {row.minimumSizeHint().width()}px and has {row.width()}px")
+        queue, run = tab._queue_btn.geometry(), tab._run_btn.geometry()
+        assert queue.top() == run.top() and queue.right() < run.left(), "not one line, primary last"
+        assert run.right() >= row.width() - 1, "the row is not right-aligned"
     finally:
         tab.close()
 
@@ -158,9 +154,9 @@ def test_a_channel_row_and_the_run_time_detect_box_can_narrow_to_one_control(qap
         from ui import theme
         edit, _smfish, _phase, remove = tab._fluor_rows[0]
         row = edit.parentWidget()
-        assert row.minimumSizeHint().width() <= theme.Metrics.rail_w - 24, (
+        assert row.minimumSizeHint().width() <= theme.Metrics.form_column_w - 24, (
             f"a channel row needs {row.minimumSizeHint().width()} px, more than "
-            f"the form's {theme.Metrics.rail_w - 24} px column")
+            f"the form's {theme.Metrics.form_column_w - 24} px column")
         assert remove.parentWidget() is row
 
         detect = tab._auto_detect_cb

@@ -1527,13 +1527,12 @@ class AllWellApp(QMainWindow):
         Bringing the rail back brings the bar back with it, which is also the
         only route back to Analyze and Datasets while collapsed.
 
-        Width matches the panel. All three modes' panels now pin to the same
-        `theme.Metrics.rail_w`, so this is a defensive
-        floor rather than reconciling genuinely different widths — it still runs
-        on every mode switch and panel resize in case that ever changes, or a
-        panel is momentarily narrower than the bar's own natural width. Floored
-        at the bar's natural width so a panel narrower than the three segments
-        elides their labels rather than the bar shrinking to fit.
+        Width is `theme.Metrics.rail_w` in every mode, whatever the panel below:
+        Review's rail and Datasets' tool list are that wide, and Analyze's form
+        column is wider (`Metrics.form_column_w` — the design language gives
+        Analyze no rail), so a bar that followed the panel moved under the
+        pointer on every switch to and from Analyze. Floored at the bar's
+        natural width so three segments that need more elide nothing.
         """
         bar = getattr(self, "_mode_seg", None)
         if bar is None:
@@ -1556,7 +1555,7 @@ class AllWellApp(QMainWindow):
             bar.setVisible(not collapsed)
         panel = self._mode_left_panel()
         natural = bar.sizeHint().width()
-        width = max(panel.width(), natural) if (
+        width = max(theme_v2.Metrics.rail_w, natural) if (
             panel is not None and panel.isVisible()) else natural
         if bar.width() != width:
             bar.setFixedWidth(width)

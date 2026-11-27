@@ -50,7 +50,6 @@ from analyze.seg_params import AnalyzeSegParamsMixin
 # to replace. The picker widget itself is shared with the Datasets pane's Zip
 # Loose Folder page — see widgets/schema_picker.py.
 # ---------------------------------------------------------------------------
-from widgets.flow_layout import FlowLayout, sync_flow_height
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
 from ui import buttons, theme
@@ -76,6 +75,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         to segment, how to correct, what to measure, which wells, and the
         rarely-changed rest. The run controls are not a section: they are the
         footer pinned under the form (``analyze.run_footer``)."""
+        self._build_page_header(parent)
         self._build_banner_strips(parent)
         self._build_data_section(parent)
         self._build_schema_section(parent)
@@ -99,40 +99,27 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         from core import wheel_guard
         wheel_guard.keep_guarding(parent)
 
-    def _build_data_section(self, parent: QWidget) -> None:
-        """The input folder, what it resolves to, and the one shortcut that
-        fills the whole form: the settings of a previous run."""
-        sec = self._section(parent, "Data")
+    def _build_page_header(self, parent: QWidget) -> None:
+        """The page's title, with the two shortcuts that fill the whole form as quiet commands beside it: a
+        previous run's settings (its pipeline_info.json, input folder included — to re-run a failed run or append
+        new data) and the user's own named presets (``analyze/presets.py``)."""
+        from ui.page_chrome import PageHeader
 
-        # Restore a prior run's settings (input path included) from its
-        # pipeline_info.json — to re-run a failed run or append new data. First
-        # in the section, above the folder it sets (as asked for), and inside
-        # it rather than floating above every section as it used to.
-        self._open_pinfo_btn = buttons.default("Use settings from a previous run…", sec)
+        self._open_pinfo_btn = buttons.quiet("Copy from a run…")
         self._open_pinfo_btn.setToolTip(
             "Open a run's pipeline_info.json and fill the whole form from it, "
             "input folder included.")
         self._open_pinfo_btn.clicked.connect(self._open_pipeline_info)
-        # A flow, not a fixed row, whose minimum would be both buttons' widths: in a wider font that held the
-        # form past Metrics.rail_w. Presets wraps under the first button instead (test_labelfree_phase.py).
-        pin_row = QWidget(sec)
-        prl = FlowLayout(pin_row)
-        prl.setContentsMargins(0, 0, 0, theme.Spacing.xs)
-        prl.addWidget(self._open_pinfo_btn)
-        # Named presets: the user's own saved settings, offered on every dataset (analyze/presets.py).
-        prl.addWidget(self._build_presets_button(pin_row))
-        sync_flow_height(pin_row)
-        sec.layout().addWidget(pin_row)
+        presets = self._build_presets_button(None)
+        buttons.set_kind(presets, buttons.QUIET)
+        parent.layout().addWidget(PageHeader("New run", parent, commands=(self._open_pinfo_btn, presets)))
 
-        in_lbl = QLabel("Input folder", sec)
-        in_lbl.setProperty("textRole", "help")
-        in_lbl.setWordWrap(True)
-        sec.layout().addWidget(in_lbl)
+    def _build_data_section(self, parent: QWidget) -> None:
+        """The input folder and what it resolves to."""
+        sec = self._section(parent, "Data")
 
-        in_pick = QWidget(sec)
-        ipl = QHBoxLayout(in_pick)
-        ipl.setContentsMargins(0, 0, 0, theme.Spacing.xs)
-        ipl.setSpacing(theme.Spacing.xs)
+        in_pick = self._row(sec, "Input folder")
+        ipl = in_pick.layout()
         self._input_edit = QLineEdit(in_pick)
         self._input_edit.setReadOnly(True)
         self._input_edit.setPlaceholderText(NOT_SET)
@@ -145,7 +132,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         self._browse_btn = buttons.default("Browse…", in_pick)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
-        sec.layout().addWidget(in_pick)
 
         # Where the run writes, once the input resolves to an output folder:
         # "—" on its own said nothing, so the row is hidden until then.

@@ -42,7 +42,7 @@ def _shell(qapp, *, collapsed: bool, mode_index: int = 0):
     review_rail = QWidget(host)
     review_rail.setFixedWidth(329)
     analyze_rail = QWidget(host)
-    analyze_rail.setFixedWidth(329)
+    analyze_rail.setFixedWidth(430)          # Analyze's form column (Metrics.form_column_w): wider than a rail
     host.show()
 
     review = types.SimpleNamespace(
@@ -99,12 +99,22 @@ def test_expanded_bar_matches_the_panel_width(qapp):
     assert bar.width() == 329
 
 
+def test_the_bar_stays_at_the_rail_width_over_analyze_s_wider_column(qapp):
+    """Switching to Analyze, whose form column is wider than a rail, must not move the control the switch is made
+    with: the bar keeps the rail's width rather than following the panel to 430."""
+    from ui import theme
+    shell, _host, bar = _shell(qapp, collapsed=False, mode_index=1)
+    AllWellApp._sync_mode_bar(shell)
+    assert bar.width() == theme.Metrics.rail_w
+
+
 def test_width_never_drops_below_the_bar_s_own_natural_width(qapp):
-    """A panel narrower than the three segments elides labels, not the bar."""
+    """The bar is the rail's width whatever the panel, and never narrower than its own three segments need."""
+    from ui import theme
     shell, _host, bar = _shell(qapp, collapsed=False)
     shell._review._sidebar_root.setFixedWidth(40)
     AllWellApp._sync_mode_bar(shell)
-    assert bar.width() == bar.sizeHint().width() >= 40
+    assert bar.width() == max(theme.Metrics.rail_w, bar.sizeHint().width())
 
 
 def test_missing_bar_is_safe(qapp):

@@ -28,7 +28,7 @@ def qapp():
 def test_analyze_form_fits_narrow_sidebar(qapp):
     """Regression: long-label checkboxes (a QCheckBox reports its full text as
     its minimum width) used to pin the form ~822 px wide, so the scroll area
-    could never shrink to its theme.Metrics.rail_w-px viewport — every word-wrap hint was
+    could never shrink to its theme.Metrics.form_column_w-px viewport — every word-wrap hint was
     laid out wide and then clipped instead of wrapping. The offending
     checkboxes are now WrapCheckBox, so the form's minimum width fits the
     sidebar."""
@@ -39,8 +39,8 @@ def test_analyze_form_fits_narrow_sidebar(qapp):
 
     tab = AnalyzeTab()
     form = next(sa.widget() for sa in tab.findChildren(QScrollArea))
-    # The form must be able to shrink to (≤) the scroll area's theme.Metrics.rail_w viewport.
-    assert form.minimumSizeHint().width() <= theme.Metrics.rail_w + 2, form.minimumSizeHint().width()
+    # The form must be able to shrink to (≤) the scroll area's theme.Metrics.form_column_w viewport.
+    assert form.minimumSizeHint().width() <= theme.Metrics.form_column_w + 2, form.minimumSizeHint().width()
     # the long-label checkboxes wrap rather than pinning the panel wide
     for cb in (tab._qc_remove_debris_cb,
                tab._dry_run_cleanup_cb):
@@ -54,8 +54,8 @@ def test_analyze_form_fits_narrow_sidebar_with_a_wider_font(qapp):
     """The form still fits the sidebar when the font is wider than this machine's.
 
     The sidebar check above failed on GitHub's runners and passed everywhere else: 334 px against
-    ``Metrics.rail_w`` + 2 on the runner, 313 px on a machine whose default sans-serif is Inter. The fast lane's
-    runner has no Inter and falls back to a wider face, and the row holding "Use settings from a previous run…"
+    ``Metrics.form_column_w`` + 2 on the runner, 313 px on a machine whose default sans-serif is Inter. The fast lane's
+    runner has no Inter and falls back to a wider face, and the row holding "Copy from a run…"
     and "Presets" side by side in a fixed row added both buttons' widths into the form's minimum. A font 15% wider
     than the default stands in for that fallback: under it the fixed row needed 345 px; the row now wraps, and
     the form needs 268.
@@ -72,8 +72,8 @@ def test_analyze_form_fits_narrow_sidebar_with_a_wider_font(qapp):
         tab = AnalyzeTab()
         form = next(sa.widget() for sa in tab.findChildren(QScrollArea))
         need = form.minimumSizeHint().width()
-        assert need <= theme.Metrics.rail_w + 2, (
-            f"with a font 15% wider the Analyze form needs {need} px, wider than the {theme.Metrics.rail_w} px "
+        assert need <= theme.Metrics.form_column_w + 2, (
+            f"with a font 15% wider the Analyze form needs {need} px, wider than the {theme.Metrics.form_column_w} px "
             "sidebar: some row adds its widgets' widths instead of wrapping")
     finally:
         qapp.setFont(original)

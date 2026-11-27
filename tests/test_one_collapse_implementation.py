@@ -19,11 +19,7 @@ from tests._repo_scan import python_sources, rel
 HOME = "widgets/collapsible_section.py"
 _FOLD = {"▸", "▾"}
 
-PENDING: dict[str, int] = {
-    # The run dashboard's own fold beside its header. D22 rebuilds the dashboard as the Run card, which does not
-    # fold (the log is what hides, behind "Show log").
-    "widgets/plate_progress.py": 1,
-}
+PENDING: dict[str, int] = {}
 
 
 def find(_path: str, tree: ast.Module):

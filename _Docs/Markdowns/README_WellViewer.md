@@ -974,7 +974,7 @@ control well missing from the input — are made when Run is pressed.
 
 The input folder, where the run will write (**Output to**, shown once the
 input resolves), a line in red if the folder cannot be used, and
-**Use settings from a previous run…**.
+**Copy from a run…**.
 
 
 The input folder is resolved by
@@ -1052,7 +1052,7 @@ never downloaded. A moment later a second sentence adds the real coverage: how
 many wells are complete, and how many of the input's field groups the output
 already accounts for, so you can see how much a re-run has left to do. If new
 
-**Use settings from a previous run…**, at the foot of the Data section, does the same from a
+**Copy from a run…**, at the foot of the Data section, does the same from a
 `pipeline_info.json` you pick, and points the input at the plate
 that file belongs to. It loads settings only — it does not resume the run; use
 the resume card (or set **Run scope → If a well already has output** to

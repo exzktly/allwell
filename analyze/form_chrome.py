@@ -24,6 +24,8 @@ from ui import text_roles
 from ui import theme
 from widgets.collapsible_section import CollapsibleSection
 
+_QWIDGETSIZE_MAX = 16_777_215   # Qt's QWIDGETSIZE_MAX: a label column with no ceiling
+
 
 class _WidthWatcher(QObject):
     """Calls back whenever the widget it is installed on changes width.
@@ -266,26 +268,26 @@ class AnalyzeFormChromeMixin:
     _SHAPE_CHIPS_MAX_W = 230
 
     def _row(self, parent: QWidget, label: str, *, tooltip: str = "") -> QWidget:
-        """Append a label-above-field row to *parent*; return the field cell.
+        """Append a form-grid row to *parent* — its label in the label column, the field beside it — and return
+        the field cell.
 
-        One column, because the panel is ``theme.Metrics.rail_w`` (329 px)
-        wide: a label column beside the field left the field about 180 px,
-        which clipped paths, the schema string and the longer dropdown entries,
-        and wrapped labels such as "Background subtraction" onto two lines.
+        The design language's form grid (§6, *Analyze*): at the desk the label sits in a column
+        ``theme.Metrics.form_label_w`` wide, beside the field, in the form column ``Metrics.form_column_w``; in
+        phone layout the row turns to label-above-field, the one arrangement a phone's width holds. The row says
+        so where it is built (``widgets.form_registry.register``), so phone layout needs to recognise nothing.
 
         *tooltip* is set on the row **and its label**, not only on whatever the
         caller puts in the field cell. The label is the word the user reads and
         the larger target; a tooltip that answers only over a narrow entry box
         is one most people never see.
         """
+        from widgets import form_registry
+
         row = QWidget(parent)
-        # Named so ``_normalise_field_widths`` and the pane's own builders can
-        # find the form's rows. Every row is already label-above-field, at the
-        # desk and on a phone, so phone layout has nothing to do to one.
+        # Named so ``_normalise_field_widths`` and the pane's own builders can find the form's rows.
         row.setObjectName("AnalyzeFormRow")
-        rl = QBoxLayout(QBoxLayout.TopToBottom, row)
+        rl = QBoxLayout(QBoxLayout.LeftToRight, row)
         rl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
-        rl.setSpacing(theme.Spacing.xs)
 
         lbl = QLabel(label, row)
         lbl.setProperty("textRole", "help")
@@ -300,8 +302,20 @@ class AnalyzeFormChromeMixin:
         rr = QHBoxLayout(right)
         rr.setContentsMargins(0, 0, 0, 0)
         rr.setSpacing(theme.Spacing.xs)
-        rl.addWidget(right)
+        rl.addWidget(right, 1)
 
+        def _arrange(phone: bool, _rl=rl, _lbl=lbl) -> None:
+            _rl.setDirection(QBoxLayout.TopToBottom if phone else QBoxLayout.LeftToRight)
+            _rl.setSpacing(theme.Spacing.xs if phone else theme.Spacing.md)
+            if phone:
+                _lbl.setMinimumWidth(0)
+                _lbl.setMaximumWidth(_QWIDGETSIZE_MAX)
+            else:
+                _lbl.setFixedWidth(theme.Metrics.form_label_w)
+            _rl.setAlignment(_lbl, Qt.AlignLeft | (Qt.AlignBottom if phone else Qt.AlignVCenter))
+
+        _arrange(False)
+        form_registry.register(row, _arrange)
         parent.layout().addWidget(row)
         return right
 

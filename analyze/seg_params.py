@@ -508,9 +508,11 @@ class AnalyzeSegParamsMixin:
             "The channel the cells are found in. Type its name as it appears in the filenames, or pick one of the "
             "channels listed above. A name that is not listed above is a separate channel, used only to find the cells.")
         row.layout().addWidget(self._nuclear_token_edit)
-        self._seg_channel_note = QLabel("", section)
-        self._seg_channel_note.setProperty("textRole", "help")
-        self._seg_channel_note.setWordWrap(True)
+        # What the typed name is, as a notice (``widgets.notice``): a caution in the attention severity when the
+        # name is not a listed channel, plain information when it is.
+        from widgets.notice import Notice
+        self._seg_channel_note = Notice(parent=section)
+        self._seg_channel_note.hide()
         section.layout().addWidget(self._seg_channel_note)
         self._nuclear_token_edit.textChanged.connect(lambda _: self._refresh_seg_channel_options())
 
@@ -530,14 +532,17 @@ class AnalyzeSegParamsMixin:
             phase_locked = self._seg_method() == "cellpose_labelfree" if hasattr(self, "_seg_method_cb") else False
         token = edit.text().strip()
         if not token or phase_locked:
-            text = ""
-        elif token.lower() in {t.lower() for t in listed}:
-            text = f"{token} is also one of the channels listed above."
+            note.setVisible(False)
+            return
+        if token.lower() in {t.lower() for t in listed}:
+            note.setSeverity("information")
+            note.setMessage(f"{token} is also one of the channels listed above.")
         else:
-            text = (f"{token} is not one of the channels listed above: it is a separate channel, the one the cells are "
-                    "found in. Pick a listed channel from the dropdown to segment that one instead.")
-        note.setText(text)
-        note.setVisible(bool(text))
+            note.setSeverity("attention")
+            note.setMessage(f"{token} is not one of the channels listed above.",
+                            "It is a separate channel, the one the cells are found in. Pick a listed channel from "
+                            "the dropdown to segment that one instead.")
+        note.setVisible(True)
 
     def _refresh_segmentation_hints(self) -> None:
         # The hint label is built under the picker, before the method pages it

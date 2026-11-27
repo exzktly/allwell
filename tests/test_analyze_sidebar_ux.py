@@ -307,12 +307,23 @@ def test_auto_threshold_is_switched_from_its_folded_header(tab):
 
 # ── layout (D4, D5) and copy (C1) ───────────────────────────────────────────
 
-def test_a_row_label_sits_above_its_field(tab, qtbot):
+def test_a_row_label_sits_beside_its_field_at_the_desk_and_above_it_on_a_phone(tab, qtbot):
+    """The form grid (tracker row D22): at the desk the label is in a column ``Metrics.form_label_w`` wide, beside
+    the field; a row declares its phone form (``widgets.form_registry``), and in it the label is above."""
+    from ui import theme
+    from widgets import form_registry
     _settle(qtbot)
     row = tab._seg_method_cb.parentWidget().parentWidget()
-    label = row.layout().itemAt(0).widget()
+    label, cell = row.layout().itemAt(0).widget(), tab._seg_method_cb.parentWidget()
     assert label.text() == "Method"
-    assert label.geometry().bottom() < tab._seg_method_cb.parentWidget().geometry().top()
+    assert label.width() == theme.Metrics.form_label_w
+    assert label.geometry().right() < cell.geometry().left()
+    assert label.geometry().top() < cell.geometry().bottom() and cell.geometry().top() < label.geometry().bottom()
+    arrange = form_registry.custom_apply(row)
+    arrange(True)
+    _settle(qtbot)
+    assert label.geometry().bottom() < cell.geometry().top()
+    arrange(False)
 
 
 def test_dropdowns_take_the_field_width_and_numbers_one_width(tab, qtbot):

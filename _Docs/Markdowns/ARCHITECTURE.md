@@ -8311,7 +8311,7 @@ building. Verbose inline helper paragraphs are collapsed behind hover `ⓘ` icon
 
 **The form's shape.** One section per question a run asks, in the order a user
 answers them (`AnalyzeTabFormMixin._build_form`): **Data** (input folder,
-Output to, and "Use settings from a previous run…" as its first row), **Filename
+Output to, and "Copy from a run…" as its first row), **Filename
 schema** (folded; a schema that does not parse unfolds it), **Channels** (Plate
 type, then one row per channel), **Segmentation** (method, its hint, the
 segmentation channel, the method's page), **Nanowell array** (shown only for a

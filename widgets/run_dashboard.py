@@ -115,7 +115,7 @@ _UNFINISHED_NOTE = "the run ended before this well finished; it has no complete 
 class RunDashboard(PlateProgress):
     """At-a-glance per-well run view. Driven entirely by the host."""
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(self, parent: QWidget | None = None, *, title: str = "Run progress") -> None:
         self._remote = False
         self._total = 0
         # Per-stage overrides for the rail's denominator. A remote run's stages
@@ -166,7 +166,7 @@ class RunDashboard(PlateProgress):
         self._transfer: float | None = None
         self._transfer_direction = _XFER_UP
         self._rail: dict[str, _StageRow] = {}
-        super().__init__("Run Progress", parent)
+        super().__init__(title, parent)
         self.setObjectName("RunDashboard")
 
     # ── host-facing API ─────────────────────────────────────────────────────
@@ -741,14 +741,15 @@ class RunDashboard(PlateProgress):
         """The only legend here whose rows are decided at run time: a remote
         run gains an Upload stage and renames the two that follow it, since
         "processed" happens on the server and "complete" means fetched back."""
-        items = [(theme.Colors.run_pending, "pending")]
+        # Sentence case: each row is a label of its own (design language §2.2, rule 7).
+        items = [(theme.Colors.run_pending, "Pending")]
         if self._remote:
-            items.append((theme.Colors.run_uploaded, "uploaded"))
-        items.append((theme.Colors.run_processing, "processing"))
-        items.append((theme.Colors.run_on_server, "on server" if self._remote else "processed"))
-        items.append((theme.Colors.run_done, "downloaded" if self._remote else "complete"))
-        items.append((theme.Colors.run_problem, "partial / unfinished", _PARTIAL_GLYPH, None))
-        items.append((theme.Colors.run_problem, "failed", _FAILED_GLYPH, theme.Colors.run_failed_mark))
+            items.append((theme.Colors.run_uploaded, "Uploaded"))
+        items.append((theme.Colors.run_processing, "Processing"))
+        items.append((theme.Colors.run_on_server, "On server" if self._remote else "Processed"))
+        items.append((theme.Colors.run_done, "Downloaded" if self._remote else "Complete"))
+        items.append((theme.Colors.run_problem, "Partial / unfinished", _PARTIAL_GLYPH, None))
+        items.append((theme.Colors.run_problem, "Failed", _FAILED_GLYPH, theme.Colors.run_failed_mark))
         return "Wells", items
 
     def _detail(self, w: str) -> str:

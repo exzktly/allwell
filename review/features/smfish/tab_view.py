@@ -223,15 +223,26 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("Threshold", threshold_edit, trailing=True)
 
+    # How the frame is drawn — its LUT range, the overlays, the frame's CDF — is on the inspector's Display page
+    # (design language §6): the band keeps what is shown (channel, field, timepoint, threshold) on one row.
+    from review.core.inspector_panels import make_popover_button
+    from widgets.form_grid import FormGrid
+
+    display_btn, display_panel, display_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
+    display_btn.setToolTip("How the frame is drawn: its LUT range, the overlays and the frame's CDF")
+    reg.register("_smfish_display_btn", display_btn)
+    lut_form = FormGrid(display_panel)
+    display_lay.addWidget(lut_form)
+
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit(""))
-    lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
+    lut_min_edit.setMaximumWidth(theme.Metrics.num_field_w)
     lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    ctrl.add_scope("LUT min", lut_min_edit)
+    lut_form.add_row("LUT min", lut_min_edit)
 
     lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit(""))
-    lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
+    lut_max_edit.setMaximumWidth(theme.Metrics.num_field_w)
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    ctrl.add_scope("LUT max", lut_max_edit)
+    lut_form.add_row("LUT max", lut_max_edit)
 
     apply_btn = buttons.default("Apply global threshold", ctrl)
     apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx))
@@ -244,13 +255,15 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # A setting that acts at once: a switch named for what is true when on (§2.5).
     from widgets.toggle_switch import ToggleSwitch
     overlay_btn = reg.register("_smfish_overlay_btn",
-                               ToggleSwitch("Show overlays", ctrl, checked=bool(ctx.state.smfish.show_overlays)))
+                               ToggleSwitch("Show overlays", display_panel,
+                                            checked=bool(ctx.state.smfish.show_overlays)))
     overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx))
-    ctrl.add_action(overlay_btn)
+    display_lay.addWidget(overlay_btn)
 
-    cdf_btn = buttons.default("This frame CDF", ctrl)
+    cdf_btn = buttons.default("This frame CDF", display_panel)
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
-    ctrl.add_action(cdf_btn)
+    display_lay.addWidget(cdf_btn)
+    ctrl.add_action(display_btn)
 
     # Status row. Starts blank: an empty selection is the shared placeholder's
     # message now, and this label sits *outside* the empty-state stack, so any

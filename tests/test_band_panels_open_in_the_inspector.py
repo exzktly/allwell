@@ -13,7 +13,7 @@ file's first test fails on a page whose buttons press nothing.
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication, QComboBox, QToolButton
+from PySide6.QtWidgets import QAbstractButton, QApplication, QComboBox, QToolButton
 
 from review.core import inspector_panels as panels
 from review.core import inspector_service as svc
@@ -29,6 +29,7 @@ PANELS = {
                         ("Display", "display", True)],
     "Heat Map": [("Layout", "data", False), ("Display", "display", True)],
     "Multivariate": [("Features", "data", False)],
+    "smFISH": [("Display", "display", True)],
 }
 
 
@@ -293,3 +294,23 @@ def test_per_sample_control_is_a_row_of_fold_change_and_opens_a_page_over_it(qtb
     assert insp.currentWidget() is panels.panel_of(fold).content, "Back did not return to Fold change"
     svc.close(ctx)
     assert editor.isHidden() and editor.parentWidget() is window
+
+
+def test_smfish_display_holds_the_frame_s_drawing_controls_and_the_overlay_switch_reaches_the_state(qtbot, mini_dataset):
+    """smFISH's band keeps what is shown on one row; the LUT range, the overlays and the frame's CDF are on its
+    Display page (design language §6, row D17). Pressed where the user now finds them."""
+    ctx, window, _frame, _bands = build_page(qtbot, "smFISH", mini_dataset)
+    (display,) = _buttons(ctx, window)
+    display.click()
+    QApplication.processEvents()
+    insp = svc.inspector(ctx)
+    for name in ("_smfish_lut_min_edit", "_smfish_lut_max_edit", "_smfish_overlay_btn"):
+        widget = ctx.widgets.get(name)
+        assert insp.isAncestorOf(widget) and widget.isVisibleTo(window), f"{name} is not on the Display page"
+    cdf = [w for w in panels.panel_of(display).content.findChildren(QAbstractButton) if w.text() == "This frame CDF"]
+    assert len(cdf) == 1 and cdf[0].isVisibleTo(window), "This frame CDF is not on the Display page"
+    switch = ctx.widgets.get("_smfish_overlay_btn")
+    before = bool(ctx.state.smfish.show_overlays)
+    switch.click()
+    QApplication.processEvents()
+    assert bool(ctx.state.smfish.show_overlays) is (not before)

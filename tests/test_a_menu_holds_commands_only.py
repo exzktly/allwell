@@ -33,8 +33,6 @@ SUBMENUS: dict[tuple[str, str], str] = {
         'kept: one level — the two ways to retry a job whose output finished jobs used, which the plain Retry cannot choose between',
     ('review/features/batch_export/variable_select_panel.py', 'VariableSelectMixin._vsel_add_quick_setup_menu'):
         'kept: one level — one group per value of the variable chosen in it',
-    ('review/features/nanowell/tab_view.py', '_layers_button'):
-        'pending S19: Layers becomes a row and a page',
     ('widgets/path_field.py', 'PathField.add_browse_alternative'):
         'kept: one level — Browse… and the list of queued outputs that can fill the field are different jobs; the list is read as it opens',
 }

@@ -82,7 +82,7 @@ def _choose_view(ctx, key, preset=None):
     seg = ctx.widgets.get("_nw_view_bar")
     seg.setCurrentIndex([k for k, _l in VIEWS].index(key))          # emits currentChanged, as a click does
     if preset:
-        ctx.widgets.get(f"_nw_preset_{preset}").trigger()
+        ctx.widgets.get(f"_nw_preset_{preset}").click()
 
 
 def _visible_scopes(ctx):
@@ -105,11 +105,11 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     # Outlined by state with no values written, the metric reaches nothing on the figure: its controls are greyed,
     # not hidden, so the controls beside them stay where they were (asked for: "the buttons should be frozen in
     # their position regardless of layer selection").
-    page.widgets.get("_nw_colour_state").trigger()
-    page.widgets.get("_nw_layer_values").trigger()
+    page.widgets.get("_nw_colour_state").click()
+    page.widgets.get("_nw_layer_values").click()
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
     assert not page.widgets.get("_nw_metric_cb").isEnabled()
-    page.widgets.get("_nw_layer_values").trigger()                   # the values written: the metric is drawn again
+    page.widgets.get("_nw_layer_values").click()                   # the values written: the metric is drawn again
     assert page.widgets.get("_nw_metric_cb").isEnabled()
     _choose_view(page, "trajectories")
     assert _visible_scopes(page) == {"Metric", "Baseline"}

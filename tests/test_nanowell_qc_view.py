@@ -335,11 +335,15 @@ def test_problem_chooses_one_class_and_each_opens_where_it_is_fixed(qc_page, qtb
                     and (st.qc_matrix is None or st.qc_matrix.counts.get("inconclusive")), timeout=20000)
     nwc._call(ctx, "_nw_refresh_controls")
     queue_btn, problem = ctx.widgets.get("_nw_queue_btn"), ctx.widgets.get("_nw_qc_walk_btn")
-    assert (problem.text(), queue_btn.text()) == ("Problem: not addressed", "Resolve: 2 timepoints")
+    # A row whose page is a choice of one — radio buttons — never a menu of ticks.
+    from PySide6.QtWidgets import QRadioButton
+    assert problem.menu() is None
+    assert isinstance(ctx.widgets.get("_nw_qc_walk_partial"), QRadioButton)
+    assert (problem.text(), queue_btn.text()) == ("Problem: not addressed ›", "Resolve: 2 timepoints")
     walk_partial = ctx.widgets.get("_nw_qc_walk_partial")
     assert walk_partial.text() == "partial — some nanowells left out (1)"
-    ctx.widgets.get("_nw_qc_walk_inconclusive").trigger()
-    assert (problem.text(), queue_btn.text()) == ("Problem: inconclusive", "Resolve: 1 timepoint")
+    ctx.widgets.get("_nw_qc_walk_inconclusive").click()
+    assert (problem.text(), queue_btn.text()) == ("Problem: inconclusive ›", "Resolve: 1 timepoint")
     assert st.anchor_queue_states == ("inconclusive",) and not walk_partial.isChecked()
     window = ctx.widgets.get("_nw_canvas").window()
 
@@ -355,7 +359,7 @@ def test_problem_chooses_one_class_and_each_opens_where_it_is_fixed(qc_page, qtb
     ctx.widgets.get("_nw_queue_stop_btn").click()
     assert not ctx.widgets.get("_nw_resolve_guide").isVisibleTo(window)
 
-    walk_partial.trigger()
+    walk_partial.click()
     assert queue_btn.text() == "Resolve: 1 timepoint"
     queue_btn.click()
     assert opened("identity") == ("1 of 1 · A02 at t_a · partial", False)       # to look at: nothing to set

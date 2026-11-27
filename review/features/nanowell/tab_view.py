@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 import shiboken6
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
     QToolButton, QVBoxLayout, QWidget,
@@ -1217,44 +1216,44 @@ def _button(text: str, tip: str, on_click) -> QPushButton:
 
 
 def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
-    """The Array view's *Layers* menu: each switchable layer, the nanowells' colouring, and the presets."""
-    button = QToolButton(parent)
-    button.setText("Layers")
-    button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    button.setPopupMode(QToolButton.InstantPopup)
+    """The Array view's *Layers* row: a page of the inspector with a box per switchable layer, the nanowells'
+    colouring as a choice of two, and the presets as buttons — not a menu of ticks and a submenu."""
+    from PySide6.QtWidgets import QButtonGroup, QCheckBox, QRadioButton
+
+    from review.core.inspector_panels import make_popover_button
+
+    button, page, lay = make_popover_button("Layers", parent, ctx=ctx, tab="data")
     button.setToolTip(_LAYERS_TIP)
-    button.setProperty("variant", "secondary")
-    button.setProperty("hasMenu", True)
-    menu = QMenu(button)
-    button.setMenu(menu)
     reg = ctx.widgets
     layer_actions = {}
     for key, label, tip in _LAYERS:
-        action = owned_action(menu, label)
-        action.setCheckable(True)
-        action.setToolTip(tip)
-        action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, key, on))
-        reg.register(f"_nw_layer_{key}", action)
-        layer_actions[key] = action
-    menu.addSeparator()
-    group = QActionGroup(menu)
+        box = QCheckBox(label, page)
+        box.setToolTip(tip)
+        box.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, key, on))
+        reg.register(f"_nw_layer_{key}", box)
+        lay.addWidget(box)
+        layer_actions[key] = box
+    caption = QLabel("Nanowells", page)
+    caption.setObjectName("Muted")
+    lay.addWidget(caption)
+    group = QButtonGroup(page)
     colour_actions = {}
     for key, label in (("metric", "Fill nanowells by the metric"), ("state", "Outline nanowells by state")):
-        action = owned_action(menu, label)
-        action.setCheckable(True)
-        group.addAction(action)
-        action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, "colour", key) if on else None)
-        reg.register(f"_nw_colour_{key}", action)
-        colour_actions[key] = action
-    menu.addSeparator()
-    # Built from Python with its parent, not by ``addMenu(title)``: a menu Qt creates is a top-level widget whose
-    # owner the binding does not know, so deleting the page's window and then the menu deletes it twice.
-    presets = QMenu("Show as", menu)
-    menu.addMenu(presets)
+        radio = QRadioButton(label, page)
+        group.addButton(radio)
+        radio.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, "colour", key) if on else None)
+        reg.register(f"_nw_colour_{key}", radio)
+        lay.addWidget(radio)
+        colour_actions[key] = radio
+    caption = QLabel("Show as", page)
+    caption.setObjectName("Muted")
+    lay.addWidget(caption)
     for key, label in _PRESETS:
-        action = owned_action(presets, label)
-        action.triggered.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
-        reg.register(f"_nw_preset_{key}", action)
+        preset = QPushButton(label, page)
+        preset.setProperty("variant", "secondary")
+        preset.clicked.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
+        reg.register(f"_nw_preset_{key}", preset)
+        lay.addWidget(preset)
     reg.register("_nw_layers_btn", button)
     return button, layer_actions, colour_actions
 

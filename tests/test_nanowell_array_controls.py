@@ -57,10 +57,10 @@ def test_no_layer_choice_shows_or_hides_a_control_on_the_band(qc_page):
         assert _shown_on_band(ctx) == before, key
         _toggle(ctx, key)
     for colour in ("metric", "state"):
-        ctx.widgets.get(f"_nw_colour_{colour}").trigger()
+        ctx.widgets.get(f"_nw_colour_{colour}").click()
         assert _shown_on_band(ctx) == before, colour
     for preset in ("map", "full", "qc"):
-        ctx.widgets.get(f"_nw_preset_{preset}").trigger()
+        ctx.widgets.get(f"_nw_preset_{preset}").click()
         assert _shown_on_band(ctx) == before, preset
     positions = ctx.widgets.get("_nw_positions_seg")
     positions.setCurrentIndex(1)
@@ -79,7 +79,7 @@ def test_the_metric_is_greyed_exactly_when_no_layer_draws_it(qc_page):
     _toggle(ctx, "values")
     assert metric_cb.isEnabled()                                          # written inside each nanowell
     _toggle(ctx, "values")
-    ctx.widgets.get("_nw_colour_metric").trigger()
+    ctx.widgets.get("_nw_colour_metric").click()
     assert metric_cb.isEnabled()                                          # the fill
     ctx.widgets.get("_nw_overlays_btn").click()
     assert not metric_cb.isEnabled()                                      # the fill is hidden with the overlays

@@ -640,7 +640,7 @@ def test_the_array_footer_is_short_until_notes_is_turned_on(qtbot, page):
                if t.get_gid() == "nw-array-notes")
     nwc.apply_array_preset(page, "qc")                                 # a preset keeps the reader's choice
     assert st.layers.notes and button.isChecked()
-    page.widgets.get("_nw_layer_notes").trigger()                      # and the menu entry turns both off
+    page.widgets.get("_nw_layer_notes").click()                      # and the menu entry turns both off
     assert not st.layers.notes and not button.isChecked() and not _texts(page, "nw-array-notes")
 
 

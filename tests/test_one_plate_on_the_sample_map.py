@@ -391,7 +391,7 @@ def test_import_follows_the_layer_not_the_tab(tab):
     from PySide6.QtWidgets import QPushButton
 
     from review.features.home.controller import sync_home_sidebar
-    from review.features.home.tab_view import IMPORT_KEY
+    from review.features.home.import_view import IMPORT_KEY
 
     button = tab.ctx.widgets.register(IMPORT_KEY, QPushButton(""))
     tab.ctx.runtime.home.subtabs = SimpleNamespace(

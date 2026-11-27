@@ -37,10 +37,11 @@ from .sample_map.controller import current_layer, on_tab_entered
 from ._phone import apply as apply_phone_form
 from ._phone import grid_columns
 from .tab_view import (
-    IMPORT_KEY, build_recent_tile, build_saved_plot_tile, definition_subtabs,
+    build_recent_tile, build_saved_plot_tile, definition_subtabs,
     format_value, legend_label, legend_swatch_style,
 )
 from ui import buttons
+from .import_view import IMPORT_KEY
 
 # Cell Gating's controller is reached for two refreshes the sub-tab handler and
 # the selection hook drive. Its tab body, and the other four, are built through

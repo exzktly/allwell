@@ -30,7 +30,6 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from review.core.app_shell_view import mirror_tab_widget
-from review.core.selection_controller import import_selections_from_json
 from review.core.ui_helpers import notes_schedule_save
 from widgets.empty_state import entry_row_text
 
@@ -46,7 +45,6 @@ DASH = "—"
 _NOTES_KEY = "_home_notes_edit"
 
 #: The Import action, registered so the sub-tab handler can hide it on Overview.
-IMPORT_KEY = "_home_import_btn"
 
 #: The report this module builds. Every other tab is a definition editor whose
 #: body lives in a sub-package beside this one and is declared in the feature
@@ -125,7 +123,7 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     """
     # No band: Home's tabs are a report and editors, each carrying its own commands (design language §6), and the
     # one command the band held — Import, which brings in groups — sits beside Sample Map's layer switch
-    # (``build_import_button``). Left in a band it was an empty strip across every tab but that one.
+    # (``import_view.py``). Left in a band it was an empty strip across every tab but that one.
     layout = parent.layout() or QVBoxLayout(parent)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
@@ -180,19 +178,6 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     # current when this runs, so no currentChanged fires and on_tab_change has returned early.
     sync_home_sidebar(ctx)
     drain_home_subtabs(ctx)
-
-
-def build_import_button(ctx, parent: QWidget) -> QWidget:
-    """Import: groups from a JSON file, merged in. Every definition on Home autosaves to the data folder on edit,
-    so there is no Save to pair it with. Sample Map puts it beside its layer switch, and ``sync_home_sidebar``
-    hides it on the Variables layer, since a file's groups are not what a page of variables would take."""
-    button = ctx.widgets.register(IMPORT_KEY, buttons.quiet("Import\u2026", parent))
-    button.setToolTip(
-        "Import groups from a JSON file. When this dataset already has groups "
-        "you choose whether to add the file's groups beside them or replace "
-        "them.")
-    button.clicked.connect(lambda _=False: import_selections_from_json(ctx))
-    return button
 
 
 def build_home_overview(ctx, parent: QWidget) -> None:

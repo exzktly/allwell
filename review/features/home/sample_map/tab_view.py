@@ -15,6 +15,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget
 
 from ui import theme
+from review.features.home.import_view import build_import_button
 from review.features.home.sample_map._phone import (
     BODY_KEY, LayerPage, install as install_phone_form, on_layer_shown,
 )
@@ -41,9 +42,7 @@ def build_sample_map_subtab(ctx, frame: QWidget) -> None:
     for layer in LAYERS:
         switch.addSegment(layer, data=layer)
     # Import (groups from a JSON file) beside the switch, quiet: the one command Home's band held, and the groups
-    # it brings in are this tab's (``home.tab_view.build_import_button``).
-    from review.features.home.tab_view import build_import_button
-
+    # it brings in are this tab's (``home.import_view``).
     head = QHBoxLayout()
     head.setSpacing(theme.Spacing.sm)
     head.addWidget(switch, 1)

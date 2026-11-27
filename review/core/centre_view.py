@@ -267,11 +267,10 @@ def build_centre(win, parent: QWidget) -> None:
         # but ``win._on_plot_channel_selected`` mirrors every change back to
         # all of them, so editing here re-renders every renderer's view
         # against the new channel.
-        from widgets.labeled_combo import LabeledComboBox as _QComboBox
+        from widgets.labeled_combo import unlabelled as _QComboBox
         win._plotting_channel_cb = win._ctx.widgets.register(
             "_plotting_channel_cb", _QComboBox("Channel"))
-        # No min-width / setMinimumContentsLength — LabeledComboBox sizes
-        # itself to exactly the painted "Channel: …" text, and a floor here
+        # No min-width / setMinimumContentsLength — the box sizes itself to its current entry, and a floor here
         # would just re-introduce the wasted space that sizing exists to cut.
         win._plotting_channel_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.control}; "
@@ -292,11 +291,9 @@ def build_centre(win, parent: QWidget) -> None:
                 swallowed()  # was: pass (silent except)
 
         win._plotting_channel_cb.currentIndexChanged.connect(_on_global_channel)
-        # The combo paints its own "Channel: " prefix (LabeledComboBox), so
-        # it needs no separate ControlBand label — pass "" so add_scope adds
-        # the combo alone rather than pairing it with a QLabel.
+        # The band labels the combo from outside (design language §5); the box draws only its value.
         win._plotting_channel_grp = win._ctx.widgets.register(
-            "_plotting_channel_grp", band.add_scope("", win._plotting_channel_cb))
+            "_plotting_channel_grp", band.add_scope("Channel", win._plotting_channel_cb))
         # Legacy display-only chip remains as an attribute for code that
         # still pokes at ``_plotting_channel_chip`` — point it at the new
         # combo so callers that read its text still work.
@@ -330,7 +327,7 @@ def build_centre(win, parent: QWidget) -> None:
 
         win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
         win._plotting_metric_grp = win._ctx.widgets.register(
-            "_plotting_metric_grp", band.add_scope("", win._plotting_metric_cb))
+            "_plotting_metric_grp", band.add_scope("Property", win._plotting_metric_cb))
 
         # Group the plot's members by a sample variable instead of by the user's
         # replicate sets. In the scope zone because that is exactly what it does

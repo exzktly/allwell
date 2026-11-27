@@ -68,6 +68,7 @@ DESIGN_PENDING: dict[tuple[str, str], str] = {
     ("Plotting/Response Curves", "band rows"): "D14",
     ("Plotting/Scatter Plot", "band rows"): "D14",
     ("Spatial", "band rows"): "D15",
+    ("smFISH", "band rows"): "D17",
     ("Statistics", "band rows"): "D15",
 }
 

@@ -189,14 +189,48 @@ The user was given a working example with each choice numbered and answered
    shown and the user asked for it to be undone. The button may carry a second
    line (wells and timepoints).
 3. **Grey is the default palette and blue is offered** (decision 8 of §2).
-4. **The well colours change** to a palette that passes contrast and
-   colour-blind separation. Only the **first eight** were designed and shown:
-   `#338ced`, `#e76624`, `#00a888`, `#d28e05`, `#e24d8b`, `#0aac23`, `#9887ef`,
-   `#eb6263`, which pass on both plot backgrounds (worst adjacent colour-blind
-   separation 10.1). The other 88 of the 96 are not designed. Row D30 designs
-   them, validates all 96, and migrates saved datasets, whose colours are
-   written into their sample definitions; it reports to the user before it
-   changes any saved file.
+4. **The well colours change, and a colour already written to a file stays as
+   it is.** The user's words: *"You can keep the old well colors if they are
+   already written to a file; build the remaining new well colors."* So there
+   is no migration. A selection whose colour is saved in a dataset's sample
+   definitions keeps that colour; a selection made after the change is baked
+   from the new palette. A dataset can therefore show old and new colours side
+   by side, which the user has accepted.
+
+   All 96 are designed. Ranks 0 to 7 are the eight the user approved; the other
+   88 were chosen and placed by `_Docs/design/well_palette_build.py`, which
+   reproduces every number below. Rank order, twelve to a plate row:
+
+   `#338CED` `#E76624` `#00A888` `#D28E05` `#E24D8B` `#0AAC23` `#9887EF` `#EB6263` `#C01085` `#DF816E` `#447CBF` `#FF648B`
+   `#1C6E80` `#C588B0` `#D302C5` `#2E8C7C` `#D40E14` `#A67284` `#857829` `#C6099F` `#F36AA9` `#C03DB3` `#878F5D` `#7C60DB`
+   `#639F74` `#795C84` `#D38B5A` `#AF16B6` `#976371` `#7BA944` `#566394` `#5EA0E3` `#A43FAE` `#FC146F` `#7332FD` `#C35E74`
+   `#A174F0` `#4AA7B7` `#3D68BC` `#915075` `#0F9CD0` `#C03A8F` `#FB5FCA` `#B6443A` `#FD449D` `#5F63CC` `#BA6C95` `#B639F0`
+   `#D8006D` `#236FEA` `#3E7C6B` `#A765DB` `#ED214B` `#FD46F5` `#FC7145` `#D163CF` `#7C6135` `#AC3992` `#2258E5` `#BF5297`
+   `#5A7BE2` `#26894C` `#9E4BFF` `#9A4F57` `#9C78B6` `#A0832A` `#4C869D` `#E14513` `#E87997` `#D56CFC` `#BC857C` `#C452FD`
+   `#507C41` `#6F70AB` `#D14160` `#3694A6` `#B29B37` `#C27FDD` `#AB6647` `#DD63A7` `#8D4E9F` `#5C7704` `#9428DD` `#AE4565`
+   `#EE27A6` `#2AA1FE` `#FB3DCC` `#FD171C` `#8552C2` `#61911C` `#8688C5` `#4DA64F` `#4C6D48` `#B33DD3` `#097463` `#DE49BD`
+
+   | Measured | Current palette | New palette |
+   |---|---|---|
+   | Under 3 : 1 on the grey plot background | 19 of 96 (lowest 1.37) | 0 (lowest 3.34) |
+   | Under 3 : 1 on the blue plot background | 22 (lowest 1.22) | 3 (lowest 2.99) |
+   | Under 3 : 1 on white, for exported figures | 38 (lowest 1.12) | 18 (lowest 2.75) |
+   | Closest pair of plate neighbours, normal vision | 5.2 | 14.0 |
+   | Closest pair of plate neighbours, colour-blind | 1.2 | 10.1 |
+   | Plate neighbours closer than 8 when colour-blind | 19 of 172 pairs | 0 |
+   | Closest pair anywhere on the plate, normal vision | 4.1 | 4.0 |
+
+   Distances are OKLab differences times 100; "colour-blind" is the worse of
+   simulated deuteranopia and protanopia (Machado et al. 2009, full severity).
+   A plate neighbour is the next well along a row or down a column, which is
+   what a person usually selects together. Three limits, stated so they are
+   not rediscovered as defects: on white, 18 colours sit between
+   2.75 and 3.0, because the approved yellow (`#D28E05`, 2.76) set that
+   floor; three colours measure 2.99 on the blue plot; and two wells far apart
+   on the plate can still be as close as 4.0, as they can today, because 96
+   colours that all pass contrast on both a dark and a white ground share a
+   narrow band of lightness. The palette leans to blues, purples and pinks for
+   the same reason: a bright yellow or green cannot reach 3 : 1 on white.
 5. **Spelling: "Color"**, in everything a user reads in the application. This
    file, the code's identifiers and the other documents keep whatever spelling
    they have; the rule is about the interface. Row D13.
@@ -464,7 +498,7 @@ awk -F'|' '/^\| D[0-9]+ /{gsub(/ /,"",$4); n[$4]++} END{for(s in n) print s, n[s
 | D27 | Home: Overview, Cell Gating, Sample Map, Ratios, Pipeline Info, QC Triage; the empty band strip removed | todo | `review/features/home/` | §4; `tests/test_home_phone_layout.py`, `tests/test_sample_map_phone_layout.py` |
 | D28 | Dialogs and windows: Manage Remote Servers and those under it, Storage, Reset analysis, Copy analysis, the curve windows, Test detection, the message-box wording | todo | `analyze/remote_dialog.py` and the others in `SURFACES_TRACKER.md` §11.5 | A render of each, before and after |
 | D29 | Phone layout: the touch sizes re-derived from the new tokens; every page on all six screens | todo | `core/phone_layout.py`, `ui/theme.py` (`_touch_qss`), `ui/phone_shell.py` | `tests/test_every_page_renders.py` green; shots reviewed |
-| D30 | The well colours (§3.4). Design all 96: the eight shown are the first eight, and the remaining 88 must be derived so that every colour is at least 3 : 1 on both palettes' plot backgrounds and on white (exported figures), and neighbouring ranks stay apart under colour-blind simulation. Read how the 96 are generated today before choosing how to extend eight. Then migrate: sample definitions store colours per well, so decide with the user, before changing any saved file, whether an existing dataset keeps its saved colours, is offered the new ones, or is converted | todo | `domain/well_palette.py`, `domain/plot_groups.py`, `ui/theme.py` (which re-exports the palette), `review/persistence/` | A test that computes contrast and simulated separation for all 96 on each background, failing on today's palette for the 19 it should; a round-trip test that a dataset saved with the old colours opens as the user decided |
+| D30 | The well colours (§3.4). The 96 values are designed; put them in `domain/well_palette.py` in the order given, keeping the length at 96 for the reason that module's docstring gives. **No migration**: a colour already saved in a dataset's sample definitions is left alone. Find every place a saved colour is *re-baked* from rank and make sure none of them replaces a saved colour with a new-palette one unasked: the module's docstring names one, Datasets' `merge_plates`, which re-bakes when a condition moves to another part of the plate; report what you find there to the user rather than choosing. Update the docstring's account of how the palette was generated | todo | `domain/well_palette.py`, `domain/selections_format.py` (`rank_color`, `well_colors`), `domain/plot_groups.py`, `datasets/merge_plates/`, `ui/theme.py` (which re-exports the palette) | A test that recomputes §3.4's table from the palette and holds each figure (it fails on today's palette, naming the 19 colours under 3 : 1); a test through the real load path that a dataset saved with an old colour still shows that colour, and that a selection made afterwards gets the new one |
 | D34 | The palette is the user's choice, in the application: a Grey / Blue setting, remembered between sessions (`core/app_settings.py`), honoured at start-up ahead of `DEFAULT_THEME` and behind an explicit `ALLWELL_THEME` or `--theme`. `ui/theme.py` says a live switch is not possible while widgets cache inline style sheets built from the tokens, so the setting applies at the next start and says so beside the control; once row D12 has removed those style sheets, make it live and delete that sentence. Where the control lives is the surfaces plan's question: the dataset-tools / `⋯` menu of `SURFACES_TRACKER.md` S23 unless a settings page exists by then | todo | `ui/theme.py` (`select_theme_from_env`), `core/app_settings.py`, `allwell.py` | A test through the real start-up path: with the setting stored as blue and no environment variable, the built window's card colour is blue's; with `ALLWELL_THEME=grey` set, grey's. Mutation: ignoring the stored setting fails the first, ignoring the variable the second |
 | D31 | Every roster from D09 is empty or holds only reasoned entries; the per-widget names in the theme's sheet that only restated a role are gone | todo | `tests/`, `ui/theme.py` | The rosters; the count of named widgets in the sheet, from a script, before and after |
 | D32 | Reconcile: re-render every page and compare each against §2's rules, not against this table; list anything that does not follow them | todo | this file | The reconciliation, in the pull request body |

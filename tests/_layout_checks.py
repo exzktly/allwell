@@ -356,9 +356,11 @@ def band_is_one_row(window: QWidget) -> list[Finding]:
     """At the desk, a page's control band is one row high at the window's width."""
     found = []
     for band in _bands(window):
-        if band.form() is None and band.height() > band.band_height() + 1:
+        # What the band asks for at its width, not the height it was given: a layout can stretch a one-row band.
+        needs = band.heightForWidth(band.width())
+        if band.form() is None and needs > band.band_height() + 1:
             found.append(Finding("band rows", _name(band),
-                                 f"{band.height()} px tall, one row is {band.band_height()}"))
+                                 f"needs {needs} px at {band.width()} px wide, one row is {band.band_height()}"))
     return found
 
 
@@ -377,7 +379,7 @@ def no_empty_band(window: QWidget) -> list[Finding]:
     """A page with no band controls shows no band strip."""
     found = []
     for band in _bands(window):
-        items = [w for w in band.scope_host().findChildren(QWidget) if w.isVisibleTo(band)]
+        items = [w for w in band.scope_host.findChildren(QWidget) if w.isVisibleTo(band)]
         if band.form() is None and not items and band.action_count() == 0:
             found.append(Finding("empty band", _name(band), "a band strip with no controls in it"))
     return found

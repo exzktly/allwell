@@ -97,6 +97,9 @@ def render_spatial(ctx) -> None:
 
 #: The narrowest a well's panel is drawn, in inches: a map with its tick numbers and axis label needs about this.
 _MIN_PANEL_W_IN = 2.2
+#: A figure narrower than this share of its height (a phone held upright) stacks its wells in one column: there the
+#: figure's size in inches is not the screen's, so the width rule alone left them two abreast.
+_STACK_BELOW_ASPECT = 0.8
 
 
 def _grid_shape(n: int, aspect: float = 1.0, width_in: float | None = None) -> tuple[int, int]:
@@ -111,6 +114,8 @@ def _grid_shape(n: int, aspect: float = 1.0, width_in: float | None = None) -> t
     cols = max(1, min(n, int(round(math.sqrt(n * max(aspect, 0.05))))))
     if width_in is not None:                       # never narrower than a map can be read at
         cols = max(1, min(cols, int(width_in // _MIN_PANEL_W_IN)))
+    if aspect < _STACK_BELOW_ASPECT:               # a figure taller than wide: one column
+        cols = 1
     rows = int(math.ceil(n / cols))
     return rows, cols
 

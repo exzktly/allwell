@@ -275,3 +275,28 @@ def test_a_key_anchored_outside_its_axes_moves_off_a_label_it_covers():
     assert figure_fit._overlaps(legend.get_window_extent(r), ax.xaxis.label.get_window_extent(r))
     assert figure_fit.keep_keys_off_labels(fig, r)
     assert not figure_fit._overlaps(legend.get_window_extent(r), ax.xaxis.label.get_window_extent(r))
+
+
+def test_a_key_too_large_to_clear_a_label_anywhere_is_made_smaller():
+    from review.core import figure_fit
+
+    fig = _agg(2.0, 2.0)
+    ax = fig.add_axes((0.2, 0.25, 0.7, 0.6))
+    for name in ("A01", "A02", "B01", "B02"):
+        ax.plot([0, 1], [0, 1], label=name)
+    # A label at every place a key can go: at its size the key covers one wherever it is put.
+    for x, y in ((0.1, 0.95), (0.9, 0.95), (0.1, 0.05), (0.9, 0.05), (0.9, 0.5), (0.1, 0.5), (0.5, 0.95), (0.5, 0.05)):
+        ax.text(x, y, "n", transform=ax.transAxes, ha="center", va="center", fontsize=7)
+    legend = ax.legend(loc="upper left", fontsize=13)
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+
+    def covered() -> int:
+        box = legend.get_window_extent(r)
+        return sum(figure_fit._overlaps(box, t.get_window_extent(r)) for t in ax.texts)
+
+    before = covered()
+    assert before > 0
+    figure_fit.keep_keys_off_labels(fig, r)
+    assert all(t.get_fontsize() < 13 for t in legend.get_texts())
+    assert covered() < before

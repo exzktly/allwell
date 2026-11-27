@@ -210,9 +210,16 @@ def keep_keys_off_labels(fig, renderer) -> bool:
             box = legend.get_window_extent(renderer)
             return sum(_overlaps(box, o) for o in others) + (10 if _off(box, fig) else 0)
 
+        entries = [*legend.get_texts(), legend.get_title()]
+        for t in entries:                                   # sized from what its renderer gave it, every draw
+            if getattr(t, "_aw_key_out", None) != t.get_fontsize():
+                t._aw_key_src = t.get_fontsize()
+            t.set_fontsize(t._aw_key_src)
         original = legend._loc
         best_loc, best = original, cost()
         if best == 0:
+            for t in entries:
+                t._aw_key_out = t.get_fontsize()
             continue
         # A key anchored outside its axes (beside or under the plot) keeps its anchor and is tried at each place
         # around it: on a phone the key under the plot sat on the x label.
@@ -226,6 +233,24 @@ def keep_keys_off_labels(fig, renderer) -> bool:
             if now == 0:
                 break
         legend._loc = best_loc
+        # Nowhere clear at its size: a key as large as the panel it is in (a phone's) covers a label wherever it
+        # goes. It is made smaller, down to :data:`_SMALLEST`, and placed again at each size.
+        for share in (0.85, 0.7, _SMALLEST):
+            if best == 0:
+                break
+            for t in entries:
+                t.set_fontsize(t._aw_key_src * share)
+            for place in _LEGEND_PLACES:
+                legend.set_loc(place)
+                now = cost()
+                if now < best:
+                    best_loc, best = legend._loc, now
+                if now == 0:
+                    break
+            legend._loc = best_loc
+        for t in entries:
+            changed = changed or getattr(t, "_aw_key_out", t._aw_key_src) != t.get_fontsize()
+            t._aw_key_out = t.get_fontsize()
         changed = changed or best_loc != original
     return changed
 

@@ -11,7 +11,7 @@ from review.features.spatial.renderer import _grid_shape
 
 def test_a_tall_narrow_figure_stacks_the_wells():
     assert _grid_shape(4, aspect=406 / 700, width_in=4.06) == (4, 1)
-    assert _grid_shape(4, aspect=406 / 700) == (2, 2)      # without the figure's width, the squarest grid
+    assert _grid_shape(4, aspect=406 / 700) == (4, 1)      # taller than wide: one column whatever its inches
 
 
 def test_a_square_figure_keeps_a_square_grid():

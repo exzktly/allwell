@@ -161,6 +161,8 @@ def open_colour(ctx, anchor: QWidget, *, key: str, title: str, color,
         inspector_service.pop(ctx)
         return None
     setattr(page, _COLOUR_HANDLER, on_pick)
+    if recents:
+        page.swatches.setRecents(list(recents))        # picked since the page was built
     page.setColor(color)
     inspector_service.push(ctx, key, title, page, tab=tab, anchor=anchor)
     return page

@@ -226,3 +226,18 @@ def test_all_and_none_go_through_the_button_so_a_subclass_can_give_them_a_meanin
     page.all_button.click()
     page.none_button.click()
     assert calls == [True, False]
+
+
+def test_none_and_all_leave_a_disabled_row_as_it_is(qtbot):
+    """A disabled row is an option that is always on (the ranked timepoint):
+    None must not untick it on the page while the figure still shows it."""
+    page = MultiSelect()
+    qtbot.addWidget(page)
+    page.setItems(["a", "b", "c"], ["a", "b", "c"])
+    page.boxes()[1].setEnabled(False)
+    seen = []
+    page.changed.connect(seen.append)
+    page.none_button.click()
+    assert page.checked() == ["b"] and seen == [["b"]]
+    page.all_button.click()
+    assert page.checked() == ["a", "b", "c"]

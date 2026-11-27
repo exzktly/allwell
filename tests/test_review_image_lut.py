@@ -81,3 +81,24 @@ def test_segmentation_brightness_is_the_range_page_wired_to_commit_and_auto(load
     page.high_edit.editingFinished.emit()
     page.auto_button.click()
     assert calls == ["commit", "auto"]
+
+
+def test_segmentation_brightness_reset_returns_to_the_range_it_opened_with(loaded_app, monkeypatch):
+    """Reset is not Auto: it puts back the range on screen when the page opened."""
+    from review.core import inspector_panels
+    from review.features.image_browser.controller import show_image_browser_subtab
+    from review.features.preview import panel_view as PV
+    from widgets.range_page import RangePage
+
+    ctx = loaded_app._ctx
+    assert show_image_browser_subtab(ctx, "Segmentation")
+    calls = []
+    monkeypatch.setattr(PV, "review_image_commit_lut", lambda c: calls.append("commit"))
+    monkeypatch.setattr(PV, "review_image_auto_lut", lambda c: calls.append("auto"))
+    page = loaded_app.findChild(RangePage, "ReviewImageRange")
+    page.low_edit.setText("100")
+    page.high_edit.setText("900")
+    inspector_panels._run_on_open(inspector_panels.panel_of(ctx.widgets.get("_review_lut_btn")))
+    page.low_edit.setText("5")
+    page.reset_button.click()
+    assert (page.low_edit.text(), page.high_edit.text()) == ("100", "900") and calls == ["commit"]

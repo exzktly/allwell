@@ -112,6 +112,7 @@ def test_the_montage_shows_only_the_timepoints_chosen_and_always_the_ranked_one(
     assert button.text() == "Timepoints: 2 of 3 ›"
     picker.none_button.click()                                                 # None still keeps the ranked one
     assert page.state.feature_slice("nanowell").extremes_tps == ["t_d"]
+    assert boxes["t_d"].isChecked(), "the page unticked the ranked timepoint the figure still shows"
     assert _fig_texts(page, "nw-extremes-tp")[:1] == ["10 h · ranked"]
     nwc.set_extremes_timepoints(page, ["t_c", "t_d"])
     assert any("Timepoints not shown: t_a." in " ".join(t.split()) for t in _fig_texts(page, "nw-extremes-caption"))

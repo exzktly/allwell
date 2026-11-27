@@ -15,7 +15,8 @@ from PySide6.QtWidgets import (
     QToolTip, QVBoxLayout, QWidget,
 )
 
-from review.core.inspector_panels import as_display_row, make_popover_button
+from review.core.inspector_panels import as_display_row, make_popover_button, on_open
+from widgets.range_page import parse_number
 from review.core.ui_helpers import (
     add_menu_action, btn_card, btn_secondary,
     make_action_menu_button,
@@ -314,6 +315,13 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     range_page.changed.connect(
         lambda low, _high: review_image_auto_lut(ctx) if low is None else review_image_commit_lut(ctx))
     lut_lay.addWidget(range_page)
+
+    def _seed_reset() -> None:
+        # What Reset returns to: the range on screen as the page opens (the
+        # renderer keeps the fields at the range it applied).
+        range_page.setRange(parse_number(range_page.low_edit.text()), parse_number(range_page.high_edit.text()))
+    on_open(lut_btn, _seed_reset)
+    reg.register("_review_lut_btn", lut_btn)
 
     view_lay.addWidget(as_display_row(lut_btn))      # a row of the Display tab
 

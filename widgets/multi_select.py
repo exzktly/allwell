@@ -131,9 +131,16 @@ class MultiSelect(QWidget):
         self._set_boxes(lambda key: any(key == k for k in wanted))
 
     def setAll(self, value: bool) -> None:
-        """Tick every row, or none — one :attr:`changed`, however many rows."""
+        """Tick every row, or none — one :attr:`changed`, however many rows.
+        A disabled row (an option that is always on) keeps its tick."""
         before = self.checked()
+        fixed = {id(b): b.isChecked() for b in self._boxes if not b.isEnabled()}
         self._set_boxes(lambda _key: bool(value))
+        for box in self._boxes:
+            if id(box) in fixed:
+                was = box.blockSignals(True)
+                box.setChecked(fixed[id(box)])
+                box.blockSignals(was)
         if self.checked() != before:
             self.changed.emit(self.checked())
 

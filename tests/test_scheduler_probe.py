@@ -248,3 +248,17 @@ def test_cancel_on_a_test_still_waiting_cancels_it_and_brings_the_form_back(form
     assert probe.cancelled.is_set(), "Cancel left the scheduler test running"
     assert form.current_page() is not window
     release.set()
+
+
+@pytest.mark.qt
+def test_closing_the_form_with_a_test_still_waiting_cancels_it(form, qtbot, monkeypatch):
+    """The test is a page of the form now: the form's own close must end it,
+    or the job it sent keeps waiting on the cluster behind a closed window."""
+    release = threading.Event()
+    monkeypatch.setattr(_StubProbe, "run", lambda self, on_line: (release.wait(5), parse_probe([], 1))[1])
+    form._compute_launcher_edit.setText("srun -p gpu")
+    form._test_sched_btn.click()
+    (probe,) = _StubProbe.made
+    form.reject()
+    assert probe.cancelled.is_set(), "closing the form left the scheduler test running"
+    release.set()

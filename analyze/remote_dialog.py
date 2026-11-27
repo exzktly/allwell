@@ -702,6 +702,16 @@ class RemoteFormDialog(QDialog):
 
         page.finished.connect(back)
 
+    def done(self, code: int) -> None:  # Qt override
+        """However the form ends — OK, Cancel, its window's close — a page still
+        open on it (a scheduler test waiting on a node) is ended first, so its
+        job is cancelled rather than left running behind a closed window."""
+        for i in range(self._pages.count() - 1, 0, -1):
+            page = self._pages.widget(i)
+            if isinstance(page, QDialog):
+                page.reject()
+        super().done(code)
+
     def current_page(self) -> QWidget:
         """What this window is showing: the form, or a page opened from it."""
         return self._pages.currentWidget()

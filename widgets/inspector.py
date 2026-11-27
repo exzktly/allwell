@@ -308,18 +308,25 @@ class Inspector(QWidget):
                  free_children: bool = False) -> None:
         """Lend *widget* and show it as a page on top of *tab* (the tab on show
         when ``None``). Pushing a key that is already on that tab's stack pops
-        back to it instead of stacking a second copy."""
+        back to it instead of stacking a second copy — and when the key's page
+        is now a different widget (its owner rebuilt it), the old page and
+        everything above it are given back and the new one takes its place."""
         tab = tab or self._current
         if tab is None or tab not in self._pages:
             raise KeyError(tab)
         stack = self._pages[tab]
         for i, page in enumerate(stack):
-            if page.key == key and page.widget is widget:
+            if page.key != key:
+                continue
+            if page.widget is widget:
                 for extra in reversed(stack[i + 1:]):
                     self._drop(tab, extra)
                 self._current = tab
                 self._show_top()
                 return
+            for extra in reversed(stack[i:]):
+                self._drop(tab, extra)
+            break
         slot = self._new_slot()
         self._stack.addWidget(slot)
         self._lend(widget, slot, free_children=free_children)
@@ -552,6 +559,9 @@ class Inspector(QWidget):
             return
         gone = {id(o.widget) for o in dead}
         self._loans = [o for o in self._loans if o not in dead]
+        for o in dead:
+            if o.box is not None and _alive(o.box):
+                o.box.deleteLater()          # an emptied fill box would keep its stretch in the tab
         for key in [k for k, w in self._tab_widgets.items() if id(w) in gone]:
             del self._tab_widgets[key]
         for tab, stack in self._pages.items():

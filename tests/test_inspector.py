@@ -262,3 +262,16 @@ def test_a_filled_tab_widget_gets_exactly_the_tab_s_height_even_when_it_wraps(in
     from widgets.inspector import _FillBox
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     assert not slot.widget().findChildren(_FillBox), "an empty box was left in the tab for every loan"
+
+
+def test_a_key_pushed_again_with_a_rebuilt_widget_replaces_its_page(insp, qtbot):
+    """An owner that rebuilds its page (the Image Table rebuilds a channel's
+    chips on every edit) pushes the same key with a new widget: the old page
+    goes, and Back does not lead to it."""
+    first, second = QLabel("first"), QLabel("second")
+    for w in (first, second):
+        qtbot.addWidget(w)
+    insp.pushPage("chan", "Channel", first, tab="data")
+    insp.pushPage("chan", "Channel", second, tab="data")
+    assert insp.depth() == 1 and insp.currentWidget() is second
+    assert not insp.holds(first)

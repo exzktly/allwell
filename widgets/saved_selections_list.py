@@ -45,6 +45,8 @@ import os as _os
 import sys as _sys
 import uuid as _uuid
 
+import shiboken6
+
 _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
@@ -138,6 +140,7 @@ def window_page(title: str, widget: QWidget, anchor: QWidget | None):
     from PySide6.QtWidgets import QDialog
     window = QDialog(anchor.window() if anchor is not None else None)
     window.setObjectName("SavedSelectionsPage")
+    window.setAttribute(Qt.WA_DeleteOnClose, True)
     window.setWindowTitle(title)
     lay = QVBoxLayout(window)
     lay.addWidget(widget)
@@ -961,6 +964,9 @@ class SavedSelectionsList(QWidget):
         from widgets.colour_page import ColourPage
         recents = [x["color"] for x in self._selections if x["id"] != sel_id][:8]
         # The one colour page: the palette's swatches over the custom picker.
+        old = self._recolour_page
+        if old is not None and shiboken6.isValid(old) and old.isHidden():
+            old.deleteLater()                         # the page of a previous Recolour, given back
         page = ColourPage(self, recents=recents)
         page.hide()
         page.setColor(s["color"])

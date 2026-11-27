@@ -199,11 +199,12 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         return edit
 
     def _absent() -> QLabel:
-        """The column a quantity has no bound for. Words, not a gap: a bound
+        """The column a quantity has no bound for. Marked, not a gap: a bound
         that does not exist should not look like one left blank, nor like one
-        not set yet."""
-        lbl = QLabel("No bound", grid)
+        not set yet (``text_roles.NOT_APPLICABLE``)."""
+        lbl = QLabel(grid)
         lbl.setProperty("textRole", "help")
+        text_roles.show_not_applicable(lbl)
         return lbl
 
     min_area_edit = _field(params.min_area, _area_tip)

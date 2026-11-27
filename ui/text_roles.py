@@ -30,6 +30,10 @@ from PySide6.QtWidgets import QLabel, QWidget
 
 #: How a value that has not been given reads, everywhere.
 NOT_SET = "not set"
+#: A field that has no value because it does not apply here — a count cutoff on a channel with no count column, a
+#: bound a quantity does not have. Not :data:`NOT_SET`, which says a value could be given and has not been: this one
+#: cannot be. Drawn in the same quiet ink, through :func:`show_not_applicable`.
+NOT_APPLICABLE = "n/a"
 
 #: The role names, as the ``textRole`` property spells them.
 PAGE_TITLE = "pageTitle"
@@ -115,6 +119,15 @@ def show_value(label: QLabel, value) -> None:
     label.setText(NOT_SET if unset else str(value))
     if bool(label.property("unset")) != unset:
         label.setProperty("unset", unset)
+        label.style().unpolish(label)
+        label.style().polish(label)
+
+
+def show_not_applicable(label: QLabel) -> None:
+    """Write :data:`NOT_APPLICABLE` into *label*, in the disabled ink an unset value takes."""
+    label.setText(NOT_APPLICABLE)
+    if not label.property("unset"):
+        label.setProperty("unset", True)
         label.style().unpolish(label)
         label.style().polish(label)
 

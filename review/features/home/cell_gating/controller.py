@@ -85,7 +85,7 @@ from review.data.fov_selection import available_fovs, normalise_selection, selec
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 from widgets.squeeze_label import SqueezeWrapLabel
 from ui import theme
-from ui.text_roles import show_value
+from ui.text_roles import show_not_applicable
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -1878,7 +1878,7 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
             else:
                 absent = QLabel(table)
                 absent.setProperty("textRole", "help")
-                show_value(absent, None)
+                show_not_applicable(absent)
                 absent.setToolTip(
                     "This channel has no smFISH count column, so there is no "
                     "count cutoff to set.")

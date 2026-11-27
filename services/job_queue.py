@@ -152,6 +152,17 @@ class JobSpec:
     #: guess them (``services.job_kinds.produced_layout``). ``None`` for every
     #: other kind, and until the job succeeds.
     layout: dict | None = None
+    #: When this job first started, as epoch seconds, kept across a Pause and
+    #: an app restart and cleared by Retry (``_reset``). A watch resumed after
+    #: either counts the files written since then as the change it waits for
+    #: (``QueueBridge._dispatch`` hands it over as ``armed_at``); without it a
+    #: resumed watch started from nothing and could wait for ever.
+    first_started_at: float | None = None
+    #: The recipe application this job belongs to, when it was queued from a
+    #: recipe: ``{"run", "name", "input", "step", "steps"}``. Its events are
+    #: journalled under ``run`` (``services.recipe_journal``) and its row names
+    #: the recipe and the step. ``None`` for every other job.
+    recipe: dict | None = None
 
     def links(self) -> list[ChainLink]:
         """Every input this job takes from an earlier job, first link first."""
@@ -202,6 +213,8 @@ class JobSpec:
             "dataset_root": self.dataset_root,
             "in_dir": self.in_dir,
             "layout": self.layout,
+            "first_started_at": self.first_started_at,
+            "recipe": self.recipe,
         }
 
     @classmethod
@@ -227,6 +240,10 @@ class JobSpec:
             dataset_root=data.get("dataset_root"),
             in_dir=data.get("in_dir"),
             layout=dict(data["layout"]) if isinstance(data.get("layout"), dict) else None,
+            first_started_at=(float(data["first_started_at"])
+                              if isinstance(data.get("first_started_at"), (int, float))
+                              else None),
+            recipe=dict(data["recipe"]) if isinstance(data.get("recipe"), dict) else None,
         )
 
 
@@ -530,6 +547,7 @@ class JobQueue:
         job.output_dir = job.dataset_root = job.in_dir = None
         job.layout = None
         job.stale_because = ""
+        job.first_started_at = None
 
     def clear_terminal(self) -> int:
         """Drop every finished job, returning how many went.
@@ -882,10 +900,14 @@ class JobQueue:
             spec["upstream_layout"] = json.loads(json.dumps(layout_from.layout))
         return spec
 
-    def mark_running(self, job_id: str) -> None:
+    def mark_running(self, job_id: str, now: float | None = None) -> None:
+        """Mark *job_id* running; *now* (epoch seconds) is recorded as its
+        first start if it has none — a resume keeps the first."""
         job = self._by_id[job_id]
         job.state = JobState.RUNNING
         job.message = ""
+        if now is not None and job.first_started_at is None:
+            job.first_started_at = now
 
     def mark_suspended(self, job_id: str, message: str = "") -> None:
         """The user wound this job down; it keeps its place and its progress.

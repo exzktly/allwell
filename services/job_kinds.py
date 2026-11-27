@@ -39,6 +39,7 @@ KIND_LABEL = {
     "subset": "Subset",
     "import_loose": "Zip loose",
     "merge_plates": "Merge plates",
+    "watch_folder": "Watch folder",
 }
 
 # What a chained successor is always handed. Every tool here — Analyze
@@ -160,14 +161,65 @@ INPUT_TARGETS = {
 }
 
 
+#: Kinds whose output is a folder of files rather than a dataset: a watched
+#: folder. Such a job can feed a kind that reads files (below) as well as one
+#: that reads a dataset, since what lands in a watched folder may be either.
+FOLDER_SOURCE_KINDS = ("watch_folder",)
+
+#: The inputs of the kinds that read files — a packed acquisition file or a
+#: loose image folder — which only a :data:`FOLDER_SOURCE_KINDS` job can fill.
+#: Kept out of :data:`INPUT_TARGETS` because no other job's output can be
+#: their input (see :data:`CHAIN_TARGET`); a watched folder can, because it is
+#: where the files are. A converter handed a folder this way picks the packed
+#: file in it when it runs (``datasets.core.watched_source``).
+FOLDER_INPUT_TARGETS = {
+    "ome_import": (("source", "Source"),),
+    "czi_import": (("source", "Source"),),
+    "nd2_import": (("source", "Source"),),
+    "import_loose": (("source", "Source folder"),),
+}
+
+
 def input_targets(kind: str) -> tuple[str, ...]:
     """The dotted spec paths *kind* receives earlier jobs' outputs at."""
     return tuple(target for target, _label in INPUT_TARGETS.get(kind, ()))
 
 
+def folder_input_targets(kind: str) -> tuple[str, ...]:
+    """The dotted spec paths of *kind* only a watched folder can fill."""
+    return tuple(target for target, _label in FOLDER_INPUT_TARGETS.get(kind, ()))
+
+
+def linkable_targets(kind: str) -> tuple[str, ...]:
+    """Every input of *kind* any queued job can fill, dataset inputs first."""
+    return input_targets(kind) + tuple(
+        t for t in folder_input_targets(kind) if t not in input_targets(kind))
+
+
+def accepts_link(kind: str, target: str | None, source_kind: str) -> bool:
+    """Whether a *source_kind* job's output may fill *kind*'s input *target*."""
+    if target in input_targets(kind):
+        return True
+    return source_kind in FOLDER_SOURCE_KINDS and target in folder_input_targets(kind)
+
+
+def chain_target(kind: str, source_kind: str) -> str | None:
+    """Where "Input from ▸ <a *source_kind* job>" puts that job's output in a
+    *kind* job's spec, or ``None`` when it cannot be that job's input."""
+    target = CHAIN_TARGET.get(kind)
+    if target is not None:
+        return target
+    if source_kind in FOLDER_SOURCE_KINDS:
+        targets = folder_input_targets(kind)
+        return targets[0] if targets else None
+    return None
+
+
 def input_label(kind: str, target: str | None) -> str:
     """What a menu or a queue row calls the input at *target*."""
-    return dict(INPUT_TARGETS.get(kind, ())).get(target or "", "Input")
+    labels = dict(INPUT_TARGETS.get(kind, ()))
+    labels.update({t: l for t, l in FOLDER_INPUT_TARGETS.get(kind, ()) if t not in labels})
+    return labels.get(target or "", "Input")
 
 
 def planned_output(kind: str, spec: dict) -> str | None:
@@ -194,6 +246,8 @@ def planned_output(kind: str, spec: dict) -> str | None:
         value = _get("source") if spec.get("in_place") else _get("destination")
     elif kind == "validate":
         value = _get("dataset")
+    elif kind == "watch_folder":
+        value = _get("folder")
     elif kind in (*CONVERTER_KINDS, "merge_plates"):
         value = _get("destination")
     else:
@@ -213,6 +267,7 @@ _DESCRIBE_KEYS = {
     "subset": (("source",), "destination"),
     "import_loose": (("source",), "destination"),
     "merge_plates": (("dataset1", "dataset2"), "destination"),
+    "watch_folder": (("folder",), None),
 }
 
 
@@ -273,6 +328,20 @@ def _analyze_detail(spec: dict) -> str:
     return " · ".join(parts)
 
 
+def _watch_detail(spec: dict) -> str:
+    """The watched folder and the rule that decides when it has settled."""
+    folder = str(spec.get("folder") or "").strip()
+    parts = [folder] if folder else []
+    try:
+        minutes = float(spec.get("quiet_minutes", 5.0))
+    except (TypeError, ValueError):
+        minutes = 5.0
+    parts.append(f"settled after {minutes:g} min with no change")
+    if not spec.get("require_change", True):
+        parts.append("counts what is already there")
+    return " · ".join(parts)
+
+
 def describe(kind: str, spec: dict) -> str:
     """A one-line name for this job, e.g. ``"Subset — plateA → plateA_sub"``.
 
@@ -300,6 +369,8 @@ def describe_detail(kind: str, spec: dict) -> str:
     """
     if kind == "analyze":
         return _analyze_detail(spec)
+    if kind == "watch_folder":
+        return _watch_detail(spec)
     inputs, out_key = _DESCRIBE_KEYS.get(kind, ((), None))
     parts = [str(spec.get(k) or "").strip() for k in inputs]
     parts = [p for p in parts if p]

@@ -123,5 +123,6 @@ DATASETS_PAGE_HELP: dict[str, str] = {
     "Subset / Split": "Subset / Split Dataset",
     "Zip Loose Folder": "Zip Loose Folder",
     "Merge Plates": "Merge Plates",
-    "Job Queue": "Job Queue",
+    "Watch Folder": "Watch Folder",
+    "Automation": "Automation",
 }

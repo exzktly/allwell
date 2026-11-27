@@ -58,7 +58,8 @@ to add features, how to debug, and build / environment troubleshooting), see
      [Subset / Split Dataset](#subset--split-dataset) ·
      [Zip Loose Folder](#zip-loose-folder) ·
      [Merge Plates](#merge-plates) ·
-     [Job Queue](#job-queue)
+     [Watch Folder](#watch-folder) ·
+     [Automation](#automation): [Job Queue](#job-queue) · [Recipes](#recipes)
 7. [Using All-Well from a phone](#using-all-well-from-a-phone)
 7. [Statistics primer: Rare responders](#statistics-primer-rare-responders) — the reasoning behind the
    Nanowells Statistics view's Rare responders test
@@ -10766,6 +10767,90 @@ or merge that well without remapping it. Files that were never images —
 purpose — carry no well token, are not this tool's business, and pass through
 under their own names.
 
+### Watch Folder
+
+Waits for a folder to finish receiving files, so the jobs queued after it run
+as soon as an acquisition is complete — without anyone checking on the
+microscope. Put it first in a chain in the Job Queue: **Watch Folder**, then a
+conversion, then Analyze.
+
+1. Choose the **Folder to watch** — where the microscope, or a copy from
+   another machine, writes the acquisition. It may not exist yet; the watch
+   waits for it to appear.
+2. Set **Settled after no change for (minutes)** — how long the folder must go with no
+   file added, removed, growing or being modified before the watch counts it
+   as finished. Make it longer than the longest pause the acquisition takes
+   between writes, such as the gap between two timepoints. 5 minutes by
+   default.
+3. Leave **Wait for new files before counting** on to watch an acquisition
+   that has not started yet: the countdown starts only once something in the
+   folder changes, so files already there from an earlier run do not count.
+   Turn it off to process a folder that is already complete — it then settles
+   after one quiet period.
+4. **Give up after (hours, 0 = never)** fails the watch, and holds up the jobs
+   after it, if the folder has not settled in that long. 0 waits indefinitely.
+5. Press **+ Queue** (or **▶ Start watching** to watch without the queue).
+
+The status line under the buttons counts down: "Receiving files — 3 files,
+quiet for 1:20 of 5:00." The folder is looked at every few seconds by listing
+its files' names, sizes and modification times, which works on network shares
+and USB drives where the operating system's change notifications often do not.
+Files that the operating system or a file browser leaves behind — `.DS_Store`,
+`._` sidecars, `Thumbs.db`, Office `~$` lock files — and anything in a hidden
+folder are ignored, so opening the folder in Finder to look at it does not
+restart the countdown.
+
+A watch fires once. To process the next acquisition, queue the chain again —
+a [recipe](#job-queue) does that in two clicks. A running watch does not hold
+up other work: it runs beside the queue's jobs on this computer, and its row
+in the queue shows the same countdown as its page. **⏸ Pause queue** pauses a
+watch rather than cancelling it — the jobs after it keep waiting. Only one watch
+runs at a time, though: a second Watch Folder job waits in the queue until the
+first has settled, so two acquisitions running at once are watched one after
+the other.
+
+A queued watch remembers when it first started. If you pause it, or the app
+closes or crashes while it is watching, starting the queue again resumes it
+and counts every file written since it first started — so an acquisition that
+finished while the app was down settles after one quiet period instead of
+waiting for a change that already happened. (This compares the files'
+modification times with this computer's clock; on a file server whose clock is
+far behind, a resumed watch can still wait for a new change — then choose
+**Edit…**, untick **Wait for new files before counting**, and save.)
+**Retry** starts a watch over, waiting for new files again.
+
+**Converting what lands in the watched folder.** Queue the conversion as usual
+— set its page up on an earlier acquisition from the same protocol, so the
+plate layout and channel roles are right, and set its **destination** to a
+folder named after the watched one (watching `run7`, convert into
+`run7_dataset`; the page suggests a name taken from the earlier file, which
+would already hold that plate) — then on its row choose **Input from ▸** the
+Watch Folder job. When the conversion starts it is handed the
+watched folder and chooses the file itself: Convert ND2 and Convert OME-TIFF
+use the one `.nd2` / `.ome.tif` file in the folder (in any subfolder), and the
+job fails naming what it found if there is none or more than one, rather than
+converting one of several plates; Convert CZI reads every `.czi` in the folder
+as one plate, as it does when you pick a folder on its page. **Zip Loose
+Folder** can take the watched folder as its source in the same way, for loose
+TIFs.
+
+### Automation
+
+Everything about running work unattended is on one page, **Automation**, in
+three tabs:
+
+- **Queue** — the jobs: what is running now and what runs next (the
+  [Job Queue](#job-queue), below).
+- **Recipes** — the plans: chains of jobs saved to apply to each new
+  acquisition ([Recipes](#recipes)).
+- **Runs** — the record: every time a recipe was applied, how far it got and
+  its log, kept after the jobs are cleared from the queue.
+
+Each leads to the next: applying a recipe adds its jobs to Queue and takes you
+there; a job queued from a recipe opens its run in Runs (**Recipe log…** in its
+**⋯** menu); a recipe shows how often it was applied, and **Show runs** opens
+Runs filtered to it.
+
 ### Job Queue
 
 Lines up Analyze runs and Datasets-tool runs to work through unattended,
@@ -10874,6 +10959,96 @@ a remote Analyze waits for a conversion above it that writes the folder it
 reads, linked or not, and a job below it that writes the folder it is
 reading waits for it to finish. A remote and a local Analyze also take turns,
 since they share the Analyze pane.
+A **Watch Folder** job only looks at its folder every few seconds, so it
+runs beside everything else rather than taking this computer's turn; a job
+that writes into the folder being watched waits for the watch to finish.
+
+**Recipes — queue the same chain again on the next acquisition.** Once a
+chain is set up the way you want it — Watch Folder → Convert → Analyze, say —
+open any of its jobs' **⋯** menu and choose **Save chain as recipe…**, and
+give it a name. The recipe keeps every job in the chain, how they are linked,
+and their settings. To use it, press **Recipes** at the top of the Job Queue
+and choose **Apply “*name*”…**, then choose the folder (or, for a chain that
+starts with Convert ND2 or Convert OME-TIFF, the file) to run it on. The whole
+chain is queued, linked as before. Everything else about recipes — their
+steps, renaming, copying, sharing, deleting, and every run's log — is on the
+[Recipes](#recipes) tab (**Recipes ▸ Manage recipes…**).
+
+Paths in the recipe follow the input you apply it to. The original input, a
+path inside it, and a path beside it **named after it** are rewritten for the
+new one: a destination `/scope/run7_dataset` saved from `/scope/run7` becomes
+`/scope/run8_dataset` when the recipe is applied to `/scope/run8`. Any other
+path, such as a shared reference plate in the same folder
+(`/scope/reference_plate`) or a calibration file elsewhere, is kept as it was.
+A step that writes a new folder must name it after the input; a recipe whose
+conversion writes to, say, `run6_dataset` while watching `run7` is refused when
+you save it, because every use of it would write into that one folder.
+
+What belongs to one acquisition rather than to the protocol is worked out when
+each job runs instead of being saved: a conversion's experiment name is taken
+from the new file's name, its timepoint selection by name is cleared (each
+file names its own timepoints; the every-Nth-timepoint setting is kept), and an
+Analyze job reads its filename schema and channels from its input when it
+starts, as **Detect schema & channels at run time** does. Analyze's list of
+wells to redo and its Force re-run are left out. The well selection, the plate
+grid, the channel roles and every other setting are kept. Applying a recipe
+says what it left out. A chain — every job linked to the one you save from,
+in either direction — can be saved as a recipe only if it starts from one job
+(two watches feeding a Concatenate have two inputs, whichever of the three you
+save from) and that job has its input set. Every job queued from a recipe says so on its row ("recipe “Nightly” · step
+2/3"), and **Recipe log…** in its **⋯** menu opens that run in the Runs tab.
+
+### Recipes
+
+The **Recipes** tab of Automation keeps the plans themselves; the Queue tab
+holds the jobs a plan becomes, and the Runs tab what each use of one did.
+
+- **The list** — every saved recipe. Choose one to see its **steps** in order,
+  each with its settings and where its input comes from ("source from step
+  1"). Paths that follow the input are written as ‹input›, ‹input's folder› and
+  ‹input name›; a fixed path is shown as it is.
+- **▶ Apply to…** queues the recipe on a folder or file you choose, as the
+  queue's own Recipes menu does, and takes you to the Queue tab.
+- **Rename…**, **Duplicate** (a copy to change), **Export…** (a file to send
+  to a colleague or another computer), **Delete…** (jobs already queued from it
+  are not affected). **Import…** adds an exported recipe; one with the same
+  name as yours is imported as "*name* (2)" rather than replacing it, and a
+  file from a newer version of All-Well, or one that is damaged, is refused
+  with the reason.
+- **Open the result in Review when the last Analyze step finishes** — tick
+  it, and every run applied from then on puts its analysed result in front of
+  you when it is ready, carefully, since nobody may be expecting it:
+  - **nobody is using the app** (the mouse has not moved for two minutes, or
+    another application is in front): it loads the result and switches to
+    Review;
+  - **you are working in Analyze or Datasets**: it loads the result in Review
+    behind you and leaves the window where it is;
+  - **you are reading another dataset in Review**: it leaves Review alone,
+    since loading would replace what you are reading, and says the result is
+    ready — on screen, on the Analyze job's row and in the run's log.
+
+  What it did is written on the Analyze job's row and in the run's log. A
+  recipe with no Analyze step has nothing to open, and the box is greyed out.
+- Under the steps, how often the recipe was applied and how its last run
+  stands; **Show runs** opens the Runs tab filtered to it.
+
+**The Runs tab** lists every time a recipe was applied — all recipes, or one
+chosen in **Recipe** — newest first: when, to what, how many steps are done,
+and how it stands (waiting, running, paused, interrupted, failed, cancelled,
+done). A recipe since renamed or deleted keeps its runs, under the name it was
+applied with. Choose a run to read its **log**: when
+  it was applied and to what, when each step started and on which folder,
+  when the watch began receiving files and settled, which file the conversion
+  chose, how each step ended and what it wrote, any pause, retry or removal,
+  and any app restart that interrupted it. The list and the log update while
+  the run is going.
+
+Recipes are saved in `job_recipes.json` beside the queue, in the app's folder
+(`~/.allwell` on macOS and Linux, `%LOCALAPPDATA%\allwell` on Windows), and
+each run's log in `recipe_runs/`, one file per run, written line by line as
+things happen — so a crash loses at most the line being written, and the log
+stays after the run's jobs are cleared from the queue. A run applied under a
+name you later renamed keeps its old name in its log.
 
 **A run you start on a tool's own page joins the queue.** Press **Run** on
 Analyze or any Datasets tool and the run appears in the Job Queue as a

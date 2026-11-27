@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from widgets.flow_layout import FlowLayout
 from datasets.core.log_panel import hrule as _hrule
-from services.job_kinds import KIND_LABEL
+from services.job_kinds import FOLDER_SOURCE_KINDS, KIND_LABEL, input_targets
 from services.job_queue import JobSpec, JobState, downstream_ids, lineage
 from datasets.job_queue.row import JobRow
 from widgets import menu_exec
@@ -43,7 +43,7 @@ from widgets.owned_action import owned_action
 # the Datasets tools in the order their own rail lists them.
 ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import",
              "nd2_import", "validate",
-             "subset", "import_loose", "merge_plates")
+             "subset", "import_loose", "merge_plates", "watch_folder")
 
 _STATE_WORD = {
     JobState.PENDING: "pending",
@@ -79,11 +79,17 @@ class JobQueuePage(QWidget):
     linkRequested = Signal(str, str, str)
     nextStepRequested = Signal(str, str, str)
     showRequested = Signal(str)
+    saveRecipeRequested = Signal(str)
+    recipeLogRequested = Signal(str)
+    applyRecipeRequested = Signal(str)
+    manageRecipesRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._rows: dict[str, JobRow] = {}
         self._order: list[str] = []
+        #: (name, one-line chain) per saved recipe, for the Recipes menu.
+        self._recipes: list[tuple[str, str]] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -113,8 +119,8 @@ class JobQueuePage(QWidget):
         blurb = QLabel(
             "Line up Analyze runs and Datasets tools to work through "
             "unattended, in order. One job runs at a time — except that an "
-            "Analyze run on a remote host can run beside one job on this "
-            "computer, when the two share no folder. "
+            "Analyze run on a remote host, and a Watch Folder job, can each "
+            "run beside one job on this computer, when they share no folder. "
             "A queued run proceeds without the interactive confirmations its "
             "own page would show, since there's no one there to ask. "
             "Pause winds the running job down and keeps what it has finished, "
@@ -193,6 +199,17 @@ class JobQueuePage(QWidget):
         self._add_btn.clicked.connect(self._open_add_menu)
         hl.addWidget(self._add_btn)
 
+        # A plain button that opens a transient menu, as "+ Add job" does: it
+        # has no QMenu attached, so Qt draws no indicator and the label needs
+        # no caret (CLAUDE.md §7.12).
+        self._recipes_btn = QPushButton("Recipes", self)
+        self._recipes_btn.setProperty("variant", "secondary")
+        self._recipes_btn.setToolTip(
+            "Queue a saved chain of jobs on a new folder or file. Save a chain "
+            "from any of its jobs' ⋯ menu: “Save chain as recipe…”.")
+        self._recipes_btn.clicked.connect(self._open_recipes_menu)
+        hl.addWidget(self._recipes_btn)
+
         self._clear_btn = QPushButton("Clear completed", self)
         self._clear_btn.setToolTip(
             "Remove every finished job — succeeded, failed, cancelled or "
@@ -249,6 +266,38 @@ class JobQueuePage(QWidget):
                                   self.addKindRequested.emit(k))
         return menu
 
+    def _open_recipes_menu(self) -> None:
+        menu = self.build_recipes_menu()
+        menu_exec.exec_transient_menu(
+            menu, self._recipes_btn.mapToGlobal(self._recipes_btn.rect().bottomLeft()))
+
+    def build_recipes_menu(self) -> QMenu:
+        """The Recipes menu, returned rather than opened (see
+        :meth:`build_add_menu`).
+
+        The queue's half of recipes only: apply one (which adds jobs here), or
+        go to the Recipes page, which owns everything else about them —
+        renaming, copying, sharing, deleting, and every run's log. Offering
+        Delete here as well put the same action in two places."""
+        menu = QMenu(self)
+        menu.setObjectName("RecipesMenu")
+        if not self._recipes:
+            note = owned_action(menu, "No recipes yet — open a queued job's ⋯ menu "
+                                      "and choose “Save chain as recipe…”")
+            note.setEnabled(False)
+        for name, summary in self._recipes:
+            act = owned_action(menu, f"Apply “{name}”…")
+            act.setToolTip(summary)
+            act.triggered.connect(
+                lambda _checked=False, n=name: self.applyRecipeRequested.emit(n))
+        menu.addSeparator()
+        owned_action(menu, "Manage recipes…").triggered.connect(self.manageRecipesRequested)
+        return menu
+
+    def set_recipes(self, recipes: list[tuple[str, str]]) -> None:
+        """The saved recipes the Recipes menu offers, as (name, chain)."""
+        self._recipes = list(recipes)
+
     # ── public API used by the controller ───────────────────────────────
     def _show_empty_hint(self) -> None:
         """Swap the list out for the one-line caption."""
@@ -290,8 +339,10 @@ class JobQueuePage(QWidget):
             if row is not None:
                 downstream = downstream_ids(jobs, job.id)
                 row.update_from(job, ordinal=positions[job.id],
-                                predecessors=self._predecessors_for(job.id, jobs),
-                                below=self._below_for(job.id, jobs),
+                                predecessors=self._sources_for(
+                                    job, self._predecessors_for(job.id, jobs), jobs),
+                                below=self._sources_for(
+                                    job, self._below_for(job.id, jobs), jobs),
                                 others=self._others_for(job.id, jobs),
                                 positions=positions,
                                 finished_downstream=sum(
@@ -312,6 +363,22 @@ class JobQueuePage(QWidget):
                 break
             out.append((job.id, job.label or job.kind))
         return out
+
+    @staticmethod
+    def _sources_for(job: JobSpec, offered: list[tuple[str, str]],
+                     jobs: list[JobSpec]) -> list[tuple[str, str]]:
+        """*offered*, narrowed to the jobs that can be *job*'s input.
+
+        A kind that reads a dataset can take any job's output. A kind that
+        reads files — a converter, Zip loose — can take only a Watch folder
+        job's, since a watched folder is the one output that is files rather
+        than a dataset (``services.job_kinds.FOLDER_INPUT_TARGETS``).
+        """
+        if input_targets(job.kind):
+            return offered
+        kinds = {j.id: j.kind for j in jobs}
+        return [(jid, label) for jid, label in offered
+                if kinds.get(jid) in FOLDER_SOURCE_KINDS]
 
     @staticmethod
     def _below_for(job_id: str, jobs: list[JobSpec]) -> list[tuple[str, str]]:
@@ -345,6 +412,8 @@ class JobQueuePage(QWidget):
             row.moveDownClicked.connect(self.moveDownRequested)
             row.editClicked.connect(self.editRequested)
             row.duplicateClicked.connect(self.duplicateRequested)
+            row.saveRecipeClicked.connect(self.saveRecipeRequested)
+            row.recipeLogClicked.connect(self.recipeLogRequested)
             row.stopClicked.connect(self.stopJobRequested)
             row.retryClicked.connect(self.retryRequested)
             row.chainRequested.connect(self.chainRequested)

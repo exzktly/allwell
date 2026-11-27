@@ -38,6 +38,10 @@ CZI_CONVERTER = ConverterSpec(
     # Reading every tile's acquisition time before the first archive, and building acquisition.json after the
     # last, write no planes: without a status line the page looked finished while the record was still unwritten.
     reports_status=True,
+    source_suffixes=(".czi",),
+    # A folder is one plate to this converter (ZEN split-scene export), so a
+    # watched folder is read whole rather than narrowed to one file.
+    folder_is_a_source=True,
 )
 
 

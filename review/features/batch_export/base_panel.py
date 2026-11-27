@@ -587,13 +587,12 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         hdr1.addStretch(1)
         hdr1.addWidget(btn_primary(None, "+ Add", self._grp_add))
         qs_btn = QToolButton()
-        # Plain dropdown-style button \u2014 no visible arrow indicator.
-        # Qt's `QToolButton::menu-indicator` is the small dropdown
-        # caret Qt paints when a menu is attached; hide it via QSS.
-        # InstantPopup keeps the "click to open menu" behaviour.
+        # A menu button draws one arrow: the theme's shared chevron, through
+        # ``hasMenu`` (CLAUDE.md §7.12). It used to hide Qt's indicator and
+        # show none at all, so nothing said the button opened a menu.
         qs_btn.setText("Quick Setup")
         qs_btn.setPopupMode(QToolButton.InstantPopup)
-        qs_btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+        qs_btn.setProperty("hasMenu", True)
         qs_menu = QMenu(qs_btn)
         qs_menu.addAction("One group per row  (Row A = all A wells, \u2026)", self._quick_by_row)
         qs_menu.addAction("One group per column  (Col 01 = all col-01 wells, \u2026)", self._quick_by_col)

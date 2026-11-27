@@ -44,7 +44,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from PySide6.QtCore import QEvent, QObject, QRect, Qt, QTimer
-from PySide6.QtGui import QAction, QActionGroup, QFont, QGuiApplication
+from PySide6.QtGui import QAction, QFont, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QLabel,
     QLineEdit, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget,
@@ -55,6 +55,7 @@ from core import phone_layout
 from core.safe import swallowed
 from ui import phone_inspector, phone_window, theme
 from widgets import form_registry
+from widgets.menu_marks import mark_current
 from widgets.control_band import ControlBand
 
 
@@ -2720,15 +2721,14 @@ class PhoneShell(QObject):
         # heading too, and two buttons offering the same sections read as one
         # control duplicated rather than as two with different jobs.
         bar = self._current_page_bar()
-        group = QActionGroup(self._page_menu)
         if bar is not None:
             self._menu_caption(self._current_section_label())
             for i in range(bar.count()):
-                act = QAction(_menu_text(bar.tabText(i)), self._page_menu, checkable=True)
-                act.setChecked(i == bar.currentIndex())
+                # The page on screen is marked, not ticked: a command, not a setting (``widgets.menu_marks``).
+                act = mark_current(QAction(self._page_menu), _menu_text(bar.tabText(i)),
+                                   i == bar.currentIndex())
                 act.setEnabled(bar.isTabEnabled(i))
                 act.triggered.connect(lambda _c=False, b=bar, idx=i: self._pick_page(b, idx))
-                group.addAction(act)
                 self._page_menu.addAction(act)
 
     def _menu_caption(self, text: str) -> None:
@@ -2764,12 +2764,9 @@ class PhoneShell(QObject):
                               self._pick_tool)
 
     def _fill_named_menu(self, names, current: str, pick) -> None:
-        group = QActionGroup(self._page_menu)
         for name in names:
-            act = QAction(_menu_text(name), self._page_menu, checkable=True)
-            act.setChecked(name == current)
+            act = mark_current(QAction(self._page_menu), _menu_text(name), name == current)
             act.triggered.connect(lambda _c=False, n=name: pick(n))
-            group.addAction(act)
             self._page_menu.addAction(act)
 
     def _pick_page_view(self, name: str) -> None:

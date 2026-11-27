@@ -17,10 +17,6 @@ from tests import _surface_guards as scan
 CHECKABLE_ACTIONS: dict[tuple[str, str], str] = {
     ('review/features/image_browser/image_table/tab_view.py', 'build_image_table_tab'):
         "pending S18: Crop view's choices become a page",
-    ('ui/phone_shell.py', 'PhoneShell._fill_named_menu'):
-        'pending S26: the current page is marked without a checkable action',
-    ('ui/phone_shell.py', 'PhoneShell._fill_page_menu'):
-        'pending S26: the current page is marked without a checkable action',
 }
 
 #: ``(file, function)`` -> why the site is still there. An entry starting
@@ -28,25 +24,23 @@ CHECKABLE_ACTIONS: dict[tuple[str, str], str] = {
 #: starting ``kept`` is permanent and says why.
 SUBMENUS: dict[tuple[str, str], str] = {
     ('analyze/presets.py', 'AnalyzePresetsMixin._rebuild_presets_menu'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
-    ('analyze/run_spec.py', 'AnalyzeRunMixin.offer_queued_outputs'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
+        'kept: one level — Delete needs the name of the preset to delete, and listing the names to load and the names to delete in one list would make a load one slip from a deletion',
     ('datasets/job_queue/row.py', 'JobRow._add_chain_submenu'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
+        'kept: one level — the jobs this job can follow, listed under the one command they answer',
     ('datasets/job_queue/row.py', 'JobRow._add_input_submenu'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
+        'kept: one level — the jobs an input can come from, listed under the input they fill',
     ('datasets/job_queue/row.py', 'JobRow._add_next_step_submenu'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
+        'kept: one level — the kinds of job that can read this output; the pairings that were a second level are entries of this list',
     ('datasets/job_queue/row.py', 'JobRow._add_retry'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
+        'kept: one level — the two ways to retry a job whose output finished jobs used, which the plain Retry cannot choose between',
     ('review/features/batch_export/variable_select_panel.py', 'VariableSelectMixin._vsel_add_quick_setup_menu'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
+        'kept: one level — one group per value of the variable chosen in it',
     ('review/features/image_browser/image_table/tab_view.py', 'build_image_table_tab'):
         'pending S18: the quality submenu becomes a Style page',
     ('review/features/nanowell/tab_view.py', '_layers_button'):
         'pending S19: Layers becomes a row and a page',
     ('widgets/path_field.py', 'PathField.add_browse_alternative'):
-        'pending S26: menu conventions — flatten or keep at one level with a reason',
+        'kept: one level — Browse… and the list of queued outputs that can fill the field are different jobs; the list is read as it opens',
 }
 
 

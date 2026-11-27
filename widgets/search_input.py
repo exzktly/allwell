@@ -45,7 +45,6 @@ class SearchInput(QLineEdit):
         self._hint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._hint.setVisible(bool(hint))
 
-        self.setStyleSheet(self._build_qss())
         self.textChanged.connect(lambda _t: self._reposition_hint())
         self._reposition_hint()
 
@@ -107,30 +106,6 @@ class SearchInput(QLineEdit):
             self._reposition_hint()
         super().changeEvent(event)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        QLineEdit#SearchInput {{
-            background-color: {c.control};
-            border: 1px solid {c.field_edge};
-            border-radius: {r.sm}px;
-            color: {c.text_primary};
-            padding: 5px 8px;
-            font-size: {t.body_size}px;
-            selection-background-color: {c.accent};
-            selection-color: {c.on_accent};
-        }}
-        QLineEdit#SearchInput:hover {{ border-color: {c.border_strong}; }}
-        QLineEdit#SearchInput:focus {{ border-color: {c.accent}; }}
-        QLabel#SearchInputHint {{
-            color: {c.text_secondary};
-            background-color: {c.card};
-            border: 1px solid {c.border_subtle};
-            border-radius: {r.xs}px;
-            padding: 0 4px;
-            font-size: {t.caption_size}px;
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -165,3 +140,29 @@ if __name__ == "__main__":
     root.resize(360, 180)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    QLineEdit#SearchInput {{
+        background-color: {c.control};
+        border: 1px solid {c.field_edge};
+        border-radius: {r.sm}px;
+        color: {c.text_primary};
+        padding: 5px 8px;
+        font-size: {t.body_size}px;
+        selection-background-color: {c.accent};
+        selection-color: {c.on_accent};
+    }}
+    QLineEdit#SearchInput:hover {{ border-color: {c.border_strong}; }}
+    QLineEdit#SearchInput:focus {{ border-color: {c.accent}; }}
+    QLabel#SearchInputHint {{
+        color: {c.text_secondary};
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.xs}px;
+        padding: 0 4px;
+        font-size: {t.caption_size}px;
+    }}
+    """

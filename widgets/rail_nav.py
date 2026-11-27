@@ -249,7 +249,6 @@ class RailNav(QFrame):
         # lays out, and how a caption knows which rows are its group.
         self._entries: list[QWidget] = []
 
-        self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
     def addItem(self, label: str, *, icon: str | None = None,
@@ -428,79 +427,6 @@ class RailNav(QFrame):
         if emit:
             self.currentChanged.emit(key)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        QFrame#RailNav {{
-            background: transparent;
-            border: 0;
-        }}
-        QFrame#RailNavRow {{
-            background: transparent;
-        }}
-        QFrame#RailNavRow:disabled {{ color: {c.text_disabled}; }}
-        QFrame#RailNavRowStrip {{
-            background: transparent;
-            border: 0;
-        }}
-        QFrame#RailNavRowStrip[active="true"] {{
-            background-color: {c.accent};
-            border-top-right-radius: 2px;
-            border-bottom-right-radius: 2px;
-        }}
-        QFrame#RailNavRowBody {{
-            background-color: transparent;
-            border-radius: {r.sm}px;
-            margin: 0 4px 0 6px;
-        }}
-        QFrame#RailNavRowBody:hover {{
-            background-color: {c.card};
-        }}
-        QFrame#RailNavRowBody[active="true"] {{
-            background-color: {c.selected};
-        }}
-        QFrame#RailNavRowBody[active="true"]:hover {{
-            background-color: {c.selected};
-        }}
-        QLabel#RailNavRowLabel {{
-            color: {c.text_secondary};
-            font-family: {t.family};
-            font-size: {t.emph_size}px;
-            font-weight: 500;
-            background: transparent;
-        }}
-        /* No `:hover` rule for the label, deliberately. Qt resolves a
-           *descendant* rule by baking its colour into the label's stylesheet
-           palette, and a palette has no notion of ":hover" — so
-           `QFrame#RailNavRow:hover QLabel#RailNavRowLabel` applies always,
-           whatever else is written beside it, and overrides the
-           `text_secondary` base above. Every row then drew at full strength
-           and the active one was not distinguished from the rest, which is the
-           whole job of this rail. Measured (Qt 6.7.3, inactive/active): the
-           [active] rule alone gives #98a2b3 / #e6e9ef; adding the :hover rule
-           gives #e6e9ef / #e6e9ef whether the two are one comma group or two
-           separate rules — splitting the group changes nothing, which is why
-           the rule is gone rather than rewritten.
-
-           Hover is still signalled, by `QFrame#RailNavRowBody:hover` above:
-           that one styles the widget it names rather than a descendant of it,
-           so the pseudo-state resolves normally. */
-        QLabel#RailNavRowLabel[active="true"] {{
-            color: {c.text_primary};
-        }}
-        /* A group caption: the row label's left edge (the 6px body margin,
-           the accent strip and the body's own md padding), muted caption type,
-           a gap above it that separates the group from the one before. */
-        QLabel#RailNavCaption {{
-            color: {c.text_secondary};
-            font-family: {t.family};
-            font-size: {t.caption_size}px;
-            font-weight: 600;
-            letter-spacing: 0.08em;
-            background: transparent;
-            padding: {theme.Spacing.sm}px 0 {theme.Spacing.xs}px {theme.Spacing.md + 8}px;
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -520,10 +446,7 @@ if __name__ == "__main__":
     lay.setSpacing(theme.Spacing.sm)
 
     head = QLabel("SECTION", host)
-    head.setStyleSheet(
-        f"color: {theme.Colors.text_secondary}; font-size: {theme.Typography.caption_size}px; "
-        f"letter-spacing: 0.08em; font-weight: 600;"
-    )
+    head.setProperty("textRole", "eyebrow")
     head.setContentsMargins(theme.Spacing.sm, 0, 0, 0)
     lay.addWidget(head)
 
@@ -540,9 +463,84 @@ if __name__ == "__main__":
     lay.addStretch(1)
 
     out = QLabel("Active: Plotting", host)
-    out.setStyleSheet(f"color: {theme.Colors.text_secondary}; padding: 0 9px;")
+    out.setProperty("textRole", "label")
     nav.currentChanged.connect(lambda k: out.setText(f"Active: {k}"))
     lay.addWidget(out)
 
     host.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    QFrame#RailNav {{
+        background: transparent;
+        border: 0;
+    }}
+    QFrame#RailNavRow {{
+        background: transparent;
+    }}
+    QFrame#RailNavRow:disabled {{ color: {c.text_disabled}; }}
+    QFrame#RailNavRowStrip {{
+        background: transparent;
+        border: 0;
+    }}
+    QFrame#RailNavRowStrip[active="true"] {{
+        background-color: {c.accent};
+        border-top-right-radius: 2px;
+        border-bottom-right-radius: 2px;
+    }}
+    QFrame#RailNavRowBody {{
+        background-color: transparent;
+        border-radius: {r.sm}px;
+        margin: 0 4px 0 6px;
+    }}
+    QFrame#RailNavRowBody:hover {{
+        background-color: {c.card};
+    }}
+    QFrame#RailNavRowBody[active="true"] {{
+        background-color: {c.selected};
+    }}
+    QFrame#RailNavRowBody[active="true"]:hover {{
+        background-color: {c.selected};
+    }}
+    QLabel#RailNavRowLabel {{
+        color: {c.text_secondary};
+        font-family: {t.family};
+        font-size: {t.emph_size}px;
+        font-weight: 500;
+        background: transparent;
+    }}
+    /* No `:hover` rule for the label, deliberately. Qt resolves a
+       *descendant* rule by baking its colour into the label's stylesheet
+       palette, and a palette has no notion of ":hover" — so
+       `QFrame#RailNavRow:hover QLabel#RailNavRowLabel` applies always,
+       whatever else is written beside it, and overrides the
+       `text_secondary` base above. Every row then drew at full strength
+       and the active one was not distinguished from the rest, which is the
+       whole job of this rail. Measured (Qt 6.7.3, inactive/active): the
+       [active] rule alone gives #98a2b3 / #e6e9ef; adding the :hover rule
+       gives #e6e9ef / #e6e9ef whether the two are one comma group or two
+       separate rules — splitting the group changes nothing, which is why
+       the rule is gone rather than rewritten.
+
+       Hover is still signalled, by `QFrame#RailNavRowBody:hover` above:
+       that one styles the widget it names rather than a descendant of it,
+       so the pseudo-state resolves normally. */
+    QLabel#RailNavRowLabel[active="true"] {{
+        color: {c.text_primary};
+    }}
+    /* A group caption: the row label's left edge (the 6px body margin,
+       the accent strip and the body's own md padding), muted caption type,
+       a gap above it that separates the group from the one before. */
+    QLabel#RailNavCaption {{
+        color: {c.text_secondary};
+        font-family: {t.family};
+        font-size: {t.caption_size}px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        background: transparent;
+        padding: {theme.Spacing.sm}px 0 {theme.Spacing.xs}px {theme.Spacing.md + 8}px;
+    }}
+    """

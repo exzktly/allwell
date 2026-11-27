@@ -195,17 +195,6 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     dock = QWidget(parent)
     dock.setObjectName("PlaygroundDock")
     dock.setAttribute(Qt.WA_StyledBackground, True)
-    dock.setStyleSheet(
-        f"#PlaygroundDock {{ background-color: {theme.Colors.rail};"
-        f" border-left: 1px solid {theme.Colors.border_subtle}; }}"
-        f"#PlaygroundDock[stacked=\"true\"] {{ border-left: none;"
-        f" border-top: 1px solid {theme.Colors.border_subtle}; }}"
-        # The blanket ``QScrollArea`` / ``QWidget`` rules would paint the
-        # scroll area and its viewport in the canvas colour over the rail fill.
-        "#PlaygroundDockScroll, #PlaygroundDockScroll > QWidget"
-        " { background-color: transparent; }"
-        f"#PropertyPanel {{ background-color: {theme.Colors.rail}; }}"
-    )
     dock.setFixedWidth(theme.Metrics.dock_w)
     dock_scroll = QScrollArea(dock)
     dock_scroll.setObjectName("PlaygroundDockScroll")

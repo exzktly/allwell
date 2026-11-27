@@ -37,7 +37,6 @@ class BrandTile(QWidget):
         # ``QPainter.setBrush(...)``, so the raw hex strings from
         # ``theme.Colors.trace`` crash the paintEvent.
         self._colors = [QColor(c) for c in theme.Colors.trace]
-        self.setStyleSheet("#BrandTile { background: transparent; }")
 
     def setColors(self, colors) -> None:
         cs = [QColor(c) for c in colors if QColor(c).isValid()]

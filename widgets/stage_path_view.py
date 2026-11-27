@@ -101,13 +101,6 @@ class StagePathView(QWidget):
         # same object name got the name and none of the appearance, which is
         # exactly the silent miss ``tests/test_theme_selectors.py`` exists to
         # catch. Same tokens, so the two still read as one drawing.
-        self.setStyleSheet(f"""
-        #StagePathView {{
-            background-color: {theme.Colors.card};
-            border: 1px solid {theme.Colors.border_subtle};
-            border-radius: {theme.Radii.md}px;
-        }}
-        """)
         # A bare QWidget has no size hint, so a layout gives it nothing and it
         # collapses to 0x0 — visible by every flag, and never a pixel on screen.
         # The plate above it gets its size from `plate_geometry`; this asks for

@@ -55,7 +55,6 @@ class ChipGroup(QWidget):
         self._current = -1
 
         self._group.idToggled.connect(self._on_id_toggled)
-        self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
     def addChip(self, text: str, data: object | None = None) -> int:
@@ -140,31 +139,6 @@ class ChipGroup(QWidget):
         else:
             self.chipToggled.emit(idx, checked)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        #ChipGroup {{ background: transparent; }}
-        #ChipGroup QToolButton#Chip {{
-            background-color: {c.control};
-            border: 1px solid {c.button_edge};
-            border-radius: {r.pill}px;
-            color: {c.text_secondary};
-            padding: 3px 10px;
-            font-size: {t.small_size}px;
-            font-weight: {t.medium};
-        }}
-        #ChipGroup QToolButton#Chip:hover {{
-            background-color: {c.hover};
-            border-color: {c.border_strong};
-            color: {c.text_primary};
-        }}
-        #ChipGroup QToolButton#Chip:checked {{
-            background-color: {c.selected};
-            border-color: {c.accent};
-            color: {c.text_primary};
-        }}
-        #ChipGroup QToolButton#Chip:disabled {{ color: {c.text_disabled}; }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -210,3 +184,30 @@ if __name__ == "__main__":
     root.resize(420, 280)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    #ChipGroup {{ background: transparent; }}
+    #ChipGroup QToolButton#Chip {{
+        background-color: {c.control};
+        border: 1px solid {c.button_edge};
+        border-radius: {r.pill}px;
+        color: {c.text_secondary};
+        padding: 3px 10px;
+        font-size: {t.small_size}px;
+        font-weight: {t.medium};
+    }}
+    #ChipGroup QToolButton#Chip:hover {{
+        background-color: {c.hover};
+        border-color: {c.border_strong};
+        color: {c.text_primary};
+    }}
+    #ChipGroup QToolButton#Chip:checked {{
+        background-color: {c.selected};
+        border-color: {c.accent};
+        color: {c.text_primary};
+    }}
+    #ChipGroup QToolButton#Chip:disabled {{ color: {c.text_disabled}; }}
+    """

@@ -404,14 +404,6 @@ class AllWellApp(QMainWindow):
         # No registered theme overrides either today — both ``blue`` and the
         # default ``grey`` leave it a transparent pill with white text — but the
         # tokens exist so a theme can recolour it without touching this builder.
-        self._version_pill.setStyleSheet(
-            f"background-color: {theme_v2.Colors.brand}; "
-            f"color: {theme_v2.Colors.brand_fg}; "
-            f"font-family: {theme_v2.Typography.family_mono}; "
-            f"font-size: {theme_v2.Typography.caption_size}px; "
-            f"font-weight: 600; padding: 1px 6px; margin-left: 4px; "
-            f"border-radius: {theme_v2.Radii.xs}px;"
-        )
         hl.addWidget(self._version_pill)
         self._header = header
         self._header_layout = hl
@@ -645,10 +637,7 @@ class AllWellApp(QMainWindow):
         # the inner strip, so status/progress show here and appear only once.
         self._status_lbl_app = getattr(self._review, "_status_lbl", None) \
             or QLabel("Ready.")
-        self._status_lbl_app.setStyleSheet(
-            f"color: {theme_v2.Colors.text_secondary}; "
-            f"font-size: {theme_v2.Typography.caption_size}px;"
-        )
+        self._status_lbl_app.setProperty("textRole", "label")
         sb_layout.addWidget(self._status_lbl_app)
         # The focused cell's chip, adopted for the same reason as the label.
         _focus_chip = getattr(self._review, "_focus_chip", None)
@@ -669,10 +658,7 @@ class AllWellApp(QMainWindow):
         self._status_hints: list[QWidget] = []
         for label, hint in (("Open", "⌘O"), ("Help", "⌘/"), ("Export", "⌘E")):
             l = QLabel(label)
-            l.setStyleSheet(
-                f"color: {theme_v2.Colors.text_secondary}; "
-                f"font-size: {theme_v2.Typography.caption_size}px;"
-            )
+            l.setProperty("textRole", "label")
             sb_layout.addWidget(l)
             kbd = _KbdHint(hint)
             sb_layout.addWidget(kbd)
@@ -689,10 +675,6 @@ class AllWellApp(QMainWindow):
         # drawer is shut (_append_log_line), cleared when the drawer opens.
         from widgets.notice_badge import NoticeBadge
         self._log_badge = NoticeBadge(self._log_btn)
-        statusbar.setStyleSheet(
-            f"#StatusBar {{ background-color: {theme_v2.Colors.titlebar}; "
-            f"border-top: 1px solid {theme_v2.Colors.border_subtle}; }}"
-        )
         rl.addWidget(statusbar)
         self._log_drawer = None  # lazy
         self._log_ring: list[str] = []
@@ -1352,10 +1334,7 @@ class AllWellApp(QMainWindow):
                 manual_view.setHtml(combined if n else prefix + manual_html)
             else:
                 manual_view.setHtml(quick_help_html)
-            manual_view.setStyleSheet(
-                f"QTextBrowser {{ background: transparent; border: none; "
-                f"color: {theme_v2.Colors.text_primary}; }}"
-            )
+            manual_view.setObjectName("HelpManual")
             # One browser owns the scrolling and fills the drawer (stretch=1), so
             # anchor links scroll and there's no pinned-height trailing gap.
             manual_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -1836,21 +1815,12 @@ class AllWellApp(QMainWindow):
             )
             where.setWordWrap(True)
             where.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            where.setStyleSheet(
-                f"color: {theme_v2.Colors.text_secondary}; "
-                f"font-size: {theme_v2.Typography.caption_size}px;"
-            )
+            where.setProperty("textRole", "label")
             bl.addWidget(where)
             from PySide6.QtWidgets import QTextEdit as _QTextEdit
             self._log_view = _QTextEdit(body)
             self._log_view.setReadOnly(True)
-            self._log_view.setStyleSheet(
-                f"QTextEdit {{ background-color: {theme_v2.Colors.card}; "
-                f"color: {theme_v2.Colors.text_secondary}; "
-                f"font-family: {theme_v2.Typography.family_mono}; "
-                f"font-size: {theme_v2.Typography.caption_size}px; "
-                f"border: 1px solid {theme_v2.Colors.border_subtle}; }}"
-            )
+            self._log_view.setObjectName("AppLogView")
             # A plain bar maps up to 500 entries onto the drawer's short track,
             # so a drag on it moved many lines per pixel; this one moves at
             # most one line per pixel of drag (widgets/fine_scroll_bar.py).

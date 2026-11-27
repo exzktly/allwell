@@ -22447,7 +22447,18 @@ spacing is 4, 8, 12, 16 and 24, and text takes four sizes: 12, 13, 15 and 17.
 
 There is no stylesheet driver, no theme-manager class and no per-theme `.qss`
 file: `theme.qss()` is the one stylesheet builder, and it lives beside the tokens
-it reads.
+it reads. It includes, last but for the text roles, the rules of the pieces that
+used to style themselves: the notice and the status chip, and
+`ui/component_qss.py` — named pieces of the shell (status bar, version pill, help
+manual, app log, the Properties and Playground docks, phone layout's docked sheet
+and busy overlay) and every reusable widget in its `WIDGET_SHEETS` whose module
+exposes a `qss()` (chip group, collapsible section, empty state, icon button,
+LUT selector, plot card, popover, rail nav, segmented control, stepper and the
+rest). Placed last, a component's own rule wins a tie of specificity as it did
+when it set its own sheet. Gaps and margins come from `Spacing` only
+(`tests/test_spacing_comes_from_tokens.py`); a style sheet set on a widget is the
+exception, each held with its reason by
+`tests/test_no_style_sheet_outside_the_theme.py`.
 
 At the bottom of the module, in a block marked as such, sit the last two named
 colours with no `Colors` home of their own — `CLR_DANGER` and

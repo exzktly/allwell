@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 from ui import buttons
+from ui import text_roles
 
 #: How far through a well counts as "being converted" rather than "pending".
 #: Any fraction above zero: the first plane written is the tell, and a well
@@ -211,7 +212,6 @@ class ConverterDashboard(PlateProgress):
         self._refresh_rail()
         self._refresh_pick_note()
         self._headline.setText("Idle")
-        self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
         self._status.setText("")
 
@@ -317,8 +317,7 @@ class ConverterDashboard(PlateProgress):
 
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
-        head = QLabel("Wells", self._rail_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head = text_roles.eyebrow("Wells", self._rail_host)
         self._rail_lay.addWidget(head)
         for state, label, count in self._counts():
             row_host = QWidget(self._rail_host)
@@ -327,7 +326,6 @@ class ConverterDashboard(PlateProgress):
             row.setSpacing(theme.Spacing.sm)
             row.addWidget(status_dot(self._state_color(state)))
             text = QLabel(f"{label}: {count}", row_host)
-            text.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(text)
             row.addStretch(1)
             self._rail_lay.addWidget(row_host)

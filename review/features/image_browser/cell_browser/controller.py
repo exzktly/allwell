@@ -41,11 +41,6 @@ class _CellThumb(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("CellThumb")
-        self.setStyleSheet(
-            f"#CellThumb {{ background: {theme.Colors.rail}; "
-            f"border: 1px solid {theme.Colors.hairline}; }}"
-            f"#CellThumb:hover {{ border: 1px solid {theme.Colors.border_strong}; }}"
-        )
 
     def mousePressEvent(self, ev) -> None:  # Qt override
         on_cell_clicked(self._ctx, self._desc)

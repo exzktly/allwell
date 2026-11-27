@@ -68,7 +68,7 @@ C = theme.Colors
 def test_concatenate_legend(qapp):
     from datasets.concatenate.dashboard import ConcatDashboard
 
-    assert _legend(ConcatDashboard()) == ("Wells", [
+    assert _legend(ConcatDashboard()) == ("WELLS", [
         (C.text_secondary, "pending"),
         (C.warn, "merging"),
         (C.success, "merged"),
@@ -79,7 +79,7 @@ def test_concatenate_legend(qapp):
 def test_import_loose_legend(qapp):
     from datasets.import_loose.dashboard import ImportLooseDashboard
 
-    assert _legend(ImportLooseDashboard()) == ("Legend", [
+    assert _legend(ImportLooseDashboard()) == ("LEGEND", [
         (C.text_secondary, "pending"),
         (C.warn, "zipping"),
         (C.success, "zipped"),
@@ -89,7 +89,7 @@ def test_import_loose_legend(qapp):
 def test_merge_plates_legend(qapp):
     from datasets.merge_plates.dashboard import MergePlatesDashboard
 
-    assert _legend(MergePlatesDashboard()) == ("Wells", [
+    assert _legend(MergePlatesDashboard()) == ("WELLS", [
         (C.text_secondary, "pending"),
         (C.warn, "merging"),
         (C.success, "merged — dataset 1"),
@@ -100,7 +100,7 @@ def test_merge_plates_legend(qapp):
 def test_validate_legend(qapp):
     from datasets.validate.dashboard import ValidateDashboard
 
-    assert _legend(ValidateDashboard()) == ("Legend", [
+    assert _legend(ValidateDashboard()) == ("LEGEND", [
         (C.success, "complete"),
         (C.warn, "partial"),
         (C.danger, "no measurements"),
@@ -111,7 +111,7 @@ def test_validate_legend(qapp):
 def test_run_dashboard_legend_is_local_by_default(qapp):
     from widgets.run_dashboard import RunDashboard
 
-    assert _legend(RunDashboard()) == ("Wells", [
+    assert _legend(RunDashboard()) == ("WELLS", [
         (C.run_pending, "pending"),
         (C.run_processing, "processing"),
         (C.run_on_server, "processed"),
@@ -130,7 +130,7 @@ def test_run_dashboard_legend_names_the_transfer_stages_when_remote(qapp):
 
     dash = RunDashboard()
     dash.reset(remote=True)
-    assert _legend(dash) == ("Wells", [
+    assert _legend(dash) == ("WELLS", [
         (C.run_pending, "pending"),
         (C.run_uploaded, "uploaded"),
         (C.run_processing, "processing"),

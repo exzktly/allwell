@@ -62,7 +62,6 @@ class ColorSwatchRow(QWidget):
         self._hover = -1            # index into self._tiles()
         self._picker = None         # lazily created ColorPickerPopover
         self._picker_anchor = None  # lazily created 1×1 anchor widget
-        self.setStyleSheet("#ColorSwatchRow { background: transparent; }")
 
     # ── API ──────────────────────────────────────────────────────────────
     def setColors(self, colors) -> None:

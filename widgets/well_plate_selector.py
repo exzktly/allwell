@@ -1784,7 +1784,6 @@ class WellPlateSelector(QWidget):
         self._btn_invert.clicked.connect(self.invertSelection)
         self._btn_clear.clicked.connect(self.clearSelection)
 
-        self.setStyleSheet(self._build_qss())
 
     # ── selection API (enabled-aware) ────────────────────────────────────
     def selectAll(self) -> None:
@@ -1970,16 +1969,6 @@ class WellPlateSelector(QWidget):
     def _on_grid_changed(self) -> None:
         self.selectionChanged.emit(self._grid.selected_ids())
 
-    def _build_qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        #WellPlateSelector {{
-            background-color: {c.card};
-            border: 1px solid {c.border_subtle};
-            border-radius: {r.md}px;
-        }}
-        #PlateGrid {{ background: transparent; }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -2049,3 +2038,15 @@ if __name__ == "__main__":
     root.resize(640, 520)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    #WellPlateSelector {{
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.md}px;
+    }}
+    #PlateGrid {{ background: transparent; }}
+    """

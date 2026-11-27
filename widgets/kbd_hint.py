@@ -48,25 +48,10 @@ class KbdHint(QLabel):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet(self._build_qss())
 
     def setText(self, text: str) -> None:  # QLabel override
         super().setText(text or "")
 
-    def _build_qss(self) -> str:
-        c, t, r, s = theme.Colors, theme.Typography, theme.Radii, theme.Spacing
-        return f"""
-        QLabel#KbdHint {{
-            color: {c.text_secondary};
-            background-color: {c.control};
-            border: 1px solid {c.border_subtle};
-            border-radius: {r.xs}px;
-            padding: 1px {s.xs}px;
-            font-family: {t.family_mono};
-            font-size: {t.caption_size}px;
-            font-weight: 500;
-        }}
-        """
 
     # ── composition helper ───────────────────────────────────────────────
     @classmethod
@@ -129,3 +114,19 @@ if __name__ == "__main__":
     lay.addStretch(1)
     host.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r, s = theme.Colors, theme.Typography, theme.Radii, theme.Spacing
+    return f"""
+    QLabel#KbdHint {{
+        color: {c.text_secondary};
+        background-color: {c.control};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.xs}px;
+        padding: 1px {s.xs}px;
+        font-family: {t.family_mono};
+        font-size: {t.caption_size}px;
+        font-weight: 500;
+    }}
+    """

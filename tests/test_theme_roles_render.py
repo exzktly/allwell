@@ -15,6 +15,7 @@ import pytest
 pytest.importorskip("PySide6")
 
 from ui import theme  # noqa: E402
+from widgets.empty_state import qss as empty_state_qss  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -87,15 +88,14 @@ def _stylesheet_sources():
     looks at.
     """
     from ui import theme as _theme
-    from widgets.empty_state import EmptyState
 
     yield "theme.qss()", _theme.qss()
     yield "theme.link_row_qss()", _theme.link_row_qss("Probe")
-    yield "EmptyState._build_qss()", EmptyState("probe")._build_qss()
+    yield "widgets.empty_state.qss()", empty_state_qss()
 
 
 @pytest.mark.parametrize("name", ["theme.qss()", "theme.link_row_qss()",
-                                  "EmptyState._build_qss()"])
+                                  "widgets.empty_state.qss()"])
 def test_no_stylesheet_reaches_qt_with_doubled_braces(qapp, name):
     """``{{`` in the output means an f-string escape survived into the QSS.
 
@@ -139,7 +139,6 @@ def test_the_two_link_row_hosts_are_styled_identically(qapp):
         "Home's card no longer takes its rows from link_row_qss, so the two "
         "lists can now be adjusted apart"
     )
-    from widgets.empty_state import EmptyState
-    assert entry in EmptyState("probe")._build_qss(), (
+    assert entry in empty_state_qss(), (
         "EmptyState's entries no longer take their rows from link_row_qss"
     )

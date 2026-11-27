@@ -128,7 +128,6 @@ class CollapsibleSection(QWidget):
         self._anim.setEasingCurve(QEasingCurve.InOutCubic)
         self._anim.finished.connect(self._on_anim_finished)
 
-        self.setStyleSheet(self._build_qss())
         self._apply_state(animate=False)
 
     # ── content API ──────────────────────────────────────────────────────
@@ -206,37 +205,6 @@ class CollapsibleSection(QWidget):
         else:
             self._body.setVisible(False)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        #CollapsibleSection {{
-            background-color: {c.card};
-            border: 1px solid {c.border_subtle};
-            border-radius: {r.md}px;
-        }}
-        #CollapsibleSectionHeader {{
-            background-color: transparent;
-            border: none;
-            border-top-left-radius: {r.md}px;
-            border-top-right-radius: {r.md}px;
-        }}
-        #CollapsibleSectionHeader:hover {{
-            background-color: {c.hover};
-        }}
-        #CollapsibleSectionTitle {{
-            color: {c.text_primary};
-            font-size: {t.h3_size}px;
-            font-weight: {t.semibold};
-            background: transparent;
-        }}
-        #CollapsibleSectionChevron {{
-            color: {c.text_secondary};
-            background: transparent;
-        }}
-        #CollapsibleSectionValue, #CollapsibleSectionBody {{
-            background: transparent;
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -285,3 +253,36 @@ if __name__ == "__main__":
     root.resize(340, 420)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    #CollapsibleSection {{
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.md}px;
+    }}
+    #CollapsibleSectionHeader {{
+        background-color: transparent;
+        border: none;
+        border-top-left-radius: {r.md}px;
+        border-top-right-radius: {r.md}px;
+    }}
+    #CollapsibleSectionHeader:hover {{
+        background-color: {c.hover};
+    }}
+    #CollapsibleSectionTitle {{
+        color: {c.text_primary};
+        font-size: {t.h3_size}px;
+        font-weight: {t.semibold};
+        background: transparent;
+    }}
+    #CollapsibleSectionChevron {{
+        color: {c.text_secondary};
+        background: transparent;
+    }}
+    #CollapsibleSectionValue, #CollapsibleSectionBody {{
+        background: transparent;
+    }}
+    """

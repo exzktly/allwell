@@ -80,7 +80,6 @@ class Toast(QWidget):
         shadow.setColor(with_alpha(theme.Colors.ink_dark, 0.35))
         card.setGraphicsEffect(shadow)
 
-        self.setStyleSheet(self._build_qss())
         self._fade = QPropertyAnimation(self, b"windowOpacity", self)
         self._fade.setEasingCurve(QEasingCurve.InOutCubic)
         self._dismiss_timer = QTimer(self)
@@ -209,21 +208,6 @@ class Toast(QWidget):
         self._dismiss_timer.stop()
         self._fade_out()
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        #Toast {{ background: transparent; }}
-        #ToastCard {{
-            background-color: {c.card};
-            border: 1px solid {c.button_edge};
-            border-radius: {r.lg}px;
-        }}
-        QLabel#ToastLabel {{
-            color: {c.text_primary};
-            font-size: {t.body_size}px;
-            background: transparent;
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -264,3 +248,20 @@ if __name__ == "__main__":
     host.resize(480, 280)
     host.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    #Toast {{ background: transparent; }}
+    #ToastCard {{
+        background-color: {c.card};
+        border: 1px solid {c.button_edge};
+        border-radius: {r.lg}px;
+    }}
+    QLabel#ToastLabel {{
+        color: {c.text_primary};
+        font-size: {t.body_size}px;
+        background: transparent;
+    }}
+    """

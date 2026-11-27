@@ -154,7 +154,7 @@ class VariableSelectMixin:
         self._vsel_empty = QLabel(NO_VARIABLES_TEXT)
         self._vsel_empty.setWordWrap(True)
         self._vsel_empty.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
-        self._vsel_empty.setStyleSheet(f"color: {theme.Colors.text_secondary};")
+        self._vsel_empty.setProperty("textRole", "help")
         layout.addWidget(self._vsel_empty)
 
         self._vsel_status = QLabel("")

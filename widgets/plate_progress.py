@@ -540,8 +540,9 @@ class PlateProgress(QWidget):
         """
         title, items = self._legend_items()
         self._clear(self._legend_lay)
-        head = QLabel(title, self._legend_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        # An eyebrow (the eyebrow text role: capitals, the label size, the secondary ink).
+        head = QLabel(title.upper(), self._legend_host)
+        head.setProperty("textRole", "eyebrow")
         self._legend_lay.addWidget(head)
         for item in items:
             # ``(colour, label)``, or ``(colour, label, glyph, ink)`` for a state
@@ -554,7 +555,6 @@ class PlateProgress(QWidget):
             r.setSpacing(_LEGEND_ROW_SPACING_PX)
             r.addWidget(status_dot(color, glyph=glyph, ink=ink))
             label = QLabel(text, row)
-            label.setStyleSheet(f"color:{theme.Colors.text_primary};")
             r.addWidget(label)
             r.addStretch(1)
             self._legend_lay.addWidget(row)

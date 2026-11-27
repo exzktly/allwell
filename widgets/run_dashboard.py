@@ -695,10 +695,10 @@ class RunDashboard(PlateProgress):
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
         self._rail = {}
-        head = QLabel("Stages", self._rail_host)
+        head = QLabel("STAGES", self._rail_host)
         head.setObjectName("StageRailHead")
         head.setVisible(not self.isStacked())
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head.setProperty("textRole", "eyebrow")
         self._rail_lay.addWidget(head)
         rows = _RAIL_REMOTE if self._remote else _RAIL_LOCAL
         for key, label in rows:
@@ -706,7 +706,6 @@ class RunDashboard(PlateProgress):
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(_STAGE_ROW_SPACING_PX)
             nm = QLabel(label, row_w); nm.setFixedWidth(scaled_px(_NM_W))
-            nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = QProgressBar(row_w)
             bar.setRange(0, max(1, self._total)); bar.setValue(0)
@@ -716,7 +715,7 @@ class RunDashboard(PlateProgress):
             bar.setVisible(not self.isRailBeside())
             row.addWidget(bar)
             cnt = QLabel("0/0", row_w); cnt.setFixedWidth(scaled_px(_CNT_W))
-            cnt.setStyleSheet(f"color:{theme.Colors.text_secondary};")
+            cnt.setProperty("textRole", "label")
             row.addWidget(cnt)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)

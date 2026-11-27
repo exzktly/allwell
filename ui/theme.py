@@ -743,6 +743,8 @@ def qss() -> str:
     from widgets import status_chip as _status_chip
     _notices = _notice.qss(c, r)
     _chips = _status_chip.qss(c, t, r)
+    from ui import component_qss as _component_qss
+    _components = _component_qss.qss(c, t, r)
     return f"""
 * {{
     font-family: {t.family};
@@ -1726,12 +1728,6 @@ QWidget#JobQueueList {{
     border-radius: {r.sm}px;
 }}
 
-/* ── Notices and status chips ────────────────────────────────────────── */
-/* The one notice (widgets/notice.py; the context banner is one) and the status
-   chip (widgets/status_chip.py), keyed on their severity and tone. */
-{_notices}
-{_chips}
-
 /* ── The Analyze pane's folder banners ───────────────────────────────── */
 /* Two strips at the head of the Analyze sidebar, reporting what the folder in
    the form already holds: the resume offer (analyze.suspend) and the pre-run
@@ -1956,6 +1952,14 @@ QLabel#PlateWellDetail {{
     color: {c.text_secondary};
     padding: {s.xs}px 0px;
 }}
+/* ── Components ──────────────────────────────────────────────────────── */
+/* Last but for the text roles, so on equal specificity a component's own rule
+   wins as it did when each set its own sheet: the notice (widgets/notice.py; the
+   context banner is one), the status chip, and the named pieces and reusable
+   widgets of ui/component_qss.py. */
+{_notices}
+{_chips}
+{_components}
 {_roles}
 """ + (_touch_qss(_TOUCH_UNIT[0]) if _TOUCH_UNIT[0] else "")
 
@@ -2177,6 +2181,14 @@ QWidget#ControlBandForm QLabel[sheetHint="true"] {{
 QWidget#ControlBandForm QPushButton[sheetValue="true"] {{
     text-align: left;
     padding-left: {pt(12)}px;
+}}
+QWidget#ControlBandForm QToolButton#IconButton[sheetButton="true"] {{
+    background-color: {c.control};
+    border: 1px solid {c.button_edge};
+    border-radius: {Radii.sm}px;
+}}
+QWidget#ControlBandForm QToolButton#IconButton[sheetButton="true"]:checked {{
+    background-color: {c.selected};
 }}
 """
 

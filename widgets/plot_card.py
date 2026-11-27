@@ -296,7 +296,6 @@ if _HAVE_MPL:
             root.addWidget(self.canvas, 1)
             root.addWidget(self.toolbar)
 
-            self.setStyleSheet(self._build_qss())
             # NB: a previous revision installed a `QEvent.StyleChange`
             # event filter here so the per-instance QSS would track a
             # future runtime-theme switcher. That filter routed *every*
@@ -964,7 +963,6 @@ if _HAVE_MPL:
             # to no axes, so the per-axes pass above never reaches it.
             _, _fig_fg, _fig_muted, _, _ = _plot_tokens(mode)
             repaint_theme_ink(self.figure, _fig_fg, _fig_muted)
-            self.setStyleSheet(self._build_qss())
             self._sync_theme_ui()
             self.draw()
             if not getattr(self, "_theme_signal_suppressed", False):
@@ -1041,43 +1039,6 @@ if _HAVE_MPL:
             """Re-derive a figure pin's chrome at the new UI scale."""
             self._apply_figure_pin()
 
-        def _build_qss(self) -> str:
-            c, t, r = theme.Colors, theme.Typography, theme.Radii
-            return f"""
-            QFrame#Panel {{
-                background-color: {c.card};
-                border: 1px solid {c.border_subtle};
-                border-radius: {r.md}px;
-            }}
-            QWidget#PlotCardHeader, QWidget#PlotCardControls,
-            QWidget#PlotCardLeftSlot {{ background: transparent; }}
-            QLabel#PlotCardTitle {{
-                color: {c.text_primary};
-                font-size: {t.emph_size}px;
-                font-weight: {t.semibold};
-                background: transparent;
-            }}
-            QLabel#PlotCardPreviewChip {{
-                color: {c.text_secondary};
-                background-color: {c.control};
-                border: 1px solid {c.border_subtle};
-                border-radius: {r.pill}px;
-                padding: 1px 8px;
-                font-size: {t.small_size}px;
-            }}
-            QPushButton#PlotCardStatsChip {{
-                color: {c.text_secondary};
-                background-color: {c.control};
-                border: 1px solid {c.border_subtle};
-                border-radius: {r.pill}px;
-                padding: 2px 10px;
-                font-size: {t.small_size}px;
-            }}
-            QPushButton#PlotCardStatsChip:hover {{
-                color: {c.text_primary};
-                border-color: {c.field_edge};
-            }}
-            """
 
 else:  # pragma: no cover - matplotlib unavailable
     PlotCard = None  # type: ignore
@@ -1152,3 +1113,42 @@ if __name__ == "__main__":
     root.resize(640, 500)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    QFrame#Panel {{
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.md}px;
+    }}
+    QWidget#PlotCardHeader, QWidget#PlotCardControls,
+    QWidget#PlotCardLeftSlot {{ background: transparent; }}
+    QLabel#PlotCardTitle {{
+        color: {c.text_primary};
+        font-size: {t.emph_size}px;
+        font-weight: {t.semibold};
+        background: transparent;
+    }}
+    QLabel#PlotCardPreviewChip {{
+        color: {c.text_secondary};
+        background-color: {c.control};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.pill}px;
+        padding: 1px 8px;
+        font-size: {t.small_size}px;
+    }}
+    QPushButton#PlotCardStatsChip {{
+        color: {c.text_secondary};
+        background-color: {c.control};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.pill}px;
+        padding: 2px 10px;
+        font-size: {t.small_size}px;
+    }}
+    QPushButton#PlotCardStatsChip:hover {{
+        color: {c.text_primary};
+        border-color: {c.field_edge};
+    }}
+    """

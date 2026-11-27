@@ -169,7 +169,6 @@ class SegmentedControl(QWidget):
         self._current = -1
 
         self._group.idClicked.connect(self._on_clicked)
-        self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
     def addSegment(self, text: str = "", icon: QIcon | None = None,
@@ -233,37 +232,6 @@ class SegmentedControl(QWidget):
             self._current = idx
             self.currentChanged.emit(idx)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        return f"""
-        #SegmentedControl {{
-            background-color: {c.card};
-            border: 1px solid {c.border_subtle};
-            border-radius: {r.sm}px;
-        }}
-        #SegmentedControl QToolButton#Segment {{
-            background-color: transparent;
-            border: 1px solid transparent;
-            border-radius: {r.xs}px;
-            color: {c.text_secondary};
-            padding: 5px 10px;
-            font-size: {t.small_size}px;
-            font-weight: {t.medium};
-            text-align: center;
-            qproperty-toolButtonStyle: ToolButtonTextBesideIcon;
-        }}
-        #SegmentedControl QToolButton#Segment:hover {{
-            color: {c.text_primary};
-        }}
-        #SegmentedControl QToolButton#Segment:checked {{
-            background-color: {c.control};
-            border-color: {c.border_subtle};
-            color: {c.text_primary};
-        }}
-        #SegmentedControl QToolButton#Segment:disabled {{
-            color: {c.text_disabled};
-        }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -313,3 +281,36 @@ if __name__ == "__main__":
     root.resize(420, 280)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    return f"""
+    #SegmentedControl {{
+        background-color: {c.card};
+        border: 1px solid {c.border_subtle};
+        border-radius: {r.sm}px;
+    }}
+    #SegmentedControl QToolButton#Segment {{
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: {r.xs}px;
+        color: {c.text_secondary};
+        padding: 5px 10px;
+        font-size: {t.small_size}px;
+        font-weight: {t.medium};
+        text-align: center;
+        qproperty-toolButtonStyle: ToolButtonTextBesideIcon;
+    }}
+    #SegmentedControl QToolButton#Segment:hover {{
+        color: {c.text_primary};
+    }}
+    #SegmentedControl QToolButton#Segment:checked {{
+        background-color: {c.control};
+        border-color: {c.border_subtle};
+        color: {c.text_primary};
+    }}
+    #SegmentedControl QToolButton#Segment:disabled {{
+        color: {c.text_disabled};
+    }}
+    """

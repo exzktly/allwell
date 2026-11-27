@@ -233,7 +233,6 @@ class _SelectionRow(QFrame):
         outer.addWidget(self._chips_host)
 
         self._top = top
-        self.setStyleSheet(self._qss())
         top.mouseDoubleClickEvent = self._begin_rename  # type: ignore[assignment]
         top.mousePressEvent = self._on_body_press        # type: ignore[assignment]
 
@@ -266,37 +265,6 @@ class _SelectionRow(QFrame):
         return self._compact
 
     # ── styling ──────────────────────────────────────────────────────────
-    def _qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        QFrame#SelectionRow {{ background: transparent; border-radius: {r.sm}px;
-            border-left: 3px solid transparent; }}
-        QFrame#SelectionRow[current="true"] {{
-            background-color: {c.selected};
-            border-left: 3px solid {c.accent};
-        }}
-        QFrame#SelectionRow[current="true"] QLabel#RowName {{
-            color: {c.text_primary};
-            font-weight: 700;
-        }}
-        QToolButton#RowGhost {{ border: none; background: transparent; color: {c.text_secondary};
-            padding: 0 2px; }}
-        QToolButton#RowGhost:hover {{ color: {c.text_primary}; }}
-        QToolButton#RowDot {{ border: 1px solid {c.hairline}; border-radius: 7px;
-            min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; }}
-        QLabel#RowHandle {{ color: {c.text_disabled}; }}
-        QLabel#RowName {{ color: {c.text_primary}; }}
-        QLabel#RowName[hiddenRow="true"] {{ color: {c.text_secondary}; }}
-        QLabel#RowCount {{ color: {c.text_secondary}; background-color: {c.control};
-            border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 0 6px; }}
-        QLabel#RepLabel {{ color: {c.text_secondary}; font-size: {theme.Typography.caption_size}px; }}
-        QToolButton#RowChip {{ color: {c.text_primary}; background-color: {c.control};
-            border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 1px 6px; }}
-        QToolButton#RowChip:hover {{ border-color: {c.accent}; }}
-        QToolButton#RepBtn {{ border: 1px solid {c.border_subtle}; border-radius: {r.xs}px;
-            background: transparent; color: {c.text_secondary}; padding: 0 4px; }}
-        QToolButton#RepBtn:hover {{ color: {c.text_primary}; border-color: {c.field_edge}; }}
-        """
 
     # ── populate / refresh ───────────────────────────────────────────────
     def update_from(self, sel: dict, *, current: bool, composable: bool = False,
@@ -327,7 +295,6 @@ class _SelectionRow(QFrame):
         # selector (colour swap). Per-widget ``opacity:`` in QSS is a no-op
         # on QLabel — Qt only honours opacity via QGraphicsOpacityEffect —
         # so don't try to set it here.
-        self.setStyleSheet(self._qss())
         if self._expanded:
             self._fill_chips()
         self.style().unpolish(self); self.style().polish(self)
@@ -649,15 +616,7 @@ class SavedSelectionsList(QWidget):
         footer.addStretch(1)
         v.addLayout(footer)
 
-        self.setStyleSheet(self._qss())
 
-    def _qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        QScrollArea#SavedSelScroll {{ background: transparent; }}
-        QWidget#SavedSelBody {{ background-color: {c.card}; border: 1px solid {c.border_subtle};
-            border-radius: {r.sm}px; }}
-        """
 
     # ── model API ────────────────────────────────────────────────────────
     def setSelections(self, selections) -> None:
@@ -1093,3 +1052,50 @@ if __name__ == "__main__":
     root.resize(480, 480)
     root.show()
     _sys.exit(app.exec())
+
+
+def _row_qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    QFrame#SelectionRow {{ background: transparent; border-radius: {r.sm}px;
+        border-left: 3px solid transparent; }}
+    QFrame#SelectionRow[current="true"] {{
+        background-color: {c.selected};
+        border-left: 3px solid {c.accent};
+    }}
+    QFrame#SelectionRow[current="true"] QLabel#RowName {{
+        color: {c.text_primary};
+        font-weight: 700;
+    }}
+    QToolButton#RowGhost {{ border: none; background: transparent; color: {c.text_secondary};
+        padding: 0 2px; }}
+    QToolButton#RowGhost:hover {{ color: {c.text_primary}; }}
+    QToolButton#RowDot {{ border: 1px solid {c.hairline}; border-radius: 7px;
+        min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; }}
+    QLabel#RowHandle {{ color: {c.text_disabled}; }}
+    QLabel#RowName {{ color: {c.text_primary}; }}
+    QLabel#RowName[hiddenRow="true"] {{ color: {c.text_secondary}; }}
+    QLabel#RowCount {{ color: {c.text_secondary}; background-color: {c.control};
+        border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 0 6px; }}
+    QLabel#RepLabel {{ color: {c.text_secondary}; font-size: {theme.Typography.caption_size}px; }}
+    QToolButton#RowChip {{ color: {c.text_primary}; background-color: {c.control};
+        border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 1px 6px; }}
+    QToolButton#RowChip:hover {{ border-color: {c.accent}; }}
+    QToolButton#RepBtn {{ border: 1px solid {c.border_subtle}; border-radius: {r.xs}px;
+        background: transparent; color: {c.text_secondary}; padding: 0 4px; }}
+    QToolButton#RepBtn:hover {{ color: {c.text_primary}; border-color: {c.field_edge}; }}
+    """
+
+
+def _list_qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    QScrollArea#SavedSelScroll {{ background: transparent; }}
+    QWidget#SavedSelBody {{ background-color: {c.card}; border: 1px solid {c.border_subtle};
+        border-radius: {r.sm}px; }}
+    """
+
+
+def qss() -> str:
+    """The rows' and the list's rules, included by the application sheet (``ui/component_qss.py``)."""
+    return _row_qss() + _list_qss()

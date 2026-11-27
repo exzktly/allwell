@@ -50,15 +50,6 @@ class FocusChip(QFrame):
         self._close.setToolTip("Stop focusing this cell")
         self._close.clicked.connect(lambda _=False: self.cleared.emit())
         lay.addWidget(self._close)
-        c = theme.Colors
-        self.setStyleSheet(
-            f"#FocusChip {{ background: {c.control}; border: 1px solid {c.border_subtle}; "
-            f"border-radius: {theme.Radii.pill}px; }}"
-            f"#FocusChipDot {{ color: {c.focused_cell}; font-size: {theme.Typography.caption_size}px; }}"
-            f"#FocusChipText, #FocusChipClear {{ color: {c.text_primary}; border: none; "
-            f"background: transparent; padding: 0 2px; font-size: {theme.Typography.caption_size}px; }}"
-            f"#FocusChipText:hover {{ text-decoration: underline; }}"
-            f"#FocusChipClear {{ color: {c.text_secondary}; }}")
         self.setVisible(False)
 
     def setItem(self, text: str | None) -> None:

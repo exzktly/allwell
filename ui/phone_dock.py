@@ -32,7 +32,6 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
-from ui import theme
 
 
 class DockedSheet(QWidget):
@@ -53,9 +52,6 @@ class DockedSheet(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        c = theme.Colors
-        self.setStyleSheet(f"#DockedSheet {{ background-color: {c.rail};"
-                           f" border-right: 1px solid {c.border_subtle}; }}")
         self.hide()
 
     def setContentWidget(self, widget: QWidget) -> None:

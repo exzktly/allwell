@@ -2,7 +2,7 @@
 
 ``_Segment.paintEvent`` suppresses the style's text rendering so it can centre
 the icon and label itself. That makes the ``color:`` declarations in
-``SegmentedControl._build_qss`` unreachable for the drawn text: a QSS
+``widgets.segmented_control.qss`` unreachable for the drawn text: a QSS
 pseudo-state colour is resolved into the painter Qt would have used, not into
 the widget palette, so the previous code — which read
 ``QPalette.ButtonText`` off the widget and off the style option — got one
@@ -18,6 +18,8 @@ each state, and the stylesheet must declare the same tone the painter uses.
 """
 
 from __future__ import annotations
+
+from widgets.segmented_control import qss as segmented_qss
 
 import re
 
@@ -51,7 +53,7 @@ def _qss_colors(qss: str) -> dict[str, str]:
 
 def test_the_stylesheet_declares_a_tone_for_each_state(qapp):
     ctrl = SegmentedControl()
-    colors = _qss_colors(ctrl._build_qss())
+    colors = _qss_colors(segmented_qss())
     assert set(colors) == {"", "hover", "checked", "disabled"}, colors
 
 
@@ -59,7 +61,7 @@ def test_the_painter_uses_the_tone_the_stylesheet_declares(qapp):
     ctrl = SegmentedControl()
     ctrl.addSegment("A")
     ctrl.addSegment("B")
-    declared = _qss_colors(ctrl._build_qss())
+    declared = _qss_colors(segmented_qss())
 
     seg = ctrl._buttons[0]
     other = ctrl._buttons[1]
@@ -101,7 +103,7 @@ class _StubSegment:
 
 def test_hover_brightens_an_unchecked_segment(qapp):
     ctrl = SegmentedControl()
-    declared = _qss_colors(ctrl._build_qss())
+    declared = _qss_colors(segmented_qss())
     assert segment_text_color(_StubSegment(hover=True)) == declared["hover"]
     assert segment_text_color(_StubSegment()) == declared[""]
 
@@ -109,7 +111,7 @@ def test_hover_brightens_an_unchecked_segment(qapp):
 def test_disabled_wins_over_hover_and_checked(qapp):
     """QSS orders ``:disabled`` last, so it must not be overridden by hover."""
     ctrl = SegmentedControl()
-    declared = _qss_colors(ctrl._build_qss())
+    declared = _qss_colors(segmented_qss())
     stub = _StubSegment(enabled=False, checked=True, hover=True)
     assert segment_text_color(stub) == declared["disabled"]
 

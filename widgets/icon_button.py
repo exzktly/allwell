@@ -50,7 +50,6 @@ class IconButton(QToolButton):
         self._px_base = int(size) if size else max(14, round(self.fontMetrics().height() * 1.0))
         self._px = round(self._px_base * theme.ui_scale())
         self._refresh_icon()
-        self.setStyleSheet(self._build_qss())
 
     def setIconName(self, name: str) -> None:
         self._icon_name = name
@@ -90,31 +89,6 @@ class IconButton(QToolButton):
         self._refresh_icon()
         super().showEvent(event)
 
-    def _build_qss(self) -> str:
-        c, t, r = theme.Colors, theme.Typography, theme.Radii
-        pad = max(3, round(theme.Spacing.xs / 1))
-        return f"""
-        QToolButton#IconButton {{
-            background-color: transparent;
-            border: 1px solid transparent;
-            border-radius: {r.sm}px;
-            color: {c.text_secondary};
-            padding: {pad}px {pad + 2}px;
-            font-size: {t.small_size}px;
-            font-weight: {t.medium};
-        }}
-        QToolButton#IconButton:hover {{
-            background-color: {c.hover};
-            color: {c.text_primary};
-        }}
-        QToolButton#IconButton:pressed {{ background-color: {c.active}; }}
-        QToolButton#IconButton:checked {{
-            background-color: {c.selected};
-            border-color: {c.accent};
-            color: {c.text_primary};
-        }}
-        QToolButton#IconButton:disabled {{ color: {c.text_disabled}; }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -171,3 +145,30 @@ if __name__ == "__main__":
     root.resize(440, 240)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    pad = max(3, round(theme.Spacing.xs / 1))
+    return f"""
+    QToolButton#IconButton {{
+        background-color: transparent;
+        border: 1px solid transparent;
+        border-radius: {r.sm}px;
+        color: {c.text_secondary};
+        padding: {pad}px {pad + 2}px;
+        font-size: {t.small_size}px;
+        font-weight: {t.medium};
+    }}
+    QToolButton#IconButton:hover {{
+        background-color: {c.hover};
+        color: {c.text_primary};
+    }}
+    QToolButton#IconButton:pressed {{ background-color: {c.active}; }}
+    QToolButton#IconButton:checked {{
+        background-color: {c.selected};
+        border-color: {c.accent};
+        color: {c.text_primary};
+    }}
+    QToolButton#IconButton:disabled {{ color: {c.text_disabled}; }}
+    """

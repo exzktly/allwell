@@ -86,7 +86,6 @@ class Popover(QWidget):
         self._frame.setGraphicsEffect(shadow)
 
         self._content: QWidget | None = None
-        self.setStyleSheet(self._build_qss())
         self.hide()
 
     # ── content ──────────────────────────────────────────────────────────
@@ -196,16 +195,6 @@ class Popover(QWidget):
         self.closed.emit()
 
     # ── style ────────────────────────────────────────────────────────────
-    def _build_qss(self) -> str:
-        c, r = theme.Colors, theme.Radii
-        return f"""
-        #Popover {{ background: transparent; }}
-        #PopoverFrame {{
-            background-color: {c.card};
-            border: 1px solid {c.button_edge};
-            border-radius: {r.lg}px;
-        }}
-        """
 
 
 def _rect_fits(x: int, y: int, w: int, h: int, scr) -> bool:
@@ -277,3 +266,15 @@ if __name__ == "__main__":
     root.resize(560, 360)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, r = theme.Colors, theme.Radii
+    return f"""
+    #Popover {{ background: transparent; }}
+    #PopoverFrame {{
+        background-color: {c.card};
+        border: 1px solid {c.button_edge};
+        border-radius: {r.lg}px;
+    }}
+    """

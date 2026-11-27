@@ -16,6 +16,8 @@ but left the first one bright too would still fail.
 
 from __future__ import annotations
 
+import pytest
+
 from PySide6.QtGui import QPalette
 
 from ui import theme
@@ -23,6 +25,16 @@ from widgets.rail_nav import RailNav
 
 _KEYS = ("Home", "Plotting", "Statistics")
 
+
+
+@pytest.fixture(autouse=True)
+def _application_sheet(qapp):
+    """The widget's rules are part of the application sheet (``ui/component_qss.py``), as in the app."""
+    from ui import theme
+
+    qapp.setStyleSheet(theme.qss())
+    yield
+    qapp.setStyleSheet("")
 
 def _label_colours(nav) -> list[str]:
     return [nav._rows[k]._label.palette().color(QPalette.WindowText).name().lower()

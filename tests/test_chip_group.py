@@ -299,7 +299,8 @@ def test_the_stylesheet_declares_a_tone_for_every_chip_state(qapp):
     """Four states are painted by QSS alone, so nothing but this notices when
     one is dropped."""
     cg = ChipGroup()
-    qss = cg._build_qss()
+    from widgets.chip_group import qss as chip_qss
+    qss = chip_qss()
     for state in ("", ":hover", ":checked", ":disabled"):
         assert f"#ChipGroup QToolButton#Chip{state} {{" in qss, state
 

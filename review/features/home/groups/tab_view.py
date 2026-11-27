@@ -137,11 +137,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     active_l.setContentsMargins(0, _theme.Spacing.xs, 0, _theme.Spacing.xs)
     active_l.setSpacing(_theme.Spacing.xs)
     active_caption = QLabel("ACTIVE GROUP", active_row)
-    active_caption.setStyleSheet(
-        f"color: {_theme.Colors.text_secondary}; "
-        f"font-size: {_theme.Typography.caption_size}px; "
-        f"letter-spacing: 0.08em; font-weight: 600;"
-    )
+    active_caption.setProperty("textRole", "eyebrow")
     active_l.addWidget(active_caption)
     active_lbl = ctx.widgets.register(
         "_rep_active_group_lbl",

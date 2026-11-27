@@ -6126,7 +6126,14 @@ DESIGN_GUARD_CASES = {
                            'def build(lbl):\n    lbl.setProperty("muted", True)\n',
                            'def build(lbl):\n    lbl.setProperty("textRole", "label")\n'),
     "style_sheet": ("tests.test_no_style_sheet_outside_the_theme", "test_no_style_sheet_is_set_outside_the_theme",
-                    'def build(w):\n    w.setStyleSheet(QSS)\n', 'def build(w):\n    w.setObjectName("Card")\n'),
+                    'def build(w):\n    w.setStyleSheet(QSS)\n',
+                    'def build(app, w):\n    app.setStyleSheet(theme.qss())\n    w.setStyleSheet("")\n'),
+    # The exemption is for the theme's own builder, called bare: a module's own qss() with arguments is a rule
+    # of its own, written past the application sheet.
+    "style_sheet_own_qss": ("tests.test_no_style_sheet_outside_the_theme",
+                            "test_no_style_sheet_is_set_outside_the_theme",
+                            'def build(w, c):\n    w.setStyleSheet(qss(c))\n',
+                            'def build(w):\n    w.setObjectName("Card")\n'),
     # A literal wrapped in arithmetic on a token is still a literal.
     "spacing": ("tests.test_spacing_comes_from_tokens", "test_spacing_comes_from_the_scale",
                 'def build(lay):\n    lay.setSpacing(theme.Spacing.sm + 2)\n',

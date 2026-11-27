@@ -279,7 +279,6 @@ class ExportStyleSidebar(QWidget):
         super().__init__(parent)
         self.setObjectName("PropertyPanel")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        self.setStyleSheet(f"#PropertyPanel {{ background-color: {theme.Colors.rail}; }}")
         self._app = app
         self._fig = fig
         self._canvas = canvas

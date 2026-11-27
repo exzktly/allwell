@@ -118,16 +118,16 @@ EXPRESSION_ALLOWLIST = {
     "widgets/color_picker_popover.py:237",
     "widgets/color_picker_popover.py:242",
     "widgets/empty_state.py:165",
-    "widgets/empty_state.py:166",
+    "widgets/empty_state.py:164",
     "widgets/lut_selector.py:121",
     "widgets/lut_selector.py:126",
     "widgets/lut_selector.py:167",
     "widgets/lut_selector.py:254",
-    "widgets/lut_selector.py:255",
-    "widgets/stepper.py:291",
-    "widgets/stepper.py:392",
-    "widgets/styled_slider.py:41",
-    "widgets/styled_slider.py:44",
+    "widgets/lut_selector.py:253",
+    "widgets/stepper.py:290",
+    "widgets/stepper.py:391",
+    "widgets/styled_slider.py:40",
+    "widgets/styled_slider.py:43",
 }
 
 #: The modules that *define* the tokens, and so may write the literals: the token classes and the palettes

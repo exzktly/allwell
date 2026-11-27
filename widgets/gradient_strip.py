@@ -77,7 +77,6 @@ class GradientStrip(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._stops: list[tuple[float, QColor]] = _normalize_stops(stops)
         self._reversed = bool(reversed)
-        self.setStyleSheet("#GradientStrip { background: transparent; }")
 
     # ── API ──────────────────────────────────────────────────────────────
     def setStops(self, stops) -> None:

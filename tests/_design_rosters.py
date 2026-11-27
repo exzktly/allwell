@@ -24,70 +24,71 @@ TEXT_ROLE: dict[str, int] = {
 BUTTON_CONSTRUCTOR: dict[str, int] = {
 }
 STYLE_SHEET: dict[str, int] = {
-    "allwell.py": 8,
+    # A menu button's own menu-indicator hide (CLAUDE.md §7.12) and each map entry's swatch in its data colour
     "analyze/bg_map.py": 2,
+    # The Advanced disclosure's flat look; the dialog is restyled in D28
     "analyze/remote_dialog.py": 1,
-    "datasets/concatenate/dashboard.py": 6,
-    "datasets/core/converter_dashboard.py": 3,
-    "datasets/import_loose/dashboard.py": 3,
-    "datasets/merge_plates/dashboard.py": 3,
-    "datasets/ome_import/view.py": 1,
-    "datasets/subset/dashboard.py": 3,
-    "datasets/validate/dashboard.py": 3,
-    "review/core/centre_view.py": 4,
+    # Each phase row's dot in its state colour (data), and the active row's selected weight (D24)
+    "datasets/concatenate/dashboard.py": 2,
+    # The Plotting band's chip-styled Channel, Property and Group-by combos: the band is rebuilt in D14
+    "review/core/centre_view.py": 3,
+    # The rail's active-group value, accent while a group is active: the rail is D21
     "review/core/selection_controller.py": 2,
+    # Menu buttons' own menu-indicator hides (CLAUDE.md §7.12)
     "review/core/ui_helpers.py": 2,
+    # Group cards and chips in their group colours (data), the progress line's outcome colour and a menu-indicator hide: the page is rebuilt in D26
     "review/features/batch_export/base_panel.py": 9,
-    "review/features/batch_export/variable_select_panel.py": 1,
-    "review/features/export/properties_view.py": 1,
+    # Severity colours of Home's step and QC lines and the plate legend's state swatches (data): Home is D27
     "review/features/home/controller.py": 5,
-    "review/features/home/groups/tab_view.py": 2,
+    # Sample Map's active-group value: Home is D27
+    "review/features/home/groups/tab_view.py": 1,
+    # Home › Labels' own sheet: a pane's page, which ui/ may not import to include its rules (D27)
     "review/features/home/labels/tab_view.py": 1,
-    "review/features/home/pipeline_info/tab_view.py": 1,
-    "review/features/image_browser/cell_browser/controller.py": 1,
+    # A channel button filled with the channel's own colour (data)
     "review/features/image_browser/cell_browser/tab_view.py": 1,
+    # Channel and colour-map swatches in their data colours, and the builder shelf's own scoped sheet: the Image Table is D18
     "review/features/image_browser/image_table/builder_view.py": 4,
+    # The figure's facet labels at the point sizes the figure plan computes: figure layout, not chrome
     "review/features/image_browser/image_table/facet_view.py": 4,
-    "review/features/image_browser/playground/tab_view.py": 1,
+    # A channel button filled with the channel's own colour (data)
     "review/features/image_browser/review_image/renderer.py": 1,
+    # A comparison group's dot in its group colour (data)
     "review/features/stats/controller.py": 1,
-    "ui/phone_dock.py": 1,
-    "ui/phone_shell.py": 3,
-    "widgets/_support.py": 2,
-    "widgets/brand_tile.py": 2,
-    "widgets/chip_group.py": 2,
-    "widgets/collapsible_section.py": 3,
-    "widgets/color_picker_popover.py": 2,
-    "widgets/color_swatch_row.py": 2,
-    "widgets/control_band_form.py": 4,
-    "widgets/drawer.py": 2,
-    "widgets/empty_state.py": 2,
-    "widgets/focus_chip.py": 1,
-    "widgets/gradient_strip.py": 2,
-    "widgets/icon_button.py": 2,
-    "widgets/icons.py": 1,
-    "widgets/kbd_hint.py": 2,
-    "widgets/lut_selector.py": 2,
+    # Phone layout's rescale pass rewriting a widget's own font sizes in place (ARCHITECTURE §8, The UI scale)
+    "ui/phone_shell.py": 1,
+    # install_qss_refresh, the opt-in helper that re-applies a widget's own sheet on a style change
+    "widgets/_support.py": 1,
+    # The demo's swatch in a well colour (data), under __main__
+    "widgets/collapsible_section.py": 1,
+    # A picker swatch in the colour it offers (data)
+    "widgets/color_picker_popover.py": 1,
+    # Restoring a combo's own chip sheet when the phone form ends: goes with the Plotting band in D14
+    "widgets/control_band_form.py": 1,
+    # The drawer's edge rule depends on which side it opens from (per instance)
+    "widgets/drawer.py": 1,
+    # The mode switch's per-segment fill and label: the switch becomes the top bar's pill in D20
     "widgets/mode_bar.py": 3,
-    "widgets/mpl_toolbar.py": 3,
+    # The toolbar's coordinate readout label: restyled with the plot pages (D14)
+    "widgets/mpl_toolbar.py": 1,
+    # The badge's fill in the tone it is showing (per instance)
     "widgets/notice_badge.py": 1,
-    "widgets/plate_progress.py": 7,
-    "widgets/plot_card.py": 3,
-    "widgets/popover.py": 2,
-    "widgets/rail_nav.py": 5,
-    "widgets/run_dashboard.py": 4,
-    "widgets/saved_selections_list.py": 5,
-    "widgets/search_input.py": 2,
-    "widgets/segmented_control.py": 2,
-    "widgets/selection_chip.py": 3,
-    "widgets/stage_path_view.py": 1,
-    "widgets/status_dot.py": 2,
-    "widgets/stepper.py": 2,
-    "widgets/styled_slider.py": 2,
-    "widgets/toast.py": 3,
-    "widgets/toggle_switch.py": 2,
-    "widgets/well_plate_selector.py": 2,
+    # Plate dots and legend swatches in their state colours (data), and the legend's small size on a phone
+    "widgets/plate_progress.py": 4,
+    # The module demo's rail host, under __main__
+    "widgets/rail_nav.py": 1,
+    # The active stage row's selected weight (D22)
+    "widgets/run_dashboard.py": 1,
+    # A saved selection's dot in its own colour (data)
+    "widgets/saved_selections_list.py": 1,
+    # The chip's look follows its accent or muted variant (per instance): the rail count chip becomes plain text in D21
+    "widgets/selection_chip.py": 2,
+    # The toast's own sheet appended to the app's when it is shown over another window
+    "widgets/toast.py": 1,
+    # Resets the app's checkbox indicator for the switch it paints itself (scoped to itself)
+    "widgets/toggle_switch.py": 1,
+    # Resets the app's checkbox spacing for the wrapping label it paints itself (scoped to itself)
     "widgets/wrap_checkbox.py": 1,
+    # Resets the app's radio spacing for the wrapping label it paints itself (scoped to itself)
     "widgets/wrap_radio.py": 1,
 }
 SPACING: dict[str, int] = {

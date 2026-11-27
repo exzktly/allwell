@@ -257,24 +257,36 @@ def test_the_shared_builders_declare_their_role(qtbot):
     assert prop.property("sheetText") == "Properties"
 
 
-def test_a_flat_icon_button_is_drawn_as_a_button_in_the_sheet(qtbot):
-    """The Properties toggle is an ``IconButton``, whose own stylesheet is
-    transparent: in the Actions grid it was the one cell with no fill or edge.
-    In the sheet it takes the application's button style; leaving the form
-    gives its own back. Another tool button's stylesheet is left alone — a
-    popover button's hides its menu arrow, and clearing it drew a stray one."""
-    band, _parts, w = _band(qtbot)
-    own = w["props"].styleSheet()
-    assert "transparent" in own
-    fold_qss = "QToolButton::menu-indicator { image: none; }"
-    w["fold"].setStyleSheet(fold_qss)
-    band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
-    _settle()
-    assert w["props"].styleSheet() == ""
-    assert w["fold"].styleSheet() == fold_qss
-    band.setForm(False)
-    _settle()
-    assert w["props"].styleSheet() == own
+def test_a_flat_icon_button_is_drawn_as_a_button_in_the_sheet(qtbot, qapp):
+    """The Properties toggle is an ``IconButton``, which is transparent: in the Actions grid it was the one cell
+    with no fill or edge. In the sheet it is drawn with a button's fill, under the phone sheet that draws the form;
+    leaving the form gives it its own look back. Another tool button's own stylesheet is left alone — a popover
+    button's hides its menu arrow, and clearing it drew a stray one. Read off a grab: the fill the reader sees."""
+    from ui import theme
+
+    theme.set_touch_unit(1.0)
+    qapp.setStyleSheet(theme.qss())
+    try:
+        band, _parts, w = _band(qtbot)
+        fold_qss = "QToolButton::menu-indicator { image: none; }"
+        w["fold"].setStyleSheet(fold_qss)
+        props = w["props"]
+
+        def fill() -> str:
+            img = props.grab().toImage()
+            return img.pixelColor(2, img.height() // 2).name().upper()
+
+        band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
+        _settle()
+        assert fill() == theme.Colors.control.upper()
+        assert w["fold"].styleSheet() == fold_qss
+        band.setForm(False)
+        _settle()
+        assert props.property("sheetButton") is None
+        assert fill() != theme.Colors.control.upper()
+    finally:
+        theme.set_touch_unit(None)
+        qapp.setStyleSheet("")
 
 
 def test_a_form_gets_its_whole_height_in_a_column_that_does_not_size_to_it(qtbot):

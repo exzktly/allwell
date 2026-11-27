@@ -113,14 +113,6 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     # ambient palette.
     _c = _theme.Colors
     tree.setAlternatingRowColors(True)
-    tree.setStyleSheet(
-        f"QTreeWidget#PipelineInfoTree {{ background:{_c.card}; "
-        f"alternate-background-color:{_c.canvas}; color:{_c.text_primary}; }}"
-        f"QTreeWidget#PipelineInfoTree::item {{ color:{_c.text_primary}; "
-        f"padding:3px 6px; }}"
-        f"QTreeWidget#PipelineInfoTree::item:selected {{ "
-        f"background:{_c.accent}; color:{_c.ink_dark}; }}"
-    )
     tree.header().setStretchLastSection(True)
     fitter = _ParameterColumnFit(tree)
     layout.addWidget(tree, 1)

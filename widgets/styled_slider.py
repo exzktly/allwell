@@ -35,7 +35,6 @@ class StyledSlider(QSlider):
         self.setFocusPolicy(Qt.StrongFocus)
         self.setCursor(Qt.PointingHandCursor)
         # Strip any inherited QSS sub-control rules; we paint everything.
-        self.setStyleSheet("QSlider#StyledSlider { background: transparent; }")
         if orientation == Qt.Horizontal:
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.setMinimumHeight(self._handle_d() + 6)

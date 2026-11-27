@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ui import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
+from ui import text_roles
 
 _WELL_STATES = ("pending", "writing", "done")
 
@@ -43,7 +44,6 @@ class ImportLooseDashboard(PlateProgress):
         self._build_rail()
         self._build_legend()
         self._headline.setText("Idle")
-        self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
         self._status.setText("")
 
@@ -96,8 +96,7 @@ class ImportLooseDashboard(PlateProgress):
 
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
-        head = QLabel("Wells", self._rail_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
+        head = text_roles.eyebrow("Wells", self._rail_host)
         self._rail_lay.addWidget(head)
         for state, label in (("pending", "Pending"), ("writing", "Zipping"), ("done", "Zipped")):
             n = sum(1 for s in self._well_stage.values() if s == state)
@@ -107,7 +106,6 @@ class ImportLooseDashboard(PlateProgress):
             row.setSpacing(theme.Spacing.sm)
             row.addWidget(status_dot(self._state_color(state)))
             nm = QLabel(f"{label}: {n}", row_w)
-            nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)

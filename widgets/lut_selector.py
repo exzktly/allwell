@@ -197,7 +197,6 @@ class LutSelector(QWidget):
         lay.addWidget(self._reset_btn)
 
         self._popover: Popover | None = None
-        self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
     def setLut(self, name: str, reversed: bool = False) -> None:
@@ -302,42 +301,6 @@ class LutSelector(QWidget):
             self._popover.close()
 
     # ── style ────────────────────────────────────────────────────────────
-    def _build_qss(self) -> str:
-        c, r, t = theme.Colors, theme.Radii, theme.Typography
-        return f"""
-        #LutSelector {{ background: transparent; }}
-        QPushButton#LutTrigger {{
-            background-color: {c.control};
-            border: 1px solid {c.field_edge};
-            border-radius: {r.sm}px;
-            padding: 2px 4px;
-            text-align: left;
-        }}
-        QPushButton#LutTrigger:hover {{ border-color: {c.border_strong}; }}
-        QPushButton#LutTrigger QLabel[textRole="number"] {{
-            color: {c.text_secondary};
-            font-family: {t.family_mono};
-            font-size: {t.small_size}px;
-        }}
-        QToolButton#LutReverse, QToolButton#LutReset {{
-            background-color: {c.control};
-            border: 1px solid {c.button_edge};
-            border-radius: {r.sm}px;
-            color: {c.text_secondary};
-            padding: 3px 8px;
-            font-size: {t.small_size}px;
-        }}
-        QToolButton#LutReverse:hover, QToolButton#LutReset:hover {{
-            background-color: {c.hover}; color: {c.text_primary};
-        }}
-        QToolButton#LutReverse:checked {{
-            background-color: {c.selected}; border-color: {c.accent}; color: {c.text_primary};
-        }}
-        #LutRow {{ background: transparent; border-radius: {r.xs}px; }}
-        #LutRow:hover {{ background-color: {c.hover}; }}
-        #LutRow QLabel[textRole="number"] {{ color: {c.text_secondary}; font-family: {t.family_mono}; font-size: {t.small_size}px; }}
-        QLabel[textRole="label"][lutCategory="true"] {{ color: {c.text_secondary}; padding-top: {theme.Spacing.xs}px; }}
-        """
 
 
 # ── standalone visual test ──────────────────────────────────────────────────
@@ -375,3 +338,41 @@ if __name__ == "__main__":
     root.resize(460, 220)
     root.show()
     _sys.exit(app.exec())
+
+
+def qss() -> str:
+    c, r, t = theme.Colors, theme.Radii, theme.Typography
+    return f"""
+    #LutSelector {{ background: transparent; }}
+    QPushButton#LutTrigger {{
+        background-color: {c.control};
+        border: 1px solid {c.field_edge};
+        border-radius: {r.sm}px;
+        padding: 2px 4px;
+        text-align: left;
+    }}
+    QPushButton#LutTrigger:hover {{ border-color: {c.border_strong}; }}
+    QPushButton#LutTrigger QLabel[textRole="number"] {{
+        color: {c.text_secondary};
+        font-family: {t.family_mono};
+        font-size: {t.small_size}px;
+    }}
+    QToolButton#LutReverse, QToolButton#LutReset {{
+        background-color: {c.control};
+        border: 1px solid {c.button_edge};
+        border-radius: {r.sm}px;
+        color: {c.text_secondary};
+        padding: 3px 8px;
+        font-size: {t.small_size}px;
+    }}
+    QToolButton#LutReverse:hover, QToolButton#LutReset:hover {{
+        background-color: {c.hover}; color: {c.text_primary};
+    }}
+    QToolButton#LutReverse:checked {{
+        background-color: {c.selected}; border-color: {c.accent}; color: {c.text_primary};
+    }}
+    #LutRow {{ background: transparent; border-radius: {r.xs}px; }}
+    #LutRow:hover {{ background-color: {c.hover}; }}
+    #LutRow QLabel[textRole="number"] {{ color: {c.text_secondary}; font-family: {t.family_mono}; font-size: {t.small_size}px; }}
+    QLabel[textRole="label"][lutCategory="true"] {{ color: {c.text_secondary}; padding-top: {theme.Spacing.xs}px; }}
+    """

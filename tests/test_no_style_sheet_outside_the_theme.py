@@ -18,8 +18,20 @@ from tests._repo_scan import python_sources, rel
 HOMES = {"ui/theme.py"}
 
 
+def _applies_or_clears(call: ast.Call) -> bool:
+    """``setStyleSheet(theme.qss())`` applies the theme's own sheet (a widget's demo, the app's start-up), and
+    ``setStyleSheet("")`` clears one: neither writes a rule of its own."""
+    if not call.args:
+        return False
+    arg = call.args[0]
+    if isinstance(arg, ast.Constant) and arg.value == "":
+        return True
+    return isinstance(arg, ast.Call) and call_name(arg) == "qss" and not arg.args
+
+
 def find(_path: str, tree: ast.Module):
-    yield from (c for c in ast.walk(tree) if isinstance(c, ast.Call) and call_name(c) == "setStyleSheet")
+    yield from (c for c in ast.walk(tree)
+                if isinstance(c, ast.Call) and call_name(c) == "setStyleSheet" and not _applies_or_clears(c))
 
 
 def _seen():

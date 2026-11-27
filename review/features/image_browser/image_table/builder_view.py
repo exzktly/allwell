@@ -1248,7 +1248,7 @@ def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
         # A button, not a label that happens to take a press: it reads as
         # something to press, takes the keyboard, and has a touch target. It
         # opens the values as a page of ticks in the inspector.
-        lbl = QToolButton(pill)
+        lbl = buttons.tool_button(pill, buttons.QUIET)
         lbl.setObjectName("ITBRootBtn")
         lbl.setText(f"{_ROOT_LABEL[dim]} ›")
         lbl.setAutoRaise(True)
@@ -1279,7 +1279,7 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
     gear.setIcon(icons.make_icon("sliders", 12))       # the drawn set's settings icon, not a "⚙" in the text
     gear.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
     gear.setCursor(Qt.PointingHandCursor)
-    gear.setToolTip("This channel's options: render, cells, outline, scale and colour")
+    gear.setToolTip("This channel's options: render, cells, outline, scale and color")
     # The options are a page of the inspector, built when the ⚙ is pressed —
     # not a menu of radio items and ticks.
     gear.clicked.connect(lambda _=False, c=cs, g=gear: open_channel_page(ctx, c, g))
@@ -1684,7 +1684,7 @@ def _tray_chip(ctx, name: str) -> QWidget:
     cl.addWidget(_grip())
     cl.addWidget(_swatch(_cmap_swatch(_default_colormap_for(ctx, name))))
     cl.addWidget(_text(display_token(name), "ITBChanLbl"))
-    tip = "Drag onto a root in Rows or Columns — it keeps this colour"
+    tip = "Drag onto a root in Rows or Columns — it keeps this color"
     if _is_metric_token(name):
         tip = f"{name}\n{tip}"
     chip.setToolTip(tip)
@@ -1744,14 +1744,14 @@ def channel_page(ctx, cs: ChannelSpec, parent: QWidget | None = None) -> QWidget
         return box
 
     colour_cells = check(
-        "ITBColourCells", "Colour cells", "label_colors",
-        "Give every cell its own colour instead of painting them all white — two nuclei that touch are otherwise one "
-        "white shape. Only a cell mask or a threshold has cells to colour.")
+        "ITBColorCells", "Color cells", "label_colors",
+        "Give every cell its own color instead of painting them all white — two nuclei that touch are otherwise one "
+        "white shape. Only a cell mask or a threshold has cells to color.")
     colour_cells.setEnabled(cs.render in ("mask", "threshold"))
     check("ITBBoundary", "Boundary outline", "boundary")
     check("ITBLog", "Log scale", "log")
     names = ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]
-    form.addRow("Colour / LUT", combo("ITBColormap", [(n, n) for n in names], cs.colormap,
+    form.addRow("Color / LUT", combo("ITBColormap", [(n, n) for n in names], cs.colormap,
                                       lambda n: _set_attr(cs, "colormap", n)))
     render = page.findChild(QComboBox, "ITBRender")
     render.currentIndexChanged.connect(

@@ -17,7 +17,7 @@ import importlib
 #: the sheet is built, so the widget follows whichever palette is applied. A widget of ``widgets/`` knows nothing of
 #: the app; the app knowing its widgets' rules is the arrow running the right way.
 WIDGET_SHEETS = (
-    "widgets.card", "widgets.chip_group", "widgets.collapsible_section", "widgets.empty_state", "widgets.icon_button",
+    "widgets.card", "widgets.chip_group", "widgets.docked_panel", "widgets.collapsible_section", "widgets.empty_state", "widgets.icon_button",
     "widgets.kbd_hint", "widgets.lut_selector", "widgets.mode_bar", "widgets.mpl_toolbar", "widgets.plot_card", "widgets.popover",
     "widgets.rail_nav", "widgets.saved_selections_list", "widgets.search_input", "widgets.segmented_control",
     "widgets.stepper", "widgets.toast", "widgets.well_plate_selector",

@@ -39,7 +39,8 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("ui/phone_shell.py", "_rescale_font"): "phone layout restoring a font it scaled, to the half point",
     ("widgets/empty_state.py", "_pin_text_heights"): "a font built only to measure two lines of the title's height",
     ("analyze/log_pane.py", "_build_log"): "the log is a QPlainTextEdit, which the textRole rules do not reach",
-    ("review/features/multivariate/feature_picker_view.py", "refresh"): "a QListWidgetItem divider, not a label",
+    ("widgets/menu_marks.py", "mark_current"): "a menu entry's own font, the current one bold: a QAction, which the "
+                                                "textRole rules do not reach",
 }
 
 

@@ -54,7 +54,7 @@ class RangePage(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(theme.Spacing.sm)
         self.caption = QLabel("", self)
-        self.caption.setObjectName("Muted")
+        self.caption.setProperty("textRole", "help")
         self.caption.setWordWrap(True)
         self.caption.hide()
         outer.addWidget(self.caption)

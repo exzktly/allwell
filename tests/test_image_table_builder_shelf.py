@@ -199,7 +199,7 @@ def test_the_channel_page_lists_render_modes_and_the_cell_options(qtbot, monkeyp
     combos, boxes = _page_controls(page)
     render = combos["ITBRender"]
     assert [render.itemText(i) for i in range(render.count())] == ["corrected", "raw", "cell mask", "> threshold"]
-    assert set(boxes) == {"ITBColourCells", "ITBBoundary", "ITBLog"}
+    assert set(boxes) == {"ITBColorCells", "ITBBoundary", "ITBLog"}
     cmaps = [combos["ITBColormap"].itemText(i) for i in range(combos["ITBColormap"].count())]
     assert "Greens" in cmaps and "Magenta" in cmaps
 
@@ -442,9 +442,9 @@ def test_the_channel_page_s_controls_mutate_the_channel_spec(qtbot, monkeypatch)
     page = B.channel_page(ctx, cs)
     qtbot.addWidget(page)
     combos, boxes = _page_controls(page)
-    assert not boxes["ITBColourCells"].isEnabled(), "an intensity image has no cells to colour"
+    assert not boxes["ITBColorCells"].isEnabled(), "an intensity image has no cells to colour"
     combos["ITBRender"].setCurrentIndex(combos["ITBRender"].findData("mask"))
-    assert cs.render == "mask" and boxes["ITBColourCells"].isEnabled()
+    assert cs.render == "mask" and boxes["ITBColorCells"].isEnabled()
     boxes["ITBBoundary"].setChecked(True)
     assert cs.boundary is True
     combos["ITBColormap"].setCurrentIndex(combos["ITBColormap"].findData("Magenta"))

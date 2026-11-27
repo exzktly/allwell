@@ -29,7 +29,7 @@ STYLE_SHEET: dict[str, int] = {
     # The Plotting band's chip-styled Channel, Property and Group-by combos: the band is rebuilt in D14
     "review/core/centre_view.py": 3,
     # Menu buttons' own menu-indicator hides (CLAUDE.md §7.12)
-    "review/core/ui_helpers.py": 2,
+    "review/core/ui_helpers.py": 1,
     # Each export group's dot, name tag, well chips, solo-well tags and selected border in the group's own colour (data)
     "review/features/batch_export/base_panel.py": 5,
     # The plate legend's state swatches and markers and each health row's severity dot, in their state colours (data)

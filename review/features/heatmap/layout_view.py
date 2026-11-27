@@ -46,7 +46,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QSpinBox,
     QStyle,
@@ -478,8 +477,7 @@ class _LayoutPanel(QWidget):
         # What double-clicking a cell does, as a control that can be seen (and
         # pressed where there is no double click): empty the cell selected in
         # the grid. Disabled until the selected cell holds a well.
-        empty_btn = QPushButton(EMPTY_CELL_TEXT, body)
-        empty_btn.setProperty("variant", "default")
+        empty_btn = buttons.default(EMPTY_CELL_TEXT, body)
         empty_btn.setToolTip("Take the well out of the cell selected in the grid below")
         empty_btn.setEnabled(False)
         body_l.addWidget(empty_btn)
@@ -500,11 +498,11 @@ class _LayoutPanel(QWidget):
 
         # Auto-populate first: it is the one way in that works by touch too.
         hint = QLabel(
-            "Select wells on the plate and press Auto-populate, or drag wells "
+            "Select wells on the plate and press “Auto-populate”, or drag wells "
             "from the plate map into a cell. Drag a cell to move it. To empty "
-            "a cell, select it and press Empty cell — or double-click it, or "
+            "a cell, select it and press “Empty cell” — or double-click it, or "
             "drag it back onto the plate. Row and column names are under "
-            "Display › Labels.",
+            "“Display” › “Labels”.",
             body,
         )
         hint.setProperty("textRole", "help")

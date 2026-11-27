@@ -164,8 +164,9 @@ def build_popout_view_controls(ctx, window, timepoint_text) -> QHBoxLayout:
         shapes = [("auto", 0), ("row", 0), ("column", 0)] + [
             ("columns", n) for n in range(2, min(POPOUT_MAX_COLS, n_tps - 1) + 1)]
         for grid, cols in shapes:
-            action = mark_current(owned_action(grid_menu, ""),
-                                  grid_label(grid, cols).removeprefix("Grid: ").capitalize(),
+            # The menu is titled Grid already: its entries drop the label's own lead-in.
+            entry = grid_label(grid, cols).partition(":")[2].strip().capitalize()
+            action = mark_current(owned_action(grid_menu, ""), entry,
                                   st is not None and (st.popout_grid, st.popout_cols) == (grid, cols))
             action.setData((grid, cols))
             action.triggered.connect(lambda _=False, grid=grid, cols=cols: nwc.set_popout_grid(ctx, grid, cols))

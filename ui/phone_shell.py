@@ -1361,7 +1361,7 @@ class PhoneShell(QObject):
         # page's own Share button holds (save the figure, copy it, save its
         # data). The button has no menu of its own — the menu is the page's —
         # so the one arrow is the caret in its label (CLAUDE.md §7.12).
-        self.share_button = QToolButton()
+        self.share_button = buttons.tool_button()
         self.share_button.setObjectName("PhoneShareButton")
         self.share_button.setText(SHARE_TEXT)
         self.share_button.setToolTip("Share: save the figure, copy it, or save its data")
@@ -2315,7 +2315,7 @@ class PhoneShell(QObject):
         scroll.setWidget(holder)
         # One way to close a panel, in one place: a button reading Close at
         # its top right, as the inspector's header has.
-        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+        from PySide6.QtWidgets import QHBoxLayout
         body = QWidget()
         body_lay = QVBoxLayout(body)
         body_lay.setContentsMargins(0, 0, 0, 0)
@@ -2326,9 +2326,8 @@ class PhoneShell(QObject):
         title = QLabel("", head)
         title.setProperty("role", "heading")
         head_lay.addWidget(title, 1)
-        close = QPushButton("Close", head)
+        close = buttons.default("Close", head)
         close.setObjectName("PhoneSheetClose")
-        close.setProperty("variant", "default")
         close.clicked.connect(lambda _=False: sheet.close())
         head_lay.addWidget(close)
         body_lay.addWidget(head)

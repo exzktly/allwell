@@ -132,4 +132,5 @@ QWidget#ShellHeader .QWidget, QWidget#ShellBand .QWidget, QWidget#ShellRail .QWi
 QWidget#ShellRail QScrollArea, QWidget#StatusBar .QWidget {{ background-color: transparent; }}
 QSplitter#ShellSplit::handle {{ background-color: {c.frame}; }}
 QStackedWidget#ShellPage {{ background-color: {c.canvas}; }}
+QWidget#InspectorDock {{ background-color: {c.canvas}; border: none; }}
 """

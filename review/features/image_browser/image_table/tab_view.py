@@ -281,7 +281,7 @@ def _build_style_panel(ctx, panel: QWidget, pl) -> None:
     # What the "Export settings…" dialog and the Saved Plots quality submenu
     # held: rows of this page, applied as they are changed.
     _cap_export = QLabel("Export", panel)
-    _cap_export.setObjectName("Muted")
+    _cap_export.setProperty("textRole", "help")
     pl.addWidget(_cap_export)
     pl.addWidget(build_export_settings(ctx, panel))
     pl.addStretch(1)

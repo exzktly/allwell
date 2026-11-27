@@ -26,6 +26,8 @@ a time.
 
 from __future__ import annotations
 
+from ui import buttons
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QToolButton, QWidget
 
@@ -70,10 +72,9 @@ def _owned(target) -> list[QWidget]:
 
 
 def _placeholder(parent: QWidget, role: str) -> QToolButton:
-    btn = QToolButton(parent)
+    btn = buttons.tool_button(parent)
     btn.setText(TITLES[role])
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "default")
     btn.setProperty(ROLE_PROPERTY, role)
     btn.setProperty(PLACEHOLDER_PROPERTY, True)
     btn.setToolTip(_NOTHING[role])

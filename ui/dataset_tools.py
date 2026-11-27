@@ -18,6 +18,8 @@ Pane-free: the window builds the list and hands it over.
 
 from __future__ import annotations
 
+from ui import buttons
+
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -66,12 +68,11 @@ class DatasetToolsList(QDialog):
         lay.setSpacing(s.sm)
         self.buttons: dict[str, QPushButton] = {}
         for tool in tools:
-            button = QPushButton(tool.label, self)
-            button.setProperty("variant", "destructive" if tool.destructive else "default")
+            button = buttons.button(tool.label, buttons.DESTRUCTIVE if tool.destructive else buttons.DEFAULT, self)
             button.clicked.connect(lambda _=False, t=tool: self._choose(t))
             lay.addWidget(button)
             about = QLabel(tool.about, self)
-            about.setObjectName("Muted")
+            about.setProperty("textRole", "help")
             about.setWordWrap(True)
             lay.addWidget(about)
             self.buttons[tool.label] = button

@@ -1228,7 +1228,7 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
         lay.addWidget(box)
         layer_actions[key] = box
     caption = QLabel("Nanowells", page)
-    caption.setObjectName("Muted")
+    caption.setProperty("textRole", "help")
     lay.addWidget(caption)
     group = QButtonGroup(page)
     colour_actions = {}
@@ -1240,11 +1240,10 @@ def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
         lay.addWidget(radio)
         colour_actions[key] = radio
     caption = QLabel("Show as", page)
-    caption.setObjectName("Muted")
+    caption.setProperty("textRole", "help")
     lay.addWidget(caption)
     for key, label in _PRESETS:
-        preset = QPushButton(label, page)
-        preset.setProperty("variant", "default")
+        preset = buttons.default(label, page)
         preset.clicked.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
         reg.register(f"_nw_preset_{key}", preset)
         lay.addWidget(preset)

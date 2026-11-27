@@ -83,7 +83,7 @@ class MultiSelect(QWidget):
             bulk.addWidget(button, 1)
         outer.addLayout(bulk)
         self._empty = QLabel(empty_text, self)
-        self._empty.setObjectName("Muted")
+        self._empty.setProperty("textRole", "help")
         self._empty.setWordWrap(True)
         outer.addWidget(self._empty)
         self._rows = QVBoxLayout()
@@ -105,7 +105,7 @@ class MultiSelect(QWidget):
         for item in items:
             if isinstance(item, Heading):
                 caption = QLabel(str(item), self)
-                caption.setObjectName("Secondary")
+                caption.setProperty("textRole", "label")
                 self._rows.addWidget(caption)
                 self._headings.append(caption)
                 continue

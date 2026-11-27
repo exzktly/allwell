@@ -123,10 +123,8 @@ class InspectorHost(QObject):
             return None
         self.dock = DockedPanel(split, self._desk_width, side="right", resizable=True,
                                 min_width=MIN_WIDTH, max_width=MAX_WIDTH)
+        # Its look is the window's (``ui/shell_frame``): in window style W1 the inspector is a panel of its own.
         self.dock.setObjectName("InspectorDock")
-        c = theme.Colors
-        self.dock.setStyleSheet(f"#InspectorDock {{ background-color: {c.rail};"
-                                f" border-left: 1px solid {c.border_subtle}; }}")
         self.dock.widthChanged.connect(self._remember_width)
         return self.dock
 

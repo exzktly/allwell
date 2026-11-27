@@ -62,10 +62,8 @@ class DockedPanel(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        c = theme.Colors
-        edge = "right" if self._side == "left" else "left"
-        self.setStyleSheet(f"#DockedPanel {{ background-color: {c.rail};"
-                           f" border-{edge}: 1px solid {c.border_subtle}; }}")
+        # The hairline on the edge facing the page: :func:`qss` keys it on this property.
+        self.setProperty("edge", "right" if self._side == "left" else "left")
         splitter.splitterMoved.connect(self._on_splitter_moved)
         self.hide()
 
@@ -144,3 +142,13 @@ class DockedPanel(QWidget):
 
     def closeNow(self) -> None:
         self.close()
+
+
+def qss() -> str:
+    """A docked panel in the rail's colour, with a hairline on the edge that faces the page."""
+    c = theme.Colors
+    return f"""
+    QWidget#DockedPanel {{ background-color: {c.rail}; }}
+    QWidget#DockedPanel[edge="left"] {{ border-left: 1px solid {c.border_subtle}; }}
+    QWidget#DockedPanel[edge="right"] {{ border-right: 1px solid {c.border_subtle}; }}
+    """

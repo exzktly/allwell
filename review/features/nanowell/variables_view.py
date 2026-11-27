@@ -70,7 +70,7 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
     reg.register("_nw_decorate_btn", button)
     note = QLabel(NO_VARIABLES_NOTE, _panel)
     note.setWordWrap(True)
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     panel_layout.addWidget(note)
     combos = {}
     for field, _band_widget, _label in DECORATION_CONTROLS:

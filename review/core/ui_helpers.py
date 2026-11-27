@@ -515,11 +515,9 @@ def make_style_button(ctx, parent: QWidget, figure_key: str, *,
     The band right-aligns its action zone itself, so a tab on the band adds this
     with ``band.add_action(...)``.
     """
-    from PySide6.QtWidgets import QToolButton
-    btn = QToolButton(parent)
+    btn = ui_buttons.tool_button(parent)
     btn.setText("Style")
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    btn.setProperty("variant", "default")
     btn.setToolTip(tooltip)
     # One of the band's three fixed buttons (``band_fixed_actions``).
     btn.setProperty("bandRole", "style")

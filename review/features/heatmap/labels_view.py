@@ -77,7 +77,7 @@ def _fill(ctx, form_host: QWidget) -> None:
     layout = _layout(ctx)
     for kind, heading, count in (("row", "Rows", layout.rows), ("col", "Columns", layout.cols)):
         head = QLabel(heading, form_host)
-        head.setObjectName("Secondary")
+        head.setProperty("textRole", "label")
         outer.addWidget(head)
         block = QWidget(form_host)
         form = QFormLayout(block)
@@ -113,7 +113,7 @@ def build_labels_row(ctx, parent: QWidget) -> QWidget:
     note = QLabel(
         "Name a row or a column; leave a field empty for the grid's own label. "
         "Double-clicking a label on the heat map renames it too.", content)
-    note.setObjectName("Muted")
+    note.setProperty("textRole", "help")
     note.setWordWrap(True)
     content_layout.addWidget(note)
     host = QWidget(content)

@@ -114,8 +114,8 @@ PAGES = {
     "Response Curves": (True, True, True),
     "Heat Map": (True, True, True),
     "Distribution": (False, True, True),
-    "Multivariate": (False, True, True),
-    "Spatial": (False, True, True),
+    "Multivariate": (True, True, True),   # Display holds Standardize (tracker §9.1 step 17)
+    "Spatial": (True, True, True),        # Display holds Recompute
     "Nanowells": (False, True, True),
 }
 

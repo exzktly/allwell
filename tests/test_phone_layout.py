@@ -2084,7 +2084,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
     Wrong implementations: the phone's overlay sheet on the Duo (the page under the controls, closed until asked
     for), a column that does not follow ⚙ Controls, or one left behind in the splitter once the phone folds."""
     from tests._screens import FakeScreen
-    from ui.phone_dock import DockedSheet
+    from widgets.docked_panel import DockedPanel
     with FakeScreen(_DUO_HALF_UP) as screen:
         win, shell, split, page, band = _docked_window(qapp)
         shell.set_on(True, restyle=False)
@@ -2093,7 +2093,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
             u = 939 / 626
             assert shell.is_docked()
             sheet = shell._sheet
-            assert isinstance(sheet, DockedSheet) and sheet.isOpen()
+            assert isinstance(sheet, DockedPanel) and sheet.isOpen()
             assert split.indexOf(sheet) == 0 and split.indexOf(page) == 1
             assert sheet.isAncestorOf(band)
             # Upright the column is 626 - 360 = 266 pt, so the page beside it keeps the narrowest phone's width.
@@ -2165,3 +2165,143 @@ def test_a_phone_s_controls_stay_an_overlay(qapp, app_sheet):
         finally:
             shell.set_on(False)
             _pump(qapp)
+
+
+# ── the Controls sheet hosts the inspector ────────────────────────────────────
+
+def _inspector_window(qapp, *, inspector=None):
+    """A page with a control band between two siblings, so "put back at its
+    index" and "appended" differ, and a hidden panel a feature could push."""
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    from widgets.control_band import ControlBand
+    win = _window()
+    QVBoxLayout(win)
+    page = QWidget(win)
+    QVBoxLayout(page)
+    win.layout().addWidget(page)
+    above = QLabel("above", page)
+    page.layout().addWidget(above)
+    band = ControlBand(page)
+    page.layout().addWidget(band)
+    band.add_scope("Channel", QPushButton("GFP"))
+    below = QLabel("the plot", page)
+    page.layout().addWidget(below, 1)
+    panel = QLabel("fold change options", page)
+    panel.hide()
+    handles = {"band_roots": lambda: [page]}
+    if inspector is not None:
+        handles["inspector"] = lambda: inspector
+    shell = _shell(win, **handles)
+    return win, shell, page, band, panel
+
+
+def test_the_controls_sheet_holds_the_inspector_with_the_band_as_its_data_tab(qapp, app_sheet):
+    """Wrong implementations: the band lent to a bare holder with no tabs, the
+    band appended to its page on the way back, or a sheet with no Close."""
+    from PySide6.QtTest import QTest
+
+    from widgets.inspector import Inspector
+    win, shell, page, band, _panel = _inspector_window(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    assert shell.open_controls() is True
+    QTest.qWait(300)
+    sheet = shell._sheet
+    insp = shell._inspector()
+    assert isinstance(insp, Inspector) and sheet.isAncestorOf(insp)
+    assert insp.tabWidget("data") is band and insp.currentTab() == "data"
+    assert [t for _k, t in insp.tabs()] == ["Data", "Display", "Style", "Detail"]
+    assert not insp.isTabEnabled("display"), "a tab the page has nothing for is disabled, not gone"
+    assert insp.close_button.isVisibleTo(win) and insp.close_button.text() == "Close"
+    insp.close_button.click()
+    QTest.qWait(300)
+    assert not sheet.isOpen()
+    assert page.layout().indexOf(band) == 1, "the band did not go back between its siblings"
+
+
+def test_a_page_pushed_in_phone_layout_is_a_page_of_the_sheet_and_goes_home_when_it_closes(qapp, app_sheet):
+    from PySide6.QtTest import QTest
+    win, shell, page, band, panel = _inspector_window(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.open_controls()
+    insp = shell._inspector()
+    insp.pushPage("fc", "Fold change", panel, tab="data")
+    _pump(qapp)
+    assert shell._sheet.isAncestorOf(panel) and panel.isVisibleTo(win)
+    assert insp.back_button.isVisibleTo(win)
+    insp.back_button.click()
+    assert insp.currentWidget() is band
+    insp.pushPage("fc", "Fold change", panel, tab="data")
+    shell.close_controls(now=True)
+    QTest.qWait(50)
+    assert panel.parentWidget() is page and panel.isHidden()
+    assert page.layout().indexOf(band) == 1
+
+
+def test_a_large_page_raises_the_bottom_sheet_to_the_room_above_the_strip(qapp, app_sheet):
+    """An editor asks for the full height (``large=True``); leaving it drops
+    the sheet back to the height of what it holds."""
+    from PySide6.QtTest import QTest
+    win, shell, _page, _band, panel = _inspector_window(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.open_controls()
+    QTest.qWait(300)
+    sheet, insp = shell._sheet, shell._inspector()
+    half = sheet.height()
+    insp.pushPage("editor", "Per-sample control", panel, tab="data", large=True)
+    QTest.qWait(300)
+    room = win.height() - shell._foot_strip()
+    assert sheet.height() == room and room > half
+    insp.popPage()
+    QTest.qWait(300)
+    assert sheet.height() < room
+
+
+def test_the_sheet_hosts_the_window_s_own_inspector_and_it_outlives_a_rebuilt_sheet(qapp, app_sheet):
+    """The window's inspector is the one the desk column shows; the sheet is
+    rebuilt when the phone turns, and must not take the inspector with it."""
+    import shiboken6
+    from PySide6.QtTest import QTest
+
+    from tests._screens import FakeScreen
+    from ui import phone_inspector
+    insp = phone_inspector.own_inspector()
+    with FakeScreen(_PHONE_UP) as screen:
+        win, shell, page, band, _panel = _inspector_window(qapp, inspector=insp)
+        shell.set_on(True, restyle=False)
+        _pump(qapp)
+        shell.open_controls()
+        first = shell._sheet
+        assert first.isAncestorOf(insp)
+        screen.turn(_PHONE_SIDE)
+        win.resize(700, 400)
+        shell.close_controls(now=True)
+        shell._landscape = True
+        shell.open_controls()
+        QTest.qWait(50)
+        second = shell._sheet
+        qapp.sendPostedEvents(None, 52)          # QEvent.DeferredDelete: the old sheet goes
+        assert second is not first
+        assert shiboken6.isValid(insp) and second.isAncestorOf(insp)
+        assert insp.tabWidget("data") is band
+        shell.close_controls(now=True)
+        assert page.layout().indexOf(band) == 1
+
+
+def test_an_unmounted_inspector_survives_the_sheet_it_was_in(qapp):
+    """A sheet is deleted when the phone turns; the inspector is the window's
+    and is taken out first."""
+    import shiboken6
+
+    from ui import phone_inspector
+    insp = phone_inspector.own_inspector()
+    mount = phone_inspector.new_mount()
+    phone_inspector.mount(mount, insp)
+    assert insp.parentWidget() is mount
+    phone_inspector.unmount(insp)
+    shiboken6.delete(mount)
+    assert shiboken6.isValid(insp) and insp.parentWidget() is None
+    shiboken6.delete(insp)

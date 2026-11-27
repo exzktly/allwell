@@ -53,7 +53,7 @@ import shiboken6
 
 from core import phone_layout
 from core.safe import swallowed
-from ui import phone_window, theme
+from ui import phone_inspector, phone_window, theme
 from widgets import form_registry
 from widgets.control_band import ControlBand
 
@@ -126,6 +126,12 @@ class PhoneHandles:
     show_log: Callable[[], None] | None = None
     #: The log button's "!" badge, mirrored onto ⋯ while the status bar is gone.
     log_badge: QWidget | None = None
+    #: The window's inspector (``widgets.inspector.Inspector``), which the
+    #: Controls sheet hosts; ``None`` for a window with no Review pane, whose
+    #: shell then keeps one of its own. And what fills it from the page on
+    #: screen just before the sheet opens (the page's Display and Style tabs).
+    inspector: Callable[[], object] | None = None
+    fill_inspector: Callable[[], None] | None = None
     #: Roots whose page control bands phone layout moves into the Controls
     #: sheet (Review's pages, the Analyze output page). Datasets keeps its own:
     #: its tools put their Run buttons there.
@@ -171,7 +177,7 @@ class PhoneHandles:
     history: object | None = None
     #: The splitter that holds Review's pages (and, at the desk, the rail
     #: beside them): on an unfolded foldable the Controls sheet docks in it,
-    #: left of the page (``ui.phone_dock``).
+    #: left of the page (``widgets.docked_panel``).
     centre_split: QWidget | None = None
 
 
@@ -1069,7 +1075,7 @@ WIDE_SCREEN_PT = 600
 #: full bar and touch targets at the floor.
 SHORT_SCREEN_PT = 500
 #: The Controls sheet docked at the left of the page on an unfolded foldable
-#: (``ui/phone_dock.py``). The Duo's inner screen is 626 pt across upright,
+#: (``widgets/docked_panel.py``). The Duo's inner screen is 626 pt across upright,
 #: which leaves the plot 326 pt — a phone's width less a margin — and 890
 #: sideways, which leaves it 590. The sheet's label column is
 #: ``phone_layout.SHEET_LABEL_PT``, so a control has about 170 pt beside it, and
@@ -1120,6 +1126,8 @@ class PhoneShell(QObject):
         self._hid: list[QWidget] = []
         self._sheet = None
         self._sheet_band = None
+        self._own_inspector = None
+        self._wired_inspector = None
         self._landscape: bool | None = None
         #: Whether Forward is in the bar (a wide screen) rather than in ⋯.
         self._forward_in_bar = False
@@ -1218,7 +1226,7 @@ class PhoneShell(QObject):
 
     def is_docked(self) -> bool:
         """Phone layout on a foldable's inner screen, opened: the Controls sheet
-        is a column docked left of the page (``ui/phone_dock``) rather than an
+        is a column docked left of the page (``widgets/docked_panel``) rather than an
         overlay, and stays open from page to page."""
         a = self._avail()
         return (phone_layout.is_on() and self._h.centre_split is not None
@@ -2127,10 +2135,43 @@ class PhoneShell(QObject):
             return self._sheet
         if self._sheet is not None:
             self._sheet.closeNow()
+            phone_inspector.unmount(self._inspector())   # it outlives the sheet
             self._sheet.deleteLater()
-        self._sheet = self._build_sheet(land, self._give_band_back, docked=form == "dock")
+        self._sheet = self._build_sheet(land, self._give_band_back, docked=form == "dock",
+                                        inspector=self._inspector())
         self._sheet._aw_form = form
         return self._sheet
+
+    def _inspector(self):
+        """The inspector the Controls sheet hosts: the window's, or one of the
+        shell's own where the window has none."""
+        fn = self._h.inspector
+        insp = fn() if fn is not None else None
+        if insp is None:
+            if self._own_inspector is None:
+                self._own_inspector = phone_inspector.own_inspector()
+            insp = self._own_inspector
+        if insp is not self._wired_inspector:
+            self._wired_inspector = insp
+            insp.closeRequested.connect(self._on_inspector_close)
+            insp.sizeWanted.connect(self._on_inspector_resized)
+            insp.contentResized.connect(self._on_inspector_resized)
+            insp.pageChanged.connect(self._on_inspector_page)
+        return insp
+
+    def _on_inspector_close(self) -> None:
+        if phone_layout.is_on():
+            self.close_controls()
+
+    def _on_inspector_resized(self, *_a) -> None:
+        sheet = self._sheet
+        if (sheet is not None and sheet.isOpen() and phone_layout.is_on()
+                and getattr(sheet, "_aw_form", None) is False):     # the bottom sheet
+            sheet.refit()
+
+    def _on_inspector_page(self, *_a) -> None:
+        if phone_layout.is_on() and self._sheet is not None and self._sheet.isOpen():
+            self._sweep(force=False)      # a pushed page's own scroll area
 
     def _ensure_wells_sheet(self):
         """The Wells sheet, built for the screen's present shape."""
@@ -2154,12 +2195,12 @@ class PhoneShell(QObject):
             return 0
         return max(0, self._win.height() - strip.mapTo(self._win, strip.rect().topLeft()).y())
 
-    def _build_sheet(self, land: bool, on_closed, *, docked: bool = False):
+    def _build_sheet(self, land: bool, on_closed, *, docked: bool = False, inspector=None):
         """A sheet phone layout lends a page's widgets to: a bottom drawer
         upright, rising from above the strip, as tall as what it holds up to
         ``SHEET_HEIGHT_SHARE`` of the window; a right-hand panel sideways; and
         *docked*, a ``DOCKED_SHEET_PT`` column left of the page
-        (``ui.phone_dock.DockedSheet``) on an unfolded foldable."""
+        (``widgets.docked_panel.DockedPanel``) on an unfolded foldable."""
         from PySide6.QtWidgets import QScrollArea
         from widgets.drawer import Drawer
         band = self._h.band
@@ -2170,6 +2211,10 @@ class PhoneShell(QObject):
         def _content_height() -> int:
             # As tall as what it holds, up to its share of the window: a sheet
             # taller than its controls is dead space where the plot could be.
+            if inspector is not None:
+                return phone_inspector.sheet_height(
+                    inspector, self._win.width(), self._win.height(),
+                    self._win.height() - self._foot_strip(), SHEET_HEIGHT_SHARE, self.pt(8))
             holder = getattr(sheet, "_aw_holder", None)
             lay = holder.layout() if holder is not None else None
             want = (lay.totalHeightForWidth(self._win.width()) if lay is not None
@@ -2180,8 +2225,8 @@ class PhoneShell(QObject):
         # No scrim: the plot above the sheet redraws as its controls change,
         # and a dimmed plot is one the user cannot judge the change by.
         if docked:
-            from ui.phone_dock import DockedSheet
-            sheet = DockedSheet(self._h.centre_split, self._docked_width)
+            from widgets.docked_panel import DockedPanel
+            sheet = DockedPanel(self._h.centre_split, self._docked_width)
         elif land:
             sheet = Drawer(self._win, edge="right", width_hint=lambda: self.pt(LANDSCAPE_SHEET_PT),
                            margin=0, top_inset=_below_band, scrim=0.0)
@@ -2189,6 +2234,8 @@ class PhoneShell(QObject):
             sheet = Drawer(self._win, edge="bottom", height_hint=_content_height,
                            margin=0, bottom_inset=self._foot_strip, scrim=0.0)
         sheet.setProperty("phoneSheet", True)
+        if inspector is not None:
+            return self._finish_inspector_sheet(sheet, inspector, land, on_closed)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
@@ -2234,6 +2281,43 @@ class PhoneShell(QObject):
         sheet.closed.connect(on_closed)
         return sheet
 
+    def _finish_inspector_sheet(self, sheet, inspector, land: bool, on_closed):
+        """The Controls sheet: the inspector is its content, and the page's
+        band — the inspector's Data tab — is what is fitted to its width."""
+        mount = phone_inspector.new_mount()
+        sheet.setContentWidget(mount)
+        sheet._aw_land = land
+        sheet._aw_mount = mount
+        slot = inspector.tabSlot("data")
+        sheet._aw_holder = slot.widget()
+
+        def _form_host() -> QWidget | None:
+            # A control band is fitted through its form, never itself (the fit
+            # would give the band a phone form of its own on top of the form,
+            # and turn its row); a page's own block of controls (the Image
+            # Table's shelf) is stacked by the sheet already, and is fitted as
+            # it stands.
+            band = self._sheet_band
+            if band is None:
+                return None
+            if hasattr(band, "form"):
+                form = band.form()
+                return form.host if form is not None else None
+            return band
+
+        fit = getattr(inspector, "_aw_phone_fit", None)
+        if fit is None:
+            # Fitted like a Datasets page (``ui/phone_fit``): a form row holds
+            # its label beside a group of controls kept on one line, and
+            # several were wider than the sheet, so the sheet scrolled
+            # sideways. One fit per inspector, which outlives its sheets.
+            fit = _FitOnShow(slot, target=_form_host)
+            slot.installEventFilter(fit)
+            inspector._aw_phone_fit = fit
+        sheet._aw_fit = fit
+        sheet.closed.connect(on_closed)
+        return sheet
+
     def toggle_controls(self) -> None:
         is_open = self._sheet is not None and self._sheet.isOpen()
         if self.is_docked():
@@ -2245,27 +2329,33 @@ class PhoneShell(QObject):
         else:
             self.open_controls()
 
-    def open_controls(self) -> None:
+    def open_controls(self, *, need_band: bool = True) -> bool:
+        """Open the Controls sheet on the page on screen. ``False`` when it
+        did not open: the page has no controls and *need_band* asked for some
+        (a page pushed by a feature opens it with ``need_band=False``)."""
         band = self._current_band()
+        if band is None and need_band:
+            return False
         if band is None:
-            return
+            return self._open_sheet_without_band()
         docked = self.is_docked()
         if self._sheet is not None and self._sheet.isOpen():
             if self._sheet_band is band and getattr(self._sheet, "_aw_form", None) == (
                     "dock" if docked else self.is_landscape()):
-                return
+                return True
             self.close_controls(now=True)   # another page's, or another shape's
         if not docked:
             self.close_wells(now=True)      # one sheet at a time
         sheet = self._ensure_sheet()
-        parent = band.parentWidget()
-        lay = parent.layout() if parent is not None else None
-        index = lay.indexOf(band) if lay is not None else -1
+        insp = self._inspector()
+        phone_inspector.mount(sheet._aw_mount, insp)
         self._sheet_band = band
-        band.setProperty("_awHome", index)
-        self._sheet_home = parent
-        holder = sheet._aw_holder
-        holder.layout().insertWidget(0, band)
+        self._sheet_home = band.parentWidget()
+        # Lent as the inspector's Data tab: the inspector reads the band's
+        # place before it moves and puts it back there (``_give_band_back``).
+        insp.setTabWidget("data", band)
+        self._fill_inspector()
+        insp.showTab("data")
         # A control band is read down as a form — one control per row, label
         # column, Data / Display / Actions; a page's own block of controls
         # (declared as ``controls``) takes its own stacked form.
@@ -2285,6 +2375,39 @@ class PhoneShell(QObject):
         if fit is not None:
             fit.refit_now()
         self.controls_button.setText("Hide controls" if docked else "Done ✕")
+        return True
+
+    def _fill_inspector(self) -> None:
+        fn = self._h.fill_inspector
+        if fn is not None:
+            try:
+                fn()
+            except RuntimeError:
+                swallowed()  # a page torn down while it was asked
+
+    def _open_sheet_without_band(self) -> bool:
+        """The sheet for a page with no controls of its own, opened because a
+        feature has a page or a detail to show in it."""
+        if self._sheet is not None and self._sheet.isOpen():
+            return True
+        if not self.is_docked():
+            self.close_wells(now=True)
+        sheet = self._ensure_sheet()
+        phone_inspector.mount(sheet._aw_mount, self._inspector())
+        self._fill_inspector()
+        sheet.open()
+        self.controls_button.setText("Hide controls" if self.is_docked() else "Done ✕")
+        return True
+
+    def inspector_is_open(self) -> bool:
+        return self._sheet is not None and self._sheet.isOpen()
+
+    def open_inspector(self) -> bool:
+        """The window's inspector service opening its phone host."""
+        return self.inspector_is_open() or self.open_controls(need_band=False)
+
+    def close_inspector(self) -> None:
+        self.close_controls()
 
     def close_controls(self, *, now: bool = False) -> None:
         if self._sheet is None:
@@ -2394,7 +2517,10 @@ class PhoneShell(QObject):
     def _give_band_back(self) -> None:
         band, self._sheet_band = self._sheet_band, None
         self.controls_button.setText("⚙ Controls")
+        insp = self._wired_inspector
         if band is None:
+            if insp is not None:
+                insp.giveBackAll()
             return
         try:
             fit = getattr(self._sheet, "_aw_fit", None) if self._sheet is not None else None
@@ -2407,10 +2533,10 @@ class PhoneShell(QObject):
             scope = getattr(band, "_scope", None)
             if scope is not None:
                 scope.setSpacing(-1)
-            home = getattr(self, "_sheet_home", None)
-            index = band.property("_awHome")
-            if home is not None and home.layout() is not None:
-                home.layout().insertWidget(max(0, int(index or 0)), band)
+            # Every page and every tab's widget goes home, the band to the
+            # index the inspector read when it was lent.
+            if insp is not None:
+                insp.giveBackAll()
             if phone_layout.is_on():
                 band.hide()          # already in self._hid from entering
             else:

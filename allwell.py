@@ -706,6 +706,7 @@ class AllWellApp(QMainWindow):
         """
         from core.app_settings import app_settings
         from review.core.tab_controller import set_sidebar_collapsed
+        import review.core.inspector_service as inspector_service
         from ui.phone_shell import PhoneHandles, PhoneShell
 
         review = self._review
@@ -820,8 +821,12 @@ class AllWellApp(QMainWindow):
             history=getattr(self, "_history", None),
             centre_split=getattr(review, "_h_pane", None),
             wells_count=lambda: len(review._ctx.state.selection.selected_wells or ()),
+            inspector=lambda: inspector_service.inspector(review._ctx),
+            fill_inspector=lambda: inspector_service.fill(review._ctx),
         )
         self._phone = PhoneShell(self, handles, settings=app_settings)
+        # The Controls sheet is the phone's host for Review's one inspector.
+        inspector_service.set_phone_host(review._ctx, self._phone)
         # Among the small icon buttons at the header row's right end, just
         # before help: like help, in every mode, since Analyze (watching a run)
         # is the commonest reason to be on a phone. Phone layout hides the

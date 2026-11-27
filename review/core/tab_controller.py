@@ -131,6 +131,10 @@ def on_tab_change(ctx, _e=None) -> None:
     notify = getattr(ctx, "notify", None)
     if notify is not None and hasattr(notify, "clear_unless_owned_by"):
         notify.clear_unless_owned_by(tab)
+    # The inspector serves one page: what it borrowed from the last one goes
+    # back before anything here shows or hides that page's controls.
+    from review.core import inspector_service
+    inspector_service.sync(ctx)
     prev_tab = ctx.runtime.tab.last_tab_name
     prev_selected = set(ctx.state.selection.selected_wells)
 

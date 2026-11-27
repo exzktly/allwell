@@ -118,6 +118,13 @@ MODE_READ_ROSTER: dict[tuple[str, str], str] = {
     ("review/core/plot_style.py", "apply_export_style_to_current"):
         "stamps whether the figure was fitted for the phone (_aw_phone_fitted); same "
         "candidate and same reason as _on_resize above.",
+    ("review/core/inspector_service.py", "InspectorHost.__init__"):
+        "the window's one inspector is lent a page's widgets, and a layout switch rescales "
+        "every widget: it listens so that everything lent goes home, and the desk column "
+        "leaves the splitter, before that pass runs.",
+    ("review/core/inspector_service.py", "_on_phone"):
+        "the one place that picks the inspector's host — the desk column or the phone's "
+        "Controls sheet — so that no feature that opens a page has to read the mode.",
     ("review/core/split_view.py", "_set_toggle_visible_for_mode"):
         "two panes side by side cannot fit a one-column layout, so Review's split toggle "
         "goes; a decision of the Review shell about its own chrome.",

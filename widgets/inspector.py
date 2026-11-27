@@ -40,7 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import shiboken6
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLayout, QPushButton, QScrollArea, QSizePolicy,
     QStackedWidget, QToolButton, QVBoxLayout, QWidget,
@@ -104,6 +104,9 @@ class Inspector(QWidget):
     tabChanged = Signal(str)
     #: ``"full"`` when the page on show was pushed ``large``, else ``"half"``.
     sizeWanted = Signal(str)
+    #: What the page on show holds laid out again (a control in it grew, a row
+    #: was shown): a host that sizes itself to its content measures again.
+    contentResized = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -158,6 +161,7 @@ class Inspector(QWidget):
         self.close_button.clicked.connect(lambda _=False: self.closeRequested.emit())
         row.addWidget(self.close_button)
         outer.addWidget(head)
+        self._head = head
 
         self._tab_row = QWidget(self)
         tab_lay = QHBoxLayout(self._tab_row)
@@ -294,6 +298,20 @@ class Inspector(QWidget):
         if not stack:
             return False
         self._drop(self._current, stack[-1])
+        if not stack and not self._tab_usable(self._current or ""):
+            # A page pushed on a tab that has no first page of its own (the
+            # desk's Data tab, whose first page is the band above the plot):
+            # there is nothing under it, so the inspector falls back to a tab
+            # it can show, and with none asks its host to close.
+            fallback = self._first_usable()
+            if fallback is None:
+                self._show_top()
+                self.closeRequested.emit()
+                return True
+            self._current = fallback
+            self._show_top()
+            self.tabChanged.emit(fallback)
+            return True
         self._show_top()
         return True
 
@@ -352,7 +370,7 @@ class Inspector(QWidget):
     def event(self, ev) -> bool:  # Qt naming
         # Deleted with widgets still lent: they would be destroyed with their
         # slots. ``DeferredDelete`` is the last moment the wrapper is whole.
-        if ev.type() == ev.Type.DeferredDelete:
+        if ev.type() == QEvent.DeferredDelete:
             self.giveBackAll()
         return super().event(ev)
 
@@ -371,7 +389,36 @@ class Inspector(QWidget):
         lay.setContentsMargins(s.sm, s.sm, s.sm, s.sm)
         lay.addStretch(1)
         scroll.setWidget(holder)
+        holder.installEventFilter(self)
         return scroll
+
+    def eventFilter(self, obj, ev) -> bool:  # Qt naming
+        if ev.type() in (QEvent.LayoutRequest, QEvent.Resize):
+            self.contentResized.emit()
+        return False
+
+    def tabSlot(self, key: str) -> QScrollArea | None:
+        """The scroll area tab *key*'s own widget sits in."""
+        return self._tab_slots.get(key)
+
+    def currentSlot(self) -> QScrollArea | None:
+        stack = self._pages.get(self._current or "", [])
+        return stack[-1].slot if stack else self._tab_slots.get(self._current or "")
+
+    def contentHeight(self, width: int) -> int:
+        """How tall the inspector is with the page on show at its full height,
+        *width* pixels wide: the header, the tab row while it shows, and what
+        the page holds."""
+        total = self._head.sizeHint().height()
+        if not self._tab_row.isHidden():
+            total += self._tab_row.sizeHint().height()
+        slot = self.currentSlot()
+        holder = slot.widget() if slot is not None and _alive(slot) else None
+        lay = holder.layout() if holder is not None else None
+        if lay is not None:
+            total += (lay.totalHeightForWidth(width) if lay.hasHeightForWidth()
+                      else lay.totalSizeHint().height())
+        return total
 
     def slotOf(self, widget: QWidget) -> QScrollArea | None:
         """The scroll area a lent widget sits in (a host fits its content)."""

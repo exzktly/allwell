@@ -276,7 +276,10 @@ def test_p7_the_empty_queue_mentions_setting_up_a_next_step(qtbot):
 
     page = JobQueuePage()
     qtbot.addWidget(page)
-    assert "New job using this output" in page._empty_hint.text()
+    # The empty state's two lines: a ⋯ menu that sets up the next job on a job's output.
+    text = page._empty_text.text()
+    assert "⋯ menu" in text and "output" in text, text
+    assert page._empty_add_btn.text() == "Add job"
 
 
 def test_p8_enter_opens_the_job_and_the_menu_button_is_a_real_target(qtbot):

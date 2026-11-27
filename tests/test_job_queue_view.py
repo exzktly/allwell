@@ -88,18 +88,26 @@ def test_page_is_wrapped_in_a_scroll_area(qapp):
     assert outer_scroll.widgetResizable() is True
 
 
-def test_start_queue_is_the_first_left_aligned_header_button(qapp):
-    """Regression guard (UX audit P2-11): every other Datasets page puts its
-    primary action at the row's left edge; Job Queue pushed "Start queue"
-    far right with a secondary button on the left -- the one page in the
-    pane with its hierarchy backwards."""
+def test_start_queue_is_the_last_header_button_after_add_and_stop(qapp):
+    """The design language's queue header (§6, *Datasets*, tracker row D25): the quiet commands, Add job, Stop
+    job while a job runs, and the primary "Start queue" last — the order every Datasets tool's foot row takes,
+    so the page's one primary action sits where every other page's does."""
     page = JobQueuePage()
     header = page._start_btn.parentWidget()
     widgets = [header.layout().itemAt(i).widget() for i in range(header.layout().count())]
     widgets = [w for w in widgets if w is not None]
-    assert widgets[0] is page._start_btn
-    assert page._start_btn.property("variant") == "primary"
-    assert widgets.index(page._add_btn) > widgets.index(page._start_btn)
+    assert widgets[-1] is page._start_btn and page._start_btn.property("variant") == "primary"
+    assert widgets.index(page._add_btn) < widgets.index(page._stop_btn) < widgets.index(page._start_btn)
+    assert page._clear_btn.property("variant") == page._clear_all_btn.property("variant") == "quiet"
+
+
+def test_stop_appears_only_while_a_job_runs(qapp):
+    page = JobQueuePage()
+    assert page._stop_btn.isHidden()
+    page.set_job_running(1)
+    assert not page._stop_btn.isHidden() and page._stop_btn.text() == "Stop job"
+    page.set_job_running(0)
+    assert page._stop_btn.isHidden()
 
 
 def test_add_job_menu_offers_every_kind(qapp):

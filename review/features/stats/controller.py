@@ -702,6 +702,9 @@ def _alternative_test_lines(ctx, *, kind, spec, groups, group_vals, target_t,
 def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     """Run the selected statistical test across all group pairs."""
     app = ctx.window  # transitional: widget-heavy body still reads app._stats_*
+    # A run starts from empty tables: one that declines (no timepoint, too few groups, …) must not leave the
+    # previous run's rows beside its reason.
+    _fill_result_tables(ctx, [], [], {}, False, None)
     tp_str = app._stats_tp_cb.currentText()
     if tp_str in ("—", ""):
         app._stats_write_result("No timepoint selected.")
@@ -830,6 +833,7 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
             target_t=target_t, val_col=val_col, threshold=threshold,
             statistic=statistic, use_fov=use_fov)
         app._stats_write_result("\n".join(lines))
+        _fill_result_tables(app._ctx, group_vals, [], {}, False, None)
         stats_refresh_fov_indicator(app._ctx)
         app._stats_fig_frame.setVisible(False)
         return
@@ -851,6 +855,7 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     lines += _format_pairwise_lines(pair_results, adjusted, show_adjusted, effects)
 
     app._stats_write_result("\n".join(lines))
+    _fill_result_tables(app._ctx, group_vals, pair_results, adjusted, show_adjusted, effects)
 
     # N7: store structured pairwise results so the Bar plot can draw significance
     # brackets from the same comparison (text output above is unchanged). Built by
@@ -1428,11 +1433,23 @@ def invalidate_stats_run(ctx) -> None:
     return None
 
 
+def _fill_result_tables(ctx, group_vals, pair_results, adjusted, show_adjusted, effects) -> None:
+    """The Groups and Comparisons tables of a run (``results_table_view``), from the values its report used."""
+    from review.features.stats import _result_rows as rows
+    from review.features.stats import results_table_view as view
+
+    view.fill_table(ctx, view.GROUPS_KEY, rows.group_rows(group_vals))
+    view.fill_table(ctx, view.PAIRS_KEY, rows.pair_rows(pair_results, adjusted, show_adjusted, effects))
+
+
 def _stats_write_result(ctx, text: str) -> None:
-    """Write *text* into the registered stats result panel (no-op if absent)."""
+    """Write *text* into the registered stats result panel (no-op if absent). Clearing it clears the tables too,
+    so a cleared or declined run shows none of the previous run's rows."""
     txt = ctx.widgets.get_or_none("_stats_result_text")
     if txt is None:
         return
+    if not text:
+        _fill_result_tables(ctx, [], [], {}, False, None)
     txt.setReadOnly(False)
     txt.setPlainText(text or "")
     txt.setReadOnly(True)

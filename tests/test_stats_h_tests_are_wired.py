@@ -414,3 +414,27 @@ def test_a_variable_declared_after_arriving_reaches_the_factor_pickers(loaded_ap
     refresh_stats_test_inputs(ctx)
 
     assert [var_a.itemText(i) for i in range(var_a.count())] == ["Dose"]
+
+
+def test_a_run_fills_the_groups_and_comparisons_tables_and_a_declined_run_empties_them(loaded_app):
+    """The results are tables (design language row D15): the Groups table holds each group's n, and the
+    Comparisons row holds the very p the report prints. A run that declines leaves no previous rows behind."""
+    from review.features.stats.results_table_view import GROUPS_KEY, PAIRS_KEY
+
+    app = loaded_app
+    _open_stats(app)
+    _two_groups(app)
+    text = _run(app, "t-test (Welch, unequal var)")
+    groups = app._ctx.widgets.get(GROUPS_KEY)
+    pairs = app._ctx.widgets.get(PAIRS_KEY)
+    assert not groups.isHidden() and not pairs.isHidden()
+    names = [groups.item(r, 0).text() for r in range(groups.rowCount())]
+    assert names == ["Ctrl", "Drug"]
+    assert all(int(groups.item(r, 1).text()) > 0 for r in range(groups.rowCount()))
+    assert pairs.rowCount() == 1 and pairs.item(0, 0).text() == "Ctrl vs Drug"
+    p_cell = pairs.item(0, 2).text()
+    assert p_cell and p_cell in text, f"the table's {p_cell!r} is not the report's p"
+
+    app._app_state.stats.groups = app._app_state.stats.groups[:1]
+    _run(app, "t-test (Welch, unequal var)")
+    assert groups.isHidden() and pairs.isHidden(), "a declined run left the previous run's rows"

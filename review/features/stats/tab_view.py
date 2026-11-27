@@ -419,7 +419,14 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     res_frame = reg.register("_stats_res_frame", QWidget(page))
     rl = QVBoxLayout(res_frame)
     rl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
-    result_text = reg.register("_stats_result_text", QTextEdit(res_frame))
+    # The results as tables first — Groups, then Comparisons — and the full text report under them, folded
+    # (design language row D15): the tables are what a reader scans, the report is the whole record to copy.
+    from review.features.stats.results_table_view import build_results_tables
+    from widgets.collapsible_section import CollapsibleSection
+
+    rl.addWidget(build_results_tables(ctx, res_frame))
+    report = reg.register("_stats_report_section", CollapsibleSection("Full report", res_frame, expanded=False))
+    result_text = reg.register("_stats_result_text", QTextEdit(report))
     result_text.setReadOnly(True)
     result_text.setLineWrapMode(QTextEdit.WidgetWidth)
     # Hint in the otherwise-blank results panel before the first run.
@@ -431,7 +438,8 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         "Define two comparison groups above, choose a test, then click "
         "Run test to see results here."
     )
-    rl.addWidget(result_text)
+    report.addWidget(result_text)
+    rl.addWidget(report)
     # Not selection-gated: this tab compares groups, and a group is built from
     # wells rather than being the plate selection. But its empty state was a
     # sentence in a QTextEdit placeholder, top-left of a large empty box, while

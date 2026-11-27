@@ -1484,7 +1484,7 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     leaves the page in view, then puts each back at its place in the rail.
 
     Wrong implementations this rejects: a strip left at the top (out of thumb
-    reach), a sheet laid over the strip (its "Done ✕" hidden), and a give-back
+    reach), a sheet laid over the strip (the button that opened it hidden), and a give-back
     that appends to the rail rather than returning each widget to its index."""
     from PySide6.QtTest import QTest
     win, shell, rail, slot, footer = _wells_window(qapp, lambda s, f: [s, f])
@@ -1503,17 +1503,26 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     sheet = shell._wells_sheet
     assert sheet.isOpen() and sheet.isVisible()
     assert slot.parentWidget() is sheet._aw_holder and footer.parentWidget() is sheet._aw_holder
-    assert shell.wells_button.text() == "Done ✕"
+    # The button keeps its name and shows it is open by being checked; the
+    # sheet closes by a button reading Close at its top right, like every panel.
+    assert shell.wells_button.text() == "Wells · 3" and shell.wells_button.isChecked()
+    assert sheet._aw_close.text() == "Close" and sheet._aw_close.isVisibleTo(win)
     strip_top = strip.mapTo(win, strip.rect().topLeft()).y()
-    assert sheet.geometry().bottom() < strip_top, "the sheet covers its own Done button"
+    assert sheet.geometry().bottom() < strip_top, "the sheet covers the button that opened it"
     assert sheet._backdrop._alpha == 0, "a scrim would dim the plot the wells change"
 
-    shell.wells_button.click()
+    sheet._aw_close.click()
     QTest.qWait(300)
     assert not sheet.isOpen()
     lay = rail.layout()
     assert (lay.indexOf(slot), lay.indexOf(footer)) == (1, 2)
-    assert shell.wells_button.text() == "Wells · 3"
+    assert shell.wells_button.text() == "Wells · 3" and not shell.wells_button.isChecked()
+    shell.wells_button.click()                  # the button is a toggle too
+    QTest.qWait(300)
+    assert sheet.isOpen()
+    shell.wells_button.click()
+    QTest.qWait(300)
+    assert not sheet.isOpen()
 
 
 def test_a_page_with_no_picker_keeps_its_wells_slot_disabled(qapp, app_sheet):
@@ -2108,7 +2117,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
             shell.refresh()
             _pump(qapp)
             assert shell._sheet.isOpen() and shell.controls_button.isVisibleTo(win)
-            assert shell.controls_button.text() == "Hide controls"
+            assert shell.controls_button.text() == "⚙ Controls" and shell.controls_button.isChecked()
             # ⚙ Controls hides it, and a refresh (a page change) does not bring it back.
             shell.toggle_controls()
             _pump(qapp)

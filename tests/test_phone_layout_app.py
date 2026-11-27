@@ -89,8 +89,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert theme.touch_unit() == pytest.approx(u)
     assert not _visible(win._header)
     assert not _visible(shell._banner)
-    for w in (win._present_btn, win._reset_saves_btn, win._copy_analysis_btn,
-              win._open_btn, win._reset_view_btn, win._refresh_btn,
+    for w in (win._present_btn, win._refresh_btn,
               win._help_btn, win._statusbar, shell.desk_button):
         assert not _visible(w), w
     assert _visible(win._mode_seg) and _visible(shell.options_button)
@@ -214,7 +213,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     assert not phone_layout.is_on()
     assert theme.ui_scale() == 1.0
     assert _visible(win._header)
-    for w in (win._present_btn, win._reset_view_btn, review._section_nav,
+    for w in (win._present_btn, win._refresh_btn, review._section_nav,
               review._page_tabs_host, review._sidebar_root,
               review._central_pane_stack, review._sidebar_toggle_btn):
         assert _visible(w), w
@@ -301,14 +300,15 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         assert _visible(shell._rail_status)
         shell.menu_button.click()
         _pump(qapp)
-        # The Controls sheet: 48 pt controls, and a "Done ✕" to close it —
+        # The Controls sheet: 48 pt controls, and a Close at its top right —
         # on Plotting, whose band has controls with no dataset loaded (Home's
         # holds nothing tappable until one is).
         nav._rows["Plotting"].clicked.emit("Plotting")
         _pump(qapp)
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.text() == "Done ✕"
+        assert shell.controls_button.text() == "⚙ Controls" and shell.controls_button.isChecked()
+        assert shell._inspector().close_button.text() == "Close"
         # At most 60 % of the window (Plotting's controls fill that on this
         # small screen), and no scrim: the plot above it is what the controls
         # are judged by.
@@ -325,7 +325,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
             (type(w).__name__, w.height()) for w in ctrls if w.height() < round(48 * u) - 1]
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.text() != "Done ✕"
+        assert not shell.controls_button.isChecked()
         # The run view drops what repeats the headline.
         dash = win._analyze._dashboard
         assert dash.isStacked() and dash._status.isHidden()
@@ -702,7 +702,7 @@ def test_wells_at_the_foot_opens_the_rail_s_plate_over_the_live_plot(qapp, win, 
         review._set_selected_wells({"A01", "B02"}, commit=True)
         QTest.qWait(500)
         _pump(qapp)
-        assert shell.wells_button.text() == "Done ✕"
+        assert shell.wells_button.isChecked() and shell._wells_sheet._aw_close.text() == "Close"
         shell.wells_button.click()
         QTest.qWait(400)
         _pump(qapp)

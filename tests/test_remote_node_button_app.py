@@ -37,7 +37,7 @@ def test_the_indicator_is_in_the_header_in_every_mode_and_opens_manage_remotes(q
     assert isinstance(btn, RemoteNodeButton)
     assert btn.parentWidget() is win._header
     layout = win._header.layout()
-    assert layout.indexOf(btn) < layout.indexOf(win._storage_btn) < layout.indexOf(win._help_btn)
+    assert layout.indexOf(btn) < layout.indexOf(win._help_btn)
 
     for idx, mode in reversed(list(enumerate(PANE_MODES))):   # end on Review
         win._on_titlebar_mode_seg(idx)

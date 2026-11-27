@@ -6249,3 +6249,23 @@ def test_a_surface_roster_entry_with_no_site_is_stale_and_a_rostered_site_is_cle
     key = (sites[0][0], sites[0][1])
     assert scan.unrostered(sites, {key: "kept: one level"}) == []
     assert scan.stale(sites, {key: "kept", ("gone.py", "f"): "kept"}) == ["gone.py f()"]
+
+
+@pytest.mark.parametrize("body", [
+    'def open_(button):\n    button.setText("Done ✕")\n',
+    'def dock(button, docked):\n    button.setText("Hide controls" if docked else "Controls")\n',
+    'CLOSE = "Close ✕"\n',
+])
+def test_close_spelling_guard_catches(body):
+    import ast
+
+    from tests import test_one_way_to_close_a_panel as guard
+    assert guard.spellings([("review/x.py", ast.parse(body))])
+
+
+def test_close_spelling_guard_clears_a_docstring_and_the_one_close():
+    import ast
+
+    from tests import test_one_way_to_close_a_panel as guard
+    body = 'def build(panel):\n    """It used to read Done ✕."""\n    panel.close_button.setText("Close")\n'
+    assert guard.spellings([("review/x.py", ast.parse(body))]) == []

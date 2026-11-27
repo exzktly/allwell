@@ -1334,6 +1334,9 @@ class PhoneShell(QObject):
         self.controls_button = QToolButton()
         self.controls_button.setObjectName("PhoneControlsButton")
         self.controls_button.setText("⚙ Controls")
+        # It keeps its name while its sheet is open, and shows that it is by
+        # being checked: closing is the sheet's own Close, and this again.
+        self.controls_button.setCheckable(True)
         self.controls_button.clicked.connect(self.toggle_controls)
 
         # The well picker, one tap from the page: the page's plate and its
@@ -1342,6 +1345,7 @@ class PhoneShell(QObject):
         self.wells_button = QToolButton()
         self.wells_button.setObjectName("PhoneWellsButton")
         self.wells_button.setText("Wells")
+        self.wells_button.setCheckable(True)
         self.wells_button.clicked.connect(self.toggle_wells)
 
         # Share, the fourth permanent slot: it opens the menu of commands the
@@ -2234,7 +2238,7 @@ class PhoneShell(QObject):
     def _foot_strip(self) -> int:
         """How much of the window's foot the strip holds, while it shows: a
         bottom sheet rises from above it, so the button that opened the sheet
-        — which then reads "Done ✕" — stays where the thumb left it."""
+        — which then shows as pressed — stays where the thumb left it."""
         strip = self._strip
         if not strip.isVisibleTo(self._win):
             return 0
@@ -2265,6 +2269,9 @@ class PhoneShell(QObject):
             want = (lay.totalHeightForWidth(self._win.width()) if lay is not None
                     and lay.hasHeightForWidth() else
                     holder.sizeHint().height() if holder is not None else 0)
+            head = getattr(sheet, "_aw_head", None)
+            if head is not None:
+                want += head.sizeHint().height()
             return min(int(self._win.height() * SHEET_HEIGHT_SHARE), want + self.pt(8))
 
         # No scrim: the plot above the sheet redraws as its controls change,
@@ -2289,9 +2296,32 @@ class PhoneShell(QObject):
         lay.setContentsMargins(self.pt(8), self.pt(8), self.pt(8), self.pt(8))
         lay.addStretch(1)
         scroll.setWidget(holder)
-        sheet.setContentWidget(scroll)
+        # One way to close a panel, in one place: a button reading Close at
+        # its top right, as the inspector's header has.
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton
+        body = QWidget()
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(0, 0, 0, 0)
+        body_lay.setSpacing(0)
+        head = QWidget(body)
+        head_lay = QHBoxLayout(head)
+        head_lay.setContentsMargins(self.pt(8), self.pt(8), self.pt(8), 0)
+        title = QLabel("", head)
+        title.setProperty("role", "heading")
+        head_lay.addWidget(title, 1)
+        close = QPushButton("Close", head)
+        close.setObjectName("PhoneSheetClose")
+        close.setProperty("variant", "secondary")
+        close.clicked.connect(lambda _=False: sheet.close())
+        head_lay.addWidget(close)
+        body_lay.addWidget(head)
+        body_lay.addWidget(scroll, 1)
+        sheet.setContentWidget(body)
         sheet._aw_land = land
         sheet._aw_holder = holder
+        sheet._aw_head = head
+        sheet._aw_title = title
+        sheet._aw_close = close
         # Fitted like a Datasets page (``ui/phone_fit``): a form row holds its
         # label beside a group of controls kept on one line, and several were
         # wider than the sheet — Nanowells QC's four "Problem:" buttons in one
@@ -2419,7 +2449,7 @@ class PhoneShell(QObject):
         fit = getattr(sheet, "_aw_fit", None)
         if fit is not None:
             fit.refit_now()
-        self.controls_button.setText("Hide controls" if docked else "Done ✕")
+        self.controls_button.setChecked(True)
         return True
 
     def _fill_inspector(self) -> None:
@@ -2441,7 +2471,7 @@ class PhoneShell(QObject):
         phone_inspector.mount(sheet._aw_mount, self._inspector())
         self._fill_inspector()
         sheet.open()
-        self.controls_button.setText("Hide controls" if self.is_docked() else "Done ✕")
+        self.controls_button.setChecked(True)
         return True
 
     def inspector_is_open(self) -> bool:
@@ -2514,7 +2544,8 @@ class PhoneShell(QObject):
             w.show()
         self._sweep(force=False)    # the sheet's own scroll area, if new
         sheet.open()
-        self.wells_button.setText("Done ✕")
+        sheet._aw_title.setText("Wells")
+        self._sync_wells_label()
         self._wells_timer.start()
         self.refresh()
 
@@ -2545,12 +2576,9 @@ class PhoneShell(QObject):
 
     def _sync_wells_label(self) -> None:
         """"Wells · 4" — the count is what the plot shows, so it is worth a
-        glance from the foot of the screen — or "Done ✕" while the sheet is
-        open."""
+        glance from the foot of the screen — checked while the sheet is open."""
         sheet = self._wells_sheet
-        if sheet is not None and sheet.isOpen():
-            self.wells_button.setText("Done ✕")
-            return
+        self.wells_button.setChecked(sheet is not None and sheet.isOpen())
         fn = self._h.wells_count
         try:
             n = fn() if fn is not None else None
@@ -2561,7 +2589,7 @@ class PhoneShell(QObject):
 
     def _give_band_back(self) -> None:
         band, self._sheet_band = self._sheet_band, None
-        self.controls_button.setText("⚙ Controls")
+        self.controls_button.setChecked(False)
         insp = self._wired_inspector
         if band is None:
             if insp is not None:

@@ -26,7 +26,7 @@ from pipeline.background import BACKGROUND_METHODS
 from pipeline.cli_args import FLATFIELD_MODES
 from widgets.button_row import ButtonRow
 from widgets.info_icon import info_icon
-from widgets.page_body import build_page_body
+from widgets.page_body import build_bandless_body
 from widgets.separator import build_hline_separator
 from review.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
@@ -173,12 +173,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # app instance through the ``window`` handle (the QMainWindow *is* the app)
     # until it gets its own ctx migration; the generic app escape hatch is gone.
     app = ctx.window
-    # The band is empty on this tab — every Playground control lives in the
-    # right-hand dock — but it is added anyway so this page's top edge is drawn
-    # level with every other page's (widgets/page_body.py). The body is a row:
-    # the canvas, then the dock.
-    _band, body = build_page_body(parent, content_margins=(12, 12, 12),
-                                  horizontal=True)
+    # No control band: every Playground control lives in the right-hand dock, and an empty band reads as a row
+    # of missing controls (``widgets.page_body.build_bandless_body``). The body is a row: the canvas, then the dock.
+    body = build_bandless_body(parent, inset=theme.Spacing.md, horizontal=True)
     on_change = partial(playground_on_change, ctx)
 
     # ── The controls dock (mounted on the right, below) ──────────────────────

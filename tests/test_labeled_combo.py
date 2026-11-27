@@ -210,4 +210,3 @@ def test_unlabelled_keeps_its_name_and_paints_no_prefix(qapp):
     assert box.label() == "FOV"
     assert not box.labelShown()
     assert labels_outside_controls(host) == []
-    host.deleteLater()

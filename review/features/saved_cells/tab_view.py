@@ -35,6 +35,7 @@ from review.core.ui_helpers import build_section_header
 from review.features.saved_cells import collect
 from review.features.saved_cells import controller as ctl
 from ui import theme
+from widgets.page_body import build_bandless_body
 from widgets.flow_layout import FlowLayout
 from ui import buttons
 
@@ -368,13 +369,8 @@ class SavedCellsPage(QWidget):
 
 def build_saved_cells_tab(ctx, parent: QWidget) -> None:
     """Build the page into *parent* and register it for refreshes."""
-    # No control band: the page has no controls that scope what it shows, and an empty band strip reads as a
-    # row of missing controls (design language §6).
-    body = QWidget(parent)
-    QVBoxLayout(body).setContentsMargins(*(theme.Spacing.lg,) * 4)
-    outer = parent.layout() or QVBoxLayout(parent)
-    outer.setContentsMargins(0, 0, 0, 0)
-    outer.addWidget(body, 1)
+    # No control band: nothing on the page scopes what it shows (``build_bandless_body``).
+    body = build_bandless_body(parent, inset=theme.Spacing.lg)
     # Scrolled, so on a short screen the lists keep their height and the page
     # scrolls, instead of every label being squeezed to fit.
     scroll = QScrollArea(body)

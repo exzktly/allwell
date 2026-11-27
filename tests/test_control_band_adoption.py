@@ -44,7 +44,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #: the page out as band-then-content and returns the band it made; a leaf sharing
 #: a page's row claims a slot in it. Each is adoption — building two of them, in
 #: any combination, is the stacking of control rows the band exists to remove.
-_BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot")
+#: The fourth, ``build_bandless_body``, is a page that has no scoping control at all and so, by the design
+#: language's rule (no empty band strip), builds the same page body without the band: it has decided its control
+#: row as surely as the other three, and building it beside one of them would be the same stacking.
+_BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot", "build_bandless_body")
 
 ADOPTED = (
     "review/core/centre_view.py",          # Plotting — all five sub-tabs

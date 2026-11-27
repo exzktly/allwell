@@ -35,4 +35,8 @@ def test_a_draw_that_finds_more_rows_sizes_the_canvas_again(qtbot, monkeypatch):
     for i in range(4):
         canvas.figure.add_subplot(4, 1, i + 1)
     canvas.draw()
+    assert sized == []                               # never inside the draw
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.processEvents()
     assert sized == [True]

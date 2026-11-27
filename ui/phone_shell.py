@@ -1962,12 +1962,18 @@ class PhoneShell(QObject):
             return
         c.setProperty("_awFollowsRows", True)
 
+        def resize(canvas=c) -> None:
+            try:
+                if phone_layout.is_on() and _rows_of(canvas.figure) != canvas.property("_awRows"):
+                    self.size_canvas(canvas, True)
+            except RuntimeError:
+                swallowed()  # the canvas was deleted before the turn came
+
         def on_draw(_event, canvas=c) -> None:
-            if not phone_layout.is_on():
-                return
-            rows = _rows_of(canvas.figure)
-            if rows != canvas.property("_awRows"):
-                self.size_canvas(canvas, True)
+            # Once the draw is over, never inside it: resizing the canvas while it paints re-enters Qt's layout, and
+            # a phone tour run crashed there (exit 139, and a layout item read back as another object).
+            if phone_layout.is_on() and _rows_of(canvas.figure) != canvas.property("_awRows"):
+                QTimer.singleShot(0, resize)
 
         c.mpl_connect("draw_event", on_draw)
 

@@ -8437,9 +8437,20 @@ choice — Skip it / Fill in what's missing / Redo it — collected as the
 pipeline's `incremental` / `force` pair; a sidecar carrying both restores Redo
 it, as the pipeline always resolved them.
 
-The form's own chrome — `_section` (a collapsible titled section), `_row`,
-`_entry`, `_info_icon`, and `reveal_section` — is `analyze.form_chrome.AnalyzeFormChromeMixin`,
-inherited by `AnalyzeTabFormMixin`. `reveal_section(title)` unfolds a folded
+The form's own chrome — `_section`, `_row`, `_entry`, `_info_icon`, and
+`reveal_section` — is `analyze.form_chrome.AnalyzeFormChromeMixin`, inherited by
+`AnalyzeTabFormMixin`. Every section is a card built from the app's one
+collapsible section, `widgets.collapsible_section.CollapsibleSection`: a folding
+section opens and closes from its header, a section that does not fold is the
+same card with no chevron (`collapsible=False`), and the form builds them
+unanimated (`animated=False`) so a caller reading a body's visibility straight
+after a toggle reads the new state. The info marker, the section's switch and
+the folded summary go in the header through `addHeaderWidget`; the form keeps
+each folding card in `_section_cards` and each body and chevron in
+`_collapsible_sections`. A fold built by hand — a caret whose text is flipped
+between ▸ and ▾ on a condition — is what `tests/test_one_collapse_implementation.py`
+rejects; the run dashboard's own fold is the one left, and the Run card that
+replaces it does not fold. `reveal_section(title)` unfolds a folded
 section on demand: the fold-by-default rule is right for a user filling the form
 in and wrong for a control something else just changed on their behalf, which
 otherwise leaves no visible trace at all (see `_open_dataset_in_analyze`).

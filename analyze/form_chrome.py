@@ -17,12 +17,12 @@ from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
-    QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
+    QBoxLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QWidget,
 )
 
-from widgets.separator import build_hline_separator
 from ui import text_roles
 from ui import theme
+from widgets.collapsible_section import CollapsibleSection
 
 
 class _WidthWatcher(QObject):
@@ -54,10 +54,6 @@ class _WidthWatcher(QObject):
 class AnalyzeFormChromeMixin:
     """Section / row / entry / info-marker builders for the Analyze form."""
 
-    #: Width of the column the ▸/▾ caret sits in. Every section header reserves
-    #: it, folding or not, so all section titles start at the same x.
-    _CARET_GUTTER_W = 26
-
     def _section(self, parent: QWidget, title: str, info: str = "",
                  *, collapsible: bool = False, collapsed: bool = False,
                  switch: QWidget | None = None,
@@ -79,72 +75,39 @@ class AnalyzeFormChromeMixin:
         section is folded — what the fold is hiding (see
         ``analyze.section_summaries``).
         """
-        container = QWidget(parent)
-        cl = QVBoxLayout(container)
-        cl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
-        cl.setSpacing(theme.Spacing.xs)
-
-        header = QWidget(container)
-        hl = QHBoxLayout(header)
-        hl.setContentsMargins(0, 0, theme.Spacing.md, 0)
-        hl.setSpacing(theme.Spacing.xs)
-        caret = QLabel("▸" if collapsed else "▾" if collapsible else "", header)
-        caret.setProperty("textRole", "sectionHeading")
-        caret.setFixedWidth(self._CARET_GUTTER_W)
-        caret.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        caret.setContentsMargins(0, theme.Spacing.xs, theme.Spacing.xs, theme.Spacing.xs)
-        hl.addWidget(caret)
-        title_lbl = QLabel(title, header)
-        title_lbl.setProperty("textRole", "sectionHeading")
-        title_lbl.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
-        hl.addWidget(title_lbl)
+        # A card: the app's one collapsible section (``widgets.collapsible_section``), unanimated so a caller
+        # reading the body's visibility straight after a toggle reads the new state. A section that does not
+        # fold is the same card with no chevron.
+        container = CollapsibleSection(title, parent, expanded=not collapsed, collapsible=collapsible,
+                                       animated=False)
+        # Preferred, not the widget's Maximum: a section's wrapping rows are taller at the form's width than the
+        # section's plain size hint, and Maximum caps it at that hint, clipping them.
+        container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+        body = container.body()
+        caret = container.chevron()
         if info:
-            hl.addWidget(self._info_icon(header, info))
+            container.addHeaderWidget(self._info_icon(container.header(), info))
         if switch is not None:
-            switch.setParent(header)
-            hl.addWidget(switch)
-        summary_lbl = QLabel("", header)
+            container.addHeaderWidget(switch)
+        summary_lbl = QLabel("", container.header())
         _WidthWatcher(summary_lbl, lambda _title=title: self._refresh_section_summary(_title))
         summary_lbl.setProperty("textRole", "help")
-        summary_lbl.setContentsMargins(theme.Spacing.xs, theme.Spacing.xs, 0, theme.Spacing.xs)
         summary_lbl.setMinimumWidth(0)
         summary_lbl.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         summary_lbl.hide()
-        # The summary takes the header's spare width when it shows; the
-        # stretch after it holds the title, ⓘ and switch to the left when it
-        # does not (a hidden widget takes no part in the layout).
-        hl.addWidget(summary_lbl, 20)
-        hl.addStretch(1)
-        cl.addWidget(header)
-
-        rule = build_hline_separator(container)
-        # The section rule: one step stronger than an in-panel hairline, which
-        # is near-invisible on the grey theme (QSS ``QFrame#Separator[section]``).
-        rule.setProperty("section", True)
-        cl.addWidget(rule)
-
-        body = QWidget(container)
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.sm)
-        bl.setSpacing(theme.Spacing.xs)
-        cl.addWidget(body)
+        # The summary takes the header's spare width when it shows (a hidden widget takes no part in the layout).
+        container.addHeaderWidget(summary_lbl, 20)
 
         if collapsible:
-            body.setVisible(not collapsed)
-
-            def _toggle(_ev=None, _body=body, _caret=caret, _title=title) -> None:
-                vis = not _body.isVisible()
-                _body.setVisible(vis)
-                _caret.setText("▾" if vis else "▸")
-                self._refresh_section_summary(_title)
-
-            header.setCursor(Qt.PointingHandCursor)
-            header.mousePressEvent = _toggle  # type: ignore[assignment]
+            container.toggled.connect(lambda _open, _title=title: self._refresh_section_summary(_title))
             # Recorded so a caller that changes a control inside a folded
             # section can show what it did — see reveal_section.
             if not hasattr(self, "_collapsible_sections"):
                 self._collapsible_sections = {}
             self._collapsible_sections[title] = (body, caret)
+            if not hasattr(self, "_section_cards"):
+                self._section_cards = {}
+            self._section_cards[title] = container
 
         if summary is not None:
             if not hasattr(self, "_section_summaries"):
@@ -167,7 +130,8 @@ class AnalyzeFormChromeMixin:
             return
         summary, label, body = entry
         text = ""
-        if not body.isVisibleTo(body.parentWidget()):
+        card = getattr(self, "_section_cards", {}).get(title)
+        if card is not None and not card.isExpanded():
             from core.safe import swallow
             with swallow(f"summarising the {title} section"):
                 text = summary() or ""
@@ -273,9 +237,7 @@ class AnalyzeFormChromeMixin:
         entry = getattr(self, "_collapsible_sections", {}).get(title)
         if entry is None:
             return
-        body, caret = entry
-        body.setVisible(True)
-        caret.setText("▾")
+        self._section_cards[title].setExpanded(True)
         self._refresh_section_summary(title)
 
     def _info_icon(self, parent: QWidget, info: str) -> QLabel:

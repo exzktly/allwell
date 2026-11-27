@@ -37,7 +37,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel, QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from ui import help_topics
 
@@ -73,10 +73,9 @@ def _settle(app, n: int = 10) -> None:
 def _expand_every_section(qapp, tab) -> None:
     """Open the collapsed sections — a hidden widget cannot take focus, so the
     focus branch is untestable while its section's body is folded."""
-    carets = [w for w in tab.findChildren(QLabel)
-              if w.property("textRole") == "sectionHeading" and w.text() == "▸"]
-    for caret in carets:
-        QTest.mouseClick(caret.parentWidget(), Qt.LeftButton)
+    for card in tab._section_cards.values():
+        if not card.isExpanded():
+            QTest.mouseClick(card.header(), Qt.LeftButton)     # the header a user clicks
     _settle(qapp)
 
 

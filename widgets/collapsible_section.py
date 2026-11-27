@@ -12,6 +12,12 @@ API
 * ``setValueWidget(w)`` — put a small preview widget (swatch, label, ...) on the
   right of the header so a collapsed section still shows its state.
 * ``toggled(bool)`` — emitted on expand/collapse.
+* ``CollapsibleSection(title, parent, *, expanded=True, collapsible=True, animated=True)`` — a section that is
+  not *collapsible* is a titled card with no chevron and a header that ignores clicks; one not *animated* shows
+  and hides its body at once, for a caller that reads the body's visibility straight after a toggle.
+* ``addHeaderWidget(w, stretch=0)`` — a widget in the header after the title (an info marker, the section's own
+  switch, a line summarising what the fold hides); its clicks are its own and do not fold the section.
+* ``body()`` / ``chevron()`` — the content widget and the chevron label.
 
 Styled from ``theme`` tokens; chevron and paddings are font/spacing relative.
 """
@@ -96,13 +102,15 @@ class CollapsibleSection(QWidget):
     _CHEVRON_SHUT = "▸"   # ▸
 
     def __init__(self, title: str = "", parent: QWidget | None = None,
-                 *, expanded: bool = True) -> None:
+                 *, expanded: bool = True, collapsible: bool = True, animated: bool = True) -> None:
         super().__init__(parent)
         self.setObjectName("CollapsibleSection")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
-        self._expanded = bool(expanded)
+        self._collapsible = bool(collapsible)
+        self._animated = bool(animated)
+        self._expanded = bool(expanded) or not self._collapsible
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -110,6 +118,9 @@ class CollapsibleSection(QWidget):
 
         self._header = _SectionHeader(title, self)
         self._header.clicked.connect(self._on_header_clicked)
+        if not self._collapsible:
+            self._header.chevron.hide()
+            self._header.setCursor(Qt.ArrowCursor)
 
         self._body = QWidget(self)
         self._body.setObjectName("CollapsibleSectionBody")
@@ -122,6 +133,7 @@ class CollapsibleSection(QWidget):
 
         root.addWidget(self._header)
         root.addWidget(self._body)
+        self._header_extras = 0
 
         self._anim = QPropertyAnimation(self._body, b"maximumHeight", self)
         self._anim.setDuration(170)
@@ -147,16 +159,33 @@ class CollapsibleSection(QWidget):
     def setValueWidget(self, widget: QWidget | None) -> None:
         self._header.set_value_widget(widget)
 
+    def addHeaderWidget(self, widget: QWidget, stretch: int = 0) -> None:
+        """Put *widget* in the header after the title and whatever was added before it."""
+        lay = self._header.layout()
+        at = lay.indexOf(self._header.title_label) + 1 + self._header_extras
+        widget.setParent(self._header)
+        lay.insertWidget(at, widget, stretch)
+        self._header_extras += 1
+
+    def body(self) -> QWidget:
+        return self._body
+
+    def chevron(self) -> QLabel:
+        return self._header.chevron
+
+    def header(self) -> QWidget:
+        return self._header
+
     # ── expand/collapse API ──────────────────────────────────────────────
     def isExpanded(self) -> bool:
         return self._expanded
 
     def setExpanded(self, expanded: bool) -> None:
-        expanded = bool(expanded)
+        expanded = bool(expanded) or not self._collapsible
         if expanded == self._expanded:
             return
         self._expanded = expanded
-        self._apply_state(animate=True)
+        self._apply_state(animate=self._animated)
         self.toggled.emit(expanded)
 
     def toggle(self) -> None:
@@ -173,7 +202,8 @@ class CollapsibleSection(QWidget):
 
     # ── internals ────────────────────────────────────────────────────────
     def _on_header_clicked(self) -> None:
-        self.toggle()
+        if self._collapsible:
+            self.toggle()
 
     def _content_height(self) -> int:
         return max(0, self._body_layout.sizeHint().height())

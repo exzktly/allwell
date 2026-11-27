@@ -6170,6 +6170,9 @@ DESIGN_GUARD_CASES = {
                                        'def build(row):\n    _add_label(row, "Folder:")\n',
                                        'def _add_label(row, text):\n    row.addWidget(QLabel(text))\n\n'
                                        'def build(row):\n    _add_label(row, "Folder")\n'),
+    "hand_built_fold": ("tests.test_one_collapse_implementation", "test_a_section_folds_through_collapsible_section",
+                        'def toggle(caret, body):\n    caret.setText("▾" if body.isVisible() else "▸")\n',
+                        'def build(btn):\n    btn.setText("Display ▾")\n'),
     "color_spelling": ("tests.test_color_is_the_one_spelling", "test_the_interface_spells_it_color",
                        'def build(b):\n    b.setToolTip("Pick the colour of the outline")\n',
                        'def build(b, s):\n    b.setToolTip("Pick the color of the outline")\n    s["colour_by"] = 1\n'),

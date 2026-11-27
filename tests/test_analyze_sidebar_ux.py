@@ -234,7 +234,8 @@ def test_run_lists_the_problems_under_it_and_opens_the_first_one(tab, qtbot):
     _numbers_and_schema_wrong(tab)
     tab.reveal_section("Advanced")
     body = tab._collapsible_sections["Filename schema"][0]
-    body.setVisible(False)                                 # folded again
+    tab._section_cards["Filename schema"].setExpanded(False)   # folded again
+    assert not body.isVisibleTo(tab)
     assert tab._validate_run_request() is None             # no dialog: the
     lbl = tab._run_problems_lbl                            # autouse guard would raise
     assert not lbl.isHidden() and lbl.property("textTone") == "failure"

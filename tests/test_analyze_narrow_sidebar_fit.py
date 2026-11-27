@@ -34,7 +34,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication
 
 
 @pytest.fixture(scope="module")
@@ -48,11 +48,10 @@ def qapp():
 
 
 def _expand_every_collapsible_section(tab) -> None:
-    carets = [l for l in tab.findChildren(QLabel)
-              if l.property("textRole") == "sectionHeading" and l.text() == "▸"]
-    assert carets, "no collapsed sections found — did the section markup change?"
-    for caret in carets:
-        QTest.mouseClick(caret.parentWidget(), Qt.LeftButton)
+    folded = [card for card in tab._section_cards.values() if not card.isExpanded()]
+    assert folded, "no collapsed sections found — did the section markup change?"
+    for card in folded:
+        QTest.mouseClick(card.header(), Qt.LeftButton)     # the header a user clicks
 
 
 def test_analyze_form_fits_rail_w_with_every_section_expanded(qapp):

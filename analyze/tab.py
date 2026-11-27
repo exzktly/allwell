@@ -175,8 +175,9 @@ class AnalyzeTab(AnalyzeBackgroundMapMixin, AnalyzeChannelRowsMixin, AnalyzeInpu
         scroll.setFixedWidth(theme.Metrics.rail_w)
         form_host = QWidget()
         self._form_layout = QVBoxLayout(form_host)
-        self._form_layout.setContentsMargins(0, theme.Spacing.sm, 0, theme.Spacing.sm)
-        self._form_layout.setSpacing(0)
+        # The sections are cards (``form_chrome._section``): a gap between them and room round them.
+        self._form_layout.setContentsMargins(theme.Spacing.md, theme.Spacing.md, theme.Spacing.md, theme.Spacing.md)
+        self._form_layout.setSpacing(theme.Spacing.md)
         scroll.setWidget(form_host)
         self._left_sidebar = scroll  # shell left-rail toggle hides/shows this
         splitter.addWidget(scroll)

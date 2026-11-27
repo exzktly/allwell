@@ -945,22 +945,29 @@ with `Ctrl+O`.
 
 ## Analyze mode — running the pipeline
 
-The Analyze tab is one tall scrollable form with a footer pinned under it. Each
-section asks one question, in the order a run needs the answers: **Data**,
-**Filename schema**, **Channels**, **Segmentation**, **Image correction**,
-**Measurements & filters**, **Auto-threshold**, **Run scope** and **Advanced**,
-with **Nanowell array** after Segmentation for a nanowell plate and **Remote
-options** at the foot while a remote host is chosen. Every label sits above its
-field, so fields use the panel's full width.
+The Analyze tab is a column on the left — the form for a **New run** — and the
+**Run** card on the right. The column's title row carries **Copy from a run…**,
+which fills the whole form from a previous run, and **Presets**, your own saved
+settings. Under it the form is a column of cards, each asking one question, in
+the order a run needs the answers: **Data**, **Filename schema**, **Channels**,
+**Segmentation**, **Image correction**, **Measurements & filters**,
+**Auto-threshold**, **Run scope** and **Advanced**, with **Nanowell array** after
+Segmentation for a nanowell plate and **Remote options** at the foot while a
+remote host is chosen. Each label sits in a column of its own beside its field;
+in phone layout it sits above the field instead. A caution — a segmentation
+channel that is not one of the channels you listed, say — is an amber notice
+in the card it belongs to.
 
 Data, Channels, Segmentation and Image correction are open when the form opens;
 the rest are folded, and a folded section's header says what it holds —
 "None · Rolling disk", "Fill in what's missing · only B02", or "2 changed" when
 some of its settings differ from a new form's. Click a header to open or fold it.
 
-The footer holds **Run on** (where the run goes; see
-[Running on a remote host](#10-running-on-a-remote-host)), the run buttons, and
-under them **what stops the run**: every problem the form can see — no input
+The card pinned under the form holds **Run on** (where the run goes, with
+**Manage…** beside it; see
+[Running on a remote host](#10-running-on-a-remote-host)), then **Add to queue**
+and **Run pipeline** at the right — **Suspend** and **Stop** while a run goes —
+and under them **what stops the run**: every problem the form can see — no input
 folder, a schema that does not parse, a method missing the channel it needs, a
 correction missing its blank well, a number that is not one — the first in full
 and a count of the rest, with all of them in its tooltip. While you fill the
@@ -1052,7 +1059,7 @@ never downloaded. A moment later a second sentence adds the real coverage: how
 many wells are complete, and how many of the input's field groups the output
 already accounts for, so you can see how much a re-run has left to do. If new
 
-**Copy from a run…**, at the foot of the Data section, does the same from a
+**Copy from a run…**, beside the form's title, does the same from a
 `pipeline_info.json` you pick, and points the input at the plate
 that file belongs to. It loads settings only — it does not resume the run; use
 the resume card (or set **Run scope → If a well already has output** to
@@ -2623,13 +2630,14 @@ recently. The log line for a folder the automatic clean-up kept says the same.
   left short of full, with a warning in the log pointing at the `errors/` folder
   in the output directory. A finished-looking bar over a part-finished plate is
   the one thing the run view will not show you.
-- **The full log sits under the dashboard, open.** Everything the run says,
-  line by line, appears there as it happens — and some of it appears nowhere
-  else: why a run refused to start, which volume ran out of room, the path of
-  the `errors/` folder when wells failed. Untick **Show raw log** in the
-  Pipeline Output header if you would rather watch the dashboard alone; the
-  app re-opens it on its own only when a run fails with an explanation you
-  would otherwise not see, and hands the toggle back at the next run.
+- **The full log is behind "Show log" until a run starts.** Everything the run
+  says, line by line, appears there as it happens — and some of it appears
+  nowhere else: why a run refused to start, which volume ran out of room, the
+  path of the `errors/` folder when wells failed. Starting a run shows it; a run
+  that ends cleanly puts it back, one that fails or comes up short keeps it open,
+  and **Show log** / **Hide log** at the top of the **Run** card opens and closes
+  it whenever you like. Once you have worked that button yourself, your choice
+  stands until you change it.
 - **The log is saved with the results.** Everything the log shows for a run,
   local or remote, is also written to the output folder as
   `logs/analyze-<date>-<time>.log`, one file per run, and the log's last line

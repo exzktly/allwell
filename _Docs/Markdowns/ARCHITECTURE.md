@@ -2637,15 +2637,15 @@ flush, with no inset — the topbar's left content margin is zero and the widget
 after the bar carry their own leading pad, so the bar and the panel below it are
 one column rather than a chip row floating over one.
 
-All three modes put a panel down the left edge, and all three pin to the same
-`rail_w` — Review's rail, the Datasets sidebar, and Analyze's form panel (fixed
-there too, not merely a minimum inside a resizable splitter) — so switching
-modes never visibly resizes the window. `AllWellApp._sync_mode_bar`
-still matches the bar to whichever panel is current, re-running on every mode
-switch and on any resize of the three panels it watches, as a defensive floor
-rather than reconciling genuinely different widths: it floors at the bar's own
-natural width, so a panel narrower than the three segments elides their labels
-rather than shrinking the bar.
+All three modes put a fixed-width panel down the left edge: Review's rail and
+the Datasets sidebar at `rail_w`, and Analyze's form column at
+`Metrics.form_column_w` (430) — the design language gives Analyze no rail, its
+form a column of cards with a label column beside the fields (`form_chrome._row`,
+which declares a label-above phone form through `widgets.form_registry`).
+`AllWellApp._sync_mode_bar` keeps the bar at `rail_w` in every mode, re-running
+on every mode switch and panel resize, so the control a switch is made with
+never moves under the pointer; it floors at the bar's own natural width, so
+three segments that need more elide nothing.
 
 Because the bar and the panel are one column, they collapse together. The same
 method hides the bar whenever the rail is collapsed (`Ctrl+B`, or the button
@@ -8539,14 +8539,17 @@ failure is *queued*, not from the live `was_stopped` / `was_suspended`. The GUI
 drains one timer tick later, and a Stop clicked inside that window would
 otherwise turn a genuine failure amber and silent.
 
-The raw log is **open by default** and the "Show raw log" toggle is there to put
-it away. Several things are said in that pane and nowhere else — why a run
-refused to start, the volume that filled, the `errors/` folder a partial run
-points at, the scheduler's queue-wait breadcrumbs — and the app used to have to
-override its own closed-by-default to show them, which is the tell that the
-default was the wrong way round. The seven Datasets tool pages
-(`datasets/core/log_panel.py`) still start theirs closed, deliberately: each
-reports a short, bounded job whose dashboard is the whole story.
+Analyze's output pane is the **Run** card (`widgets.card.Card`, titled "Run"),
+holding the last run's summary, the run dashboard (which no longer folds) and the
+raw log. The log waits behind a quiet checkable tool button, `_raw_log_cb`, that
+names the state it moves to — "Show log", then "Hide log" — until a run starts:
+`_set_running_ui_state` calls `force_raw_log_open`, a clean end
+(`_on_run_done` with every well accounted for) calls `restore_raw_log`, and a
+failure or a short run leaves it open, since several things are said in that
+pane and nowhere else — why a run refused to start, the volume that filled, the
+`errors/` folder a partial run points at. The card hugs the dashboard while the
+log is hidden and fills the pane once it shows. The Datasets tool pages
+(`datasets/core/log_panel.py`) start theirs closed too.
 
 `force_raw_log_open` therefore covers the user who has closed the pane and then
 hits a failure: it re-opens it, because the explanation is in there and they

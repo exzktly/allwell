@@ -107,7 +107,12 @@ def draw_qc(fig, matrix, *, which: str, out_dir, message: str = "", highlight=fr
     ax = fig.add_axes((_LEFT, _BOTTOM, _RIGHT - _LEFT, _TOP - _BOTTOM))
     _theme_axes(ax)
     ground, ink, muted = _inks(ax)
-    _title(fig, matrix, which, out_dir, message, ink, muted, walk)
+    below = _title(fig, matrix, which, out_dir, message, ink, muted, walk)
+    # The title's lines are broken to the figure's width, so on a narrow figure there are more of them: the grid
+    # starts under the last one rather than at a fixed height they would run into.
+    box = ax.get_position()
+    if below - 0.01 < box.y1:
+        ax.set_position((box.x0, box.y0, box.width, max(0.05, below - 0.01 - box.y0)))
     if not wells:
         ax.set_axis_off()
         _ink(ax.text(0.5, 0.5, "Every timepoint is addressed and confirmed.", ha="center", va="center",
@@ -137,17 +142,41 @@ def draw_qc(fig, matrix, *, which: str, out_dir, message: str = "", highlight=fr
     return drawn
 
 
-def _title(fig, matrix, which, out_dir, message, ink, muted, walk=qc.WALK_DEFAULT) -> None:
-    _ink(fig.text(_LEFT, 0.965, qc.summary(matrix), ha="left", va="top", fontsize=10, fontweight="bold", color=ink,
-                  gid="nw-qc-summary"))
-    y = 0.925
+#: The type of the summary line and of the notes under it, in points.
+_SUMMARY_PT, _NOTE_PT = 10.0, 7.5
+#: An average glyph's width as a share of its type size, for breaking a line to the figure's width: a little wider
+#: than ``renderer._GLYPH_EM``, since a line that breaks a word early costs a line and one that runs past the edge
+#: loses words.
+_QC_GLYPH_EM = 0.6
+
+
+def _broken(fig, text: str, size_pt: float) -> list[str]:
+    """*text* broken at spaces into lines that fit the figure's width from ``_LEFT``; every word kept."""
+    import textwrap
+
+    width_pt = fig.get_figwidth() * 72.0 * (1.0 - _LEFT - 0.02)
+    return textwrap.wrap(text, max(12, int(width_pt / (_QC_GLYPH_EM * size_pt)))) or [text]
+
+
+def _title(fig, matrix, which, out_dir, message, ink, muted, walk=qc.WALK_DEFAULT) -> float:
+    """The summary and the notes under it, each broken to the figure's width. Returns the height, as a share of the
+    figure, under the last line: on a phone the notes run to more lines than at a desk."""
+    height_pt = max(fig.get_figheight() * 72.0, 1.0)
+    step_summary, step_note = 1.25 * _SUMMARY_PT / height_pt, 1.25 * _NOTE_PT / height_pt
+    y = 0.965
+    _ink(fig.text(_LEFT, y, "\n".join(_broken(fig, qc.summary(matrix), _SUMMARY_PT)), ha="left", va="top",
+                  fontsize=_SUMMARY_PT, fontweight="bold", color=ink, linespacing=1.15, gid="nw-qc-summary"))
+    y -= step_summary * len(_broken(fig, qc.summary(matrix), _SUMMARY_PT)) + 0.6 * step_note
     action = qc.action_line(matrix, walk)
     lines = ([(message, ink)] if message else []) + ([(action, ink)] if action and not message else []) \
         + [(n, muted) for n in qc.notes(matrix, which, out_dir)]
     for text, colour in lines:
-        _ink(fig.text(_LEFT, y, text, ha="left", va="top", fontsize=7.5, color=colour, wrap=True,
-                      gid="nw-qc-message" if colour is ink else "nw-qc-note"), muted=colour is muted)
-        y -= 0.032
+        rows = _broken(fig, text, _NOTE_PT)
+        _ink(fig.text(_LEFT, y, "\n".join(rows), ha="left", va="top", fontsize=_NOTE_PT, color=colour,
+                      linespacing=1.15, gid="nw-qc-message" if colour is ink else "nw-qc-note"),
+             muted=colour is muted)
+        y -= step_note * len(rows) + 0.25 * step_note
+    return y
 
 
 def _cells(ax, matrix, wells, tps, tops, muted) -> None:

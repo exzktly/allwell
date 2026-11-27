@@ -9,6 +9,8 @@ through its real builder and controls (``build_nanowell_tab``, the view switch, 
 
 from __future__ import annotations
 
+from review.features.nanowell.values_view import is_offered
+
 import numpy as np
 import pytest
 import scipy.stats as st
@@ -293,7 +295,7 @@ def test_the_moving_average_distribution_draws_is_the_one_statistics_tests(page,
     assert (state.axis, state.moving) == ("wells", 2)
     page.widgets.get("_nw_view_bar").setCurrentIndex([k for k, _l in VIEWS].index("statistics"))
     assert state.view == "statistics"
-    assert page.widgets.get("_nw_moving_spin").isVisibleTo(page.window)
+    assert is_offered(page, page.widgets.get("_nw_moving_spin"))
     # At t_a over 2 timepoints: A01 (1+2)/2, (2+4)/2, (0+3)/2 and its fourth is occluded at t_c, so no value;
     # B01 (3+6)/2, then occluded at t_a, then (1+7)/2, (1+9)/2.
     samples = " ".join(_report(page, sc.GID_SAMPLE))

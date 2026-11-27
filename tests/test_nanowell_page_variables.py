@@ -245,7 +245,7 @@ def test_without_variables_group_by_is_hidden_and_colour_and_split_says_where_to
     nwc.redraw(ctx)
     assert not ctx.widgets.get("_nw_groupby_grp").isVisibleTo(ctx.window)
     button = ctx.widgets.get("_nw_decorate_btn")
-    assert button.isVisibleTo(ctx.window) and button.text() == "Colour & split ›"
+    assert button.isVisibleTo(ctx.window) and button.text() == "Colour && split ›"
     content = inspector_panels.panel_of(button).content
     notes = [lab for lab in content.findChildren(QLabel) if lab.text() == NO_VARIABLES_NOTE]
     assert len(notes) == 1 and not notes[0].isHidden()

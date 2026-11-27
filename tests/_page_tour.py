@@ -26,6 +26,7 @@ def tour(win, qapp, *, kind: str, wells: set[str], phone: bool) -> Iterator[str]
 
     win._on_titlebar_mode_seg(0)
     pump(qapp)
+    seen: set[str] = set()                            # the inspector pages already measured, by title
     nav = review._section_nav
     for key, _label in nav.shownItems():
         row = getattr(nav, "_rows", {}).get(key)
@@ -47,6 +48,7 @@ def tour(win, qapp, *, kind: str, wells: set[str], phone: bool) -> Iterator[str]
             prepare(win, qapp, kind, name, wells)
             yield name
             yield from _controls_sheet(shell, qapp, name, phone)
+            yield from _inspector_pages(review, qapp, name, seen)
     if kind == "mini":
         win._on_titlebar_mode_seg(2)
         pump(qapp)
@@ -101,3 +103,65 @@ def _controls_sheet(shell, qapp, name: str, phone: bool) -> Iterator[str]:
     yield name + SHEET_SUFFIX
     shell.close_controls(now=True)
     pump(qapp, 20, 200)
+
+
+#: The pages whose inspector pages the tour opens, each once, on the first of the page's views that offers it: the
+#: Nanowells page (``SURFACES_TRACKER.md`` row S22, "every inspector page on all six screens"). Every page's would
+#: be the whole app's; it is where the rows that built the inspector ended.
+INSPECTOR_PAGES_OF = ("Nanowells/",)
+
+
+def _inspector_pages(review, qapp, name: str, seen: set[str]) -> Iterator[str]:
+    """Each inspector page the page's band opens — a row such as *Values ›* or *Layers ›*, the Display and Style
+    tabs, and the rows a Display tab holds — open over the page, yielded as ``"<page> ▸ <title>"``, each title once.
+    A page is opened as a press of its button opens it, and closed again before the next."""
+    from PySide6.QtWidgets import QAbstractButton
+
+    from review.core import inspector_panels as panels
+    from review.core import inspector_service
+    from widgets.control_band import ControlBand
+
+    if not name.startswith(INSPECTOR_PAGES_OF):
+        return
+    # The page's own band: the one holding its Metric (on a phone it may be lent to the Controls sheet, closed).
+    anchor = review._ctx.widgets.get_or_none("_nw_metric_cb")
+    band = anchor
+    while band is not None and not isinstance(band, ControlBand):
+        band = band.parentWidget()
+    for band in [band] if band is not None else []:
+        for button in band.findChildren(QAbstractButton):
+            panel = panels.panel_of(button)
+            if panel is None or panel.title in seen or not _offered(button, band):
+                continue
+            ctx = panels._ctx_of(button, panel)
+            if ctx is None:
+                continue
+            seen.add(panel.title)
+            panels.press(button)
+            pump(qapp, 20, 300)
+            yield f"{name} ▸ {panel.title}"
+            # The rows a root page holds that open a page of their own (Display ▸ Display range).
+            for row in panel.content.findChildren(QAbstractButton):
+                inner = panels.panel_of(row)
+                label = inner.title if inner is not None else row.text().split(":")[0].strip()
+                if label in seen or not (inner is not None or row.property("inspectorRow")):
+                    continue
+                seen.add(label)
+                if inner is not None:
+                    panels.press(row)
+                else:
+                    row.click()
+                pump(qapp, 20, 300)
+                yield f"{name} ▸ {panel.title} ▸ {label}"
+            inspector_service.close(ctx)
+            pump(qapp, 20, 200)
+
+
+def _offered(button, band) -> bool:
+    """Whether *button* is on the band's current view: not hidden itself nor by any group between it and the band."""
+    widget = button
+    while widget is not None and widget is not band:
+        if widget.isHidden():
+            return False
+        widget = widget.parentWidget()
+    return widget is band

@@ -366,7 +366,12 @@ def test_the_distribution_s_footer_is_in_its_details_field_not_the_figure(page, 
     assert nwc.set_subset(page, ss.Subset((ss.Condition("n0", "ge", 1),), "all"))
     fig = page.widgets.get("_nw_fig")
     assert not [t for t in fig.texts if (t.get_gid() or "").startswith("nw-footer")]       # none in the figure
-    assert fig.subplotpars.bottom == pytest.approx(0.10)                                    # the panels have the room
+    # The panels have the room: the figure reserves what its tick labels and x labels need under the panels, and
+    # nothing for a footer it does not write.
+    from review.features.nanowell import renderer as nw_renderer
+
+    footer_room = nw_renderer._FOOTER_BASE + nw_renderer._line_step(fig) * nw_renderer._FOOTER_LINES
+    assert fig.subplotpars.bottom < 0.10 + footer_room
     footer = st.hits.footer
     assert footer.alerts and footer.notes
     assert any(a.startswith("Starting cells ≥1") for a in footer.alerts)

@@ -24,6 +24,7 @@ from review.features.nanowell import _anchor_queue as aq
 from review.features.nanowell import _phone as nw_phone
 from review.features.nanowell import _window_controller as wnc
 from review.features.nanowell import controller as nwc
+from review.features.nanowell import renderer as nw_renderer
 from review.features.nanowell import statistics_compute as stats_compute
 from review.features.nanowell.cell_scope_compute import cell_scope
 from review.features.nanowell.distribution_compute import (
@@ -536,6 +537,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     # boxes commit on Enter or focus-out) is committed by the click rather than left uncommitted under a figure
     # that never changes.
     card.canvas.setFocusPolicy(Qt.ClickFocus)
+    nw_renderer.keep_ticks_apart(card.canvas)            # tick labels that would run together, thinned as drawn
     apply_plot_card_decorators(ctx, card, "Nanowells")
     card.plotThemeChanged.connect(lambda _m: nwc.redraw(ctx))
     mount_array_canvas_tools(ctx, card, array_controls)

@@ -76,9 +76,15 @@ def render_statistics(fig, result: sc.StatisticsResult, *, note: str = "") -> No
     lines = wrapped
     fits = max(1, int(room // (size * _LEADING)))
     if len(lines) > fits:
-        left_out = len(lines) - fits + 1
-        lines = lines[:fits - 1] + [(sc.GID_NOTE, f"… {left_out} more line(s) not shown: the figure is too short. "
-                                                   "Enlarge the window or narrow the comparison.")]
+        # The line saying what was left out is wrapped like the rest, and as many lines as it became are given up for
+        # it: unwrapped it ran past a phone's narrow figure (900 px of text on a 406 px figure).
+        chars = int(0.93 * width_pt / (_CHAR_EM * size))
+        for keep in range(fits - 1, -1, -1):
+            said = _wrap([(sc.GID_NOTE, f"… {len(lines) - keep} more line(s) not shown: the figure is too short. "
+                                        "Enlarge the window or narrow the comparison.")], chars)
+            if keep + len(said) <= fits or keep == 0:
+                break
+        lines = lines[:keep] + said
     step = size * _LEADING / height_pt
     top = 0.03 + step * len(lines)
     ax0 = fig.add_axes([0, 0, 1, 1])

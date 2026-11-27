@@ -541,6 +541,14 @@ Step log (newest last):
 13. D17 closed: smFISH's LUT min / LUT max / Show overlays / This frame CDF on its inspector Display page; band one
     row at 1284 and 1100 px (two rows still at 916 px, below the every-page desk widths). Test and mutation in the
     row. Next smallest: D18 Segmentation `band rows`, then D15 (Statistics, Spatial, Multivariate band rows).
+14. D18 Segmentation `band rows` — measured, not changed, waiting on the user. At 1284 px the band has 1142 px and
+    needs two rows (69 px). Its scopes measure 94 (well), 141 (Channel), 74 (FOV), 105 (Timepoint), 160 and 150 (the
+    Delete and Crop scope controls), 175 (ON threshold) px, plus the zoom group and the actions Delete cell, Crop
+    cells, Edit and Display. Moving the zoom group under the image alone still left two rows (68 px at 1258), so it
+    was reverted. The ON threshold field's comment records that it was put back on the band on purpose ("its original
+    home"), so it was not moved. What would fit: the editing tools — Delete cell and Crop cells with their scope
+    controls, and Edit — as a tool row under the image beside the zoom. That is a layout decision the plan and the
+    prototype do not settle (no Segmentation mock-up), so it is the user's.
 
 ## 10. Rows
 

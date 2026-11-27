@@ -1,4 +1,4 @@
-"""Two header controls on ``PlotCard`` that did not hold the state they were set to.
+"""A header control on ``PlotCard`` that did not hold the state it was set to.
 
 ``setThemeToggleVisible(False)`` hid the ``Publication ↔ Screen`` segmented
 control and the "preview only" chip once, and then ``_sync_theme_ui`` — which
@@ -6,11 +6,6 @@ runs again on every ``setPlotTheme`` call and once more from the card's own
 ``changeEvent`` — put the chip straight back the first time the card switched
 to the screen theme. A card asked to hide its theme UI ended up showing half
 of it.
-
-``_open_stats_popover`` built a fresh ``Popover`` on every click and assigned
-it over ``self._stats_pop``. The old popover is a child of the card, so
-dropping the Python reference did not destroy it: each click left another
-hidden popover, with its own segmented controls, alive for the card's lifetime.
 """
 
 from __future__ import annotations
@@ -123,21 +118,3 @@ def test_a_failing_restore_does_not_wedge_the_signal_off_for_ever(card, monkeypa
     card.plotThemeChanged.connect(seen.append)
     card.setPlotTheme("screen")
     assert seen == ["screen"], "plotThemeChanged never fired again"
-
-
-def test_reopening_the_stats_popover_does_not_stack_popovers(card):
-    from widgets.popover import Popover
-
-    from PySide6.QtCore import QEvent
-
-    before = len(card.findChildren(Popover))
-    for _ in range(5):
-        card._open_stats_popover()
-        # ``deleteLater`` is deferred: without draining the queue the discarded
-        # popovers are still children and the count looks identical either way.
-        QApplication.sendPostedEvents(None, QEvent.DeferredDelete)
-    after = len(card.findChildren(Popover))
-
-    assert after - before <= 1, (
-        f"five clicks left {after - before} popovers parented to the card"
-    )

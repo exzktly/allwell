@@ -54,7 +54,6 @@ _IMG_LABEL_MIN_H = 300
 
 #: Width of the slide-out (the Properties sidebar's order of magnitude, so the
 #: shared dock does not jump when the two swap).
-_CELL_VIEWER_WIDTH = 380
 
 
 @dataclass(frozen=True)
@@ -145,13 +144,9 @@ class ScatterCellViewer(QWidget):
         tfont = self._title_label.font()
         tfont.setBold(True)
         self._title_label.setFont(tfont)
+        # No close of its own: the viewer is the inspector's Detail tab, and
+        # the inspector's header holds the one Close.
         head.addWidget(self._title_label, 1)
-        close_btn = QPushButton("✕")
-        close_btn.setObjectName("Ghost")
-        close_btn.setFixedWidth(theme.Metrics.icon_btn_w)
-        close_btn.setToolTip("Close the cell viewer")
-        close_btn.clicked.connect(self._close_dock)
-        head.addWidget(close_btn, 0)
         layout.addLayout(head)
 
         ctrl = QHBoxLayout()
@@ -223,8 +218,9 @@ class ScatterCellViewer(QWidget):
             self.ctx.notify.set_status("This build has no Segmentation page to open the cell in.")
 
     def _close_dock(self) -> None:
-        from review.core.ui_helpers import hide_plot_dock
-        hide_plot_dock(self.parentWidget())
+        """Nothing is picked any more: the Detail tab empties."""
+        from review.core import inspector_service
+        inspector_service.clear_detail(self.ctx)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -360,22 +356,23 @@ class ScatterCellViewer(QWidget):
 
 def open_scatter_cell_viewer(ctx, well_label: str, filename: str, nuclear_id: str,
                              row_idx: int) -> None:
-    """Open (or update) the cell viewer in the Scatter tab's right dock.
+    """Show the picked cell on the inspector's Detail tab.
+
+    One viewer per window: picking another point updates it in place, so the
+    plot the point was picked on stays in view beside it (at the desk) or above
+    it (the phone's sheet, at the height of what it holds).
 
     *filename* is accepted for the callers' sake and not used: the cell is found
     by its well, field, timepoint and nucleus id, never by guessing a file.
     """
-    from review.core.ui_helpers import mount_widget_in_plot_dock
+    from review.core import inspector_service
 
     del filename
-    dock = ctx.widgets.get_or_none("_scatter_export_dock")
     viewer = ctx.runtime.scatter.cell_viewer
     if viewer is None:
-        viewer = ScatterCellViewer(dock, ctx)
+        viewer = ScatterCellViewer(ctx.window, ctx)
+        viewer.hide()
         ctx.runtime.scatter.cell_viewer = viewer
     viewer.show_cell(well_label, row_idx, nuclear_id)
-    if dock is not None:
-        mount_widget_in_plot_dock(dock, viewer, _CELL_VIEWER_WIDTH)
-    else:  # pragma: no cover — the per-cell scatter tab always builds a dock
-        viewer.show()
-        viewer.raise_()
+    inspector_service.show_detail(ctx, viewer, viewer._title_label.text(),
+                                  anchor=ctx.widgets.get_or_none("_scatter_canvas"))

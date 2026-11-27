@@ -58,3 +58,47 @@ def test_resolved_value_is_cached_per_channel(qtbot):
     ctx = _ctx("3", "27")
     review_image_resolve_lut(ctx, ARR)
     assert ctx.state.image_view.lut_by_channel["gfp"] == (3.0, 27.0)
+
+
+def test_segmentation_brightness_is_the_range_page_wired_to_commit_and_auto(loaded_app, monkeypatch):
+    """Segmentation's Brightness page is the one ``RangePage``. A typed range
+    commits it; Auto fits the range to the image, as the old Auto LUT did."""
+    from review.features.image_browser.controller import show_image_browser_subtab
+    from review.features.preview import panel_view as PV
+    from widgets.range_page import RangePage
+
+    ctx = loaded_app._ctx
+    assert show_image_browser_subtab(ctx, "Segmentation")
+    calls = []
+    monkeypatch.setattr(PV, "review_image_commit_lut", lambda c: calls.append("commit"))
+    monkeypatch.setattr(PV, "review_image_auto_lut", lambda c: calls.append("auto"))
+    page = loaded_app.findChild(RangePage, "ReviewImageRange")
+    assert page is not None
+    assert ctx.widgets.get("_review_lmin_entry") is page.low_edit
+    assert ctx.widgets.get("_review_lmax_entry") is page.high_edit
+    page.low_edit.setText("5")
+    page.high_edit.setText("90")
+    page.high_edit.editingFinished.emit()
+    page.auto_button.click()
+    assert calls == ["commit", "auto"]
+
+
+def test_segmentation_brightness_reset_returns_to_the_range_it_opened_with(loaded_app, monkeypatch):
+    """Reset is not Auto: it puts back the range on screen when the page opened."""
+    from review.core import inspector_panels
+    from review.features.image_browser.controller import show_image_browser_subtab
+    from review.features.preview import panel_view as PV
+    from widgets.range_page import RangePage
+
+    ctx = loaded_app._ctx
+    assert show_image_browser_subtab(ctx, "Segmentation")
+    calls = []
+    monkeypatch.setattr(PV, "review_image_commit_lut", lambda c: calls.append("commit"))
+    monkeypatch.setattr(PV, "review_image_auto_lut", lambda c: calls.append("auto"))
+    page = loaded_app.findChild(RangePage, "ReviewImageRange")
+    page.low_edit.setText("100")
+    page.high_edit.setText("900")
+    inspector_panels._run_on_open(inspector_panels.panel_of(ctx.widgets.get("_review_lut_btn")))
+    page.low_edit.setText("5")
+    page.reset_button.click()
+    assert (page.low_edit.text(), page.high_edit.text()) == ("100", "900") and calls == ["commit"]

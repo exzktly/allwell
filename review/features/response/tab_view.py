@@ -17,9 +17,10 @@ from core.safe import swallow
 from review.core.fold_change_controls_view import (
     install_fold_change_controls,
 )
+from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_popover_button, make_properties_button,
+    make_plot_area, make_style_button,
     plotting_band_slot,
 )
 # Module scope, not function-local: nothing in ``controller`` imports this
@@ -47,16 +48,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         apply_plot_card_decorators, no_selection_reason, wrap_with_empty_state,
     )
     reg = ctx.widgets
-    # The right-side dock the Properties sidebar mounts into, the same one every
-    # other plotting leaf builds. Without it ``style._resolve_export_dock``
-    # returns None and ``launch_export_editor`` falls back to appending the
-    # sidebar into the PlotCard's own layout — inside this tab's QScrollArea,
-    # below the toolbar — so the panel opened somewhere no other tab puts it.
-    # Adding the key to ``open_export_style_panel``'s roster alone was half the
-    # sweep: that file holds *two* rosters answering the same question, a
-    # hundred lines apart.
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_response_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
     layout.setContentsMargins(0, 0, 0, 0)
 
@@ -116,7 +108,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     tp_button.clicked.connect(lambda _=False: open_timepoint_selector(ctx))
     band.add_scope("", tp_button)
 
-    display_btn, display_panel, display_lay = make_popover_button("Display ▾", band)
+    display_btn, display_panel, display_lay = make_popover_button("Display", band, ctx=ctx, root=True)
     display_btn.setToolTip("Error bars (SEM/SD) and per-FOV spread")
     display_lay.addWidget(make_band_controls(ctx, display_panel, with_fov=True))
     band.add_action(display_btn)
@@ -127,7 +119,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # state — a control picked here is picked there. Its own scope, so a redraw
     # requested while this leaf is on screen reaches this figure rather than
     # being deferred as though the tab were hidden.
-    fc_button, fc_panel, fc_layout = make_popover_button("Fold change ▾", band)
+    fc_button, fc_panel, fc_layout = make_popover_button("Fold change", band, ctx=ctx, tab="data")
     fc_button.setToolTip(
         "Fold-change normalization (vs a control well/set or a baseline "
         "timepoint). vs t0 needs more than one timepoint drawn.")
@@ -145,7 +137,11 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         cells_cb=lambda: export_cell_data_from(ctx, cell_scope),
     )
     band.add_action(export_btn)
-    band.add_action(make_properties_button(ctx, band, "response"))
+    band.add_action(make_style_button(ctx, band, "response"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(band)
 
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
                     header=False)
@@ -158,7 +154,6 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     canvas = reg.register("_response_canvas", card.canvas)
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
     card.pinFigureHeight(int(_FIG_H * _DPI))
-    card.setStatsChipVisible(False)
 
     scroll = reg.register("_response_scroll", QScrollArea(parent))
     scroll.setWidgetResizable(True)
@@ -197,7 +192,7 @@ def _build_fit_popover(ctx, band):
 
     from widgets.labeled_combo import LabeledComboBox
 
-    button, panel, layout = make_popover_button("Fit ▾", band)
+    button, panel, layout = make_popover_button("Fit", band, ctx=ctx, tab="data")
     button.setToolTip("Fit a response curve and report its half-maximal value")
 
     model, top, bottom = fit_settings(ctx)

@@ -88,3 +88,49 @@ def load_dataset(ctx, path: Path) -> None:
     ds.rebuild_timepoints()
     ds.rebuild_fovs()
     recalculate_threshold(ctx)
+
+
+def build_page(qtbot, name: str, dataset: Path | None = None, *, size=(1400, 900)):
+    """``(ctx, window, frame, bands)``: Review page *name* built by the
+    registry's own ``build(ctx, frame)``, in a minimal shell.
+
+    A Plotting leaf puts its controls in the Plotting page's shared band,
+    which ``centre_view`` builds for a whole window; here a band is registered
+    under the same key first, above the leaf's frame, so the leaf claims a
+    slot of it exactly as it does in the application and its controls are on
+    screen. *bands* is every ``ControlBand`` the page ended up with."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QSplitter, QVBoxLayout, QWidget
+
+    from review.core.ui_helpers import PLOTTING_BAND_KEY
+    from widgets.control_band import ControlBand
+
+    ctx, window = minimal_shell(qtbot)
+    window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features   # as ReviewApp sets them
+    if dataset is not None:
+        load_dataset(ctx, dataset)
+    # The splitter Review's pages sit in (``app_shell_view``): the rail as
+    # pane 0, the page as pane 1. The desk inspector docks at its right.
+    split = QSplitter(Qt.Horizontal)
+    rail = QWidget()
+    rail.setFixedWidth(120)
+    split.addWidget(rail)
+    host = QWidget()
+    QVBoxLayout(host)
+    split.addWidget(host)
+    window.setCentralWidget(split)
+    window._h_pane = split
+    if name in ctx.features.sub_leaves("Plotting"):
+        band = ctx.widgets.register(PLOTTING_BAND_KEY, ControlBand(host))
+        host.layout().addWidget(band)
+    frame = QWidget(host)
+    host.layout().addWidget(frame, 1)
+    ctx.features.get(name).build(ctx, frame)
+    band = ctx.widgets.get_or_none(PLOTTING_BAND_KEY)
+    if band is not None and band.slot_names():
+        band.show_slot(band.slot_names()[0])
+    window.resize(*size)
+    window.show()
+    qtbot.waitExposed(window)
+    QApplication.processEvents()
+    return ctx, window, frame, window.findChildren(ControlBand)

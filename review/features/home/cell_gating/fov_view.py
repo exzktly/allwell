@@ -30,7 +30,6 @@ from review.data.fov_selection import (
     fov_selection_status,
     selected_fovs,
 )
-from widgets import menu_exec
 
 # Pixel geometry for this row, named rather than written at the call sites
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site). The vertical
@@ -109,21 +108,30 @@ def refresh_fov_selection_widgets(ctx) -> None:
     status.setVisible(bool(text))
 
 
+#: How long after the last tick of a burst a Cell Gating picker applies (ms).
+#: Each application re-projects every layer over every cached well behind a
+#: progress popup, so it runs once per burst, not once per tick — and at once
+#: when the page is left with a change pending. Long enough to swallow a run
+#: of ticks; the pass itself was timed only on the test plates (a few wells,
+#: tens of milliseconds), not on a full plate, so this is the length of a
+#: pause between ticks rather than a figure derived from the pass.
+APPLY_SETTLE_MS = 900
+
+
 def open_fov_menu(ctx, on_apply: Callable) -> None:
-    """Pop up one checkbox per FOV plus All / None, and apply on close.
+    """Show one box per FOV, under All / None, as a page of the inspector.
 
-    The ticks are gathered while the menu is open and applied once when it
-    closes: each application re-projects every layer over every cached well and
-    redraws, which is not something to do per click.
+    The page applies as the user ticks, once per burst of ticks
+    (:data:`APPLY_SETTLE_MS`): each application re-projects every layer over
+    every cached well and redraws, which is not something to do per click.
 
-    Nothing is applied when the menu closes with every box as it opened — a
-    look is not an edit. And a selected FOV the dataset does not have (one
+    Nothing is applied when the boxes end as they began — a look is not an
+    edit. And a selected FOV the dataset does not have (one
     carried over from a saved plot or an earlier run, which the status line
     names) has no box, so it is carried through untouched rather than dropped
     by an edit to the boxes that do exist.
     """
-    from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+    from review.core.inspector_pages import open_multi_select
 
     btn = ctx.runtime.cell_gating.fov_btn
     if btn is None:
@@ -132,41 +140,18 @@ def open_fov_menu(ctx, on_apply: Callable) -> None:
     current = selected_fovs(ctx)
     keys = None if current is None else {fov_match_key(f) for f in current}
     initial = {f for f in fovs if keys is None or fov_match_key(f) in keys}
-    chosen = set(initial)
     avail_keys = {fov_match_key(f) for f in fovs}
     absent = {f for f in (current or ()) if fov_match_key(f) not in avail_keys}
+    applied = [set(initial)]
 
-    menu = QMenu(btn)
-    if not fovs:
-        empty = QAction("No fields of view found in this dataset", menu)
-        empty.setEnabled(False)
-        menu.addAction(empty)
-    boxes: list = []
-    for fov in fovs:
-        cb = QCheckBox(f"FOV {fov}", menu)
-        cb.setChecked(fov in chosen)
+    def _apply(picked: list) -> None:
+        chosen = set(picked)
+        if chosen != applied[0]:
+            applied[0] = set(chosen)
+            on_apply(ctx, chosen | absent)
 
-        def _on(checked: bool, _fov=fov) -> None:
-            chosen.add(_fov) if checked else chosen.discard(_fov)
-
-        cb.toggled.connect(_on)
-        boxes.append(cb)
-        action = QWidgetAction(menu)
-        action.setDefaultWidget(cb)
-        menu.addAction(action)
-    if fovs:
-        menu.addSeparator()
-
-        def _tick_all(state: bool) -> None:
-            for box in boxes:
-                box.setChecked(state)
-
-        all_a = QAction("All", menu)
-        all_a.triggered.connect(lambda _=False: _tick_all(True))
-        menu.addAction(all_a)
-        none_a = QAction("None", menu)
-        none_a.triggered.connect(lambda _=False: _tick_all(False))
-        menu.addAction(none_a)
-    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
-    if fovs and chosen != initial:
-        on_apply(ctx, chosen | absent)
+    open_multi_select(ctx, btn, key="cell_gating/fovs", title="Fields of view",
+                      items=[(f, f"FOV {f}") for f in fovs],
+                      checked=[f for f in fovs if f in initial], on_change=_apply,
+                      settle_ms=APPLY_SETTLE_MS,
+                      empty_text="No fields of view found in this dataset.")

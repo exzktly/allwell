@@ -70,7 +70,7 @@ def _draw_and_check(ctx):
 
 def test_the_y_labels_stay_inside_when_the_page_narrows_after_the_draw(ctx):
     """The page drawn wide, then narrowed without a redraw of the data — an unfolded iPhone Duo, where the page's
-    ⚙ Controls dock beside it after the page is drawn (``ui/phone_dock.py``): 867 px of canvas became 475. The
+    ⚙ Controls dock beside it after the page is drawn (``widgets/docked_panel.py``): 867 px of canvas became 475. The
     renderer laid the figure out once, at its width then, so at 475 px and phone layout's 108 dpi each left-hand
     "Cumulative Probability" hung 12 px off the figure's edge (the page-render test, mini dataset, Duo upright).
     Laid out on every draw, it is fitted at the width it is drawn at. Wrong implementation: the one-shot

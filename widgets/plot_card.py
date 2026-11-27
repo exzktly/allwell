@@ -43,7 +43,7 @@ if _ROOT not in _sys.path:
 
 from PySide6.QtCore import QEvent, Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from ui import theme
@@ -260,10 +260,6 @@ if _HAVE_MPL:
             self._plot_theme = "screen"
             self._stat = "Mean"
             self._error = "SEM"
-            # Anchors the stats popover: this attribute is the only Python
-            # reference keeping it alive once it is shown, so it is written
-            # and never read — dead-looking, and load-bearing.
-            self._stats_pop = None
 
             self.figure = _Figure(figsize=figsize,
                                   layout=("constrained" if constrained else None))
@@ -699,13 +695,6 @@ if _HAVE_MPL:
             self._title_lbl.setText(str(text))
             self._title_lbl.setVisible(bool(text))
 
-        def setStatsChipVisible(self, visible: bool) -> None:
-            """Hide the ``Mean · SEM`` chip (e.g. on a tab whose stats UI lives
-            elsewhere). The popover/stat/error API still works programmatically."""
-            if self._header is None:
-                return
-            self._stats_chip.setVisible(bool(visible))
-
         def setThemeToggleVisible(self, visible: bool) -> None:
             """Hide the in-header ``Publication ↔ Screen`` toggle (and the
             'preview only' chip). ``setPlotTheme`` still works programmatically.
@@ -815,11 +804,6 @@ if _HAVE_MPL:
                     lambda *_a: self.setPlotTheme(self._theme_sc.currentData() or "publication"))
                 lay.addWidget(self._theme_sc)
 
-            self._stats_chip = QPushButton(self._chip_text(), self._header)
-            self._stats_chip.setObjectName("PlotCardStatsChip")
-            self._stats_chip.setCursor(Qt.PointingHandCursor)
-            self._stats_chip.clicked.connect(self._open_stats_popover)
-            lay.addWidget(self._stats_chip)
             return self._header
 
         def _sync_theme_ui(self) -> None:
@@ -834,53 +818,6 @@ if _HAVE_MPL:
                     self._theme_sc.setCurrentByData(self._plot_theme)
                 finally:
                     self._theme_sc.blockSignals(False)
-
-        def _chip_text(self) -> str:
-            return f"{self._stat} · {self._error}"
-
-        def _open_stats_popover(self) -> None:
-            from widgets.popover import Popover
-            pop = Popover(self)
-            content = QWidget()
-            v = QVBoxLayout(content)
-            v.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm,
-                                 theme.Spacing.sm, theme.Spacing.sm)
-            v.setSpacing(theme.Spacing.sm)
-            v.addWidget(QLabel("Statistic"))
-            stat_sc = _make_segmented([("Mean", "Mean"), ("Median", "Median")], current=self._stat)
-            if stat_sc is not None:
-                stat_sc.currentChanged.connect(lambda *_a: self._set_stat(stat_sc.currentData()))
-                v.addWidget(stat_sc)
-            v.addWidget(QLabel("Error band"))
-            err_sc = _make_segmented([("SEM", "SEM"), ("SD", "SD"),
-                                      ("95% CI", "95% CI"), ("None", "None")], current=self._error)
-            if err_sc is not None:
-                err_sc.currentChanged.connect(lambda *_a: self._set_error(err_sc.currentData()))
-                v.addWidget(err_sc)
-            pop.setContentWidget(content)
-            # Each click built a fresh Popover and dropped the reference to the
-            # previous one onto this attribute. The old popover is a child of
-            # this card, so Qt keeps it alive for the card's whole life: a
-            # session of poking the chip accumulated one hidden window per
-            # click, each holding its own segmented controls.
-            prev = getattr(self, "_stats_pop", None)
-            if prev is not None:
-                prev.close()
-                prev.deleteLater()
-            self._stats_pop = pop
-            pop.popup(self._stats_chip, side="bottom", align="end")
-
-        def _set_stat(self, value) -> None:
-            if value and value != self._stat:
-                self._stat = str(value)
-                self._stats_chip.setText(self._chip_text())
-                self.statsChanged.emit(self._stat, self._error)
-
-        def _set_error(self, value) -> None:
-            if value and value != self._error:
-                self._error = str(value)
-                self._stats_chip.setText(self._chip_text())
-                self.statsChanged.emit(self._stat, self._error)
 
         def statistic(self) -> str:
             return self._stat

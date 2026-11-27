@@ -82,7 +82,7 @@ def _choose_view(ctx, key, preset=None):
     seg = ctx.widgets.get("_nw_view_bar")
     seg.setCurrentIndex([k for k, _l in VIEWS].index(key))          # emits currentChanged, as a click does
     if preset:
-        ctx.widgets.get(f"_nw_preset_{preset}").trigger()
+        ctx.widgets.get(f"_nw_preset_{preset}").click()
 
 
 def _visible_scopes(ctx):
@@ -105,11 +105,11 @@ def test_the_switch_lists_every_view_and_each_shows_only_the_controls_it_uses(pa
     # Outlined by state with no values written, the metric reaches nothing on the figure: its controls are greyed,
     # not hidden, so the controls beside them stay where they were (asked for: "the buttons should be frozen in
     # their position regardless of layer selection").
-    page.widgets.get("_nw_colour_state").trigger()
-    page.widgets.get("_nw_layer_values").trigger()
+    page.widgets.get("_nw_colour_state").click()
+    page.widgets.get("_nw_layer_values").click()
     assert _visible_scopes(page) == {"Metric", "Baseline", "Well", "Timepoint"}
     assert not page.widgets.get("_nw_metric_cb").isEnabled()
-    page.widgets.get("_nw_layer_values").trigger()                   # the values written: the metric is drawn again
+    page.widgets.get("_nw_layer_values").click()                   # the values written: the metric is drawn again
     assert page.widgets.get("_nw_metric_cb").isEnabled()
     _choose_view(page, "trajectories")
     assert _visible_scopes(page) == {"Metric", "Baseline"}
@@ -416,17 +416,22 @@ _VALUE_CONTROLS = ("_nw_metric_cb", "_nw_channel_cb", "_nw_baseline_cb", "_nw_ri
 def test_a_control_with_no_role_on_a_view_is_not_shown_there(page, qtbot):
     """Asked for: "if it has no role on that tab, it shouldn't be displayed". QC and Identity draw no nanowell's
     value, so nothing that chooses or narrows values is on their band, and QC, one row per well, has no nanowell to
-    go to. Every other view draws values and shows them all. An open Subset editor goes with its control and comes
-    back as it was left."""
+    go to. Every other view draws values and shows them all. An open Subset editor leaves the inspector with its
+    control."""
     from review.features.nanowell import tab_view as tv
 
     _loaded(qtbot, page)
     shown = lambda name: page.widgets.get(name).isVisibleTo(page.window)          # noqa: E731
+    from review.core import inspector_service as svc
     page.widgets.get("_nw_subset_edit_btn").click()                               # the editor open
-    assert shown("_nw_subset_editor")
+    editor = page.widgets.get("_nw_subset_editor")
+    open_ = lambda: svc.inspector(page).isAncestorOf(editor)                      # noqa: E731
+    assert open_()
+    left = False                                    # a view with no Subset has been shown: the page was left
     for view, _label in tv.VIEWS:
         _choose_view(page, view)
         values = view not in ("identity", "qc")
         assert {name: shown(name) for name in _VALUE_CONTROLS} == {name: values for name in _VALUE_CONTROLS}, view
-        assert shown("_nw_subset_editor") == values, view
+        left = left or not values
+        assert open_() == (not left), view
         assert shown("_nw_goto_edit") == (view not in ("qc", "statistics", "position")), view

@@ -16,16 +16,16 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
+from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import build_plot_save_menu
 from review.features.export.service import export_cell_data_from
 from review.features.multivariate.cell_scope_compute import cell_scope
-from core.safe import swallowed
 from review.features.multivariate import state as mv_state
 from review.features.multivariate import controller as mv_ctrl
 from review.features.multivariate.collect import (
     available_feature_columns, column_display_label,
 )
-from review.features.multivariate.feature_picker_view import build_feature_picker
+from review.features.multivariate.feature_picker_view import build_feature_picker, features_summary
 from domain.tp_match import tp_close
 
 _FIG_W, _FIG_H, _DPI = 7.6, 6.6, 100
@@ -68,7 +68,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
     from review.core.ui_helpers import (
-        make_plot_with_right_dock, make_popover_button, no_selection_reason,
+        make_plot_area, no_selection_reason,
         wrap_with_empty_state,
     )
 
@@ -87,8 +87,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # The Properties sidebar needs a dock to slide out of, exactly as the other
     # plot tabs have. Without one this tab had no Properties button at all, and
     # its figure was the only one in the pane that could not be styled.
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_mv_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     # ── the control band ────────────────────────────────────────────────────
@@ -108,9 +107,11 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_mode_seg", mode_seg)
     band.add_scope("Mode", mode_seg)
 
-    feat_btn, _feat_panel, feat_lay = make_popover_button("Features ▾", band)
+    feat_btn, _feat_panel, feat_lay = make_popover_button(
+        "Features", band, ctx=ctx, tab="data", summary=lambda: features_summary(ctx))
     feat_btn.setToolTip("Choose which per-cell feature columns form the matrix")
     build_feature_picker(ctx, feat_lay)
+    reg.register("_mv_features_btn", feat_btn)
     band.add_action(feat_btn)
 
     std_cb = QCheckBox("Standardize")
@@ -122,7 +123,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     band.add_scope("", std_cb)
 
     from review.core.ui_helpers import (
-        make_properties_button,
+        make_style_button,
     )
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
         ctx, band,
@@ -137,7 +138,11 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     band.add_action(export_btn)
     from review.core.cell_lasso_view import make_lasso_button
     band.add_action(make_lasso_button(ctx, band, "_mv_canvas", source="lasso · Multivariate"))
-    band.add_action(make_properties_button(ctx, band, "multivariate"))
+    band.add_action(make_style_button(ctx, band, "multivariate"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(band)
 
     # ── per-mode option groups + the timepoint filter ───────────────────────
     # Correlation: heatmap / SPLOM.
@@ -276,10 +281,6 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
                     header=False)
     card.setFigureTitle("")
-    try:
-        card.setStatsChipVisible(False)
-    except Exception:
-        swallowed()
     reg.register("_mv_card", card)
     reg.register("_mv_fig", card.figure)
     reg.register("_mv_canvas", card.canvas)

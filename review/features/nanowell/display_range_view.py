@@ -15,10 +15,9 @@ a popover. Blank fields are Auto: each picture takes its own percentile scale, a
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import QPushButton
 
 from review.features.nanowell import controller as nwc
-from ui import theme
 
 #: The buttons that open the Display range, one per place the image channel is offered (``tab_view``'s
 #: ``_IMAGE_CHANNEL_COMBOS``): refreshed together by :func:`refresh_display_range_buttons`.
@@ -51,57 +50,45 @@ def build_display_range_button(ctx, name: str) -> QPushButton:
     button = QPushButton(button_text(ctx))
     button.setProperty("variant", "secondary")
     button.setToolTip(RANGE_TIP)
+    button.setObjectName(name)
     button.clicked.connect(lambda _=False: open_display_range(ctx, button))
     ctx.widgets.register(name, button)
     return button
 
 
+#: Registry key of the page's one range page (``widgets.range_page.RangePage``).
+RANGE_PAGE = "_nw_range_page"
+
+
 def open_display_range(ctx, anchor) -> None:
-    """Open the Display range row under *anchor*, seeded from the range in force. *min* and *max* apply when either
-    is edited and both are numbers, the high above the low; **Auto** clears them and gives the pictures back their
-    own scale."""
-    from widgets.popover import Popover
+    """Show the Display range page in the inspector, seeded from the range in force. *min* and *max* apply when
+    either is edited and both are numbers, the high above the low; **Auto** clears them and gives the pictures back
+    their own scale; **Reset** returns to the range the page opened with. Pressing the button again leaves the page."""
+    from review.core import inspector_service
+    from widgets.range_page import RangePage
 
+    page = ctx.widgets.get_or_none(RANGE_PAGE)
+    if page is None:
+        page = RangePage(ctx.window, auto_tip="Back to each picture's own scale (the 1st to 99th percentile "
+                                              "of its pixels).")
+        page.hide()
+        page.changed.connect(lambda low, high: nwc.set_display_range(ctx, low, high))
+        ctx.widgets.register(RANGE_PAGE, page)
+        ctx.widgets.register("_nw_range_lo_edit", page.low_edit)
+        ctx.widgets.register("_nw_range_hi_edit", page.high_edit)
+        ctx.widgets.register("_nw_range_auto_btn", page.auto_button)
+    # The same button again leaves the page; another of the page's Display
+    # range buttons keeps it open and re-reads the range.
+    same_button = page.property("openedFrom") == anchor.objectName() and bool(anchor.objectName())
+    if inspector_service.is_showing(ctx, page) and same_button:
+        inspector_service.pop(ctx)
+        return
+    page.setProperty("openedFrom", anchor.objectName())
     chosen = nwc.display_range(ctx)
-    pop = Popover(anchor)
-    row = QWidget()
-    lay = QHBoxLayout(row)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.addWidget(QLabel(f"{nwc.display_key(ctx.state.feature_slice('nanowell')).upper()}  min"))
-    lo_edit = QLineEdit(_fmt(None if chosen is None else chosen[0]))
-    hi_edit = QLineEdit(_fmt(None if chosen is None else chosen[1]))
-    for edit in (lo_edit, hi_edit):
-        edit.setPlaceholderText("auto")
-        edit.setFixedWidth(theme.Metrics.num_field_w)
-    lay.addWidget(lo_edit)
-    lay.addWidget(QLabel("max"))
-    lay.addWidget(hi_edit)
-    auto = QPushButton("Auto")
-    auto.setProperty("variant", "secondary")
-    auto.setToolTip("Back to each picture's own scale (the 1st to 99th percentile of its pixels).")
-    lay.addWidget(auto)
-
-    def commit() -> None:
-        low, high = _number(lo_edit.text()), _number(hi_edit.text())
-        if not lo_edit.text().strip() and not hi_edit.text().strip():
-            nwc.set_display_range(ctx, None, None)
-        elif low is not None and high is not None and high > low:
-            nwc.set_display_range(ctx, low, high)
-
-    def to_auto() -> None:
-        lo_edit.clear()
-        hi_edit.clear()
-        nwc.set_display_range(ctx, None, None)
-
-    lo_edit.editingFinished.connect(commit)
-    hi_edit.editingFinished.connect(commit)
-    auto.clicked.connect(lambda _=False: to_auto())
-    ctx.widgets.register("_nw_range_lo_edit", lo_edit)
-    ctx.widgets.register("_nw_range_hi_edit", hi_edit)
-    ctx.widgets.register("_nw_range_auto_btn", auto)
-    ctx.widgets.register("_nw_range_popover", pop)
-    pop.setContentWidget(row)
-    pop.popup(anchor, side="bottom", align="start")
+    page.setCaption(f"{nwc.display_key(ctx.state.feature_slice('nanowell')).upper()} — the brightness window "
+                    "every picture on this page is drawn in.")
+    page.setRange(None if chosen is None else chosen[0], None if chosen is None else chosen[1])
+    inspector_service.push(ctx, "nanowell/display_range", "Display range", page, tab="display", anchor=anchor)
 
 
 def refresh_display_range_buttons(ctx) -> None:

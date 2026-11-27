@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from review.core.ui_helpers import (
-    build_plot_save_menu, make_plot_with_right_dock, make_properties_button, plotting_band_slot)
+    build_plot_save_menu, make_plot_area, make_style_button, plotting_band_slot)
 from review.features.export.service import (
     export_cell_data_from, export_distribution_data)
 from review.features.distribution.cell_scope_compute import cell_scope
@@ -43,8 +43,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_distribution_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Distribution")
@@ -142,7 +141,11 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
             ctx, cell_scope),
     )
     ctrl.add_action(export_btn)
-    ctrl.add_action(make_properties_button(ctx, ctrl, "distribution"))
+    ctrl.add_action(make_style_button(ctx, ctrl, "distribution"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(ctrl)
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False, header=False)
     from review.core.ui_helpers import apply_plot_card_decorators
@@ -165,7 +168,6 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     # widget-side theme styling that setPlotTheme already applied. Let
     # PlotCard.setPlotTheme's own apply_axes_style walk handle spines / grid /
     # ticks / title / labels for the existing axes.
-    card.setStatsChipVisible(False)
     from review.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="line-chart",

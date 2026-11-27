@@ -870,6 +870,16 @@ def test_the_page_zooms_side_by_side_and_blink_through_its_canvas(page, qtbot):
                                                           at, button=1, dblclick=True))
     assert _limits(drawn.axes["reference"]) == _limits(drawn.axes["compared"]) == drawn.home["reference"]
     assert st.identity_zoom == {}
+    # The band's Reset zoom does the same from a button a user can see: zoomed again, one press shows the whole
+    # of every panel.
+    canvas.callbacks.process("scroll_event", _event(canvas, "scroll_event", drawn.axes["reference"], at, step=2))
+    assert _limits(drawn.axes["compared"]) != drawn.home["compared"] and st.identity_zoom
+    reset = ctx.widgets.get("_nw_identity_reset_zoom_btn")
+    assert reset.text() == "Reset zoom" and reset.isVisibleTo(ctx.window)
+    reset.click()
+    assert _limits(drawn.axes["reference"]) == drawn.home["reference"]
+    assert _limits(drawn.axes["compared"]) == drawn.home["compared"]
+    assert st.identity_zoom == {}
 
     # Blink: another mode starts at the whole view; a zoom survives the frames flipping.
     _choose(ctx, "_nw_identity_mode_seg", "blink", [k for k, _l in MODES])

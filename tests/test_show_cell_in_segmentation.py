@@ -56,6 +56,21 @@ def _on_screen(ctx, nucleus_id):
     return extent, centre, (vp.width(), vp.height())
 
 
+def test_loading_the_plate_leaves_the_window_the_size_it_was_given(app):
+    """Nothing a tab does to lay itself out may resize the application window.
+
+    A panel of options used to live in a ``QMenu``, and the Bar tab's
+    relative-to row re-measured "its popup" by calling ``adjustSize`` on every
+    ancestor up to the menu. Once panels became pages of the inspector there
+    was no menu above the row, the walk reached the window, and the 1400 × 900
+    window this fixture asks for was 866 × 357 after the load — its minimum
+    size. Nothing looked at the window's size; the test below failed for it,
+    because a cell cannot sit in the middle of a canvas that small. This one
+    reads the size itself.
+    """
+    assert (app.width(), app.height()) == (1400, 900)
+
+
 def test_the_cell_fills_a_good_part_of_the_canvas_and_sits_in_its_middle(app, qtbot):
     from review.features.image_browser.review_image.renderer import _MAX_PIXMAP_SIDE
 

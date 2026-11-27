@@ -1484,7 +1484,7 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     leaves the page in view, then puts each back at its place in the rail.
 
     Wrong implementations this rejects: a strip left at the top (out of thumb
-    reach), a sheet laid over the strip (its "Done ✕" hidden), and a give-back
+    reach), a sheet laid over the strip (the button that opened it hidden), and a give-back
     that appends to the rail rather than returning each widget to its index."""
     from PySide6.QtTest import QTest
     win, shell, rail, slot, footer = _wells_window(qapp, lambda s, f: [s, f])
@@ -1503,24 +1503,35 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     sheet = shell._wells_sheet
     assert sheet.isOpen() and sheet.isVisible()
     assert slot.parentWidget() is sheet._aw_holder and footer.parentWidget() is sheet._aw_holder
-    assert shell.wells_button.text() == "Done ✕"
+    # The button keeps its name and shows it is open by being checked; the
+    # sheet closes by a button reading Close at its top right, like every panel.
+    assert shell.wells_button.text() == "Wells · 3" and shell.wells_button.isChecked()
+    assert sheet._aw_close.text() == "Close" and sheet._aw_close.isVisibleTo(win)
     strip_top = strip.mapTo(win, strip.rect().topLeft()).y()
-    assert sheet.geometry().bottom() < strip_top, "the sheet covers its own Done button"
+    assert sheet.geometry().bottom() < strip_top, "the sheet covers the button that opened it"
     assert sheet._backdrop._alpha == 0, "a scrim would dim the plot the wells change"
 
-    shell.wells_button.click()
+    sheet._aw_close.click()
     QTest.qWait(300)
     assert not sheet.isOpen()
     lay = rail.layout()
     assert (lay.indexOf(slot), lay.indexOf(footer)) == (1, 2)
-    assert shell.wells_button.text() == "Wells · 3"
+    assert shell.wells_button.text() == "Wells · 3" and not shell.wells_button.isChecked()
+    shell.wells_button.click()                  # the button is a toggle too
+    QTest.qWait(300)
+    assert sheet.isOpen()
+    shell.wells_button.click()
+    QTest.qWait(300)
+    assert not sheet.isOpen()
 
 
-def test_a_page_with_no_picker_offers_no_wells_button(qapp, app_sheet):
+def test_a_page_with_no_picker_keeps_its_wells_slot_disabled(qapp, app_sheet):
+    """A slot a page cannot use is disabled, never removed: the four buttons
+    at the foot are where the thumb last found them on every page."""
     _win, shell, *_ = _wells_window(qapp, lambda s, f: [])
     shell.set_on(True)
     _pump(qapp)
-    assert not shell.wells_button.isVisible()
+    assert shell.wells_button.isVisible() and not shell.wells_button.isEnabled()
     shell.open_wells()                 # nothing to lend: nothing opens
     assert shell._wells_sheet is None
 
@@ -1553,11 +1564,13 @@ def test_the_page_menu_lists_this_section_s_pages_and_never_the_sections(qapp, a
     shell._fill_page_menu()
     picks = [a.text() for a in shell._page_menu.actions() if not a.isSeparator() and a.isEnabled()]
     assert picks == ["Bar Plots", "Line Graphs", "Scatter Plot"]
-    # A section with no pages of its own: no page button.
+    # A section with no pages of its own: the slot stays, naming the section,
+    # with nothing to pick.
     current_bar["bar"] = None
     nav.setCurrentKey("Statistics")
     shell.refresh()
-    assert not shell.page_button.isVisible()
+    assert shell.page_button.isVisible() and not shell.page_button.isEnabled()
+    assert shell.page_button.text() == "Statistics"
 
 
 def test_an_empty_plot_s_hint_says_where_the_plate_is_on_a_phone():
@@ -1687,23 +1700,30 @@ def test_scroll_bars_are_a_thumb_wide_in_phone_layout(monkeypatch):
     assert "min-width: 122px" in _qss_rule(sheet, "QScrollBar::handle:horizontal")
 
 
-def test_the_text_size_buttons_follow_the_named_touch_sizes(
-        qapp, app_sheet, monkeypatch):
-    """The ⋯ menu's Text size buttons are TOUCH_ROW_PT × TOUCH_MIN_PT, spaced
-    TOUCH_GAP_PT apart — read from the constants, not restated beside them."""
-    from PySide6.QtWidgets import QPushButton
-    monkeypatch.setattr(phone_layout, "TOUCH_MIN_PT", 50)
-    monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
-    monkeypatch.setattr(phone_layout, "TOUCH_GAP_PT", 11)
+def test_text_size_is_three_plain_commands_with_the_one_in_use_marked(qapp, app_sheet):
+    """The ⋯ menu's Text size is three commands, not a row of buttons inside the
+    menu; the size in use is marked, and choosing one applies it once the menu
+    has closed."""
+    from PySide6.QtWidgets import QMenu
+
+    from widgets.menu_marks import is_current
     win = _window()
     QVBoxLayout(win)
     shell = _shell(win)
-    row = shell._text_size_row().defaultWidget()
-    buttons = row.findChildren(QPushButton, "PhoneTextSizeButton")
-    assert len(buttons) == len(phone_layout.TEXT_SIZES)
-    for b in buttons:
-        assert (b.minimumWidth(), b.minimumHeight()) == (shell.pt(61), shell.pt(50))
-    assert row.layout().spacing() == shell.pt(11)
+    menu = QMenu()
+    actions = shell._add_text_sizes(menu)
+    assert [a.text() for a in actions] == [f"Text size: {phone_layout.TEXT_SIZE_LABEL[s]}"
+                                           for s in phone_layout.TEXT_SIZES]
+    assert not any(a.isCheckable() for a in actions)
+    current = [phone_layout.TEXT_SIZES[i] for i, a in enumerate(actions) if is_current(a)]
+    assert current == [shell._text_size]
+    chosen = []
+    shell.set_text_size = chosen.append
+    other = next(i for i, s in enumerate(phone_layout.TEXT_SIZES) if s != shell._text_size)
+    actions[other].trigger()
+    assert chosen == [], "applied inside the menu's own event loop"
+    _pump(qapp)
+    assert chosen == [phone_layout.TEXT_SIZES[other]]
 
 
 def test_every_kind_phone_layout_adapts_is_watched_and_dispatched(qapp):
@@ -2084,7 +2104,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
     Wrong implementations: the phone's overlay sheet on the Duo (the page under the controls, closed until asked
     for), a column that does not follow ⚙ Controls, or one left behind in the splitter once the phone folds."""
     from tests._screens import FakeScreen
-    from ui.phone_dock import DockedSheet
+    from widgets.docked_panel import DockedPanel
     with FakeScreen(_DUO_HALF_UP) as screen:
         win, shell, split, page, band = _docked_window(qapp)
         shell.set_on(True, restyle=False)
@@ -2093,7 +2113,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
             u = 939 / 626
             assert shell.is_docked()
             sheet = shell._sheet
-            assert isinstance(sheet, DockedSheet) and sheet.isOpen()
+            assert isinstance(sheet, DockedPanel) and sheet.isOpen()
             assert split.indexOf(sheet) == 0 and split.indexOf(page) == 1
             assert sheet.isAncestorOf(band)
             # Upright the column is 626 - 360 = 266 pt, so the page beside it keeps the narrowest phone's width.
@@ -2104,7 +2124,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
             shell.refresh()
             _pump(qapp)
             assert shell._sheet.isOpen() and shell.controls_button.isVisibleTo(win)
-            assert shell.controls_button.text() == "Hide controls"
+            assert shell.controls_button.text() == "⚙ Controls" and shell.controls_button.isChecked()
             # ⚙ Controls hides it, and a refresh (a page change) does not bring it back.
             shell.toggle_controls()
             _pump(qapp)
@@ -2165,3 +2185,275 @@ def test_a_phone_s_controls_stay_an_overlay(qapp, app_sheet):
         finally:
             shell.set_on(False)
             _pump(qapp)
+
+
+# ── the Controls sheet hosts the inspector ────────────────────────────────────
+
+def _inspector_window(qapp, *, inspector=None):
+    """A page with a control band between two siblings, so "put back at its
+    index" and "appended" differ, and a hidden panel a feature could push."""
+    from PySide6.QtWidgets import QLabel, QPushButton
+
+    from widgets.control_band import ControlBand
+    win = _window()
+    QVBoxLayout(win)
+    page = QWidget(win)
+    QVBoxLayout(page)
+    win.layout().addWidget(page)
+    above = QLabel("above", page)
+    page.layout().addWidget(above)
+    band = ControlBand(page)
+    page.layout().addWidget(band)
+    band.add_scope("Channel", QPushButton("GFP"))
+    below = QLabel("the plot", page)
+    page.layout().addWidget(below, 1)
+    panel = QLabel("fold change options", page)
+    panel.hide()
+    handles = {"band_roots": lambda: [page]}
+    if inspector is not None:
+        handles["inspector"] = lambda: inspector
+    shell = _shell(win, **handles)
+    return win, shell, page, band, panel
+
+
+def test_the_controls_sheet_holds_the_inspector_with_the_band_as_its_data_tab(qapp, app_sheet):
+    """Wrong implementations: the band lent to a bare holder with no tabs, the
+    band appended to its page on the way back, or a sheet with no Close."""
+    from PySide6.QtTest import QTest
+
+    from widgets.inspector import Inspector
+    win, shell, page, band, _panel = _inspector_window(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    assert shell.open_controls() is True
+    QTest.qWait(300)
+    sheet = shell._sheet
+    insp = shell._inspector()
+    assert isinstance(insp, Inspector) and sheet.isAncestorOf(insp)
+    assert insp.tabWidget("data") is band and insp.currentTab() == "data"
+    assert [t for _k, t in insp.tabs()] == ["Data", "Display", "Style", "Detail"]
+    assert not insp.isTabEnabled("display"), "a tab the page has nothing for is disabled, not gone"
+    assert insp.close_button.isVisibleTo(win) and insp.close_button.text() == "Close"
+    insp.close_button.click()
+    QTest.qWait(300)
+    assert not sheet.isOpen()
+    assert page.layout().indexOf(band) == 1, "the band did not go back between its siblings"
+
+
+def test_a_page_pushed_in_phone_layout_is_a_page_of_the_sheet_and_goes_home_when_it_closes(qapp, app_sheet):
+    from PySide6.QtTest import QTest
+    win, shell, page, band, panel = _inspector_window(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.open_controls()
+    insp = shell._inspector()
+    insp.pushPage("fc", "Fold change", panel, tab="data")
+    _pump(qapp)
+    assert shell._sheet.isAncestorOf(panel) and panel.isVisibleTo(win)
+    assert insp.back_button.isVisibleTo(win)
+    insp.back_button.click()
+    assert insp.currentWidget() is band
+    insp.pushPage("fc", "Fold change", panel, tab="data")
+    shell.close_controls(now=True)
+    QTest.qWait(50)
+    assert panel.parentWidget() is page and panel.isHidden()
+    assert page.layout().indexOf(band) == 1
+
+
+def test_a_large_page_raises_the_bottom_sheet_to_the_room_above_the_strip(qapp, app_sheet):
+    """An editor asks for the full height (``large=True``); leaving it drops
+    the sheet back to the height of what it holds."""
+    from PySide6.QtTest import QTest
+    win, shell, _page, _band, panel = _inspector_window(qapp)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.open_controls()
+    QTest.qWait(300)
+    sheet, insp = shell._sheet, shell._inspector()
+    half = sheet.height()
+    insp.pushPage("editor", "Per-sample control", panel, tab="data", large=True)
+    QTest.qWait(300)
+    room = win.height() - shell._foot_strip()
+    assert sheet.height() == room and room > half
+    insp.popPage()
+    QTest.qWait(300)
+    assert sheet.height() < room
+
+
+def test_the_sheet_hosts_the_window_s_own_inspector_and_it_outlives_a_rebuilt_sheet(qapp, app_sheet):
+    """The window's inspector is the one the desk column shows; the sheet is
+    rebuilt when the phone turns, and must not take the inspector with it."""
+    import shiboken6
+    from PySide6.QtTest import QTest
+
+    from tests._screens import FakeScreen
+    from ui import phone_inspector
+    insp = phone_inspector.own_inspector()
+    with FakeScreen(_PHONE_UP) as screen:
+        win, shell, page, band, _panel = _inspector_window(qapp, inspector=insp)
+        shell.set_on(True, restyle=False)
+        _pump(qapp)
+        shell.open_controls()
+        first = shell._sheet
+        assert first.isAncestorOf(insp)
+        screen.turn(_PHONE_SIDE)
+        win.resize(700, 400)
+        shell.close_controls(now=True)
+        shell._landscape = True
+        shell.open_controls()
+        QTest.qWait(50)
+        second = shell._sheet
+        qapp.sendPostedEvents(None, 52)          # QEvent.DeferredDelete: the old sheet goes
+        assert second is not first
+        assert shiboken6.isValid(insp) and second.isAncestorOf(insp)
+        assert insp.tabWidget("data") is band
+        shell.close_controls(now=True)
+        assert page.layout().indexOf(band) == 1
+
+
+def test_an_unmounted_inspector_survives_the_sheet_it_was_in(qapp):
+    """A sheet is deleted when the phone turns; the inspector is the window's
+    and is taken out first."""
+    import shiboken6
+
+    from ui import phone_inspector
+    insp = phone_inspector.own_inspector()
+    mount = phone_inspector.new_mount()
+    phone_inspector.mount(mount, insp)
+    assert insp.parentWidget() is mount
+    phone_inspector.unmount(insp)
+    shiboken6.delete(mount)
+    assert shiboken6.isValid(insp) and insp.parentWidget() is None
+    shiboken6.delete(insp)
+
+
+# ── the foot strip's four permanent slots, and Share ──────────────────────────
+
+def _share_window(qapp, *, with_share: bool):
+    """A page whose band holds a Share menu button (or none), built the way
+    ``ui_helpers.build_plot_save_menu`` builds it: a menu of commands, role
+    ``share``."""
+    from PySide6.QtWidgets import QMenu, QPushButton, QToolButton
+
+    from widgets.control_band import ControlBand
+    win = _window()
+    QVBoxLayout(win)
+    page = QWidget(win)
+    QVBoxLayout(page)
+    win.layout().addWidget(page)
+    band = ControlBand(page)
+    page.layout().addWidget(band)
+    band.add_scope("Channel", QPushButton("GFP"))
+    chosen: list[str] = []
+    share = None
+    if with_share:
+        share = QToolButton(band)
+        share.setText("Share ▾")
+        share.setProperty("bandRole", "share")
+        menu = QMenu(share)
+        for label in ("Save figure…", "Copy figure as SVG"):
+            menu.addAction(label).triggered.connect(lambda _=False, name=label: chosen.append(name))
+        share.setMenu(menu)
+        band.add_action(share)
+    shell = _shell(win, band_roots=lambda: [page])
+    return win, shell, band, share, chosen
+
+
+def test_the_strip_has_four_slots_in_one_order_and_share_is_disabled_on_a_page_with_nothing_to_share(
+        qapp, app_sheet):
+    win, shell, _band, _share, _chosen = _share_window(qapp, with_share=False)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.refresh()
+    slots = shell.strip_buttons()
+    assert slots == [shell.page_button, shell.wells_button, shell.controls_button, shell.share_button]
+    xs = [b.mapTo(win, b.rect().topLeft()).x() for b in slots[1:]]
+    assert xs == sorted(xs), "the slots are not in page · Wells · Controls · Share order"
+    assert all(b.isVisible() for b in slots[1:])
+    assert shell.controls_button.isEnabled()
+    assert not shell.share_button.isEnabled()
+    assert not shell.wells_button.isEnabled()        # this page has no well picker either
+
+
+def test_share_pops_the_page_s_own_menu_and_an_entry_reaches_its_command(qapp, app_sheet):
+    """Wrong implementations: a Share button that is offered and opens nothing,
+    one that opens a menu of its own that is not the page's, and one that
+    opens the menu on top of the Controls sheet (two surfaces)."""
+    from PySide6.QtTest import QTest
+
+    from tests import _surface_checks as surf
+    win, shell, _band, share, chosen = _share_window(qapp, with_share=True)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.refresh()
+    from ui.phone_shell import SHARE_GLYPH
+    # Upright the slot is the glyph alone, named in its tooltip and accessible name: the page button needs the room.
+    assert shell.share_button.isEnabled() and shell.share_button.text() == SHARE_GLYPH
+    assert shell.share_button.accessibleName() == "Share"
+    assert shell.share_button.menu() is None, "one arrow: the caret in the label, no Qt indicator"
+    shell.open_controls()
+    QTest.qWait(250)
+    shell.share_button.click()
+    QTest.qWait(250)
+    _pump(qapp)
+    menu = share.menu()
+    assert menu.isVisible(), "Share opened nothing"
+    assert not shell._sheet.isOpen(), "the menu opened over the Controls sheet"
+    assert surf.depth(win) == 1, surf.describe(surf.open_transients(win))
+    menu.actions()[1].trigger()
+    assert chosen == ["Copy figure as SVG"]
+    menu.close()
+
+
+def test_the_page_s_share_button_is_not_shown_again_inside_the_controls_sheet(qapp, app_sheet):
+    from PySide6.QtTest import QTest
+    win, shell, band, share, _chosen = _share_window(qapp, with_share=True)
+    shell.set_on(True)
+    _pump(qapp)
+    shell.open_controls()
+    QTest.qWait(250)
+    assert not share.isVisibleTo(win), "Share is in the sheet as well as at the foot"
+    assert share in band.form().parked()
+    shell.refresh()
+    assert shell.share_button.isEnabled(), "a parked Share button stopped counting as the page's"
+
+
+def test_the_more_menu_reaches_dataset_tools_and_manage_remote_servers(qapp, app_sheet):
+    """Both were out of reach in phone layout: the resets, copy analysis,
+    reveal folder and storage were title-bar icons hidden as fat-finger
+    targets, and Manage Remote Servers' button is in that same hidden bar."""
+    from ui.dataset_tools import DatasetToolsList, Tool
+    ran: list[str] = []
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win, dataset_tools=lambda: [Tool("Reveal folder", "Show it.", lambda: ran.append("reveal"))],
+                   manage_remotes=lambda: ran.append("remotes"))
+    shell.set_on(True)
+    _pump(qapp)
+    shell._fill_menu()
+    by_text = {a.text(): a for a in shell._menu.actions()}
+    assert "Dataset tools…" in by_text and "Manage remote servers…" in by_text
+    by_text["Manage remote servers…"].trigger()
+    assert ran == ["remotes"]
+    by_text["Dataset tools…"].trigger()
+    _pump(qapp)
+    lists = [w for w in qapp.topLevelWidgets() if isinstance(w, DatasetToolsList) and w.isVisible()]
+    assert len(lists) == 1
+    lists[0].buttons["Reveal folder"].click()
+    _pump(qapp)
+    assert ran == ["remotes", "reveal"]
+    lists[0].deleteLater()
+
+
+def test_upright_share_is_its_glyph_and_sideways_it_is_worded(qapp, app_sheet):
+    """Measured on a 432 px phone: with Share worded, the page button had 106 px
+    for "Response Curves ▾", which needs 147. Upright, Share is its glyph; the
+    every-page tour measures the page button itself."""
+    from ui.phone_shell import SHARE_GLYPH, SHARE_TEXT
+    win = _window()
+    QVBoxLayout(win)
+    shell = _shell(win)
+    shell._place_page_controls(landscape=False)
+    assert shell.share_button.text() == SHARE_GLYPH
+    shell._place_page_controls(landscape=True)
+    assert shell.share_button.text() == SHARE_TEXT

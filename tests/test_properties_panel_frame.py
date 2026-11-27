@@ -51,19 +51,38 @@ def test_each_footer_button_reaches_its_action(qtbot, monkeypatch, text, method)
     assert calls == [method]
 
 
-def test_the_header_close_button_closes_the_panel(qtbot, monkeypatch):
-    from review.features.export.properties_view import ExportStyleSidebar
-    from widgets.icon_button import IconButton
+def test_the_panel_has_no_title_and_no_close_of_its_own(qtbot, monkeypatch):
+    """The panel is the inspector's Style tab: the inspector's header names
+    the page and holds the one Close. A second title and a second ✕ inside
+    the panel were two of the four spellings of "close this" the app had."""
+    from PySide6.QtWidgets import QAbstractButton, QLabel
 
-    calls: list[str] = []
-    monkeypatch.setattr(ExportStyleSidebar, "_close_dock",
-                        lambda self: calls.append("close"))
     _app, sb = _sidebar(qtbot, monkeypatch, kind="_line_fig")
-    closers = [b for b in sb.findChildren(IconButton)
-               if b.toolTip() == "Hide this panel"]
-    assert len(closers) == 1
-    closers[0].click()
-    assert calls == ["close"]
+    assert not [b for b in sb.findChildren(QAbstractButton)
+                if "hide this panel" in (b.toolTip() or "").lower() or b.text() in ("✕", "x", "Close")]
+    assert not [lab for lab in sb.findChildren(QLabel) if lab.text() == "Properties"]
+
+
+def test_every_section_is_a_row_that_opens_its_rows_somewhere_else(qtbot, monkeypatch):
+    """Sixteen unfolded sections were several screens of scrolling; folded
+    headers are a list that fits one, and a header pressed hands its section
+    to ``_open_section`` instead of unfolding it in place."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+    from review.features.export.properties_view import ExportStyleSidebar
+
+    opened: list[str] = []
+    monkeypatch.setattr(ExportStyleSidebar, "_open_section",
+                        lambda self, section: opened.append(section.titleText()))
+    _app, sb = _sidebar(qtbot, monkeypatch, kind="_line_fig")
+    sections = sb.findChildren(CollapsibleSection)
+    assert sections and not any(sec.isExpanded() for sec in sections)
+    assert all(sec.body().isHidden() for sec in sections)
+    grid = next(sec for sec in sections if sec.titleText() == "Grid")
+    sb.show()
+    QTest.mouseClick(grid._header, Qt.LeftButton, pos=QPoint(8, 8))
+    assert opened == ["Grid"]
+    assert not grid.isExpanded(), "the section unfolded in place as well"
 
 
 def _section_grids(sidebar) -> list[QGridLayout]:

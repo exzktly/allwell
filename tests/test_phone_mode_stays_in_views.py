@@ -9,7 +9,7 @@ phone-layout flag. These rules hold that in place:
    how a second mode spreads through code that should not know there is one.
 2. **Reads of the mode outside the sanctioned layers only go down.** The
    sanctioned layers are ``ui/``, ``core/``, the ``*_phone.py`` /
-   ``*phone_view.py`` siblings and ``review/core/phone_panel_sheet.py``. A read
+   ``*phone_view.py`` siblings. A read
    anywhere else is on a roster keyed by *file and function* with a written
    reason, and an entry that no longer describes a real read fails the test, so
    the roster can only shrink.
@@ -63,7 +63,6 @@ MODE_READS = ("is_on", "add_listener", "is_switching")
 SANCTIONED_DIRS = ("ui", "core")
 SANCTIONED_SUFFIXES = ("_phone.py", "phone_view.py")
 SANCTIONED_FILES = (
-    "review/core/phone_panel_sheet.py",
     # The Image Table's phone form, owned by the Image Table: it listens to the
     # mode and refits its own grid. One of the five views that already own
     # their phone form ().
@@ -118,6 +117,13 @@ MODE_READ_ROSTER: dict[tuple[str, str], str] = {
     ("review/core/plot_style.py", "apply_export_style_to_current"):
         "stamps whether the figure was fitted for the phone (_aw_phone_fitted); same "
         "candidate and same reason as _on_resize above.",
+    ("review/core/inspector_service.py", "InspectorHost.__init__"):
+        "the window's one inspector is lent a page's widgets, and a layout switch rescales "
+        "every widget: it listens so that everything lent goes home, and the desk column "
+        "leaves the splitter, before that pass runs.",
+    ("review/core/inspector_service.py", "_on_phone"):
+        "the one place that picks the inspector's host — the desk column or the phone's "
+        "Controls sheet — so that no feature that opens a page has to read the mode.",
     ("review/core/split_view.py", "_set_toggle_visible_for_mode"):
         "two panes side by side cannot fit a one-column layout, so Review's split toggle "
         "goes; a decision of the Review shell about its own chrome.",

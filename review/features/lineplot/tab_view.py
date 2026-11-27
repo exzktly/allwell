@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from review.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll,
-    make_band_controls, make_plot_with_right_dock, make_properties_button,
+    make_band_controls, make_plot_area, make_style_button,
     plotting_band_slot)
 from functools import partial
 from review.core.plot_orchestrator import redraw_app
@@ -42,8 +42,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # readers keep resolving. Non-widget state and behaviour calls still reach app.
     reg = ctx.widgets
 
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_line_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     # ── the shared control band above the card ──────────────────────────────
@@ -83,15 +82,15 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # Fold-change normalization collapses into a popover button (C1) so it no
     # longer needs its own row.
     from review.core.fold_change_controls_view import install_fold_change_controls
-    from review.core.ui_helpers import make_popover_button
-    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", line_ctrl)
+    from review.core.inspector_panels import make_popover_button
+    _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change", line_ctrl, ctx=ctx, tab="data")
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
     install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="line")
     line_ctrl.add_action(_fc_btn)
 
     # Error band (SEM/SD + Spread) collapses into a "Display ▾" popover (C1)
     # rather than a separate card-controls row beneath the figure.
-    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", line_ctrl)
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display", line_ctrl, ctx=ctx, root=True)
     _disp_btn.setToolTip("Error band (SEM/SD) and per-FOV spread")
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
     line_ctrl.add_action(_disp_btn)
@@ -105,7 +104,11 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
             ctx, cell_scope),
     )
     line_ctrl.add_action(export_btn)
-    line_ctrl.add_action(make_properties_button(ctx, line_ctrl, "line"))
+    line_ctrl.add_action(make_style_button(ctx, line_ctrl, "line"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(line_ctrl)
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
@@ -137,13 +140,10 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # no separate card-controls row beneath the header.
 
     # The Publication↔Screen toggle is wired through plot_style.apply_ax_style
-    # (it consults card.plotTheme() via ax.figure._plot_card). The stats chip is
-    # left hidden — its statsChanged signal isn't wired to typed state yet (the
-    # error band lives on the controls row above; Mean/Median is unsupported).
+    # (it consults card.plotTheme() via ax.figure._plot_card).
     card.plotThemeChanged.connect(lambda _m: redraw_app(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
     card.panelCopied.connect(ctx.notify.set_status)
-    card.setStatsChipVisible(False)
 
     scroll = reg.register("_line_scroll_canvas", QScrollArea(parent))
     scroll.setWidgetResizable(True)

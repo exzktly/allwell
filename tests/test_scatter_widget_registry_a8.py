@@ -20,7 +20,7 @@ from review.features.scatter.agg_tab_view import build_scatter_agg_tab
 from tests.widget_registry_helpers import assert_handles_registered as _check
 
 _CELLS = (
-    "_scatter_export_dock", "_scatter_ch_x_cb", "_scatter_ch_x_var",
+    "_scatter_ch_x_cb", "_scatter_ch_x_var",
     "_scatter_metric_x_cb", "_scatter_metric_x_var", "_scatter_ch_y_cb",
     "_scatter_ch_y_var", "_scatter_metric_y_cb", "_scatter_metric_y_var",
     "_scatter_tp_button", "_scatter_tp_cb", "_scatter_tp_var",
@@ -29,7 +29,7 @@ _CELLS = (
 )
 
 _AGG = (
-    "_scatter_agg_export_dock", "_scatter_agg_ch_x_cb", "_scatter_agg_metric_x_cb",
+    "_scatter_agg_ch_x_cb", "_scatter_agg_metric_x_cb",
     "_scatter_agg_ch_y_cb", "_scatter_agg_metric_y_cb", "_scatter_agg_stat_x_cb",
     "_scatter_agg_stat_x_var", "_scatter_agg_stat_y_cb", "_scatter_agg_stat_y_var",
     "_scatter_agg_tp_button", "_scatter_agg_card",

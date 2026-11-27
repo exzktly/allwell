@@ -211,3 +211,54 @@ def test_a_loose_word_is_refused_without_sending_anything(form):
     form._test_sched_btn.click()
     assert _StubProbe.made == []
     assert "g4dn.12xlarge" in form._test_result_lbl.text()
+
+
+@pytest.mark.qt
+def test_the_scheduler_test_is_a_page_of_the_form_not_a_third_window(form, qtbot):
+    """Manage Remote Servers → the host form → the test was three windows
+    deep. The test is a page of the form now, and Close brings the form back."""
+    form._compute_launcher_edit.setText("srun -p gpu")
+    form._test_sched_btn.click()
+    window = form._scheduler_test
+    assert window.window() is form, "the scheduler test opened a window of its own"
+    assert form.current_page() is window
+    qtbot.waitUntil(lambda: bool(window._summary_lbl.text()), timeout=5000)
+    window._close_btn.click()
+    assert form.current_page() is not window and form.current_page().isAncestorOf(form._test_sched_btn)
+
+
+@pytest.mark.qt
+def test_cancel_on_a_test_still_waiting_cancels_it_and_brings_the_form_back(form, qtbot, monkeypatch):
+    """The test runs until the scheduler answers, which can be minutes. Cancel
+    must stop it — as a page of the form, Cancel ends the page, and the job
+    the probe sent must not be left waiting on the cluster."""
+    release = threading.Event()
+
+    def blocking_run(self, on_line):
+        release.wait(5)
+        return parse_probe([], 1)
+
+    monkeypatch.setattr(_StubProbe, "run", blocking_run)
+    form._compute_launcher_edit.setText("srun -p gpu")
+    form._test_sched_btn.click()
+    (probe,) = _StubProbe.made
+    window = form._scheduler_test
+    assert window._close_btn.text() == "Cancel"
+    window._close_btn.click()
+    assert probe.cancelled.is_set(), "Cancel left the scheduler test running"
+    assert form.current_page() is not window
+    release.set()
+
+
+@pytest.mark.qt
+def test_closing_the_form_with_a_test_still_waiting_cancels_it(form, qtbot, monkeypatch):
+    """The test is a page of the form now: the form's own close must end it,
+    or the job it sent keeps waiting on the cluster behind a closed window."""
+    release = threading.Event()
+    monkeypatch.setattr(_StubProbe, "run", lambda self, on_line: (release.wait(5), parse_probe([], 1))[1])
+    form._compute_launcher_edit.setText("srun -p gpu")
+    form._test_sched_btn.click()
+    (probe,) = _StubProbe.made
+    form.reject()
+    assert probe.cancelled.is_set(), "closing the form left the scheduler test running"
+    release.set()

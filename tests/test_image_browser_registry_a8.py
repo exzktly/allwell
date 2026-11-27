@@ -23,7 +23,7 @@ from tests.widget_registry_helpers import assert_handles_registered as _check
 # combos are gone (not registered). What remains are the action-strip + render
 # handles the controller / persistence still read.
 _IMAGE_TABLE = (
-    "_image_table_props_dock", "_image_table_crop_act",
+    "_image_table_crop_act",
     "_image_table_thresh_chan_cb", "_image_table_thresh_frac_stepper",
     "_image_table_render_grid", "_image_table_zoom_lbl",
     "_image_table_empty_state",

@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0">
+<title>All-Well Phone Surfaces</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column of findings; the prototype phone sits beside its own commentary and stacks under it when narrow. */
+:root{
+  --bg:#F5F6FA; --panel:#FFFFFF; --ink:#151A26; --ink2:#4A5468; --ink3:#7B8598; --line:#DCE0EA;
+  --accent:#3F5BD9; --accent-soft:#E6EAFD; --warn:#A8610A; --warn-soft:#FBF0DC; --ok:#17794A; --ok-soft:#DDF3E6;
+  /* the app's own tokens (ui/theme.py) — the mock-up is always drawn in the app's dark theme */
+  --a-surface:#0B0F17; --a-rail:#0E131C; --a-panel:#131A24; --a-elev:#1A2230; --a-hover:#212B3B; --a-active:#2A3548;
+  --a-border:#2A3343; --a-text:#E6E9EF; --a-text2:#98A2B3; --a-muted:#5F6B7C; --a-accent:#6B8AFD; --a-accent-dim:#2C3A66;
+  --a-ok:#4ADE80; --a-warn:#F59E0B; --a-danger:#F87171;
+  --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0C1018; --panel:#131924; --ink:#E7EAF1; --ink2:#A9B2C3; --ink3:#77829A; --line:#263042;
+  --accent:#8AA2FF; --accent-soft:#1E2A52; --warn:#F2B04C; --warn-soft:#3A2A0E; --ok:#5FD896; --ok-soft:#113322; color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#0C1018; --panel:#131924; --ink:#E7EAF1; --ink2:#A9B2C3; --ink3:#77829A; --line:#263042;
+  --accent:#8AA2FF; --accent-soft:#1E2A52; --warn:#F2B04C; --warn-soft:#3A2A0E; --ok:#5FD896; --ok-soft:#113322; color-scheme:dark }
+
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans)}
+.wrap{max-width:1040px;margin:0 auto;padding-block:28px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:44px}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0;text-wrap:balance}
+h2{font-size:21px;letter-spacing:-.01em;margin:0;text-wrap:balance}
+h3{font-size:15px;margin:0}
+p{margin:0;max-width:68ch}
+section{display:flex;flex-direction:column;gap:18px}
+.eyebrow{font:600 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.lede{font-size:16px;color:var(--ink2)}
+.muted{color:var(--ink3);font-size:13px}
+code,.mono{font-family:var(--mono);font-size:.88em}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.figures div{background:var(--panel);padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.figures b{font:600 26px/1 var(--mono);font-variant-numeric:tabular-nums}
+.figures span{font-size:12.5px;color:var(--ink2)}
+
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 11px/1.2 var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.bar{display:inline-block;height:8px;border-radius:2px;background:var(--accent);vertical-align:middle;margin-right:8px}
+
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.card ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:6px;font-size:13.5px;color:var(--ink2)}
+.card li b{color:var(--ink)}
+
+.chain{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:12.5px}
+.chain i{font-style:normal;color:var(--ink3)}
+.chip{padding:3px 8px;border-radius:5px;background:var(--warn-soft);color:var(--warn);font-weight:500;min-width:0}
+.chip.new{background:var(--accent-soft);color:var(--accent)}
+.flows{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.flow{display:grid;grid-template-columns:170px 1fr;gap:6px 16px;padding:14px 16px;border-bottom:1px solid var(--line)}
+.flow:last-child{border-bottom:0}
+.flow>*{min-width:0}
+.flow h3{grid-row:span 2;font-size:14px}
+.flow .tag{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);margin-right:6px}
+@media (max-width:640px){.flow{grid-template-columns:1fr}.flow h3{grid-row:auto}}
+
+.grammar td:first-child{font-weight:600;white-space:nowrap}
+.pill{display:inline-block;font:600 10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 7px;border-radius:4px;background:var(--ok-soft);color:var(--ok)}
+.pill.no{background:var(--warn-soft);color:var(--warn)}
+
+/* ───────── prototype ───────── */
+.proto{display:grid;grid-template-columns:auto minmax(0,1fr);gap:28px;align-items:start}
+@media (max-width:760px){.proto{grid-template-columns:1fr;justify-items:center}}
+.phone{width:324px;max-width:100%;height:660px;border-radius:30px;background:var(--a-surface);color:var(--a-text);border:6px solid #05070B;box-shadow:0 18px 40px rgba(8,12,24,.28);position:relative;overflow:hidden;display:flex;flex-direction:column;font:13px/1.3 var(--sans);user-select:none}
+.phone button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+.top{height:46px;flex:none;display:flex;align-items:center;gap:4px;padding:0 6px;background:#0A0E15;border-bottom:1px solid var(--a-border)}
+.top .ic{width:38px;height:38px;border-radius:8px;font-size:17px;color:var(--a-text2)}
+.modes{flex:1;display:flex;background:var(--a-elev);border-radius:8px;padding:2px}
+.modes span{flex:1;text-align:center;padding:7px 0;border-radius:6px;font-size:12px;color:var(--a-text2)}
+.modes span.on{background:var(--a-active);color:var(--a-text);font-weight:600}
+.page{flex:1;min-height:0;display:flex;flex-direction:column;padding:10px 12px;gap:8px}
+.ptitle{font-size:12px;color:var(--a-text2);display:flex;justify-content:space-between}
+.plot{flex:none;height:230px;background:var(--a-panel);border:1px solid var(--a-border);border-radius:8px;position:relative;cursor:pointer}
+.plot svg{width:100%;height:100%;display:block}
+.status{display:flex;gap:6px;flex-wrap:wrap}
+.status button{font-size:11.5px;padding:5px 9px;border-radius:999px;background:var(--a-elev);border:1px solid var(--a-border);color:var(--a-text2)}
+.status button.warn{color:var(--a-warn);border-color:#5a4313}
+.hint{font-size:11.5px;color:var(--a-muted)}
+.foot{height:54px;flex:none;display:grid;grid-template-columns:1.25fr 1fr 1fr 46px;gap:6px;padding:6px 8px;background:var(--a-rail);border-top:1px solid var(--a-border);position:relative;z-index:6}
+.foot button{border-radius:9px;background:var(--a-elev);border:1px solid var(--a-border);font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.foot button.on{background:var(--a-accent);border-color:var(--a-accent);color:#F0F4FF}
+.sheet{position:absolute;left:0;right:0;bottom:54px;background:var(--a-panel);border-top:1px solid var(--a-border);border-radius:16px 16px 0 0;display:flex;flex-direction:column;z-index:5;box-shadow:0 -10px 30px rgba(0,0,0,.45);transition:height .2s ease}
+@media (prefers-reduced-motion:reduce){.sheet{transition:none}}
+.grab{width:36px;height:4px;border-radius:2px;background:var(--a-border);margin:7px auto 2px;flex:none;cursor:pointer}
+.shead{display:flex;align-items:center;gap:6px;padding:4px 8px 8px 12px;flex:none}
+.shead .back{width:32px;height:32px;border-radius:8px;font-size:18px;color:var(--a-accent)}
+.shead h4{margin:0;font-size:14px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shead .crumb{display:block;font-size:10.5px;font-weight:400;color:var(--a-muted)}
+.shead .x{padding:7px 11px;border-radius:8px;background:var(--a-elev);font-size:12px;font-weight:600}
+.tabs{display:flex;margin:0 12px 6px;background:var(--a-surface);border-radius:8px;padding:2px;flex:none}
+.tabs button{flex:1;padding:7px 0;border-radius:6px;font-size:12px;color:var(--a-text2)}
+.tabs button.on{background:var(--a-active);color:var(--a-text);font-weight:600}
+.sbody{flex:1;min-height:0;overflow-y:auto;padding:0 12px 10px;display:flex;flex-direction:column}
+.row{min-height:42px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #1B2331;width:100%;text-align:left}
+.row .l{flex:none;width:104px;color:var(--a-text2);font-size:12.5px}
+.row .v{flex:1;min-width:0;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .go{color:var(--a-muted);font-size:15px}
+.row.full .l{width:auto;flex:1;color:var(--a-text)}
+.seg{flex:1;display:flex;background:var(--a-surface);border-radius:7px;padding:2px}
+.seg button{flex:1;padding:6px 0;border-radius:5px;font-size:11.5px;color:var(--a-text2)}
+.seg button.on{background:var(--a-accent-dim);color:var(--a-text);font-weight:600}
+.sw{width:38px;height:22px;border-radius:11px;background:var(--a-active);position:relative;flex:none}
+.sw::after{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--a-text2);transition:left .12s}
+.sw.on{background:var(--a-accent)} .sw.on::after{left:19px;background:#fff}
+.ck{width:20px;height:20px;border-radius:5px;border:1.5px solid var(--a-border);flex:none;display:grid;place-items:center;font-size:12px;color:transparent}
+.ck.on{background:var(--a-accent);border-color:var(--a-accent);color:#fff}
+.btns{display:flex;gap:8px;padding:8px 0}
+.btns button{flex:1;padding:9px 0;border-radius:8px;background:var(--a-elev);border:1px solid var(--a-border);font-size:12.5px;font-weight:500}
+.btns button.danger{color:var(--a-danger)}
+.note{font-size:11.5px;color:var(--a-muted);padding:8px 0}
+.dot{width:20px;height:20px;border-radius:50%;flex:none;border:1px solid rgba(255,255,255,.25)}
+.track{flex:1;height:4px;border-radius:2px;background:var(--a-active);position:relative}
+.track i{position:absolute;left:0;top:0;bottom:0;border-radius:2px;background:var(--a-accent)}
+.track b{position:absolute;top:-6px;width:16px;height:16px;border-radius:50%;background:#fff;margin-left:-8px}
+.plate{display:grid;grid-template-columns:repeat(12,1fr);gap:3px;padding:8px 0}
+.plate button{aspect-ratio:1;border-radius:50%;background:var(--a-elev);border:1px solid var(--a-border)}
+.plate button.on{background:var(--a-accent);border-color:var(--a-accent)}
+.crops{display:flex;gap:6px;padding:8px 0}
+.crops span{flex:1;aspect-ratio:1;border-radius:6px;background:radial-gradient(circle at 40% 45%,#3ddc84 0 14%,#0d2b1b 16% 100%)}
+.crops span:nth-child(2n){background:radial-gradient(circle at 60% 55%,#3ddc84 0 9%,transparent 10%),radial-gradient(circle at 35% 35%,#3ddc84 0 10%,#0d2b1b 12% 100%)}
+.menu{position:absolute;z-index:8;background:var(--a-elev);border:1px solid var(--a-border);border-radius:12px;padding:5px;min-width:200px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:flex;flex-direction:column}
+.menu .cap{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--a-muted);padding:7px 10px 4px}
+.menu button{text-align:left;padding:10px;border-radius:8px;font-size:13px}
+.menu button.cur{color:var(--a-accent);font-weight:600}
+.menu hr{border:0;border-top:1px solid var(--a-border);margin:4px 0;width:100%}
+.veil{position:absolute;inset:0;z-index:7}
+.aside{display:flex;flex-direction:column;gap:14px;min-width:0;width:100%}
+.meter{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.meter div{background:var(--panel);padding:12px 14px}
+.meter b{display:block;font:600 24px/1.1 var(--mono)}
+.meter span{font-size:12px;color:var(--ink2)}
+.meter .old b{color:var(--warn)} .meter .now b{color:var(--accent)}
+.say{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:8px;font-size:13.5px}
+.say .k{font:600 10.5px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase}
+.say .k.o{color:var(--warn)} .say .k.p{color:var(--accent)}
+.try{display:flex;flex-wrap:wrap;gap:6px}
+.try button{font:500 12.5px var(--sans);padding:6px 10px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+.try button:hover{border-color:var(--accent)}
+
+/* ───────── desk mock-up ───────── */
+.deskscroll{overflow-x:auto;border-radius:12px}
+.desk{min-width:800px;height:470px;border-radius:12px;background:var(--a-surface);color:var(--a-text);border:1px solid #05070B;box-shadow:0 14px 34px rgba(8,12,24,.22);display:flex;flex-direction:column;font:12px/1.3 var(--sans);user-select:none;position:relative;overflow:hidden}
+:where(.desk) button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+.dtitle{height:38px;flex:none;display:flex;align-items:center;gap:10px;padding:0 10px;background:#0A0E15;border-bottom:1px solid var(--a-border)}
+.dtitle b{font-size:13px}.dtitle .modes{flex:none;width:230px}.dtitle .sp{flex:1}
+.dtitle .hi{padding:5px 8px;border-radius:6px;color:var(--a-text2);font-size:11.5px;border:1px solid var(--a-border)}
+.dbody{flex:1;min-height:0;display:flex}
+.drail{width:150px;flex:none;background:var(--a-rail);border-right:1px solid var(--a-border);padding:8px;display:flex;flex-direction:column;gap:6px}
+.drail .ds{padding:7px 8px;border-radius:7px;background:var(--a-elev);border:1px solid var(--a-border);text-align:left;font-weight:600}
+.drail span{padding:5px 8px;border-radius:6px;color:var(--a-text2)}.drail span.on{background:var(--a-active);color:var(--a-text)}
+.drail .plate{gap:2px;padding:6px 0 0;margin-top:auto}
+.dcentre{flex:1;min-width:0;display:flex;flex-direction:column}
+.dtabs{display:flex;gap:2px;padding:6px 10px 0;border-bottom:1px solid var(--a-border)}
+.dtabs button{padding:6px 12px;border-radius:7px 7px 0 0;color:var(--a-text2)}.dtabs button.on{background:var(--a-panel);color:var(--a-text);font-weight:600}
+.dband{display:flex;align-items:center;gap:6px;padding:7px 10px;background:var(--a-panel);border-bottom:1px solid var(--a-border);flex-wrap:wrap}
+.dchip{padding:5px 8px;border-radius:6px;background:var(--a-elev);border:1px solid var(--a-border);color:var(--a-text2);white-space:nowrap}
+.dchip b{color:var(--a-text);font-weight:500}.dchip.on{border-color:var(--a-accent);color:var(--a-text)}
+.dband .sp{flex:1}.dfix{padding:5px 10px;border-radius:6px;background:var(--a-elev);border:1px solid var(--a-border);font-weight:600}
+.dfix.on{background:var(--a-accent);border-color:var(--a-accent);color:#F0F4FF}
+.dplot{flex:1;min-height:0;margin:10px;background:var(--a-panel);border:1px solid var(--a-border);border-radius:8px}
+.dplot svg{width:100%;height:100%;display:block}
+.dstat{padding:0 10px 8px}
+.dinsp{width:262px;flex:none;background:var(--a-panel);border-left:1px solid var(--a-border);display:flex;flex-direction:column}
+.dinsp .shead{padding:8px 8px 8px 12px}
+.desk .menu{font-size:12px}
+ol.steps{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:8px;max-width:72ch}
+ol.steps li b{font-weight:600}
+</style>
+
+<div class="wrap">
+
+<header style="display:flex;flex-direction:column;gap:14px">
+  <span class="eyebrow">All-Well · phone and desk · proposal</span>
+  <h1>Too many kinds of pop-up, opened from too many places</h1>
+  <p class="lede">An inventory of every secondary surface in the app, what Apple's, Google's and NN/g's guidance and a few widely used apps do with the same jobs, and clickable mock-ups of a phone layout and a desk layout that use one inspector, in one place, with nothing stacked on top of it.</p>
+  <div class="figures">
+    <div><b>28</b><span>popovers (20 from one factory, 8 hand-built)</span></div>
+    <div><b>46</b><span>drop-down menus in 29 files</span></div>
+    <div><b>23</b><span>dialogs and separate windows</span></div>
+    <div><b>172</b><span>message-box call sites</span></div>
+    <div><b>4</b><span>levels deep, the worst pop-up chain</span></div>
+    <div><b>8</b><span>different builds of one multi-select picker</span></div>
+  </div>
+  <p class="muted">Counts are from a sweep of the non-test source on this branch. Mock-up data (wells, values, subset names) is illustrative.</p>
+</header>
+
+<section>
+  <span class="eyebrow">Part 1 · Inventory</span>
+  <h2>What exists today</h2>
+
+  <div class="scroll"><table>
+    <tr><th>Kind</th><th>Count</th><th>What it is, and where it opens from</th></tr>
+    <tr><td>Persistent panels</td><td class="n">12</td><td>Header icon cluster (11 icons), left rail, plot right dock (Properties · Scatter cell viewer · Heat Map Layout share one slot), Image Table's separate Properties dock, Help drawer, Log drawer, status bar, Nanowells site-detail column, Split View.</td></tr>
+    <tr><td>Phone-only surfaces</td><td class="n">11</td><td>☰ rail drawer (left), page menu, Wells sheet and ⚙ Controls sheet (bottom), Properties sheet (right edge, full width), ⋯ menu (top right), full-screen form for each dialog, switch banner.</td></tr>
+    <tr><td>Popovers</td><td class="n">28</td><td>Display ▾ ×7, Fold change ▾ ×3, Decorate ▾ ×2, LUT ▾ ×2, Fit, Features, View, Colors, Delete scope, Crop scope; plus colour swatches, colour picker, colour-map picker, Nanowells Display range (button in 4 places), saved-selection compose and recolour.</td></tr>
+    <tr><td>Menus</td><td class="n">46</td><td>Save ▾ on 10 plot pages, timepoint / FOV / gate checklists, Nanowells Layers · Problem · Excluded, Image Table Table · Crop view · Save · channel ⚙, Job Queue row ⋯ (5 submenus), Presets, dataset picker.</td></tr>
+    <tr><td>Dialogs &amp; windows</td><td class="n">23</td><td>Manage Remote Servers and five dialogs under it, Storage, Reset analysis, Copy analysis, Per-sample control, New Replicate Set, Optimize ON cutoff, three curve windows, Nanowell crops pop-out, Test detection, Pair blanks, Export settings.</td></tr>
+    <tr><td>Text prompts</td><td class="n">8</td><td>Save preset ×2, rename group / plot, edit heat-map label, prefix / suffix, exclude field.</td></tr>
+    <tr><td>Message &amp; file boxes</td><td class="n">172 + 34</td><td>Analyze 48, Batch Export 26, Review core 33, other Review features 38, Datasets 15, shell 8.</td></tr>
+    <tr><td>In-page disclosure</td><td class="n">≈ 40</td><td>Four separate collapse mechanisms; 16 Properties sections; 11 Analyze sections; seven Nanowells panels that appear only after something else is pressed.</td></tr>
+  </table></div>
+
+  <h3>Openable surfaces per page, and how many places they open from</h3>
+  <div class="scroll"><table id="perpage">
+    <tr><th>Page</th><th>Surfaces</th><th>Trigger places</th><th>Notes</th></tr>
+  </table></div>
+  <p class="muted">On top of these, every Review page carries about 15 global surfaces reached from 5 places (header, rail head, rail body, status bar, keyboard).</p>
+
+  <h3>Why it feels illogical: four patterns</h3>
+  <div class="cols">
+    <div class="card"><h3>The same job is a different kind of surface on each page</h3><ul>
+      <li><b>Pick several timepoints / FOVs / gates:</b> eight implementations. Some apply as you tick, some only when the menu closes. Labels vary: "Timepoints: 0 selected", "Timepoints", "All FOVs", "All gates".</li>
+      <li><b>Live view options:</b> a Display ▾ popover on seven pages, a Layers menu with a submenu on Nanowells.</li>
+      <li><b>Brightness range:</b> LUT ▾ popover on Cell Browser and Segmentation, a custom popover on Nanowells.</li>
+      <li><b>Save a figure:</b> Save ▾, Properties › Export…, hover buttons on the canvas, the matplotlib toolbar, Ctrl+E. Image Table, Saved Plots and the crops pop-out each have their own differently-stocked menu.</li>
+      <li><b>Gating on Scatter</b> is split over four surfaces: Properties (draw), Display ▾ (apply), Cell Gating (choose), Cell Browser rail (filter).</li>
+    </ul></div>
+    <div class="card"><h3>Pop-ups open pop-ups</h3>
+      <div class="chain"><span class="chip">Fold change ▾</span><i>→</i><span class="chip">Control combo</span><i>→</i><span class="chip">Per-sample dialog</span><i>→</i><span class="chip">Set all to ▾</span></div>
+      <div class="chain"><span class="chip">Colors ▾</span><i>→</i><span class="chip">swatch popover</span><i>→</i><span class="chip">colour picker</span></div>
+      <div class="chain"><span class="chip">LUT ▾</span><i>→</i><span class="chip">swatch popover</span><i>→</i><span class="chip">colour picker</span></div>
+      <div class="chain"><span class="chip">Manage Remotes</span><i>→</i><span class="chip">Edit Remote</span><i>→</i><span class="chip">SSH key wizard</span></div>
+      <div class="chain"><span class="chip">Delete scope ▾</span><i>→</i><span class="chip">3 dropdown menus</span></div>
+      <ul><li>On a phone each of these starts <b>inside the Controls sheet</b>, so the chain is one deeper. Properties and Subset › Edit… each close the sheet they were tapped from and open something else somewhere else.</li></ul>
+    </div>
+    <div class="card"><h3>Things you can only find by accident</h3><ul>
+      <li><b>Right-click only:</b> Image Table per-cell override (the app's only context menu).</li>
+      <li><b>Double-click only:</b> edit a Heat Map tick label.</li>
+      <li><b>Hover only:</b> copy / save buttons on every plot canvas. Nothing hovers on a phone.</li>
+      <li><b>Tap a plain label:</b> Image Table root filter.</li>
+      <li><b>An entry inside a combo inside a popover:</b> Per-sample control; Custom subset….</li>
+      <li><b>Appears only in some state:</b> Decorate ▾, Excluded (n), the window strip, the Resolve guide.</li>
+      <li><b>Not reachable on a phone at all:</b> Reset analysis, Reset view, Copy analysis, Storage, Reveal folder, Presentation look.</li>
+    </ul></div>
+    <div class="card"><h3>No fixed place for a kind of control</h3><ul>
+      <li><b>Timepoints</b> is in the band's left zone on three pages, inside a group on Nanowells, in the rail on Cell Browser, in a toolbar in the pop-out.</li>
+      <li><b>Properties</b> is the same icon on plot pages and Image Table and opens two different panels.</li>
+      <li><b>Three arrow conventions</b> for "this opens a menu"; Batch Export's Quick Setup shows none.</li>
+      <li><b>Four close controls:</b> ✕, "Close", an × icon, "Done ✕".</li>
+      <li><b>Phone layout opens from all four edges:</b> rail from the left, Properties from the right, sheets from the bottom, ⋯ from the top.</li>
+    </ul></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">Part 2 · Research</span>
+  <h2>How widely used apps and the platform guidelines handle the same jobs</h2>
+  <div class="scroll"><table>
+    <tr><th>Rule</th><th>Source</th><th>What it means here</th></tr>
+    <tr><td><b>No popovers on a phone-width screen.</b> "Avoid displaying popovers in compact views"; use a sheet. "Never show a cascade or hierarchy of popovers."</td><td>Apple HIG, Popovers</td><td>All 28 popovers become pages of one sheet in phone layout.</td></tr>
+    <tr><td><b>One sheet at a time.</b> "Do Not Stack Bottom Sheets" (NN/g). "Display only one sheet at a time from the main interface" (Apple).</td><td>NN/g; Apple HIG, Sheets</td><td>Deeper options are pages <em>inside</em> the sheet with a back arrow, never a second surface.</td></tr>
+    <tr><td><b>Non-modal sheet when the content behind it is what you are adjusting.</b> Apple's example is Notes' text-format sheet; NN/g: use when users "need to refer to the main, background information".</td><td>Apple HIG; NN/g</td><td>Controls and Wells already do this (no scrim, plot stays live). Properties should too, instead of covering the plot.</td></tr>
+    <tr><td><b>Resting heights.</b> Medium is about half the screen, large is full; a grabber shows it resizes. Google Maps keeps place details in a sheet you drag up while the map stays usable.</td><td>Apple HIG; Material; Mobbin</td><td>Half height for adjusting against the plot; full height for an editor. Nanowell site detail becomes a half-height sheet over the plot.</td></tr>
+    <tr><td><b>Always a visible Close; Back dismisses.</b> Do not rely on the grab handle or a swipe.</td><td>NN/g</td><td>One Close control, one position, every sheet. Back ‹ steps out of a sheet page, then closes the sheet.</td></tr>
+    <tr><td><b>Sheets are for short interactions.</b> Long or multi-step work gets a full-screen view.</td><td>NN/g; Apple HIG</td><td>Manage Remotes, Storage, Test detection stay full-screen forms (they already are).</td></tr>
+    <tr><td><b>Menus are for commands: short, most-used first, at most one submenu level,</b> and a submenu over about five items becomes its own menu.</td><td>Apple HIG, Menus</td><td>Menus keep commands (Save…, Copy, Reset). Checklists and sliders leave menus. Job row ⋯'s two-level submenus flatten.</td></tr>
+    <tr><td><b>Group tools, keep the frequent ones visible, put the rare ones behind ⋯, keep the picture in view.</b> Lightroom's 2023 phone redesign did exactly this and made the edit panel translucent so the photo does not shrink.</td><td>Adobe</td><td>Three fixed groups in the sheet (Data · Display · Style); rare commands in ⋯.</td></tr>
+    <tr><td><b>Hidden navigation is used less.</b> 179 participants: hidden navigation used in 57 % of mobile sessions against 86 % when partly visible; with four or fewer top-level links, show them.</td><td>NN/g, Hamburger menus</td><td>The four things every page needs get four permanent slots in the bottom bar.</td></tr>
+    <tr><td><b>Warnings are alerts,</b> never popovers or sheets, because those are dismissed by accident.</td><td>Apple HIG</td><td>Destructive resets can return to the phone safely behind a confirm alert.</td></tr>
+  </table></div>
+  <p class="muted">Material 3's own bottom-sheet page could not be read (it needs JavaScript); the Material points above come from Google's earlier published guidance and summaries of it. NN/g also notes the claim that bottom sheets are easier to reach is "largely incorrect", so the case for them here is keeping the plot in view, not thumb reach.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Part 3 · Proposal</span>
+  <h2>Five kinds of surface, each with one job and one place</h2>
+  <div class="scroll"><table class="grammar">
+    <tr><th>Surface</th><th>Used for</th><th>Opens from</th><th>Replaces</th></tr>
+    <tr><td>Sheet</td><td>Anything that changes what the plot shows. Three fixed tabs: <b>Data</b> (what is plotted), <b>Display</b> (how it is drawn), <b>Style</b> (export look). Sub-options are pages inside it.</td><td>Bottom bar › Controls. Always the bottom edge.</td><td>28 popovers, Properties sheet, 8 pickers, Layers menu, Subset editor, Per-sample dialog</td></tr>
+    <tr><td>Wells sheet</td><td>Picking wells and saved selections.</td><td>Bottom bar › Wells</td><td>Unchanged, gains saved selections</td></tr>
+    <tr><td>Menu</td><td>Commands only. One level. No tick-lists, no sliders.</td><td>The button it belongs to</td><td>Save ▾ on 10 pages becomes one Share button</td></tr>
+    <tr><td>Full screen</td><td>Long or multi-step work away from the plot.</td><td>A row that ends in ›, or ⋯</td><td>Unchanged (dialogs already take the screen)</td></tr>
+    <tr><td>Alert</td><td>Confirm something destructive; report an error.</td><td>Centre of screen</td><td>Unchanged</td></tr>
+  </table></div>
+
+  <h3>Try it</h3>
+  <p>The phone below works. Every option a page has is a row in the sheet; a row ending in › opens a page <em>inside</em> the sheet. The panel beside it says what the same step costs today.</p>
+
+  <div class="proto">
+    <div class="phone" id="phone" aria-label="Interactive mock-up of the proposed phone layout"></div>
+    <div class="aside">
+      <div class="meter">
+        <div class="now"><b id="mNow">0</b><span>surfaces open in the proposal</span></div>
+        <div class="old"><b id="mOld">0</b><span>stacked for the same step today</span></div>
+      </div>
+      <div class="say"><span class="k p">Proposed</span><div id="sayNew"></div><span class="k o">Today</span><div id="sayOld"></div></div>
+      <div><p class="muted" style="margin-bottom:8px">Jump to a step:</p>
+      <div class="try" id="try"></div></div>
+    </div>
+  </div>
+
+  <h3>The same design at the desk</h3>
+  <p>The desk has room, so the inspector is a column beside the plot that stays open while you work, and the Data controls stay in the band above the plot as they are today. Everything else is the same component with the same pages: a band button that used to drop a pop-up now shows its current value and opens its page in the inspector. Click the band, the three fixed buttons, and the dataset name.</p>
+  <div class="deskscroll"><div class="desk" id="desk" aria-label="Interactive mock-up of the proposed desk layout"></div></div>
+  <div class="scroll"><table class="grammar">
+    <tr><th></th><th>Phone</th><th>Desk</th></tr>
+    <tr><td>Inspector</td><td>Bottom sheet, half or full height; right-hand panel sideways; docked column on an unfolded foldable</td><td>Right-hand column beside the page; replaces the Properties dock and every band pop-up</td></tr>
+    <tr><td>Data</td><td>First tab of the sheet</td><td>The band row above the plot, as today</td></tr>
+    <tr><td>Display · Style</td><td>Second and third tabs</td><td>Inspector tabs, opened by two fixed buttons at the band's right end</td></tr>
+    <tr><td>A sub-option<br><span class="muted">Fold change, Timepoints, Subset…</span></td><td>A page inside the sheet</td><td>A page inside the inspector; its band button reads "Fold change: vs DMSO ›"</td></tr>
+    <tr><td>Detail<br><span class="muted">nanowell site, scatter cell</span></td><td>Half-height sheet over the plot</td><td>A Detail tab that appears in the inspector while something is picked</td></tr>
+    <tr><td>Wells</td><td>Wells sheet</td><td>The rail's plate, as today</td></tr>
+    <tr><td>Share</td><td>Fourth button of the bottom bar</td><td>Third fixed band button. Canvas hover buttons, right-click and Ctrl+E stay, as shortcuts to things that are also visible</td></tr>
+    <tr><td>Dataset tools</td><td>⋯ › Dataset tools</td><td>The dataset menu at the head of the rail; the header keeps 5 icons instead of 11</td></tr>
+    <tr><td>Dialogs</td><td>Full screen</td><td>Windows, never opened from a pop-up, at most two deep</td></tr>
+  </table></div>
+
+  <h3>Three flows, before and after</h3>
+  <div class="flows">
+    <div class="flow"><h3>Set a per-sample fold-change control (Bar Plots)</h3>
+      <div class="chain"><span class="tag">Today</span><span class="chip">⚙ Controls sheet</span><i>→</i><span class="chip">Fold change ▾ popover</span><i>→</i><span class="chip">"Per-sample control…" in a combo</span><i>→</i><span class="chip">full-screen dialog</span><i>→</i><span class="chip">Set all to ▾ menu</span></div>
+      <div class="chain"><span class="tag">Proposed</span><span class="chip new">Controls</span><i>›</i><span class="chip new">Fold change</span><i>›</i><span class="chip new">Per-sample control</span><i>· one sheet, back arrow, plot still visible</i></div></div>
+    <div class="flow"><h3>Restyle the axes, then save (any plot)</h3>
+      <div class="chain"><span class="tag">Today</span><span class="chip">⚙ Controls</span><i>→</i><span class="chip">Properties (Controls closes; panel slides in from the right and covers the plot)</span><i>→</i><span class="chip">✕</span><i>→</i><span class="chip">⚙ Controls again</span><i>→</i><span class="chip">Save ▾</span></div>
+      <div class="chain"><span class="tag">Proposed</span><span class="chip new">Controls</span><i>›</i><span class="chip new">Style tab › Axes</span><i>then</i><span class="chip new">Share button</span><i>· always in the bar</i></div></div>
+    <div class="flow"><h3>Recolour a boundary (Segmentation)</h3>
+      <div class="chain"><span class="tag">Today</span><span class="chip">⚙ Controls</span><i>→</i><span class="chip">Colors ▾ popover</span><i>→</i><span class="chip">swatch popover</span><i>→</i><span class="chip">colour picker popover</span></div>
+      <div class="chain"><span class="tag">Proposed</span><span class="chip new">Controls</span><i>›</i><span class="chip new">Display › Colours</span><i>›</i><span class="chip new">Boundary</span></div></div>
+  </div>
+
+  <h3>Rules the mock-up follows</h3>
+  <div class="cols">
+    <div class="card"><h3>Fixed places</h3><ul>
+      <li><b>Bottom bar, four permanent slots:</b> page picker, Wells, Controls, Share. They never move and never hide; a slot a page cannot use is dimmed, not removed.</li>
+      <li><b>Everything rises from the bottom.</b> Properties stops arriving from the right. ☰ remains the only side panel and is navigation only.</li>
+      <li><b>Status line under the plot</b> holds whatever is conditional today (Excluded 2, Subset, gates applied). Each chip opens the sheet page that owns it.</li>
+    </ul></div>
+    <div class="card"><h3>One sheet, pages inside</h3><ul>
+      <li><b>Depth is never more than one surface.</b> A row ending in › pushes a page; ‹ pops it; Close is always top right.</li>
+      <li><b>Two heights:</b> half for adjusting against the plot, full for an editor (Per-sample control, Custom subset). The grabber switches between them.</li>
+      <li><b>Every row shows its current value,</b> so the sheet doubles as a summary of the page's state.</li>
+    </ul></div>
+    <div class="card"><h3>One component per job</h3><ul>
+      <li><b>One multi-select page</b> (All / None, applies as you tick, row reads "3 of 8") for timepoints, FOVs, gates, layers, features, scopes.</li>
+      <li><b>One range page</b> (min / max / Auto) for LUT and Display range.</li>
+      <li><b>One colour page</b> (swatches, then custom) wherever a colour is chosen.</li>
+    </ul></div>
+    <div class="card"><h3>Nothing by gesture alone</h3><ul>
+      <li>Right-click, double-click and hover actions each get a visible row or a long-press with the same menu.</li>
+      <li>Canvas hover buttons become the Share menu.</li>
+      <li>Desk-only actions come back under ⋯ › Dataset tools, each behind a confirm alert.</li>
+    </ul></div>
+  </div>
+
+  <h3>Suggested build order</h3>
+  <ol class="steps">
+    <li><b>Give the Controls sheet a page stack and the three tabs.</b> In phone layout <code>make_popover_button</code> pushes its panel as a sheet page instead of dropping a menu. Twenty popovers go through that one factory, so they convert together.</li>
+    <li><b>Move Properties into the Style tab</b> of the same sheet (<code>phone_panel_sheet.present</code> becomes a tab switch), so the plot stays in view while it is styled.</li>
+    <li><b>Add Share to the bottom bar</b> from <code>build_plot_save_menu</code>, already shared by ten pages.</li>
+    <li><b>Replace the eight multi-select builds with one picker</b>, on the desk too.</li>
+    <li><b>Convert the hand-built popovers</b> (Display range, colour-map picker, swatches, colour picker) to range and colour pages.</li>
+    <li><b>Turn dialogs that open from inside a popover into full-height sheet pages:</b> Per-sample control, Export settings, the Subset editor.</li>
+    <li><b>Nanowells:</b> site detail as a half-height sheet; Layers, Problem, Excluded, Subset as rows; conditional strips as status chips.</li>
+    <li><b>Give gesture-only actions a visible entry,</b> and restore the desk-only actions under ⋯.</li>
+    <li><b>Add a guard:</b> in phone layout, a test that presses every control fails if a second popup opens while a sheet is open.</li>
+  </ol>
+  <p class="muted">The row-by-row plan, with the code each row touches and the test that proves it, is <code>_Docs/Markdowns/SURFACES_TRACKER.md</code> in the repository.</p>
+</section>
+
+<section>
+  <span class="eyebrow">Sources</span>
+  <p class="muted"><a href="https://www.nngroup.com/articles/bottom-sheet/">NN/g, Bottom Sheets: Definition and UX Guidelines</a> · <a href="https://www.nngroup.com/articles/hamburger-menus/">NN/g, Hamburger Menus and Hidden Navigation</a> · <a href="https://developer.apple.com/design/human-interface-guidelines/sheets">Apple HIG, Sheets</a> · <a href="https://developer.apple.com/design/human-interface-guidelines/popovers">Apple HIG, Popovers</a> · <a href="https://developer.apple.com/design/human-interface-guidelines/menus">Apple HIG, Menus</a> · <a href="https://material.io/components/sheets-bottom">Material Design, Sheets: bottom</a> · <a href="https://mobbin.com/glossary/bottom-sheet">Mobbin, Bottom Sheet</a> · <a href="https://blog.adobe.com/en/publish/2023/07/26/adobe-photoshop-lightroom-has-new-mobile-interface-make-editing-even-easier-on-go">Adobe, Lightroom's new mobile interface</a></p>
+</section>
+</div>
+
+<script>
+(function(){
+// ── per-page table ──
+var PP=[["Nanowells",22,11,"3 band rows, crop strip, detail header, window strip, pop-out toolbar, figure click and drag"],
+["Analyze",20,6,"Manage… leads to 6 dialogs; 11 collapsible sections"],
+["Segmentation",14,3,"6 top-level popovers and menus with 8 more nested inside"],
+["Response Curves",10,5,"Series, Timepoints, Display, Fit, Fold-change chain"],
+["Bar Plots",9,5,"Fold-change chain is 4 levels deep"],
+["Image Table",9,5,"Includes right-click-only and label-click-only entries"],
+["Job Queue",8,3,"Row ⋯ has 5 submenus, two of them two levels deep"],
+["Line Graphs",7,4,""],["Heat Map",7,4,"Label edit is double-click only"],["Cell Browser",7,3,"LUT chain is 3 levels deep"],
+["Cell Gating",6,4,"One curve window opens by itself"],["Sample Map",6,3,""],["Scatter",5,4,""],["Playground",5,3,""],["Saved Plots",4,2,""]];
+var t=document.getElementById("perpage");
+PP.forEach(function(r){var tr=document.createElement("tr");
+ tr.innerHTML='<td><b>'+r[0]+'</b></td><td class="n"><span class="bar" style="width:'+(r[1]*5)+'px"></span>'+r[1]+'</td><td class="n">'+r[2]+'</td><td>'+r[3]+'</td>';t.appendChild(tr);});
+
+// ── prototype ──
+function nav(l,v,to){return{t:"nav",l:l,v:v,to:to}} function seg(l,o,i){return{t:"seg",l:l,o:o,i:i||0}}
+function tog(l,on){return{t:"tog",l:l,on:!!on}} function chk(l,on){return{t:"chk",l:l,on:!!on}}
+function btns(){return{t:"btns",o:[].slice.call(arguments)}} function note(x){return{t:"note",x:x}}
+function sld(l,p){return{t:"sld",l:l,p:p}} function col(l,c,to){return{t:"col",l:l,c:c,to:to}}
+
+var STYLE=[nav("Profile & format","Publication","sty"),nav("Axes","Auto","sty"),nav("Colours","Sample map","sty"),nav("Legend","Right","sty"),nav("Limits & scale","Linear","sty"),nav("Layout","1 × 3","sty"),btns("Reset","Save preset")];
+var SC={
+ bar:{name:"Bar Plots",sec:"Plotting",plot:"bars",status:[["3 of 8 timepoints","tp"],["vs DMSO","fc"]],
+  tabs:{Data:[nav("Channel","GFP","one"),nav("Property","Mean intensity","one"),nav("Timepoints","3 of 8","tp"),nav("Fold change","vs DMSO","fc"),nav("Colour & split","Dose · none","dec")],
+        Display:[seg("Show",["Bars","Points","Both"],2),seg("Error band",["SEM","SD","Off"],0),tog("Significance",true),tog("Pool replicates",false),nav("Grouping","By sample","one")],Style:STYLE},
+  old:"⚙ Controls opens a sheet with a Display grid (Decorate ▾, Fold change ▾, Display ▾), an Actions grid (Save ▾, Properties) and Data rows. Each ▾ drops a popover on top of the sheet.",oldN:1},
+ nano:{name:"Nanowells",sec:"Plotting",plot:"hist",status:[["Subset: ≥ 1 cell","sub"],["Excluded 2","exc",1]],
+  tabs:{Data:[nav("View","Distribution","view"),nav("Metric","Fold change","one"),nav("Subset","Starting cells ≥ 1","sub"),nav("Timepoints","3 of 8","tp"),nav("Excluded wells","2","exc"),nav("Colour & split","none","dec")],
+        Display:[nav("Layers","5 of 8","lay"),nav("Display range","120 – 3,400","rng"),nav("Problem filter","Any","one"),tog("Moving average",false),tog("Details footer",true)],Style:STYLE},
+  old:"The band is three rows. Layers, Problem and Excluded are menus; Decorate and Display range are popovers; Subset is a combo plus an Edit… button; Display range's button appears in four places.",oldN:1},
+ seg:{name:"Segmentation",sec:"Image Browser",plot:"img",status:[["Delete scope: this frame","scope"]],
+  tabs:{Data:[nav("Delete scope","This frame","scope"),nav("Crop scope","All frames","scope"),tog("Crop cells",false),btns("Clear crop","Reset crop + curation")],
+        Display:[seg("Stage",["Raw","Mask","Final"],2),tog("Outline",true),tog("Why removed",false),nav("Brightness","80 – 2,900","rng"),nav("Colours","3 set","cols")],Style:[note("Segmentation has no export styling. The tab stays in place, dimmed, so the sheet has the same shape on every page.")]},
+  old:"View ▾, LUT ▾, Colors ▾, Delete scope ▾ and Crop scope ▾ are five popovers; Edit ▾ is a menu. Eight more pop-ups are nested inside them.",oldN:1}
+};
+var PG={
+ tp:{title:"Timepoints",rows:[btns("All","None"),chk("0 h",1),chk("6 h",0),chk("12 h",1),chk("24 h",1),chk("36 h",0),chk("48 h",0),chk("60 h",0),chk("72 h",0)],
+  nw:"One checklist page, used for every multi-select in the app. It applies as you tick and the row behind it reads “3 of 8”.",old:"A checkbox menu dropped over the Controls sheet. There are eight separate builds of this picker; some apply live, some only when the menu closes.",n:2},
+ fc:{title:"Fold change",rows:[tog("Fold change",true),seg("Relative to",["Control","Baseline"],0),nav("Control","DMSO","one"),nav("Per-sample control","4 pairs set","pair"),tog("Log₂",false)],
+  nw:"A page of the same sheet. Per-sample control is an ordinary row you can see, not an entry hidden in a combo.",old:"A Fold change ▾ popover over the Controls sheet. Per-sample control is reached only by picking the last entry of its Control combo.",n:2},
+ pair:{title:"Per-sample control",large:1,rows:[btns("Set all to…","Auto-pair"),nav("Drug A · 1 µM","DMSO-1","one"),nav("Drug A · 10 µM","DMSO-1","one"),nav("Drug B · 1 µM","DMSO-2","one"),nav("Drug B · 10 µM","DMSO-2","one"),nav("Drug C · 1 µM","not set","one"),note("An editor gets the inspector's full height: the whole sheet on a phone, the whole column at the desk.")],
+  nw:"Third page of the same sheet, at full height. Back steps out one page; Close leaves.",old:"A separate full-screen dialog, opened from a combo inside a popover inside the sheet, with two more menus (Set all to ▾, Auto-pair ▾) inside it.",n:4},
+ dec:{title:"Colour & split",rows:[nav("Colour by","Dose","one"),nav("Split by","none","one")],nw:"Always listed. With no variables defined it says so and links to Sample Map, instead of disappearing.",old:"Decorate ▾ popover, hidden entirely until variables exist; built twice (Plotting band and Nanowells band).",n:2},
+ one:{title:"Choose one",rows:[chk("GFP",1),chk("mCherry",0),chk("DAPI",0),chk("Brightfield",0)],nw:"Single choice is a page with a tick, in place of a combo box whose list Qt draws as its own pop-up window.",old:"A combo box in the sheet, whose drop-down list is another pop-up.",n:2},
+ sty:{title:"Axes",rows:[seg("Y scale",["Linear","Log"],0),tog("Zero baseline",true),sld("Label size",55),sld("Tick size",40),tog("Grid",false)],nw:"Properties is the Style tab of the same sheet. Its 16 sections are rows; the plot above restyles as you change them.",old:"The Properties button closes the Controls sheet and slides a second, full-width panel in from the right, covering the plot it styles.",n:2},
+ view:{title:"View",rows:[chk("Distribution",1),chk("QC",0),chk("Array",0),chk("Trajectories",0),chk("Position",0),chk("Extremes",0),chk("Identity",0),chk("Statistics",0)],nw:"The eight Nanowells views in one list.",old:"A view bar in the first of three band rows.",n:1},
+ sub:{title:"Subset",rows:[chk("All nanowells",0),chk("Starting cells ≥ 1",1),chk("Starting cells = 1",0),chk("Starting cells 1–2",0),chk("Responders (saved)",0),nav("Custom subset","3 conditions","subed")],nw:"Presets, saved subsets and the custom editor are one list.",old:"A combo plus an Edit… button. Edit… closes the sheet you tapped it from and opens an editor in the page behind it.",n:2},
+ subed:{title:"Custom subset",large:1,rows:[nav("Starting cells","≥ 1","one"),nav("Verdict","Live","one"),nav("Fold change","> 2.0","one"),btns("+ Add condition","Clear"),btns("Save as…","Apply")],nw:"The editor is a full-height page of the sheet.",old:"An in-page panel that is hidden until Edit… is pressed, with its own Close, a tiles menu, and Name / Save / Rename / Delete.",n:3},
+ exc:{title:"Excluded wells",rows:[nav("C4","Restore","one"),nav("F9","Restore","one"),btns("Restore every well")],nw:"A permanent row that reads 0 when nothing is excluded, plus a status chip under the plot when something is.",old:"An “Excluded (n)” menu button that exists only while a well is excluded.",n:2},
+ lay:{title:"Layers",rows:[btns("All","None"),chk("Cells",1),chk("Nuclei",1),chk("Well outline",1),chk("Anchors",0),chk("Verdict tint",1),chk("Notes",1),chk("Rim",0),chk("Scale bar",0),seg("Draw as",["Fill","Outline"],1)],nw:"The same checklist page as Timepoints.",old:"A menu of checkable items with a “Show as” submenu. On every other page the same job is a Display ▾ popover. Overlays and Notes are also separate toggle buttons.",n:2},
+ rng:{title:"Display range",rows:[sld("Min",12),sld("Max",70),btns("Auto","Reset")],nw:"One range page for every image view.",old:"LUT ▾ popover on Segmentation and Cell Browser; a different custom popover on Nanowells whose button appears in four places.",n:2},
+ cols:{title:"Colours",rows:[col("Boundary","#F59E0B","pick"),col("Selected","#6B8AFD","pick"),col("Tint","#4ADE80","pick"),btns("Reset colours")],nw:"Colour roles are rows.",old:"Colors ▾ popover over the Controls sheet.",n:2},
+ pick:{title:"Boundary",rows:[{t:"sws"},sld("Hue",30),sld("Opacity",85)],nw:"Swatches and the custom picker on one page.",old:"Colors ▾ popover, then a swatch popover, then a colour-picker popover: three stacked on the sheet.",n:4},
+ scope:{title:"Delete scope",rows:[seg("Wells",["This","Selected","All"],0),seg("FOVs",["This","All"],0),seg("Timepoints",["This","All"],0),note("Applies to: B3 · FOV 2 · 12 h")],nw:"Three plain choices on one page, with the result spelled out.",old:"A popover holding a hint and three dropdown menus.",n:3}
+};
+var S={scene:"bar",sheet:null,tab:"Data",stack:[],menu:null,full:false,wells:{},detail:false};
+[14,15,16,26,27,28].forEach(function(i){S.wells[i]=1});
+var ph=document.getElementById("phone");
+function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;")}
+function plot(kind){
+ var s='<svg viewBox="0 0 300 230" preserveAspectRatio="none" aria-hidden="true">';
+ if(kind==="img"){s+='<rect width="300" height="230" fill="#05080d"/>';
+  [[60,60,22],[130,90,26],[210,60,20],[90,160,24],[180,165,28],[250,140,18]].forEach(function(c,i){s+='<circle cx="'+c[0]+'" cy="'+c[1]+'" r="'+c[2]+'" fill="#12351f" stroke="'+(i===1?"#6B8AFD":"#F59E0B")+'" stroke-width="2"/>';});
+ }else{
+  s+='<line x1="30" y1="200" x2="290" y2="200" stroke="#2A3343"/><line x1="30" y1="15" x2="30" y2="200" stroke="#2A3343"/>';
+  var h=kind==="hist"?[20,48,95,140,165,120,84,52,30,18,10,6]:[60,64,118,150,96,170,72,132];
+  var w=250/h.length;
+  h.forEach(function(v,i){s+='<rect x="'+(35+i*w)+'" y="'+(200-v)+'" width="'+(w-(kind==="hist"?1:8))+'" height="'+v+'" fill="'+(kind==="hist"?"#6B8AFD":["#6B8AFD","#B98CF7","#4ADE80","#F59E0B"][i%4])+'" rx="2"/>';
+   if(kind!=="hist")s+='<line x1="'+(35+i*w+(w-8)/2)+'" y1="'+(190-v)+'" x2="'+(35+i*w+(w-8)/2)+'" y2="'+(210-v)+'" stroke="#E6E9EF" stroke-width="1.5"/>';});
+ }
+ return s+'</svg>';
+}
+function row(r,i){
+ if(r.t==="nav")return '<button class="row" data-a="push" data-v="'+r.to+'"><span class="l">'+esc(r.l)+'</span><span class="v">'+esc(r.v)+'</span><span class="go">›</span></button>';
+ if(r.t==="col")return '<button class="row" data-a="push" data-v="'+r.to+'"><span class="l">'+esc(r.l)+'</span><span class="v"></span><span class="dot" style="background:'+r.c+'"></span><span class="go">›</span></button>';
+ if(r.t==="seg")return '<div class="row"><span class="l">'+esc(r.l)+'</span><span class="seg">'+r.o.map(function(o,j){return '<button class="'+(j===r.i?"on":"")+'" data-a="seg" data-v="'+i+':'+j+'">'+esc(o)+'</button>'}).join("")+'</span></div>';
+ if(r.t==="tog")return '<button class="row full" data-a="flip" data-v="'+i+'"><span class="l">'+esc(r.l)+'</span><span class="sw '+(r.on?"on":"")+'"></span></button>';
+ if(r.t==="chk")return '<button class="row full" data-a="flip" data-v="'+i+'"><span class="l">'+esc(r.l)+'</span><span class="ck '+(r.on?"on":"")+'">✓</span></button>';
+ if(r.t==="sld")return '<div class="row"><span class="l">'+esc(r.l)+'</span><span class="track"><i style="width:'+r.p+'%"></i><b style="left:'+r.p+'%"></b></span></div>';
+ if(r.t==="btns")return '<div class="btns">'+r.o.map(function(o){return '<button class="'+(/Reset|Clear|Restore/.test(o)?"danger":"")+'">'+esc(o)+'</button>'}).join("")+'</div>';
+ if(r.t==="sws")return '<div class="btns">'+["#F59E0B","#F87171","#4ADE80","#22D3EE","#6B8AFD","#B98CF7","#E6E9EF"].map(function(c,j){return '<span class="dot" style="background:'+c+';width:28px;height:28px;'+(j===0?"outline:2px solid #fff;outline-offset:2px":"")+'"></span>'}).join("")+'</div>';
+ return '<div class="note">'+esc(r.x)+'</div>';
+}
+function rows(){var sc=SC[S.scene];return S.stack.length?PG[S.stack[S.stack.length-1]].rows:sc.tabs[S.tab]}
+function nWells(){return Object.keys(S.wells).length}
+function render(){
+ var sc=SC[S.scene],h='';
+ h+='<div class="top"><button class="ic" title="Sections">☰</button><button class="ic" data-a="back" title="Back">‹</button><div class="modes"><span class="on">Review</span><span>Analyze</span><span>Datasets</span></div><button class="ic" data-a="menu" data-v="more" title="More">⋯</button></div>';
+ h+='<div class="page"><div class="ptitle"><span>'+sc.sec+' › <b style="color:var(--a-text)">'+sc.name+'</b></span><span>plate_0412</span></div>';
+ h+='<div class="plot" data-a="plot">'+plot(sc.plot)+'</div>';
+ h+='<div class="status">'+sc.status.map(function(c){return '<button class="'+(c[2]?"warn":"")+'" data-a="jump" data-v="'+c[1]+'">'+esc(c[0])+'</button>'}).join("")+'</div>';
+ h+='<div class="hint">'+(S.scene==="nano"?"Tap the plot to open a nanowell's detail.":"Status chips open the sheet page that owns them.")+'</div></div>';
+ if(S.sheet){
+  var ht=S.full||(S.stack.length&&PG[S.stack[S.stack.length-1]].large)?"86%":"54%";
+  h+='<div class="sheet" style="height:'+ht+'"><div class="grab" data-a="full" title="Resize"></div>';
+  if(S.sheet==="controls"){
+   var top=S.stack.length?PG[S.stack[S.stack.length-1]]:null;
+   var crumb=["Controls",S.tab].concat(S.stack.slice(0,-1).map(function(k){return PG[k].title})).join(" › ");
+   h+='<div class="shead">'+(top?'<button class="back" data-a="back" title="Back">‹</button>':'')+'<h4>'+(top?'<span class="crumb">'+esc(crumb)+'</span>'+esc(top.title):esc(sc.name)+' controls')+'</h4><button class="x" data-a="close">Close</button></div>';
+   if(!top)h+='<div class="tabs">'+["Data","Display","Style"].map(function(t){return '<button class="'+(t===S.tab?"on":"")+'" data-a="tab" data-v="'+t+'">'+t+'</button>'}).join("")+'</div>';
+   h+='<div class="sbody">'+rows().map(row).join("")+'</div>';
+  }else if(S.sheet==="wells"){
+   h+='<div class="shead"><h4>Wells · '+nWells()+' selected</h4><button class="x" data-a="close">Close</button></div><div class="sbody"><div class="plate">';
+   for(var i=0;i<96;i++)h+='<button class="'+(S.wells[i]?"on":"")+'" data-a="well" data-v="'+i+'" aria-label="well"></button>';
+   h+='</div><div class="btns"><button data-a="wall">All</button><button data-a="wnone">None</button></div>'+row(nav("Saved selections","4","one"))+'</div>';
+  }else{
+   h+='<div class="shead"><h4><span class="crumb">Nanowell detail</span>C4 · site 0182</h4><button class="x" data-a="close">Close</button></div><div class="sbody">'+row(nav("Start → end","1 → 6 cells","one"))+row(nav("Fold change","6.0","one"))+row(nav("Verdict","Live · responder","one"))+'<div class="crops"><span></span><span></span><span></span><span></span><span></span></div><div class="btns"><button>All crops</button><button class="danger">Exclude well</button></div></div>';
+  }
+  h+='</div>';
+ }
+ h+='<div class="foot"><button data-a="menu" data-v="page">'+esc(sc.name)+' ▾</button><button class="'+(S.sheet==="wells"?"on":"")+'" data-a="sheet" data-v="wells">Wells · '+nWells()+'</button><button class="'+(S.sheet==="controls"?"on":"")+'" data-a="sheet" data-v="controls">Controls</button><button data-a="menu" data-v="share" title="Share">⇪</button></div>';
+ if(S.menu){
+  h+='<div class="veil" data-a="nomenu"></div>';
+  if(S.menu==="page")h+='<div class="menu" style="left:8px;bottom:62px"><span class="cap">Pages</span>'+Object.keys(SC).map(function(k){return '<button class="'+(k===S.scene?"cur":"")+'" data-a="scene" data-v="'+k+'">'+SC[k].name+'</button>'}).join("")+'</div>';
+  if(S.menu==="share")h+='<div class="menu" style="right:8px;bottom:62px"><button>Save figure…</button><button>Copy figure</button><button>Save data as CSV…</button><button>Save cell data…</button><hr><button>Add to Saved Plots</button></div>';
+  if(S.menu==="more")h+='<div class="menu" style="right:8px;top:50px"><button>Text size · S  M  L</button><button>Reload dataset</button><button>Help</button><button>App log</button><hr><button>Dataset tools ›</button><button>Desktop layout</button></div>';
+ }
+ ph.innerHTML=h; say();
+}
+function say(){
+ var sc=SC[S.scene],n=0,o=0,a="",b="";
+ if(S.menu==="share"){n=1;o=2;a="Share is a permanent button in the bar and opens a plain command menu: the same five commands on every plot page.";b="Save ▾ sits in the Actions grid inside the Controls sheet. Figure export also lives in Properties › Export…, in hover-only buttons on the canvas, and in the matplotlib toolbar on two pages.";}
+ else if(S.menu==="more"){n=1;o=1;a="⋯ keeps app-level commands. “Dataset tools” is a full-screen list holding Reset analysis, Reset view, Copy analysis and Storage, each behind a confirm alert.";b="⋯ is a flat menu. Reset analysis, Reset view, Copy analysis, Storage, Reveal folder and the Presentation look cannot be reached in phone layout at all.";}
+ else if(S.menu==="page"){n=1;o=1;a="Unchanged: the page picker lists the current section's pages.";b="Same as today.";}
+ else if(S.sheet==="wells"){n=1;o=1;a="Unchanged, except that saved selections join it as a row, so everything about “which wells” is in one sheet.";b="The Wells sheet holds the plate; saved selections stay in the ☰ rail, with a ⋯ menu, a compose popover and a recolour popover of their own.";}
+ else if(S.sheet==="detail"){n=1;o=1;a="A half-height sheet over the plot, the way a maps app shows a place: tap another nanowell and it updates in place.";b="The site detail takes the whole page, so the distribution you tapped is gone until you close it. Display range and Pop out sit in its header.";}
+ else if(S.sheet==="controls"&&S.stack.length){var p=PG[S.stack[S.stack.length-1]];n=1;o=p.n;a=p.nw;b=p.old;}
+ else if(S.sheet==="controls"){n=1;o=sc.oldN;a={Data:"Data: what is plotted. Every scope control is a row showing its current value.",Display:"Display: how it is drawn. What used to be Display ▾, View ▾, LUT ▾, Colors ▾ and Layers are rows here.",Style:"Style: the Properties panel, in the same sheet, with the plot still visible above it."}[S.tab];b=S.tab==="Style"?PG.sty.old:sc.old;if(S.tab==="Style")o=2;}
+ else{a="Four permanent buttons: page, Wells, Controls, Share. Anything conditional shows as a status chip under the plot.";b="Three buttons (page, Wells, ⚙ Controls). Save and Properties are inside the Controls sheet; conditional controls appear and disappear inside the band.";}
+ document.getElementById("mNow").textContent=n;document.getElementById("mOld").textContent=o;
+ document.getElementById("sayNew").textContent=a;document.getElementById("sayOld").textContent=b;
+}
+function go(scene,tab,stack){S.scene=scene;S.sheet="controls";S.tab=tab;S.stack=stack;S.menu=null;S.full=false;render();}
+ph.addEventListener("click",function(e){
+ var el=e.target.closest("[data-a]");if(!el)return;var a=el.dataset.a,v=el.dataset.v;
+ if(a==="sheet"){S.menu=null;if(S.sheet===v)S.sheet=null;else{S.sheet=v;S.stack=[];S.full=false;}}
+ else if(a==="close"){S.sheet=null;S.stack=[];S.full=false;}
+ else if(a==="tab"){S.tab=v;}
+ else if(a==="push"){S.stack.push(v);S.full=false;}
+ else if(a==="back"){if(S.stack.length)S.stack.pop();else S.sheet=null;S.full=false;}
+ else if(a==="full"){S.full=!S.full;}
+ else if(a==="menu"){S.menu=S.menu===v?null:v;}
+ else if(a==="nomenu"){S.menu=null;}
+ else if(a==="scene"){S.scene=v;S.menu=null;S.stack=[];S.tab="Data";if(S.sheet==="detail")S.sheet=null;}
+ else if(a==="jump"){var sc=SC[S.scene];S.sheet="controls";S.tab=sc.tabs.Data.some(function(r){return r.to===v})?"Data":"Display";S.stack=[v];S.full=false;}
+ else if(a==="plot"){if(S.scene==="nano"){S.sheet=S.sheet==="detail"?null:"detail";S.stack=[];S.full=false;}}
+ else if(a==="well"){if(S.wells[v])delete S.wells[v];else S.wells[v]=1;}
+ else if(a==="wall"){for(var i=0;i<96;i++)S.wells[i]=1;}
+ else if(a==="wnone"){S.wells={};}
+ else if(a==="flip"){var r=rows()[+v];r.on=!r.on;}
+ else if(a==="seg"){var p=v.split(":");rows()[+p[0]].i=+p[1];}
+ render();
+});
+
+// ── desk mock-up ──
+var D={scene:"bar",open:false,tab:"Display",stack:[],menu:null};
+var dk=document.getElementById("desk");
+function dRows(){var sc=SC[D.scene];return D.stack.length?PG[D.stack[D.stack.length-1]].rows:sc.tabs[D.tab]}
+function dRender(){
+ var sc=SC[D.scene],h='';
+ h+='<div class="dtitle"><b>All-Well</b><div class="modes"><span class="on">Review</span><span>Analyze</span><span>Datasets</span></div><span class="sp"></span><span class="hi">Split</span><span class="hi">Refresh</span><span class="hi">Remote</span><span class="hi">Phone</span><span class="hi">Help</span></div>';
+ h+='<div class="dbody"><div class="drail"><button class="ds" data-a="dmenu" data-v="ds">plate_0412 ▾</button><span>Home</span><span class="'+(sc.sec==="Plotting"?"on":"")+'">Plotting</span><span class="'+(sc.sec==="Image Browser"?"on":"")+'">Image Browser</span><span>Saved Plots</span><div class="plate">';
+ for(var i=0;i<96;i++)h+='<button class="'+(S.wells[i]?"on":"")+'" tabindex="-1" aria-hidden="true"></button>';
+ h+='</div></div><div class="dcentre"><div class="dtabs">'+Object.keys(SC).map(function(k){return '<button class="'+(k===D.scene?"on":"")+'" data-a="dscene" data-v="'+k+'">'+SC[k].name+'</button>'}).join("")+'</div>';
+ h+='<div class="dband">'+sc.tabs.Data.map(function(r,i){
+   if(r.t==="nav")return '<button class="dchip '+(D.open&&D.stack[0]===r.to?"on":"")+'" data-a="dpush0" data-v="'+r.to+'">'+esc(r.l)+': <b>'+esc(r.v)+'</b> ›</button>';
+   if(r.t==="tog")return '<span class="dchip">'+esc(r.l)+': <b>'+(r.on?"on":"off")+'</b></span>';
+   if(r.t==="seg")return '<span class="dchip">'+esc(r.l)+': <b>'+esc(r.o[r.i])+'</b></span>';return '';}).join("");
+ h+='<span class="sp"></span><button class="dfix '+(D.open&&!D.stack.length&&D.tab==="Display"?"on":"")+'" data-a="dtab" data-v="Display">Display</button><button class="dfix '+(D.open&&!D.stack.length&&D.tab==="Style"?"on":"")+'" data-a="dtab" data-v="Style">Style</button><button class="dfix" data-a="dmenu" data-v="share">Share ▾</button></div>';
+ h+='<div class="dplot">'+plot(sc.plot)+'</div><div class="dstat status">'+sc.status.map(function(c){return '<button class="'+(c[2]?"warn":"")+'" data-a="dpush0" data-v="'+c[1]+'">'+esc(c[0])+'</button>'}).join("")+'</div></div>';
+ if(D.open){var top=D.stack.length?PG[D.stack[D.stack.length-1]]:null;
+  var crumb=D.stack.slice(0,-1).map(function(k){return PG[k].title}).join(" › ")||"Inspector";
+  h+='<div class="dinsp"><div class="shead">'+(top?'<button class="back" data-a="dback" title="Back">‹</button>':'')+'<h4>'+(top?'<span class="crumb">'+esc(crumb)+'</span>'+esc(top.title):esc(sc.name))+'</h4><button class="x" data-a="dclose">Close</button></div>';
+  if(!top)h+='<div class="tabs">'+["Display","Style"].map(function(t){return '<button class="'+(t===D.tab?"on":"")+'" data-a="dtab" data-v="'+t+'">'+t+'</button>'}).join("")+'</div>';
+  h+='<div class="sbody">'+dRows().map(row).join("")+'</div></div>';}
+ h+='</div>';
+ if(D.menu){h+='<div class="veil" data-a="dnomenu"></div>';
+  if(D.menu==="ds")h+='<div class="menu" style="left:10px;top:78px"><button>Open…</button><span class="cap">Recent</span><button>plate_0409</button><button>plate_0331</button><hr><span class="cap">Dataset tools</span><button>Copy analysis…</button><button>Storage…</button><button>Reveal folder</button><button>Reset view…</button><button>Reset analysis…</button></div>';
+  if(D.menu==="share")h+='<div class="menu" style="right:'+(D.open?272:10)+'px;top:112px"><button>Save figure…</button><button>Copy figure</button><button>Save data as CSV…</button><button>Save cell data…</button><hr><button>Add to Saved Plots</button></div>';}
+ dk.innerHTML=h;
+}
+dk.addEventListener("click",function(e){
+ var el=e.target.closest("[data-a]");if(!el)return;var a=el.dataset.a,v=el.dataset.v;
+ if(a==="dtab"){if(D.open&&!D.stack.length&&D.tab===v&&el.classList.contains("dfix"))D.open=false;else{D.open=true;D.tab=v;D.stack=[];}D.menu=null;}
+ else if(a==="dpush0"){D.open=true;D.stack=[v];D.menu=null;}
+ else if(a==="push"){D.stack.push(v);}
+ else if(a==="dback"){D.stack.pop();}
+ else if(a==="dclose"){D.open=false;D.stack=[];}
+ else if(a==="dmenu"){D.menu=D.menu===v?null:v;}
+ else if(a==="dnomenu"){D.menu=null;}
+ else if(a==="dscene"){D.scene=v;D.stack=[];D.tab="Display";}
+ else if(a==="flip"){var r=dRows()[+v];r.on=!r.on;}
+ else if(a==="seg"){var p=v.split(":");dRows()[+p[0]].i=+p[1];}
+ dRender();
+});
+D.open=true;D.stack=["fc"];dRender();
+var TRY=[["Per-sample fold change",function(){go("bar","Data",["fc","pair"])}],["Style the axes",function(){go("bar","Style",["sty"])}],["Timepoints picker",function(){go("bar","Data",["tp"])}],
+ ["Nanowells: custom subset",function(){go("nano","Data",["sub","subed"])}],["Nanowells: layers",function(){go("nano","Display",["lay"])}],
+ ["Nanowell detail",function(){S.scene="nano";S.sheet="detail";S.stack=[];S.menu=null;S.full=false;render()}],
+ ["Segmentation: recolour",function(){go("seg","Display",["cols","pick"])}],["Share",function(){S.sheet=null;S.stack=[];S.menu="share";render()}],["Wells",function(){S.menu=null;S.sheet="wells";S.stack=[];S.full=false;render()}]];
+var tr=document.getElementById("try");
+TRY.forEach(function(x){var b=document.createElement("button");b.type="button";b.textContent=x[0];b.addEventListener("click",x[1]);tr.appendChild(b);});
+go("bar","Data",[]);
+})();
+</script>
+</body>
+</html>

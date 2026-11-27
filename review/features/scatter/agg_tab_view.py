@@ -8,10 +8,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     make_band_controls,
-    build_plot_save_menu, make_plot_with_right_dock, make_popover_button,
-    make_properties_button, plotting_band_slot)
+    build_plot_save_menu, make_plot_area,
+    make_style_button, plotting_band_slot)
 from review.features.scatter.controller import redraw_scatter_agg_orchestrate
 from review.features.scatter.tp_selector_view import open_timepoint_selector
 from review.features.scatter.controller import on_scatter_agg_axis_change
@@ -37,8 +38,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_scatter_agg_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Scatter Plot", "aggregate")
@@ -105,7 +105,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
 
     # Error band (SEM/SD) for the aggregate's mean±spread points collapses into
     # a "Display ▾" popover (matches line/bar), instead of a card-controls row.
-    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
+    _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display", ctrl, ctx=ctx, root=True)
     _disp_btn.setToolTip("Error band (SEM/SD) for the aggregate points")
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=False))
     ctrl.add_action(_disp_btn)
@@ -122,7 +122,11 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
             unavailable="Pick both axes and a timepoint first."),
     )
     ctrl.add_action(_export_btn)
-    ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_agg"))
+    ctrl.add_action(make_style_button(ctx, ctrl, "scatter_agg"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False, header=False)
     from review.core.ui_helpers import apply_plot_card_decorators
@@ -138,7 +142,6 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_agg_canvas", card.canvas)
     # Error band now lives in the "Display ▾" popover on the control row above.
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_agg_orchestrate(ctx))
-    card.setStatsChipVisible(False)
     from review.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="scatter-chart",

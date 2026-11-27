@@ -54,7 +54,7 @@ UNSTYLED_NAMES = frozenset({
     "PlotGroupsDrawer", "PlotToolbar", "Sidebar", "VersionPill",
     # Widget-internal handles; these widgets paint themselves in code rather
     # than through a stylesheet string the scan can see.
-    "CheckableDropdown", "CheckableDropdownButton", "HueStrip", "SvSquare",
+    "MultiSelectButton", "MultiSelectButtonFace", "MultiSelectWindow", "HueStrip", "SvSquare",
     "KbdHintWrap", "PlateProgress", "PlotCardThemeToggle", "RailNavRowGlyph",
     "RowEditor", "RunDashboard", "SavedSelectionsList",
     # Per-feature handles read back by their controllers.

@@ -854,6 +854,32 @@ def test_the_stage_path_is_drawn_under_the_plate_and_anchored_at_the_origin(
     assert page._path_view._points[0] == (1.0, 1.0)
 
 
+def test_fit_whole_path_does_what_double_clicking_the_path_does(qapp, tmp_path):
+    """A double click on the stage path fits the whole run again; the button
+    under the path is the route a user can see. It appears with the path and
+    is enabled only while the path is zoomed in."""
+    from PySide6.QtCore import QPointF
+
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4)
+    page = OmeImportController().page
+    fit = page._path_fit_btn
+    assert fit.text() == "Fit whole path" and not fit.isVisibleTo(page)
+
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert fit.isVisibleTo(page) and not fit.isEnabled()
+
+    view = page._path_view
+    view.setZoom(3.0, QPointF(10.0, 10.0))
+    view._pan = QPointF(25.0, -8.0)
+    assert view._zoom == 3.0 and fit.isEnabled()
+    fit.click()
+    assert view._zoom == 1.0 and view._pan == QPointF(0.0, 0.0)
+    assert not fit.isEnabled()
+
+
 def _plate_timelapse(path, rows, cols, fovs, cycles, *, wobble=0.31):
     """A plate scan imaged *cycles* times, with the stage wobble a real one has.
 

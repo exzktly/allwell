@@ -592,7 +592,7 @@ def set_active_image_channel(ctx, channel: str, *, preserve_review_view: bool = 
         ri_chan_var.setCurrentText(ch_upper)
     ri_lut_lbl = ctx.widgets.get_or_none("_review_lut_chan_lbl")
     if ri_lut_lbl is not None:
-        ri_lut_lbl.setText(f"{ch_upper} LUT min:")
+        ri_lut_lbl.setText(f"{ch_upper} channel")
     saved_review_lut = ctx.state.image_view.lut_by_channel.get(channel)
     ri_lmin = ctx.widgets.get_or_none("_review_lmin_entry")
     ri_lmax = ctx.widgets.get_or_none("_review_lmax_entry")

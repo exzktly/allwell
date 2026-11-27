@@ -163,6 +163,9 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     from review.features.home.groups.selections_view import wire_selections_list as _wire
     rep_list = ctx.widgets.register("_rep_list", SavedSelectionsList(parent))
     rep_list.setComposable(True)
+    # The list's pages — a group's wells chooser, Recolour — are pages of the
+    # window's inspector, not panels floating over the rail.
+    rep_list.setPageOpener(lambda title, widget, anchor: _inspector_page(ctx, title, widget, anchor))
     layout.addWidget(rep_list, 1)
     _wire(ctx, rep_list)
 
@@ -310,3 +313,14 @@ def _build_from_variables_row(ctx, parent: QWidget, layout) -> None:
     button.setProperty("enabledTip", _FROM_VARIABLES_TIP)
     row_l.addWidget(button)
     refresh_replicates_button(ctx)
+
+
+def _inspector_page(ctx, title: str, widget, anchor):
+    """Show one of the groups list's pages in the inspector; return its close."""
+    from review.core import inspector_service
+    inspector_service.push(ctx, f"groups/{title}", title, widget, tab="data", anchor=anchor)
+
+    def close() -> None:
+        if inspector_service.is_showing(ctx, widget):
+            inspector_service.pop(ctx)
+    return close

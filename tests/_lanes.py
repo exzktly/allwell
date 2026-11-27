@@ -125,7 +125,6 @@ UI_LANE_FILES: dict[str, str] = {
     "test_phone_datasets_shell.py": "phone shell fits the Datasets pages",
     "test_phone_form_swipe.py": "form pages scroll by a drag on a phone",
     "test_phone_plot_swipe.py": "a swipe on a plot scrolls its page",
-    "test_phone_panel_sheet.py": "the Properties panel as a full-width sheet",
     "test_phone_windows.py": "a dialog or pop-out window covers the phone, scrolls, and closes from its foot",
     "test_home_phone_layout.py": "Home's Overview as one column on a phone",
     "test_sample_map_phone_layout.py": "Home's Sample Map layers as one scrolling column on a phone",

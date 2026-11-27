@@ -68,33 +68,28 @@ def build_qc_controls(ctx, band) -> SimpleNamespace:
 
 
 def _walk_button(ctx, parent):
-    """*Problem ▾*: which class of problem *Resolve* walks, one at a time, each listed with its count on the plate
-    (``resolve_compute.PICKABLE``). Not addressed, contradicted and inconclusive open with *Set anchor* on; partial
-    opens on Identity to be looked at; not located opens to be looked at, or its well excluded."""
-    from PySide6.QtCore import Qt
-    from PySide6.QtGui import QActionGroup
-    from PySide6.QtWidgets import QMenu, QToolButton
+    """*Problem*: which class of problem *Resolve* walks, one at a time, each listed with its count on the plate
+    (``resolve_compute.PICKABLE``) — a row whose page is a choice of one, not a menu of ticks. Not addressed,
+    contradicted and inconclusive open with *Set anchor* on; partial opens on Identity to be looked at; not located
+    opens to be looked at, or its well excluded."""
+    from PySide6.QtWidgets import QButtonGroup, QRadioButton
 
-    from widgets.owned_action import owned_action
+    from review.core.inspector_panels import make_popover_button
 
-    button = QToolButton(parent)
-    button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    button.setPopupMode(QToolButton.InstantPopup)
-    button.setProperty("variant", "secondary")
-    button.setProperty("hasMenu", True)
+    shown = {"value": ""}
+    button, page, lay = make_popover_button("Problem", parent, ctx=ctx, tab="data",
+                                            summary=lambda: shown["value"])
+    button._aw_problem_value = shown                     # what refresh_qc_controls writes the chosen class into
     button.setToolTip(WALK_TIP)
-    menu = QMenu(button)
-    button.setMenu(menu)
-    group = QActionGroup(menu)
-    group.setExclusive(True)
+    group = QButtonGroup(page)
     actions = {}
     for state in rc.PICKABLE:
-        action = owned_action(menu, rc.CLASSES[state].label)
-        action.setCheckable(True)
-        group.addAction(action)
-        action.triggered.connect(lambda _on=False, state=state: _set_walk(ctx, state))
-        ctx.widgets.register(f"_nw_qc_walk_{state}", action)
-        actions[state] = action
+        radio = QRadioButton(rc.CLASSES[state].label, page)
+        group.addButton(radio)
+        radio.clicked.connect(lambda _on=False, state=state: _set_walk(ctx, state))
+        ctx.widgets.register(f"_nw_qc_walk_{state}", radio)
+        lay.addWidget(radio)
+        actions[state] = radio
     return button, actions
 
 
@@ -129,9 +124,13 @@ def refresh_qc_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
     states = rc.walk_states(matrix, st.anchor_queue_states)
     chosen = states[0] if states else None
     for state, action in c.walk_actions.items():
+        blocked = action.blockSignals(True)
         action.setChecked(state == chosen)
+        action.blockSignals(blocked)
         action.setText(f"{rc.CLASSES[state].label} ({matrix.counts.get(state, 0) if matrix is not None else 0:,})")
-    c.walk_btn.setText(f"Problem: {qc.WORDS[chosen]}" if chosen else "Problem")
+    from review.core import inspector_panels
+    c.walk_btn._aw_problem_value["value"] = qc.WORDS[chosen] if chosen else ""
+    inspector_panels.refresh(c.walk_btn)
     c.walk_btn.setToolTip(f"{WALK_TIP}\n\nNow: {qc.walk_words(states)}.")
     why = qc.queue_tip(matrix, states)
     c.queue_btn.setText(qc.queue_label(matrix, st.anchor_queue_per_well, states))

@@ -22,28 +22,29 @@ def test_spatial_properties_panel_opens_and_toggles(loaded_app_shape):
     app = loaded_app_shape
     _open_spatial(app)
 
-    # The dock was pre-allocated for the shared sidebar.
-    dock = app._ctx.widgets.get_or_none("_spatial_export_dock")
-    assert dock is not None
-
-    # Opening resolves the Export-Style sidebar to the Spatial figure and mounts
-    # it in the dock. (``isHidden``/``isVisible`` differ under the offscreen QPA:
-    # the top-level window is never shown, so ``isVisible()`` is always False;
-    # ``isHidden()`` still reflects the explicit show/hide state.)
+    # Opening resolves the style panel to the Spatial figure and shows it as
+    # the inspector's Style tab — beside the page, not in a dock of the plot's.
+    from review.core import inspector_service as svc
     app._ctx.figures.open_style_panel("spatial")
     fig = app._ctx.widgets.get_or_none("_sp_fig")
     sidebars = getattr(app, "_export_style_sidebars", {}) or {}
     sb = sidebars.get(id(fig))
-    assert sb is not None, "Properties sidebar was not created for the Spatial figure"
-    assert not sb.isHidden(), "sidebar should be shown after opening"
-    assert not dock.isHidden(), "dock should be shown after opening"
-    # The sidebar is mounted inside the Spatial dock (not floating / elsewhere).
-    assert dock.layout().indexOf(sb) >= 0
+    assert sb is not None, "the style panel was not created for the Spatial figure"
+    insp = svc.inspector(app._ctx)
+    assert svc.is_open(app._ctx) and insp.currentTab() == "style"
+    assert insp.tabWidget("style") is sb and insp.isAncestorOf(sb)
+    assert not sb.isHidden(), "the panel should be shown after opening"
 
-    # Closing the dock hides the sidebar again (the toggle affordance's close
-    # path, invoked directly since the offscreen window reports not-visible).
+    # The same press again closes it, and the panel goes back to its park.
+    app._ctx.figures.open_style_panel("spatial")
+    assert not svc.is_open(app._ctx)
+    assert not insp.holds(sb) and sb.isHidden()
+
+    # And the panel's own close path closes the inspector too.
+    app._ctx.figures.open_style_panel("spatial")
+    assert svc.is_open(app._ctx)
     sb._close_dock()
-    assert sb.isHidden()
+    assert not svc.is_open(app._ctx) and sb.isHidden()
 
 
 def _flow_host(widget):

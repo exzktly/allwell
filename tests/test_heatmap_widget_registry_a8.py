@@ -18,7 +18,7 @@ from review.features.heatmap.tab_view import build_heatmap_tab
 from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (
-    "_heatmap_export_dock", "_chan_cb_heatmap", "_heatmap_metric_cb",
+    "_chan_cb_heatmap", "_heatmap_metric_cb",
     "_heatmap_cmap_cb", "_heatmap_scale_cb", "_heatmap_vmin_edit",
     "_heatmap_vmax_edit", "_heatmap_repset_avg_cb", "_heatmap_log_scale_cb",
     "_heatmap_show_error_cb", "_heatmap_sample_labels_cb",

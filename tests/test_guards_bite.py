@@ -3734,7 +3734,7 @@ def open_export_style_panel(win, plot_key):
 def test_properties_guard_catches_a_button_for_a_key_the_roster_lacks(monkeypatch):
     """The shape that shipped: the Response tab's inert Properties button."""
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, "response")')
+                     'make_style_button(ctx, band, "response")')
     with pytest.raises(AssertionError) as exc:
         mod.test_every_properties_button_names_a_panel_that_exists()
     assert "response" in str(exc.value)
@@ -3743,7 +3743,7 @@ def test_properties_guard_catches_a_button_for_a_key_the_roster_lacks(monkeypatc
 def test_properties_guard_reads_the_key_passed_by_keyword(monkeypatch):
     """``figure_key=`` is the same call; a positional-only reader misses it."""
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, figure_key="ghost")')
+                     'make_style_button(ctx, band, figure_key="ghost")')
     with pytest.raises(AssertionError) as exc:
         mod.test_every_properties_button_names_a_panel_that_exists()
     assert "ghost" in str(exc.value)
@@ -3751,14 +3751,14 @@ def test_properties_guard_reads_the_key_passed_by_keyword(monkeypatch):
 
 def test_properties_guard_clears_a_tab_whose_key_is_in_the_roster(monkeypatch):
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, "line")')
+                     'make_style_button(ctx, band, "line")')
     mod.test_every_properties_button_names_a_panel_that_exists()
 
 
 def test_properties_guard_refuses_a_key_it_cannot_read(monkeypatch):
     """A non-literal key is unprotected, and silence would read as a pass."""
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, chosen_key)')
+                     'make_style_button(ctx, band, chosen_key)')
     with pytest.raises(AssertionError) as exc:
         mod.test_every_properties_button_names_a_panel_that_exists()
     assert "non-literal" in str(exc.value)
@@ -5886,7 +5886,7 @@ def test_phone_guard_catches_an_unrostered_read_of_the_mode(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("name", [
     "ui/phone_shell.py", "core/anything.py", "analyze/phone_view.py",
-    "review/features/home/_phone.py", "review/core/phone_panel_sheet.py"])
+    "review/features/home/_phone.py"])
 def test_phone_guard_clears_a_read_in_a_sanctioned_layer(tmp_path, monkeypatch, name):
     path = _write(tmp_path, name,
                   "from core import phone_layout\n\n\ndef f():\n    return phone_layout.is_on()\n")
@@ -6066,3 +6066,223 @@ def test_recursive_delete_guard_clears(shape):
     from tests.test_every_recursive_delete_goes_through_the_layer import violations
     found = violations(ast.parse(RECURSIVE_DELETE_CLEAR[shape]), "probe.py")
     assert not found, f"the guard fired on a legitimate {shape}: {found}"
+
+
+# ── the surface guards (tests/_surface_guards.py) ─────────────────────────────
+#
+# Each scan is handed a synthetic tree. The violations are the shapes the
+# application held when the guards were written, plus the spellings that would
+# walk past a narrower scan: an aliased import, the class reached through its
+# module, the chained ``addAction(...).setCheckable(True)``, the keyword form,
+# and matplotlib's double click read with ``getattr``.
+
+def _surface_tree(body: str, rel: str = "review/features/x/view.py"):
+    import ast
+    import textwrap
+    return [(rel, ast.parse(textwrap.dedent(body)))]
+
+
+SURFACE_VIOLATIONS = {
+    "a widget action": ("widget_actions", """
+        from PySide6.QtWidgets import QMenu, QWidgetAction
+        def build(menu):
+            wa = QWidgetAction(menu)
+            menu.addAction(wa)
+        """),
+    "a widget action under an alias": ("widget_actions", """
+        from PySide6.QtWidgets import QWidgetAction as WA
+        def build(menu):
+            menu.addAction(WA(menu))
+        """),
+    "a popover": ("popovers", """
+        from widgets.popover import Popover
+        def pick(anchor):
+            Popover(anchor).show()
+        """),
+    "a popover under an alias": ("popovers", """
+        from widgets.popover import Popover as Bubble
+        def pick(anchor):
+            Bubble(anchor)
+        """),
+    "a popover through its module": ("popovers", """
+        from widgets import popover
+        def pick(anchor):
+            popover.Popover(anchor)
+        """),
+    "a checkable action": ("checkable_menu_actions", """
+        def fill(menu):
+            act = menu.addAction("Outline")
+            act.setCheckable(True)
+        """),
+    "a checkable action, chained": ("checkable_menu_actions", """
+        def fill(menu):
+            menu.addAction("Outline").setCheckable(True)
+        """),
+    "a checkable action by keyword": ("checkable_menu_actions", """
+        from PySide6.QtGui import QAction
+        def fill(menu):
+            menu.addAction(QAction("Outline", menu, checkable=True))
+        """),
+    "a submenu": ("submenus", """
+        def fill(menu):
+            sub = menu.addMenu("Quality")
+            sub.addAction("High")
+        """),
+    "the old picker imported": ("old_picker_importers", """
+        from widgets.checkable_dropdown import CheckableDropdown
+        """),
+    "the old picker imported as a module": ("old_picker_importers", """
+        from widgets import checkable_dropdown
+        """),
+    "a check-list of boxes in a menu": ("check_list_builds", """
+        from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
+        def open_timepoints(button, tps):
+            menu = QMenu(button)
+            for tp in tps:
+                box = QCheckBox(tp)
+        """),
+    "a check-list of ticked actions": ("check_list_builds", """
+        from PySide6.QtWidgets import QMenu
+        def layers(button, names):
+            menu = QMenu(button)
+            for name in names:
+                act = menu.addAction(name)
+                act.setCheckable(True)
+        """),
+    "a custom context menu": ("gesture_sites", """
+        def wire(table, handler):
+            table.customContextMenuRequested.connect(handler)
+        """),
+    "a double click handler": ("gesture_sites", """
+        class Table:
+            def mouseDoubleClickEvent(self, ev):
+                self.edit()
+        """),
+    "a matplotlib double click": ("gesture_sites", """
+        def on_press(event):
+            if event.dblclick:
+                edit()
+        """),
+    "a matplotlib double click read by name": ("gesture_sites", """
+        def on_press(event):
+            if getattr(event, "dblclick", False):
+                edit()
+        """),
+    "a control shown on hover": ("gesture_sites", """
+        class Row:
+            def enterEvent(self, ev):
+                self.remove_button.show()
+        """),
+    "a control shown on a hover event": ("gesture_sites", """
+        from PySide6.QtCore import QEvent
+        class Card:
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Enter:
+                    self.tools.setVisible(True)
+                return False
+        """),
+}
+
+SURFACE_CLEAN = {
+    "widget_actions": """
+        def build(menu, on_save):
+            menu.addAction("Save figure…").triggered.connect(on_save)
+        """,
+    "popovers": """
+        from review.core import inspector_service
+        def pick(ctx, page):
+            inspector_service.push(ctx, "colour", "Colour", page)
+        """,
+    "checkable_menu_actions": """
+        def build(button):
+            button.setCheckable(True)        # a toggle button, not a menu entry
+        """,
+    "submenus": """
+        def fill(menu, on_high):
+            menu.addAction("High").triggered.connect(on_high)
+        """,
+    "old_picker_importers": """
+        from widgets.multi_select import MultiSelect
+        """,
+    "check_list_builds": """
+        from PySide6.QtWidgets import QCheckBox
+        def options(layout, names):
+            for name in names:               # boxes on a page, in no menu
+                layout.addWidget(QCheckBox(name))
+        """,
+    "gesture_sites": """
+        class Row:
+            def enterEvent(self, ev):
+                self._hovered = True         # a highlight, nothing revealed
+                self.update()
+        """,
+}
+
+
+@pytest.mark.parametrize("shape", sorted(SURFACE_VIOLATIONS))
+def test_surface_guard_catches(shape):
+    from tests import _surface_guards as scan
+    fn, body = SURFACE_VIOLATIONS[shape]
+    sites = getattr(scan, fn)(_surface_tree(body))
+    assert sites, f"{fn} walked past {shape}"
+    assert scan.unrostered(sites, {}), "an unrostered site was not reported"
+
+
+@pytest.mark.parametrize("fn", sorted(SURFACE_CLEAN))
+def test_surface_guard_clears(fn):
+    from tests import _surface_guards as scan
+    assert getattr(scan, fn)(_surface_tree(SURFACE_CLEAN[fn])) == []
+
+
+def test_surface_guard_leaves_the_homes_of_the_components_alone():
+    from tests import _surface_guards as scan
+    _fn, body = SURFACE_VIOLATIONS["a popover"]
+    assert scan.popovers(_surface_tree("class Popover: pass\n" + "", rel=scan.POPOVER_HOME)) == []
+    _fn, body = SURFACE_VIOLATIONS["a check-list of boxes in a menu"]
+    assert scan.check_list_builds(_surface_tree(body, rel=scan.MULTI_SELECT_HOME)) == []
+
+
+def test_a_surface_roster_entry_with_no_site_is_stale_and_a_rostered_site_is_cleared():
+    from tests import _surface_guards as scan
+    _fn, body = SURFACE_VIOLATIONS["a submenu"]
+    sites = scan.submenus(_surface_tree(body))
+    key = (sites[0][0], sites[0][1])
+    assert scan.unrostered(sites, {key: "kept: one level"}) == []
+    assert scan.stale(sites, {key: "kept", ("gone.py", "f"): "kept"}) == ["gone.py f()"]
+
+
+@pytest.mark.parametrize("body", [
+    'def open_(button):\n    button.setText("Done ✕")\n',
+    'def dock(button, docked):\n    button.setText("Hide controls" if docked else "Controls")\n',
+    'CLOSE = "Close ✕"\n',
+])
+def test_close_spelling_guard_catches(body):
+    import ast
+
+    from tests import test_one_way_to_close_a_panel as guard
+    assert guard.spellings([("review/x.py", ast.parse(body))])
+
+
+def test_close_spelling_guard_clears_a_docstring_and_the_one_close():
+    import ast
+
+    from tests import test_one_way_to_close_a_panel as guard
+    body = 'def build(panel):\n    """It used to read Done ✕."""\n    panel.close_button.setText("Close")\n'
+    assert guard.spellings([("review/x.py", ast.parse(body))]) == []
+
+
+def test_the_checkable_action_guard_sees_an_owned_action(tmp_path):
+    """``owned_action`` is how nearly every action in the application is built,
+    and the guard once could not see one made checkable — two job-row entries
+    stayed ticks past the row that converted their siblings."""
+    import ast
+
+    from tests import _surface_guards as scan
+
+    source = (
+        "from widgets.owned_action import owned_action\n"
+        "def fill(menu):\n"
+        "    act = owned_action(menu, 'Nothing')\n"
+        "    act.setCheckable(True)\n")
+    sites = scan.checkable_menu_actions([("fake.py", ast.parse(source))])
+    assert [s[1] for s in sites] == ["fill"]

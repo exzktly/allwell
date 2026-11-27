@@ -62,6 +62,13 @@ ALLOWED: dict[str, str] = {
         "fold-change scopes and the persistence layer among them, so it cannot "
         "travel; the roster of panes that used to sit beside it did, to "
         "`core/panes.py`.",
+    "review/core/inspector_service.py":
+        "The window builds phone layout's shell, and the shell's Controls sheet is "
+        "the phone host of Review's one inspector: the window hands the shell that "
+        "inspector and registers the shell as its host (`inspector`, `fill`, "
+        "`set_phone_host`). The service finds a page's panels through Review's "
+        "tab controller and widget registry, so it cannot travel; `ui/` may not "
+        "import a pane, which is why the window does the wiring.",
     "review/core/reset_scopes_view.py":
         "The title bar's two reset actions (`prompt_reset_view`, "
         "`prompt_reset_analysis`) live here because the scopes they reset are "

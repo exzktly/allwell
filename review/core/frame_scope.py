@@ -192,6 +192,14 @@ def describe_scope(ctx, spec: ScopeSpec) -> str:
     )
 
 
+def scope_value(ctx, spec: ScopeSpec) -> str:
+    """The armed scope without its title: what the scope's row shows as its
+    value ("this frame", "2 wells · all FOVs · 1 TP")."""
+    text = describe_scope(ctx, spec)
+    prefix = f"{spec.title}: "
+    return text[len(prefix):] if text.startswith(prefix) else text
+
+
 def refresh_scope_button(ctx, spec: ScopeSpec) -> None:
     """Re-label the scope button. Safe to call when the tab was never built.
 
@@ -204,7 +212,8 @@ def refresh_scope_button(ctx, spec: ScopeSpec) -> None:
     if btn is None:
         return
     try:
-        btn.setText(describe_scope(ctx, spec) + " ▾")
+        from review.core import inspector_panels
+        inspector_panels.refresh(btn)       # "<title>: <the armed scope> ›"
     except RuntimeError:
         # The registry hands back a widget whose C++ half may already be gone
         # (a tab torn down, the window closing). Relabelling is the least

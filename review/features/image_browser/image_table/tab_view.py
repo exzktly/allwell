@@ -6,23 +6,21 @@ it with per-channel ⚙ render options, and the table renders. This module just
 frames the shelf, the action strip, and the rendered grid:
 
 - Builder shelf (root + nested channels)
-- Action strip: Generate · Table▾ · Crop▾ · ON-threshold · Export▾ · zoom
-  · Zoom · Properties (right-dock toggle)
+- Action strip: Generate · Table▾ · Crop▾ · ON-threshold · Share▾ · zoom
+  · Cell › · Style (the inspector's Style tab)
 - Rendered image-table area (built by the controller's Generate)
 
-Per-cell tweaks come from a right-click override popover on a rendered cell
-(``grid_ops.image_table_cell_override_menu``); table sizing/nesting is owned by
+Per-cell tweaks are the **Cell** page of the inspector (``grid_ops``; a
+right-click on a rendered cell opens it on that cell); table sizing/nesting is owned by
 the shelf. The render model (``ctx.runtime.image_table.cells``) is headless plain
 data — no per-cell selector grid, per-row LUT table, or held-value combos here.
 """
 
 from __future__ import annotations
 
-from functools import partial
 
-from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QLabel,
     QMenu, QProgressBar, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
@@ -40,7 +38,6 @@ from review.features.image_browser.image_table.controller import (
     image_table_export,
     image_table_export_pptx,
     image_table_generate,
-    image_table_open_export_settings,
     image_table_refresh_empty_state,
     image_table_repopulate_dropdowns,
     image_table_rebuild_grid,
@@ -60,12 +57,8 @@ from review.features.image_browser.image_table.builder_view import (
     build_shelf, builder_mark_inclusion_stale, builder_notify_rendered,
     builder_flush_pending, builder_set_stacked, builder_transpose,
 )
-from review.features.image_browser.image_table.export import (
-    GALLERY_QUALITY_LABELS,
-    GALLERY_QUALITY_PRESETS,
-    gallery_quality_px,
-    set_gallery_quality,
-)
+from review.features.image_browser.image_table.export import build_export_settings
+from review.features.image_browser.image_table.grid_ops import build_cell_row
 from ui import theme
 from widgets.owned_action import owned_action
 
@@ -73,9 +66,11 @@ from widgets.owned_action import owned_action
 # inline so the number is stated once and a reader can see what it sizes
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 _CB_MIN_W = 132
-_DOCK_W = 288
 _EMPTY_STATE_MIN_H = 180
 _THRESH_CHAN_CB_MIN_W = 96
+#: The Crop view menu's first command, as it reads with the crop tool off and on.
+CROP_START_TEXT = "Start cropping (drag on an image)"
+CROP_STOP_TEXT = "Stop cropping"
 _ZOOM_IN_W = 32
 _ZOOM_LBL_W = 60
 _ZOOM_OUT_W = 32
@@ -136,47 +131,19 @@ class _TableControls(QWidget):
         builder_set_stacked(self._ctx, self._stacked)
 
 
-def _toggle_props_dock(ctx) -> None:
-    # isHidden() is the dock's own explicit flag (ancestor-independent), so the
-    # toggle is correct regardless of whether the tab is currently shown.
-    dock = getattr(ctx.runtime.image_table, "props_dock", None)
-    if dock is not None:
-        if not dock.isHidden():
-            dock.setVisible(False)
-            return
-        # Phone layout: a full-width sheet, not a column beside the grid —
-        # lent before it is shown, so the grid is never refitted to the width
-        # the column would have left it (``mount_widget_in_plot_dock``).
-        from review.core import phone_panel_sheet
-        if not phone_panel_sheet.present(dock):
-            dock.setVisible(True)
+def toggle_style_panel(ctx) -> None:
+    """What the page's **Style** button does: open the inspector on the table's
+    Style tab (spacing, label fonts, scale bar, cell labels), or close it."""
+    from review.core import inspector_panels
+    button = ctx.widgets.get_or_none("_image_table_style_btn")
+    if button is not None:
+        inspector_panels.press(button)
 
 
-def _build_properties_dock(ctx, dock) -> None:
-    """Fill the right-side Properties inspector: the grouped-view spacing gaps +
-    label font sizes, as Label:[Stepper] rows that live-re-render. A header with a
-    close button matches the figure-properties panel other tabs slide out."""
-    from widgets.icon_button import IconButton
-    # Wide enough that the two-column rows fit a label + a full-text dropdown
-    # ("Bottom-right") without truncating, even with the scrollbar shown. Still far
-    # narrower than the plotting Export panel, so it's a modest footprint.
-    dock.setFixedWidth(_DOCK_W)
-    panel = QFrame(dock)
-    panel.setObjectName("Panel")
-    pl = QVBoxLayout(panel)
-    pl.setContentsMargins(12, 10, 12, 12)
-    pl.setSpacing(8)
-
-    hdr = QHBoxLayout()
-    title = QLabel("Properties", panel)
-    title.setObjectName("Heading")
-    hdr.addWidget(title)
-    hdr.addStretch(1)
-    close = IconButton("x", panel, tooltip="Close")
-    close.clicked.connect(lambda _=False: dock.setVisible(False))
-    hdr.addWidget(close)
-    pl.addLayout(hdr)
-
+def _build_style_panel(ctx, panel: QWidget, pl) -> None:
+    """Fill the page's Style tab: the grouped-view spacing gaps, label font
+    sizes, scale bar and cell labels, as ``Label: [Stepper]`` rows that
+    re-render live. The inspector's header carries the title and Close."""
     grid = QGridLayout()
     grid.setColumnMinimumWidth(0, 104)
     grid.setColumnStretch(0, 0)
@@ -309,21 +276,14 @@ def _build_properties_dock(ctx, dock) -> None:
     _check("Background box", "label_bg",
            "Draw a translucent dark box behind the label for legibility.")
 
-    # The panel grew several sections (spacing + fonts + scale bar + labels), so it
-    # can be taller than a short / Split-View pane. Scroll the controls (header +
-    # close stay pinned) instead of clipping the bottom rows.
-    content = QWidget()
-    cl = QVBoxLayout(content)
-    cl.setContentsMargins(0, 0, 0, 0)
-    cl.addLayout(grid)
-    cl.addStretch(1)
-    scroll = QScrollArea(panel)
-    scroll.setWidgetResizable(True)
-    scroll.setFrameShape(QFrame.NoFrame)
-    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    scroll.setWidget(content)
-    pl.addWidget(scroll, 1)
-    dock.layout().addWidget(panel)
+    pl.addLayout(grid)
+    # What the "Export settings…" dialog and the Saved Plots quality submenu
+    # held: rows of this page, applied as they are changed.
+    _cap_export = QLabel("Export", panel)
+    _cap_export.setObjectName("Muted")
+    pl.addWidget(_cap_export)
+    pl.addWidget(build_export_settings(ctx, panel))
+    pl.addStretch(1)
 
 
 def build_image_table_tab(ctx, parent: QWidget) -> None:
@@ -367,12 +327,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
             on_change=lambda: image_table_generate(ctx),
         )
 
-    # Host the tab body with a right-side dock that slides out the Properties
-    # inspector — matching every other tab's figure-properties panel.
-    from review.core.ui_helpers import make_plot_with_right_dock
-    body_area, body_layout, props_dock = make_plot_with_right_dock(body)
-    ctx.runtime.image_table.props_dock = props_dock
-    reg.register("_image_table_props_dock", props_dock)
+    from review.core.ui_helpers import make_plot_area
+    body_area, body_layout = make_plot_area(body)
 
     scroll = QScrollArea(body_area)
     scroll.setWidgetResizable(True)
@@ -383,12 +339,11 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.setSpacing(6)
     scroll.setWidget(inner)
     body_layout.addWidget(scroll, 1)
-    _build_properties_dock(ctx, props_dock)
 
     # ── Builder shelf: root + nested channels (the sole authoring surface) ────
     # Drag a root (Well/Timepoint/FOV) onto Rows/Columns, nest channels under it,
-    # set each channel's ⚙ options, then Generate. Per-cell tweaks come from a
-    # right-click override popover on a rendered cell.
+    # set each channel's ⚙ options, then Generate. Per-cell tweaks are the
+    # action strip's Cell page.
     # The builder and the action strip share one host: the page's controls,
     # which phone layout lends to its Controls sheet so the page opens on the
     # images (``_TableControls``). At the desk it lays out exactly as the
@@ -451,21 +406,16 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
                             tooltip="Crop the region every image shows")
     cmenu = crop_btn.menu()
     _crop = ctx.runtime.image_table.crop_tool
-    crop_act = QAction("Crop the view (drag on an image)", cmenu)
-    crop_act.setCheckable(True)
-    crop_act.setChecked(bool(_crop.mode))
-    crop_act.toggled.connect(lambda _c=False: _crop.toggle_mode())
-    cmenu.addAction(crop_act)
+    # A command that says what it will do, not a tick: "Start cropping" while
+    # the crop tool is off, "Stop cropping" while it is on.
+    crop_act = owned_action(cmenu, CROP_START_TEXT)
+    crop_act.triggered.connect(lambda _c=False: _crop.toggle_mode())
     reg.register("_image_table_crop_act", crop_act)
     reset_crop_act = owned_action(cmenu, "Show the full field again")
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
     def _sync_crop_menu() -> None:
-        blocked = crop_act.blockSignals(True)
-        try:
-            crop_act.setChecked(bool(_crop.mode))
-        finally:
-            crop_act.blockSignals(blocked)
+        crop_act.setText(CROP_STOP_TEXT if _crop.mode else CROP_START_TEXT)
     cmenu.aboutToShow.connect(_sync_crop_menu)
     # The crop state rides on the Crop button rather than in a loose caption
     # beside it — the row read "Crop ▾  (full FOV)", two controls' worth of
@@ -519,56 +469,33 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     thresh_chan_cb.currentTextChanged.connect(_sync_thresh_for_channel)
     tr.addWidget(thresh_stepper)
 
-    # Save ▾ menu button: clicking anywhere on it opens the menu (no
+    # The Share menu button: clicking anywhere on it opens the menu (no
     # split default-action — that surprised users by firing "Export to
     # File" on a plain click instead of showing the options).
     #
-    # "Save", not "Export", because that is the verb every plot tab's
-    # equivalent button carries (``core.ui_helpers.build_plot_save_menu``).
-    # This tab cannot go through that builder — its menu is not a plot card's,
-    # it offers no CSV and no per-cell rows — so the one thing the two have in
-    # common is the word on the button, and it was the word that differed.
+    # "Share", because that is the word every plot tab's equivalent button
+    # carries (``core.ui_helpers.build_plot_save_menu``). This tab cannot go
+    # through that builder — its menu is not a plot card's, it offers no CSV
+    # and no per-cell rows — so what the two share is the word on the button
+    # and the ``share`` role, which is how phone layout's foot strip finds it.
     export_btn = _menu_button(
-        action_row, "Save", tooltip="Save, copy, or export this table.",
+        action_row, "Share", tooltip="Save, copy, or export this table.",
     )
+    export_btn.setProperty("bandRole", "share")
     emenu = export_btn.menu()
-    owned_action(emenu, "Export to File…").triggered.connect(
+    owned_action(emenu, "Save figure…").triggered.connect(
         lambda _=False: image_table_export(ctx))
     owned_action(emenu, "Export to PowerPoint…").triggered.connect(
         lambda _=False: image_table_export_pptx(ctx))
     emenu.addSeparator()
-    owned_action(emenu, "Copy PNG").triggered.connect(
+    owned_action(emenu, "Copy figure as PNG").triggered.connect(
         lambda _=False: image_table_copy_png(ctx))
-    owned_action(emenu, "Copy SVG").triggered.connect(
+    owned_action(emenu, "Copy figure as SVG").triggered.connect(
         lambda _=False: image_table_copy_svg(ctx))
     emenu.addSeparator()
     owned_action(emenu, "Save to Saved Plots").triggered.connect(
         lambda _=False: image_table_save_to_gallery(ctx))
 
-    # Quick-pick resolution/speed preset for "Save to Saved Plots" — the same
-    # setting "Export settings…" exposes, surfaced here too since downsampling
-    # speed is the thing users tend to want to change right before saving.
-    quality_menu = emenu.addMenu("Save to Saved Plots quality")
-    quality_group = QActionGroup(quality_menu)
-    quality_group.setExclusive(True)
-    quality_actions: dict[str, QAction] = {}
-    for _qkey in GALLERY_QUALITY_PRESETS:
-        _gallery_px = GALLERY_QUALITY_PRESETS[_qkey][1]
-        _qact = owned_action(quality_menu, f"{GALLERY_QUALITY_LABELS[_qkey]} — {_gallery_px}px")
-        _qact.setCheckable(True)
-        quality_group.addAction(_qact)
-        _qact.triggered.connect(partial(set_gallery_quality, ctx, _qkey))
-        quality_actions[_qkey] = _qact
-
-    def _sync_quality_check():
-        current = gallery_quality_px(ctx)
-        for key, act in quality_actions.items():
-            act.setChecked(GALLERY_QUALITY_PRESETS[key] == current)
-    quality_menu.aboutToShow.connect(_sync_quality_check)
-
-    emenu.addSeparator()
-    owned_action(emenu, "Export settings…").triggered.connect(
-        lambda _=False: image_table_open_export_settings(ctx))
     tr.addWidget(export_btn)
 
     # Zoom: − [level] +  (clicking the % resets to 100%). No "Zoom:" caption —
@@ -597,12 +524,21 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))
     tr.addWidget(zoom_in)
 
-    # Properties (spacing + label fonts) live in the right-side dock; the
-    # sliders button toggles it, pinned to the action strip's right edge.
-    from review.core.ui_helpers import wrap_ctrl_row_with_properties
-    controls.set_actions(wrap_ctrl_row_with_properties(
-        action_row, lambda: _toggle_props_dock(ctx),
-        tooltip="Show / hide the table Properties (spacing & label fonts)"))
+    # One cell's own Well / Channel / Timepoint / FOV: a page of the Data tab.
+    tr.addWidget(build_cell_row(ctx, action_row))
+
+    # Style (spacing, label fonts, scale bar, cell labels) is the first page
+    # of the inspector's Style tab; the button sits at the action strip's end.
+    from review.core.inspector_panels import make_popover_button
+    style_btn, style_panel, style_l = make_popover_button(
+        "Style", action_row, ctx=ctx, tab="style", root=True)
+    style_btn.setToolTip("Show / hide the table's style: spacing, label fonts, "
+                         "scale bar and cell labels")
+    _build_style_panel(ctx, style_panel, style_l)
+    reg.register("_image_table_style_btn", style_btn)
+    reg.register("_image_table_style_panel", style_panel)
+    tr.addWidget(style_btn)
+    controls.set_actions(action_row)
 
     # ── Rendered image table (drawn BELOW the action strip) ────────────────
     render_lbl = QLabel("Image Table:", inner)

@@ -14,10 +14,9 @@ from types import SimpleNamespace
 
 import shiboken6
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
-    QSplitter, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QScrollArea,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from review.features.export.service import export_cell_data_from
@@ -51,7 +50,7 @@ from review.features.nanowell.display_range_view import (
     refresh_display_range_buttons,
 )
 from review.features.nanowell.series_compute import baseline_at, baseline_timepoint
-from review.features.nanowell.subset_view import build_subset_control, share_page
+from review.features.nanowell.subset_view import build_subset_control
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.moving_compute import MAX_WINDOW
 from review.features.nanowell.state import EXTREMES_MAX_N
@@ -61,7 +60,6 @@ from review.features.nanowell.statistics_view import (
 from widgets.control_band import ControlBand
 from widgets.delayed_tooltip import DelayedToolTip
 from widgets.labeled_combo import LabeledComboBox
-from widgets.owned_action import owned_action
 from widgets.spin_box import SpinBox
 
 #: The views the page draws, in the order the switch lists them.
@@ -327,23 +325,19 @@ def build_view_bar(ctx, view: str):
 
 def build_nanowell_tab(ctx, parent: QWidget) -> None:
     from review.core.ui_helpers import (
-        apply_plot_card_decorators, build_plot_save_menu, install_canvas_wheel_scroll, make_plot_with_right_dock,
-        make_properties_button, wrap_with_empty_state,
+        apply_plot_card_decorators, build_plot_save_menu, install_canvas_wheel_scroll, make_plot_area,
+        make_style_button, wrap_with_empty_state,
     )
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
 
     st = ctx.state.feature_slice("nanowell")
     reg = ctx.widgets
-    plot_area, plot_layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_nanowell_export_dock", export_dock)
-    # The page is two columns: everything the page shows on the left — the band, the Subset's conditions, the guide,
-    # the figure and its footer — and the site detail on the right, from the top of the page to the bottom, the way
-    # the Heat Map's Layout panel sits beside its band and figure. The splitter lets the two share the width.
-    page_split = QSplitter(Qt.Horizontal, plot_area)
-    page_split.setChildrenCollapsible(False)
-    plot_layout.addWidget(page_split, 1)
-    main = QWidget(page_split)
+    plot_area, plot_layout = make_plot_area(parent)
+    # The page is one column: the band, the guide, the figure and its footer. The site detail is not part of it:
+    # it is the Detail tab of the window's inspector, beside the page at a desk and in the Controls sheet on a phone.
+    main = QWidget(plot_area)
+    plot_layout.addWidget(main, 1)
     layout = QVBoxLayout(main)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
@@ -500,12 +494,15 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         cells_cb=lambda: export_cell_data_from(
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
     band.add_action(export_btn)
-    band.add_action(make_properties_button(ctx, band, "nanowell"))
+    band.add_action(make_style_button(ctx, band, "nanowell"))
+    # The row ends in Display · Style · Share on every page; a slot this page
+    # does not use is a disabled button, never a gap.
+    from review.core.band_fixed_actions import finish_band
+    finish_band(band)
     # *Excluded (n)* names wells: it follows Exclude on the second row, on every view.
     band.place_trailing(exclusion.excluded_group, grp_baseline)
     reg.register("_nw_band_breaks", (selection_row_end, filter_row_end))
     layout.addWidget(band)
-    layout.addWidget(start.editor)                  # the Subset's conditions, under the band when shown
     # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
     guide = build_resolve_guide(ctx, plot_area)
     layout.addWidget(guide.frame)
@@ -553,7 +550,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     load_timer.timeout.connect(lambda: nwc.run_queued_load(ctx))
     reg.register("_nw_load_timer", load_timer)
 
-    detail = QWidget(page_split)
+    # Built hidden, in no layout: the inspector borrows it as its Detail tab and gives it back here.
+    detail = QWidget(main)
     detail_layout = QVBoxLayout(detail)
     detail_layout.setContentsMargins(0, 0, 0, 0)
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
@@ -576,10 +574,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail_layout.addWidget(strip_card, 1)
     detail.hide()
     reg.register("_nw_detail_pane", detail)
-    page_split.addWidget(main)
-    page_split.addWidget(detail)
-    page_split.setStretchFactor(0, 3)
-    page_split.setStretchFactor(1, 2)
     # The card goes into the empty-state stack inside a host of its own, as it went in inside the splitter before the
     # detail moved out to the page's right column: a stack resizes its page directly while showing its placeholder, and
     # the card as that page was laid out a few pixels across, so the first draw packed the swarms for no room at all.
@@ -600,16 +594,16 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     figure_layout.addWidget(figure_scroll)
     figures = wrap_with_empty_state(ctx.window, figure_host, icon="hexagon", reason=nwc.nanowell_empty_reason)
     layout.addWidget(figures, 1)
-    # A page too short for the Subset's conditions and the figures both (a phone held sideways) gives the editor
-    # the page while it is open.
-    share_page(start.editor, figures, redraw=lambda: nwc.redraw(ctx))
     layout.addWidget(build_details_panel(ctx, plot_area))  # the Distribution's footer, out of its figure
 
-    show_detail = nw_phone.detail_placement(card, detail, detail_layout, strip_card,
-                                            desk=page_split, phone=(layout, figures),
-                                            redraw_figure=lambda: nwc.redraw(ctx),
-                                            refit_strip=lambda: nwc.refit_crop_strip(ctx),
-                                            refit_ms=_REFIT_MS)
+    show_detail = _detail_tab(ctx, detail, card)
+    # The crop strip wraps its crops to its own shape in phone layout (``_phone.strip_columns_for``): laid out again
+    # once a resize of it settles — the sheet opening, the phone turned, arrive as a burst.
+    strip_refit = QTimer(strip_card)
+    strip_refit.setSingleShot(True)
+    strip_refit.setInterval(_REFIT_MS)
+    strip_refit.timeout.connect(lambda: nwc.refit_crop_strip(ctx))
+    strip_card.canvas.mpl_connect("resize_event", lambda _event: strip_refit.start())
 
     def show_computing() -> None:
         computing.setVisible(nwc.computing_shown(ctx))
@@ -899,17 +893,16 @@ def _grey_metrics(metric_cb, view: str, channel, active_channel) -> None:
 
 
 def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
-    """The Extremes view's **Timepoints** menu: which of the well's timepoints the montage shows as columns, each
-    named by its hours as the Timepoint control names it. Fewer columns give larger crops. The ranking timepoint is
-    always shown, so its entry is checked and greyed; *All timepoints* clears the choice."""
+    """The Extremes view's **Timepoints**: which of the well's timepoints the montage shows as columns, each named by
+    its hours as the Timepoint control names it, ticked on the application's one multi-select page in the inspector.
+    Fewer columns give larger crops. The ranking timepoint is always shown, so its row is ticked and greyed; **All**
+    clears the choice."""
+    from review.core import inspector_pages
+
     button = QToolButton(parent)
     button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    button.setPopupMode(QToolButton.InstantPopup)
     button.setToolTip(_EXTREMES_TPS_TIP)
     button.setProperty("variant", "secondary")
-    button.setProperty("hasMenu", True)
-    menu = QMenu(button)
-    button.setMenu(menu)
     ctx.widgets.register("_nw_extremes_tps_btn", button)
 
     def state():
@@ -917,36 +910,32 @@ def _extremes_timepoints_button(ctx, parent) -> SimpleNamespace:
         tps, ranked = nwc.shown_timepoint(ctx) if st is not None and st.data is not None else ([], "")
         return st, list(tps), ranked
 
-    def toggle(tp: str, on: bool) -> None:
-        st, tps, ranked = state()
-        shown = set(nwc.extremes_columns(tps, ranked, st.extremes_tps))
-        shown = shown | {tp} if on else shown - {tp}
+    def chosen(keys) -> None:
+        _st, tps, ranked = state()
+        shown = set(keys) | ({ranked} if ranked else set())
         nwc.set_extremes_timepoints(ctx, [] if shown >= set(tps) else [t for t in tps if t in shown])
+        refresh()
 
-    def rebuild() -> None:
+    def open_page() -> None:
         st, tps, ranked = state()
-        menu.clear()
-        every = owned_action(menu, "All timepoints")
-        every.triggered.connect(lambda _=False: nwc.set_extremes_timepoints(ctx, []))
-        menu.addSeparator()
         shown = set(nwc.extremes_columns(tps, ranked, st.extremes_tps if st is not None else []))
         times = st.data.times_h if st is not None and st.data is not None else {}
-        for tp in tps:
-            action = owned_action(menu, timepoint_text(tp, times) + (" (ranked)" if tp == ranked else ""))
-            action.setCheckable(True)
-            action.setChecked(tp in shown)
-            action.setEnabled(tp != ranked)
-            action.setData(tp)
-            action.toggled.connect(lambda on, tp=tp: toggle(tp, on))
+        picker = inspector_pages.open_multi_select(
+            ctx, button, key="nanowell/extremes_timepoints", title="Timepoints",
+            items=[(tp, timepoint_text(tp, times) + (" (ranked, always shown)" if tp == ranked else "")) for tp in tps],
+            checked=[tp for tp in tps if tp in shown], on_change=chosen)
+        if picker is not None:
+            for key, box in zip(picker.keys(), picker.boxes()):
+                box.setEnabled(key != ranked)
 
     def refresh() -> None:
         st, tps, ranked = state()
         shown = nwc.extremes_columns(tps, ranked, st.extremes_tps if st is not None else [])
-        button.setText("Timepoints: all" if len(shown) >= len(tps) else f"Timepoints: {len(shown)} of {len(tps)}")
+        text = "Timepoints: all" if len(shown) >= len(tps) else f"Timepoints: {len(shown)} of {len(tps)}"
+        button.setText(f"{text} ›")
 
-    menu.aboutToShow.connect(rebuild)
-    ctx.widgets.register("_nw_extremes_tps_menu", menu)
-    ctx.widgets.register("_nw_extremes_tps_rebuild", rebuild)
+    button.clicked.connect(lambda _=False: open_page())
+    ctx.widgets.register("_nw_extremes_tps_open", open_page)
     return SimpleNamespace(button=button, refresh=refresh)
 
 
@@ -962,25 +951,54 @@ def _cells_box(ctx, name: str) -> QCheckBox:
     return box
 
 
-def _detail_header(ctx, parent) -> QHBoxLayout:
-    """The site detail's title row, with a close button (✕) that clears the nanowell selection — which is what hides
-    the pane (``controller.redraw_detail`` shows it only while a selected nanowell has a series). Without it the only
-    way to dismiss the pane was a click on empty space in the plot, which nothing on screen says."""
-    from ui import theme
+#: The Detail tab's title for the site detail, and its button that clears the nanowell selection.
+DETAIL_TITLE = "Selected nanowell"
+CLEAR_SELECTION_TEXT = "Clear selection"
 
+
+def _detail_tab(ctx, detail: QWidget, card):
+    """``show_detail(on)``: the site detail as the inspector's Detail tab while a nanowell is selected.
+
+    A nanowell **just picked** opens the inspector on the tab. A redraw of the one already picked — a setting
+    changed, its crops arriving — updates the detail in place and never re-opens an inspector the user closed: the
+    detail is redrawn on every redraw of the page, and one that re-opened itself each time could not be closed at
+    all. With no nanowell selected the tab is emptied."""
+    from review.core import inspector_service
+
+    opened_for: list = [None]
+
+    def show_detail(on: bool) -> None:
+        st = ctx.state.feature_slice("nanowell")
+        picked = tuple(tuple(site) for site in (st.selected_sites or [])) if on else None
+        if picked is None:
+            if opened_for[0] is not None or inspector_service.inspector(ctx).tabWidget("detail") is detail:
+                inspector_service.clear_detail(ctx)
+            opened_for[0] = None
+            return
+        fresh = picked != opened_for[0]
+        opened_for[0] = picked
+        inspector_service.show_detail(ctx, detail, DETAIL_TITLE, anchor=card, fill=True, reveal=fresh)
+
+    return show_detail
+
+
+def _detail_header(ctx, parent) -> QHBoxLayout:
+    """The site detail's title row, with **Clear selection** — which empties the Detail tab
+    (``controller.redraw_detail`` fills it only while a selected nanowell has a series). Without it the only way to
+    deselect was a click on empty space in the plot, which nothing on screen says. It is not a close button: the
+    inspector's header has the one Close, which leaves the selection as it is."""
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
-    title = QLabel("Selected nanowell", parent)
+    title = QLabel(DETAIL_TITLE, parent)
     title.setObjectName("Caption")
-    close = QPushButton("✕", parent)
-    close.setObjectName("Ghost")
-    close.setFixedWidth(theme.Metrics.icon_btn_w)
-    close.setToolTip("Close the site detail and clear the nanowell selection")
-    close.clicked.connect(lambda _=False: nwc.clear_selection(ctx))
-    ctx.widgets.register("_nw_detail_close_btn", close)
+    clear = QPushButton(CLEAR_SELECTION_TEXT, parent)
+    clear.setProperty("variant", "secondary")
+    clear.setToolTip("Deselect the nanowell: its rings and this detail go")
+    clear.clicked.connect(lambda _=False: nwc.clear_selection(ctx))
+    ctx.widgets.register("_nw_detail_clear_btn", clear)
     row.addWidget(title)
     row.addStretch(1)
-    row.addWidget(close)
+    row.addWidget(clear)
     return row
 
 
@@ -1080,8 +1098,10 @@ def _popout_window(ctx):
     card.canvas.mpl_connect("motion_notify_event", lambda event: wnc.on_popout_motion(ctx, event))
     card.canvas.mpl_connect("scroll_event", lambda event: wnc.on_popout_scroll(ctx, event))
     ctx.widgets.register("_nw_popout_hover_tip", DelayedToolTip(card.canvas))
+    # Timepoints and Channels open their lists as small windows of the pop-out's own, which hand activation back
+    # to it when they close; the two menus are what the main window took it from.
     window.keep_above_after_choices([ctx.widgets.get_or_none(n) for n in (
-        "_nw_popout_tps_menu", "_nw_popout_channels_menu", "_nw_popout_grid_menu", "_nw_popout_save_menu")])
+        "_nw_popout_grid_menu", "_nw_popout_save_menu")])
     refresh = ctx.widgets.get_or_none("_nw_refresh_controls")
     if callable(refresh):
         refresh()                                        # the new controls start on the page's settings
@@ -1192,44 +1212,44 @@ def _button(text: str, tip: str, on_click) -> QPushButton:
 
 
 def _layers_button(ctx, parent) -> tuple[QToolButton, dict, dict]:
-    """The Array view's *Layers* menu: each switchable layer, the nanowells' colouring, and the presets."""
-    button = QToolButton(parent)
-    button.setText("Layers")
-    button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    button.setPopupMode(QToolButton.InstantPopup)
+    """The Array view's *Layers* row: a page of the inspector with a box per switchable layer, the nanowells'
+    colouring as a choice of two, and the presets as buttons — not a menu of ticks and a submenu."""
+    from PySide6.QtWidgets import QButtonGroup, QCheckBox, QRadioButton
+
+    from review.core.inspector_panels import make_popover_button
+
+    button, page, lay = make_popover_button("Layers", parent, ctx=ctx, tab="data")
     button.setToolTip(_LAYERS_TIP)
-    button.setProperty("variant", "secondary")
-    button.setProperty("hasMenu", True)
-    menu = QMenu(button)
-    button.setMenu(menu)
     reg = ctx.widgets
     layer_actions = {}
     for key, label, tip in _LAYERS:
-        action = owned_action(menu, label)
-        action.setCheckable(True)
-        action.setToolTip(tip)
-        action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, key, on))
-        reg.register(f"_nw_layer_{key}", action)
-        layer_actions[key] = action
-    menu.addSeparator()
-    group = QActionGroup(menu)
+        box = QCheckBox(label, page)
+        box.setToolTip(tip)
+        box.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, key, on))
+        reg.register(f"_nw_layer_{key}", box)
+        lay.addWidget(box)
+        layer_actions[key] = box
+    caption = QLabel("Nanowells", page)
+    caption.setObjectName("Muted")
+    lay.addWidget(caption)
+    group = QButtonGroup(page)
     colour_actions = {}
     for key, label in (("metric", "Fill nanowells by the metric"), ("state", "Outline nanowells by state")):
-        action = owned_action(menu, label)
-        action.setCheckable(True)
-        group.addAction(action)
-        action.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, "colour", key) if on else None)
-        reg.register(f"_nw_colour_{key}", action)
-        colour_actions[key] = action
-    menu.addSeparator()
-    # Built from Python with its parent, not by ``addMenu(title)``: a menu Qt creates is a top-level widget whose
-    # owner the binding does not know, so deleting the page's window and then the menu deletes it twice.
-    presets = QMenu("Show as", menu)
-    menu.addMenu(presets)
+        radio = QRadioButton(label, page)
+        group.addButton(radio)
+        radio.toggled.connect(lambda on, key=key: nwc.set_layer(ctx, "colour", key) if on else None)
+        reg.register(f"_nw_colour_{key}", radio)
+        lay.addWidget(radio)
+        colour_actions[key] = radio
+    caption = QLabel("Show as", page)
+    caption.setObjectName("Muted")
+    lay.addWidget(caption)
     for key, label in _PRESETS:
-        action = owned_action(presets, label)
-        action.triggered.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
-        reg.register(f"_nw_preset_{key}", action)
+        preset = QPushButton(label, page)
+        preset.setProperty("variant", "secondary")
+        preset.clicked.connect(lambda _=False, key=key: nwc.apply_array_preset(ctx, key))
+        reg.register(f"_nw_preset_{key}", preset)
+        lay.addWidget(preset)
     reg.register("_nw_layers_btn", button)
     return button, layer_actions, colour_actions
 

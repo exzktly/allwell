@@ -128,7 +128,7 @@ def test_the_layers_menu_switches_the_dots_on_and_off(tmp_path, qtbot):
 
     assert dots() == 0 and not any("Cells:" in t for t in _texts(ctx, "nw-array-footer"))
     action = ctx.widgets.get("_nw_layer_cells")
-    action.trigger()
+    action.click()
     assert st.layers.cells and action.isChecked() and dots() == 3
     assert any("3 cells the run counted" in t for t in _texts(ctx, "nw-array-footer"))
     overlays = ctx.widgets.get("_nw_overlays_btn")
@@ -136,5 +136,5 @@ def test_the_layers_menu_switches_the_dots_on_and_off(tmp_path, qtbot):
     assert dots() == 0 and st.layers.cells
     overlays.click()                                                     # and back, as they were
     assert dots() == 3
-    action.trigger()
+    action.click()
     assert not st.layers.cells and dots() == 0

@@ -49,7 +49,10 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
     the page draws.
     """
     from review.core.group_by_controller import DECORATION_CONTROLS, DECORATION_TITLES
-    from review.core.ui_helpers import make_popover_button
+    from PySide6.QtWidgets import QLabel
+
+    from review.core import inspector_panels
+    from review.core.inspector_panels import make_popover_button
 
     reg = ctx.widgets
     group_cb = reg.register("_nw_groupby_cb", LabeledComboBox("Group by"))
@@ -58,9 +61,17 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
     group_grp = reg.register("_nw_groupby_grp", band.add_scope("", group_cb))
     group_grp.setVisible(False)
 
-    button, _panel, panel_layout = make_popover_button("Decorate ▾", band)
+    from review.core.group_by_controller import (
+        NO_VARIABLES_NOTE, decoration_summary, show_decoration_controls,
+    )
+    button, _panel, panel_layout = make_popover_button(
+        "Colour & split", band, ctx=ctx, tab="data", summary=lambda: decoration_summary(ctx))
     button.setToolTip(_DECORATE_TIP)
     reg.register("_nw_decorate_btn", button)
+    note = QLabel(NO_VARIABLES_NOTE, _panel)
+    note.setWordWrap(True)
+    note.setObjectName("Muted")
+    panel_layout.addWidget(note)
     combos = {}
     for field, _band_widget, _label in DECORATION_CONTROLS:
         combo = reg.register(DECORATION_WIDGETS[field], LabeledComboBox(DECORATION_TITLES[field]))
@@ -77,7 +88,11 @@ def build_variable_controls(ctx, band) -> SimpleNamespace:
         has_variables = fill_group_by_combo(ctx, group_cb)
         fill_decoration_combos(ctx, combos, {"colour_by_variable": NO_COLOUR_LABEL})
         group_grp.setVisible(has_variables and view != "qc")     # QC reads every well of the plate, ungrouped
-        button.setVisible(has_variables and view in nwc.DECORATED_VIEWS)
+        # Listed on every view that draws through the decoration seam, with or
+        # without variables: with none, its page says so and where to define them.
+        button.setVisible(view in nwc.DECORATED_VIEWS)
+        show_decoration_controls(note, combos.values(), has_variables)
+        inspector_panels.refresh(button)
 
     return SimpleNamespace(group_by=group_cb, group=group_grp, decorate=button, combos=combos, refresh=refresh,
                            signalling=(group_cb, *combos.values()))

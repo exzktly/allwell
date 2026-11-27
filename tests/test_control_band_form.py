@@ -51,12 +51,17 @@ def _band(qtbot):
         "hint": band.add_scope("", hint),
         "threshold": band.add_scope("ON threshold", thr, trailing=True),
     }
+    # Two panel rows — one that reads a value, one that has none — and the
+    # root of the Display tab, which is not in the form at all.
     fold = QToolButton()
-    fold.setText("Fold change ▾")
-    fold.setProperty("bandRole", "display")
+    fold.setText("Fold change: vs DMSO ›")
+    fold.setProperty("bandPanel", "row")
+    fit = QToolButton()
+    fit.setText("Fit ›")
+    fit.setProperty("bandPanel", "row")
     display = QToolButton()
-    display.setText("Display ▾")
-    display.setProperty("bandRole", "display")
+    display.setText("Display")
+    display.setProperty("bandPanel", "root")
     reset = QPushButton("Reset Order")
     save = QToolButton()
     save.setText("Save ▾")
@@ -64,12 +69,12 @@ def _band(qtbot):
     save.setProperty("bandRole", "action")        # a menu, but of commands
     props = IconButton("sliders-horizontal", tooltip="Show / hide the figure properties panel")
     props.setProperty("sheetText", "Properties")
-    for w in (fold, display, reset, save, props):
+    for w in (fold, fit, display, reset, save, props):
         band.add_action(w)
     band.resize(400, 900)
     band.show()
     qtbot.waitExposed(band)
-    widgets = dict(combo=combo, prop=prop, tp=tp, hint=hint, thr=thr, fold=fold,
+    widgets = dict(combo=combo, prop=prop, tp=tp, hint=hint, thr=thr, fold=fold, fit=fit,
                    display=display, reset=reset, save=save, props=props)
     return band, parts, widgets
 
@@ -103,8 +108,10 @@ def test_every_scope_control_is_a_row_with_its_label_in_one_column(qtbot):
     _settle()
     form = band.form()
     rows = form.rows("Data")
+    # The two panel rows are scope: they sit with the other choices of data,
+    # before the trailing threshold, not in the action zone.
     assert [_row_label(r) for r, _i in rows] == [
-        "Channel", "Property", "Timepoints", "ON threshold"]
+        "Channel", "Property", "Timepoints", "Fold change", "Fit", "ON threshold"]
     for row, item in rows:
         assert row.minimumHeight() == ROW_H
         assert [lb.width() for lb in row.findChildren(QLabel) if lb.isVisible()
@@ -147,23 +154,39 @@ def test_a_labelled_button_is_painted_as_its_value_only(qtbot):
     assert tp.grab().toImage() == twin_of("2/3 selected")
 
 
-def test_sections_come_in_a_fixed_order_and_actions_are_equal_cells(qtbot):
+def test_the_form_is_the_data_tab_panel_rows_are_rows_and_a_tab_s_root_is_not_in_it(qtbot):
+    """The form is what the inspector's Data tab holds. A button that opens a
+    page is a row like any other — its title in the label column, its value in
+    the control — and the root of another tab (Display) is in no row and no
+    grid: its panel is the tab beside this one.
+
+    Wrong implementations this rejects: the old Display grid (a button for the
+    tab next door), a panel row left in the Actions grid, and a row that still
+    reads its own title beside the label column."""
     band, _parts, w = _band(qtbot)
     band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
     _settle()
     form = band.form()
-    # The button grids first, Data last: on a page with many Data rows
-    # (Nanowells) grids laid out after it sat below the fold, and Decorate was
-    # reported missing.
-    assert SECTIONS == ("Display", "Actions", "Data")
-    y = {n: form.section_box(n).y() for n in ("Display", "Actions", "Data")}
-    assert y["Display"] < y["Actions"] < y["Data"], y
-    assert form.buttons("Display") == [w["fold"], w["display"]]
+    assert SECTIONS == ("Actions", "Data")
+    y = {n: form.section_box(n).y() for n in SECTIONS}
+    assert y["Actions"] < y["Data"], y
     assert form.buttons("Actions") == [w["reset"], w["save"], w["props"]]
+    assert form.parked() == [w["display"]]
+    assert not w["display"].isVisible(), "the Display tab's button is shown beside the tab"
+    assert not w["display"].isHidden(), "parking must keep the visibility the page gave it"
+    row_items = [i for _r, i in form.rows("Data")]
+    assert w["fold"] in row_items and w["fit"] in row_items
+    # The value alone is painted; the text the page set is untouched.
+    painter = {type(o).__name__: o for o in w["fold"].children()}["_ValueOnly"]
+    assert painter.value(w["fold"].text()) == "vs DMSO ›"
+    assert w["fold"].text() == "Fold change: vs DMSO ›"
+    bare = {type(o).__name__: o for o in w["fit"].children()}["_ValueOnly"]
+    assert bare.value(w["fit"].text()) == "›"
+    # The tabs above the form say "Data"; the form does not say it again.
+    assert not form._sections["Data"]["title"].isVisible()
     # Equal cells: Qt hands the odd pixel of a division to one of them.
-    for name in ("Display", "Actions"):
-        widths = [b.width() for b in form.buttons(name)]
-        assert max(widths) - min(widths) <= 1, (name, widths)
+    widths = [b.width() for b in form.buttons("Actions")]
+    assert max(widths) - min(widths) <= 1, widths
     # An icon-only button says what it is.
     assert w["props"].text() == "Properties"
 
@@ -197,16 +220,20 @@ def test_the_page_still_owns_visibility(qtbot):
     parts["threshold"].show()
     _settle()
     assert row_of[id(parts["threshold"])].isVisible()
-    w["fold"].hide()
-    w["display"].hide()
+    w["fold"].hide()                      # a panel row follows its button too
     _settle()
-    assert not form.section_box("Display").isVisible()
+    assert not row_of[id(w["fold"])].isVisible()
+    for b in (w["reset"], w["save"], w["props"]):
+        b.hide()
+    _settle()
+    assert not form.section_box("Actions").isVisible()
 
 
 def test_leaving_the_form_puts_the_row_back_as_it_was(qtbot):
     band, parts, w = _band(qtbot)
     scope_before = [band._scope.itemAt(i).widget() for i in range(band.scope_count())]
     actions_before = [band._actions.itemAt(i).widget() for i in range(band.action_count())]
+    assert w["display"] in actions_before and w["fold"] in scope_before
     margins = band.layout().contentsMargins()
     band.setForm(True, label_width=LABEL_W, row_height=ROW_H, gap=GAP)
     _settle()
@@ -229,32 +256,35 @@ def test_leaving_the_form_puts_the_row_back_as_it_was(qtbot):
                     if type(o).__name__ in ("_ValueOnly", "_Mirror")], widget
 
 
-@pytest.mark.parametrize("role,expect", [("display", "Display"), ("action", "Actions")])
-def test_an_action_s_section_is_its_builder_s_role(qtbot, role, expect):
+@pytest.mark.parametrize("panel,expect", [("root", "Parked"), ("row", "Data"), (None, "Actions")])
+def test_where_an_action_goes_is_what_its_builder_declared(qtbot, panel, expect):
     b = QToolButton()
     qtbot.addWidget(b)
-    b.setPopupMode(QToolButton.InstantPopup)
-    b.setProperty("bandRole", role)
+    b.setPopupMode(QToolButton.InstantPopup)   # dropping a menu decides nothing
+    if panel:
+        b.setProperty("bandPanel", panel)
     assert section_of_action(b) == expect
 
 
 def test_the_shared_builders_declare_their_role(qtbot):
-    """Display ▾-style panels and Save ▾-style command menus both drop a menu;
-    only the builders know which is which, so each declares it — and the
-    Properties toggle says what it is in words."""
+    """Only the builders know what a button is, so each declares it: a tab's
+    root panel, a panel that is a row, a menu of commands — and the Properties
+    toggle says what it is in words."""
     from types import SimpleNamespace
 
-    from review.core.ui_helpers import (
-        make_action_menu_button, make_popover_button, make_properties_button,
-    )
+    from review.core.inspector_panels import make_popover_button
+    from review.core.ui_helpers import make_action_menu_button, make_style_button
     host = QWidget()
     qtbot.addWidget(host)
-    pop, _c, _l = make_popover_button("Display ▾", host)
+    root, _c, _l = make_popover_button("Display", host, root=True)
+    row, _c2, _l2 = make_popover_button("Fold change", host, tab="data", summary=lambda: "vs DMSO")
     cmd, _m = make_action_menu_button("Save ▾", host)
-    prop = make_properties_button(SimpleNamespace(figures=None), host, "bar")
-    assert section_of_action(pop) == "Display"
+    prop = make_style_button(SimpleNamespace(figures=None), host, "bar")
+    assert section_of_action(root) == "Parked" and root.text() == "Display"
+    assert section_of_action(row) == "Data" and row.text() == "Fold change: vs DMSO ›"
     assert section_of_action(cmd) == "Actions"
-    assert prop.property("sheetText") == "Properties"
+    assert prop.property("sheetText") == "Style" and prop.text() == "Style"
+    assert prop.property("bandRole") == "style" and cmd.property("bandRole") == "action"
 
 
 def test_a_flat_icon_button_is_drawn_as_a_button_in_the_sheet(qtbot):

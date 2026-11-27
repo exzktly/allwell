@@ -10,14 +10,12 @@ from __future__ import annotations
 from util.fov import sort_key as fov_sort_key
 from review.data.data_loading import get_rows
 
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget, QWidgetAction, QCheckBox,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
 from core.safe import swallowed
-from widgets import menu_exec
 from review.features.image_browser.cell_browser import controller as ctl
 from review.features.image_browser.cell_browser.collect import (
     cell_browser_source_wells,
@@ -317,7 +315,10 @@ def _refresh_gate_pick_label(ctx) -> None:
 
 
 def _open_gate_select(ctx) -> None:
-    """Checkbox menu over the drawn gate names; ``None`` selection ⇒ all."""
+    """The drawn gates as a multi-select page of the inspector; a ``None``
+    selection means all. Applied as a box is ticked."""
+    from review.core.inspector_pages import open_multi_select
+
     btn = getattr(ctx.runtime.cell_browser, "gate_pick_btn", None)
     if btn is None:
         return
@@ -325,26 +326,17 @@ def _open_gate_select(ctx) -> None:
     if not names:
         return
     chosen = getattr(ctx.runtime.cell_browser, "gate_choices", None)
-    selected = set(names) if chosen is None else set(chosen)
-    menu = QMenu(btn)
-    checks = {}
-    for nm in names:
-        cb = QCheckBox(nm, menu)
-        cb.setChecked(nm in selected)
-        checks[nm] = cb
-        wa = QWidgetAction(menu)
-        wa.setDefaultWidget(cb)
-        menu.addAction(wa)
 
-    def _commit() -> None:
-        picked = {nm for nm, c in checks.items() if c.isChecked()}
+    def _apply(picked_list: list) -> None:
+        picked = set(picked_list)
         # All picked (or none) ⇒ None (= all gates, auto-includes new ones).
         ctx.runtime.cell_browser.gate_choices = None if picked == set(names) or not picked else picked
         _refresh_gate_pick_label(ctx)
         ctl.apply_filters(ctx)
 
-    menu.aboutToHide.connect(_commit)
-    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+    open_multi_select(ctx, btn, key="cell_browser/gates", title="Gates", items=list(names),
+                      checked=list(names) if chosen is None else [n for n in names if n in chosen],
+                      on_change=_apply, empty_text="No gates are drawn.")
 
 
 def _add_row(ctx, column: str = "") -> None:
@@ -387,37 +379,21 @@ def _add_row(ctx, column: str = "") -> None:
 
 
 def _open_multiselect(ctx, btn, selections: dict, label) -> None:
-    """Popup a checkbox menu over *selections* (str → bool); update *label*."""
-    menu = QMenu(btn)
-    checks = {}
-    for key in sorted(selections.keys(), key=_sort_key):
-        cb = QCheckBox(key, menu)
-        cb.setChecked(bool(selections[key]))
-        checks[key] = cb
+    """Show *selections* (str → bool) as a multi-select page of the inspector;
+    update *label* as boxes are ticked."""
+    from review.core.inspector_pages import open_multi_select
 
-        def _make(k=key, c=cb):
-            def _toggled(on: bool) -> None:
-                selections[k] = bool(on)
-                _refresh_multiselect_label(selections, label)
-            return _toggled
-        cb.toggled.connect(_make())
-        wa = QWidgetAction(menu)
-        wa.setDefaultWidget(cb)
-        menu.addAction(wa)
-    menu.addSeparator()
+    order = sorted(selections.keys(), key=_sort_key)
 
-    def _set_all(val: bool) -> None:
-        for k, c in checks.items():
-            c.blockSignals(True)
-            c.setChecked(val)
-            c.blockSignals(False)
-            selections[k] = val
+    def _apply(picked_list: list) -> None:
+        picked = set(picked_list)
+        for key in list(selections):
+            selections[key] = key in picked
         _refresh_multiselect_label(selections, label)
 
-    a_all = QAction("All", menu); a_all.triggered.connect(lambda _=False: _set_all(True))
-    a_none = QAction("None", menu); a_none.triggered.connect(lambda _=False: _set_all(False))
-    menu.addAction(a_all); menu.addAction(a_none)
-    menu_exec.exec_transient_menu(menu, btn.mapToGlobal(btn.rect().bottomLeft()))
+    title = (btn.text() or "Choose").split(":")[0].replace("▾", "").strip() or "Choose"
+    open_multi_select(ctx, btn, key=f"cell_browser/{title.lower()}", title=title, items=order,
+                      checked=[k for k in order if selections[k]], on_change=_apply)
 
 
 def _refresh_multiselect_label(selections: dict, label) -> None:

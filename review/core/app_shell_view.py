@@ -111,14 +111,43 @@ def _fill_dataset_menu(win, menu) -> None:
     because a ``QMenu`` row is a line of text with nothing to reveal a second
     control over; forgetting a dataset is Home's ×.
     """
-    from review.core.recent_view import entry_rows
-
     menu.clear()
     # Qt hides action tooltips by default, and the tooltip is where a row says
     # its full path and when it was last opened — the two facts that tell
     # ``plate3_run2`` from ``plate3_run2`` on another drive.
     menu.setToolTipsVisible(True)
     owned_action(menu, "Open…").triggered.connect(lambda _=False: win._browse())
+    _add_recent_datasets(win, menu)
+    _add_dataset_tools(win, menu)
+
+
+#: The widget-registry key of the callable that lists the window's dataset
+#: tools (``ui.dataset_tools.Tool``). The window that owns the commands
+#: registers it there under this key; Review only shows them.
+DATASET_TOOLS_KEY = "_dataset_tools"
+
+
+def _add_dataset_tools(win, menu) -> None:
+    """The last group of the menu: the commands about the open dataset — copy
+    analysis, reveal folder, storage and the two resets — under a caption.
+    They were five unlabelled icons in the title bar."""
+    registry = getattr(getattr(win, "_ctx", None), "widgets", None)
+    provider = registry.get_or_none(DATASET_TOOLS_KEY) if registry is not None else None
+    tools = list(provider()) if callable(provider) else []
+    if not tools:
+        return
+    from ui.dataset_tools import TITLE
+    menu.addSeparator()
+    heading = menu.addAction(TITLE)
+    heading.setEnabled(False)
+    for tool in tools:
+        action = owned_action(menu, tool.label)
+        action.setToolTip(tool.about)
+        action.triggered.connect(lambda _checked=False, _fn=tool.run: _fn())
+
+
+def _add_recent_datasets(win, menu) -> None:
+    from review.core.recent_view import entry_rows
 
     ctx = getattr(win, "_ctx", None)
     if ctx is None:

@@ -79,7 +79,7 @@ def test_picking_a_queued_job_calls_choose_with_its_key(qapp):
     tab, button = _tab_with_offer(
         provider=lambda: [("job-1", "Concatenate → /out/a"), ("job-2", "Subset → /out/b")],
         choose=chosen.append)
-    sub = button.menu().actions()[0].menu()
+    sub = button.menu()                       # the list itself, with no submenu (S26)
     sub.aboutToShow.emit()
     labels = [a.text() for a in sub.actions()]
     assert labels == ["Concatenate → /out/a", "Subset → /out/b"]
@@ -90,7 +90,7 @@ def test_picking_a_queued_job_calls_choose_with_its_key(qapp):
 
 def test_an_empty_queue_shows_the_empty_text_disabled(qapp):
     tab, button = _tab_with_offer(provider=lambda: [])
-    sub = button.menu().actions()[0].menu()
+    sub = button.menu()                       # the list itself, with no submenu (S26)
     sub.aboutToShow.emit()
     [only] = sub.actions()
     assert (only.text(), only.isEnabled()) == ("No queued job writes a folder", False)

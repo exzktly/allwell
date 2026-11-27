@@ -71,6 +71,20 @@ def forget(st) -> None:
     st.identity_zoom, st.identity_zoom_for, st.identity_press = {}, None, None
 
 
+def reset(ctx, st) -> None:
+    """**Reset zoom**: every panel back to its whole view — what a double click does for the panel under it."""
+    drawn = st.identity_drawn
+    st.identity_press = None
+    if drawn is not None:
+        for name in drawn.zoomable:
+            home, ax = drawn.home.get(name), drawn.axes.get(name)
+            if home is not None and ax is not None:
+                ax.set_xlim(*home[0])
+                ax.set_ylim(*home[1])
+    st.identity_zoom = {}
+    _repaint(ctx)
+
+
 def _apply(st, drawn, name: str, xlim, ylim) -> None:
     """Set *name*'s limits and every axes linked with it, and keep them."""
     for other in zc.linked(drawn.links, name):

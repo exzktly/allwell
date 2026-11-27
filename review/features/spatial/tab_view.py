@@ -25,6 +25,7 @@ from review.features.spatial.cell_scope_compute import cell_scope
 from core.safe import swallowed
 from review.features.spatial import state as sp_state
 from review.features.spatial import controller as sp_ctrl
+from review.features.spatial.renderer import grid_is_stale, render_spatial
 from review.features.spatial.collect import available_metric_columns, available_timepoints
 from domain.tp_match import tp_close
 from widgets.spin_box import SpinBox, DoubleSpinBox
@@ -437,7 +438,6 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # turned, its sheet opened): the grid is chosen as the page renders (``renderer.grid_is_stale``).
     from PySide6.QtCore import QTimer
 
-    from review.features.spatial.renderer import grid_is_stale, render_spatial
     regrid = QTimer(card)
     regrid.setSingleShot(True)
     regrid.setInterval(_REGRID_MS)

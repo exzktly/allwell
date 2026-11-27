@@ -155,7 +155,7 @@ def qss() -> str:
         selection-background-color: {c.accent};
         selection-color: {c.on_accent};
     }}
-    QLineEdit#SearchInput:hover {{ border-color: {c.border_strong}; }}
+    QLineEdit#SearchInput:hover {{ border-color: {c.text_secondary}; }}
     QLineEdit#SearchInput:focus {{ border-color: {c.accent}; }}
     QLabel#SearchInputHint {{
         color: {c.text_secondary};

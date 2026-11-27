@@ -465,7 +465,7 @@ if __name__ == "__main__":
     lay.addWidget(swatch)
 
     btn = QPushButton("Open color picker")
-    btn.setObjectName("Primary")
+    btn.setProperty("variant", "default")
     btn.setCursor(Qt.PointingHandCursor)
     lay.addWidget(btn, 0, Qt.AlignLeft)
     picker = ColorPickerPopover(root, color="#6B8AFD",

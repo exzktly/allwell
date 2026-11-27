@@ -482,7 +482,7 @@ def qss() -> str:
         border: 1px solid {c.field_edge};
         border-radius: {r.sm}px;
     }}
-    #Stepper:hover {{ border-color: {c.border_strong}; }}
+    #Stepper:hover {{ border-color: {c.text_secondary}; }}
     #Stepper[focused="true"] {{ border-color: {c.accent}; }}
     #Stepper QLineEdit#StepperEdit {{
         background: transparent;

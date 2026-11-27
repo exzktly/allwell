@@ -975,7 +975,6 @@ def _detail_header(ctx, parent) -> QHBoxLayout:
     title = QLabel("Selected nanowell", parent)
     title.setProperty("textRole", "label")
     close = buttons.icon_button("x", "Close the site detail and clear the nanowell selection", parent)
-    close.setObjectName("Ghost")
     close.setFixedWidth(theme.Metrics.icon_btn_w)
     close.setToolTip("Close the site detail and clear the nanowell selection")
     close.clicked.connect(lambda _=False: nwc.clear_selection(ctx))

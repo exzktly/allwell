@@ -315,7 +315,7 @@ if __name__ == "__main__":
     title.setWordWrap(True)
     hv.addWidget(title)
     open_btn = QPushButton("Open Analyze")
-    open_btn.setObjectName("Primary")
+    open_btn.setProperty("variant", "default")
     hv.addWidget(open_btn, 0, Qt.AlignLeft)
     hv.addStretch(1)
 

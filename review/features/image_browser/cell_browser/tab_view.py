@@ -145,8 +145,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # Generate: the display controls (channels / LUT / color / source /
     # boundaries) only *stage* their state; pressing Generate re-composites the
     # gallery with everything staged (same gate as the sidebar "Apply filters").
-    generate_btn = buttons.default("Generate", ctrl)
-    generate_btn.setObjectName("Primary")
+    # The page's one primary action, as Generate is on the Image Table.
+    generate_btn = buttons.primary("Generate", ctrl)
     generate_btn.setToolTip(
         "Re-render the gallery with the current channels / LUT / colors / "
         "source. Display settings are staged until you press this.")
@@ -371,7 +371,6 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         rl.addWidget(swatch)
         reset_c = buttons.icon_button("x", "Reset this channel's colour to the default.", row)
         reset_c.setFixedWidth(_RESET_C_W)
-        reset_c.setObjectName("Ghost")
         reset_c.setToolTip("Reset this channel's color to the default.")
         rl.addWidget(reset_c)
 

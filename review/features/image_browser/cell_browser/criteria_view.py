@@ -363,7 +363,6 @@ def _add_row(ctx, column: str = "") -> None:
     hi = QLineEdit(row); hi.setPlaceholderText("max"); hi.setFixedWidth(_HI_W)
     rm = buttons.icon_button("x", "Remove this criterion", row)
     rm.setFixedWidth(_RM_W)
-    rm.setObjectName("Ghost")
     rl.addWidget(combo, 1)
     rl.addWidget(lo)
     rl.addWidget(hi)

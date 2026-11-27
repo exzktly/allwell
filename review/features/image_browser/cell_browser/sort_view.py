@@ -80,7 +80,6 @@ def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
 
     rm = buttons.icon_button("x", "Remove this sort key", row)
     rm.setFixedWidth(_RM_W)
-    rm.setObjectName("Ghost")
 
     rl.addWidget(combo, 1)
     rl.addWidget(dir_btn)

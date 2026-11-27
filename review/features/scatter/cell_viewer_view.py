@@ -145,7 +145,6 @@ class ScatterCellViewer(QWidget):
         self._title_label.setProperty("textRole", "sectionHeading")
         head.addWidget(self._title_label, 1)
         close_btn = buttons.icon_button("x", "Close the cell viewer")
-        close_btn.setObjectName("Ghost")
         close_btn.setFixedWidth(theme.Metrics.icon_btn_w)
         close_btn.setToolTip("Close the cell viewer")
         close_btn.clicked.connect(self._close_dock)

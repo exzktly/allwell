@@ -1453,16 +1453,11 @@ class ExportStyleSidebar(QWidget):
                 bbl = QHBoxLayout(btns)
                 bbl.setContentsMargins(0, 0, 0, 0)
                 bbl.setSpacing(sp.xs)
-                up = buttons.default("▴")
-                up.setObjectName("Ghost")
-                up.setToolTip("Move up")
-                up.clicked.connect(lambda _=False, lw=list_widget: self._move_list_item(lw, -1))
-                down = buttons.default("▾")
-                down.setObjectName("Ghost")
-                down.setToolTip("Move down")
-                down.clicked.connect(lambda _=False, lw=list_widget: self._move_list_item(lw, +1))
+                up = buttons.icon_button(
+                    "chevron-up", "Move up", on_click=lambda lw=list_widget: self._move_list_item(lw, -1))
+                down = buttons.icon_button(
+                    "chevron-down", "Move down", on_click=lambda lw=list_widget: self._move_list_item(lw, +1))
                 apply_b = buttons.default("Apply")
-                apply_b.setObjectName("Primary")
                 apply_b.clicked.connect(lambda _=False: self._apply_line_order())
                 bbl.addWidget(up)
                 bbl.addWidget(down)
@@ -1511,7 +1506,6 @@ class ExportStyleSidebar(QWidget):
         save_btn = buttons.default("Save preset")
         save_btn.clicked.connect(lambda _=False: self._save_preset())
         exp_btn = buttons.default("Export…")
-        exp_btn.setObjectName("Primary")
         exp_btn.clicked.connect(lambda _=False: self._export())
         # Equal flex on the three action buttons so they share the row
         # cleanly inside the panel's width; without this the QPushButton

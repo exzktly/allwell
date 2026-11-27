@@ -1219,46 +1219,6 @@ QToolButton[popupMode="1"]::menu-arrow {{
     height: 10px;
 }}
 
-QPushButton#Primary {{
-    background-color: {c.accent};
-    border-color: {c.accent};
-    color: {c.on_accent};
-    font-weight: {t.semibold};
-}}
-QPushButton#Primary:hover {{
-    background-color: {c.accent_hover};
-    border-color: {c.accent_hover};
-}}
-QPushButton#Primary:pressed {{
-    background-color: {c.accent_pressed};
-    border-color: {c.accent_pressed};
-}}
-QPushButton#Primary:disabled {{
-    background-color: {c.selected};
-    border-color: {c.selected};
-    color: {c.text_disabled};
-}}
-
-QPushButton#Danger {{
-    background-color: transparent;
-    border-color: {c.border_subtle};
-    color: {c.danger};
-}}
-QPushButton#Danger:hover {{
-    background-color: {c.card};
-}}
-
-QPushButton#Ghost, QToolButton#Ghost {{
-    background-color: transparent;
-    border-color: transparent;
-    /* Ghost buttons are icon-like (✕ close, ▲/▾ reorder). The default 10px
-       horizontal button padding ate a compact fixed width and clipped the glyph,
-       so keep their padding tight. */
-    padding: {s.xs}px {s.xs}px;
-}}
-QPushButton#Ghost:hover, QToolButton#Ghost:hover {{
-    background-color: {c.card};
-}}
 
 /* The four kinds of button — primary, default, quiet, destructive — and the pressed-in tool, from
    ui.buttons.qss. A change of kind after polish needs unpolish()/polish(), which ui.buttons.set_kind does. */
@@ -1450,7 +1410,7 @@ QRadioButton::indicator {{
     border-radius: 8px;
 }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
-    border-color: {c.border_strong};
+    border-color: {c.text_secondary};
 }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
     background-color: {c.accent};

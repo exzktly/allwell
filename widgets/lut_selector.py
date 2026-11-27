@@ -352,7 +352,7 @@ def qss() -> str:
         padding: 2px 4px;
         text-align: left;
     }}
-    QPushButton#LutTrigger:hover {{ border-color: {c.border_strong}; }}
+    QPushButton#LutTrigger:hover {{ border-color: {c.text_secondary}; }}
     QPushButton#LutTrigger QLabel[textRole="number"] {{
         color: {c.text_secondary};
         font-family: {t.family_mono};

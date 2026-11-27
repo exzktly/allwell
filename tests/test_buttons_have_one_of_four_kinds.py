@@ -127,3 +127,29 @@ def test_a_pane_builds_its_buttons_through_ui_buttons():
 def test_the_hand_built_roster_only_describes_sites_that_remain():
     stale = stale_roster(_hand_built(), BUTTON_CONSTRUCTOR)
     assert not stale, "lower these roster entries:\n  " + "\n  ".join(stale)
+
+
+#: Object names that once gave a button its own look by an ID selector (``#Primary``, ``#Ghost``, ``#Danger``).
+#: An ID selector outranks ``[variant=…]``, so a button carrying one of them drew a fifth look over its kind —
+#: a default button filled like the primary — and the scan above, which reads only ``variant``, could not see it.
+RETIRED_BUTTON_NAMES = {"Primary", "Ghost", "Danger"}
+
+
+def _retired_names(tree: ast.AST) -> list[str]:
+    return [call.args[0].value for call in ast.walk(tree)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+            and call.func.attr == "setObjectName" and call.args
+            and isinstance(call.args[0], ast.Constant) and call.args[0].value in RETIRED_BUTTON_NAMES]
+
+
+def test_no_button_takes_a_look_from_its_object_name():
+    found = [f"{rel(p)}: {name}" for p in python_sources() for name in _retired_names(parse_source(p))]
+    assert not found, "a button's look is its kind (ui.buttons), not an object name:\n  " + "\n  ".join(found)
+    from ui import theme
+    sheet = theme.qss()
+    assert not [n for n in RETIRED_BUTTON_NAMES if f"#{n}" in sheet], "the theme still styles a retired name"
+
+
+def test_the_retired_name_scan_bites():
+    """It reads a ``setObjectName`` of a retired name, and nothing else."""
+    assert _retired_names(ast.parse('b.setObjectName("Ghost")\nc.setObjectName("Card")')) == ["Ghost"]

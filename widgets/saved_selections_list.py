@@ -476,7 +476,7 @@ class _SelectionRow(QFrame):
         br.addStretch(1)
         cancel = QPushButton("Cancel")
         okb = QPushButton("OK")
-        okb.setObjectName("Primary")
+        okb.setProperty("variant", "primary")
         br.addWidget(cancel)
         br.addWidget(okb)
         cv.addLayout(br)

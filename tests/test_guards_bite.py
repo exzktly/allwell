@@ -6269,3 +6269,20 @@ def test_close_spelling_guard_clears_a_docstring_and_the_one_close():
     from tests import test_one_way_to_close_a_panel as guard
     body = 'def build(panel):\n    """It used to read Done ✕."""\n    panel.close_button.setText("Close")\n'
     assert guard.spellings([("review/x.py", ast.parse(body))]) == []
+
+
+def test_the_checkable_action_guard_sees_an_owned_action(tmp_path):
+    """``owned_action`` is how nearly every action in the application is built,
+    and the guard once could not see one made checkable — two job-row entries
+    stayed ticks past the row that converted their siblings."""
+    import ast
+
+    from tests import _surface_guards as scan
+
+    source = (
+        "from widgets.owned_action import owned_action\n"
+        "def fill(menu):\n"
+        "    act = owned_action(menu, 'Nothing')\n"
+        "    act.setCheckable(True)\n")
+    sites = scan.checkable_menu_actions([("fake.py", ast.parse(source))])
+    assert [s[1] for s in sites] == ["fill"]

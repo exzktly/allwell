@@ -143,7 +143,7 @@ def checkable_menu_actions(trees) -> list[Site]:
     ``menu.addAction(...).setCheckable(True)``, and ``QAction(..., checkable=True)``.
     A tick in a menu is a setting, and a setting belongs on an inspector page."""
     sites: list[Site] = []
-    makers = {"QAction", "addAction", "add_menu_action", "addSection"}
+    makers = {"QAction", "addAction", "add_menu_action", "addSection", "owned_action"}
     for rel, tree in trees:
         class V(_Scopes):
             def __init__(self):

@@ -124,6 +124,10 @@ def failure_reason(job: JobSpec) -> str | None:
     return f"{word} — {message}"
 
 
+
+#: The input lists' first entry: the job reads the folder set on its own page.
+NOTHING_TEXT = "Nothing (use the folder on its page)"
+
 class JobRow(QWidget):
     """A single queue entry, rewritable in place."""
 
@@ -500,9 +504,7 @@ class JobRow(QWidget):
         sub = QMenu("Input from", menu)
         sub.setObjectName("JobRowChainMenu")
         menu.addMenu(sub)
-        none_action = owned_action(sub, "Nothing (use the folder on its page)")
-        none_action.setCheckable(True)
-        none_action.setChecked(not self._job.chain_from)
+        none_action = mark_current(owned_action(sub, ""), NOTHING_TEXT, not self._job.chain_from)
         none_action.triggered.connect(lambda: self.chainRequested.emit(self.job_id, ""))
         current = self._job.chain_from
         self._add_sources(sub, self._predecessors, self._below,
@@ -522,9 +524,7 @@ class JobRow(QWidget):
         menu.addMenu(sub)
         current = self._job.link_for(target)
         taken = {link.source for link in self._job.links() if link.target != target}
-        none_action = owned_action(sub, "Nothing (use the folder on its page)")
-        none_action.setCheckable(True)
-        none_action.setChecked(current is None)
+        none_action = mark_current(owned_action(sub, ""), NOTHING_TEXT, current is None)
         none_action.triggered.connect(
             lambda _checked=False, t=target: self.linkRequested.emit(self.job_id, t, ""))
         above = [(pid, plabel) for pid, plabel in self._predecessors if pid not in taken]

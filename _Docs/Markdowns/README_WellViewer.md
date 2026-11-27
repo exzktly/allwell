@@ -5843,7 +5843,7 @@ threshold has a fraction of zero, and dividing by it is undefined. The figure
 says so in as many words rather than reporting a missing control — switch the
 operation to subtract, or plot the raw fraction.
 
-**Error bars with one well.** Set **Spread** to **FOV** in the Display popover
+**Error bars with one well.** Set **Spread** to **FOV** on the Display tab
 and each field of view counts as a replicate, so a condition run in a single
 well still gets an error bar. Left on the default, spread is measured across
 wells and a one-well condition has none — the caption under the figure names
@@ -5967,7 +5967,7 @@ a lower bound the fit does not support. The same numbers go into **Save plot
 data…**.
 
 **Comparing conditions.** With a fit on and the curves split into series (for
-example one per cell line), **Compare EC50 to** in the Fit popover picks a
+example one per cell line), **Compare EC50 to** on the Fit page picks a
 reference series. Every other curve's EC50 is then reported as a multiple of
 the reference's EC50 *at the same timepoint* — `EC50 ×4 (2.6–6.1)` means that
 curve needs about four times as much to reach its half-maximal effect, with a
@@ -6038,7 +6038,7 @@ cannot place it, and the footer says how many values made it so.
 
 #### Fold change on a response curve
 
-The band's **Fold change** popover is the same one the Bar and Line tabs carry,
+The band's **Fold change** page is the same one the Bar and Line tabs carry,
 over the same shared setting — a control picked on one is picked on all three,
 and the y-axis label says what it was normalised by so a normalised number is
 never sitting under a raw label.
@@ -6127,7 +6127,7 @@ cells it kept.
   you draw the gates here and need to see what falls outside them to judge or
   resize a box. Switch **Apply gates** on to plot only the cells inside the
   boxes shown here; the title gains a `· gate-filtered` tag so a copied or saved
-  figure says which it is — and so a filter left on inside a popover still
+  figure says which it is — and so a filter left on inside the inspector still
   announces itself. It filters against the boxes on screen, so it always
   agrees with what you are looking at, and it needs nothing switched on
   elsewhere. Two things to know: it is a *view* filter — it changes nothing

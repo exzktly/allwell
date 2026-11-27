@@ -31,6 +31,7 @@ OME_CONVERTER = ConverterSpec(
     convert=convert,
     refusals=(OmeImportError,),
     cancelled=OmeExplodeCancelled,
+    source_suffixes=(".ome.tif", ".ome.tiff"),
 )
 
 

@@ -95,7 +95,7 @@ def test_saving_the_banner_queues_the_whole_form_and_returns_to_the_queue(
     assert jq.session() is None
     assert _banner_on(analyze_tab) is None
     assert calls == ["analyze", "datasets"]
-    assert datasets._nav.currentKey() == "Job Queue"
+    assert datasets._nav.currentKey() == "Automation"
 
 
 def test_a_form_run_would_refuse_is_not_queued_and_stays_open(panes, monkeypatch):

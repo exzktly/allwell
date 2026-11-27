@@ -42,6 +42,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QThread, Signal
 
 from core.safe import swallowed as gui_swallowed
+from datasets.core.watched_source import WatchedSourceError, resolve_source
 from datasets.core.tool_controller import DatasetToolController
 from util.aw_safe import swallowed
 
@@ -108,6 +109,13 @@ class ConverterSpec:
     #: writes no planes (the CZI converter's metadata passes, which can take minutes on a large plate with no
     #: other sign of life). The page then shows it on its status line through ``set_stage_status``.
     reports_status: bool = False
+    #: The file names this converter reads, for choosing the file when a
+    #: queued job is handed a watched folder (``datasets.core.watched_source``).
+    source_suffixes: tuple[str, ...] = ()
+    #: Whether a folder is itself a source this converter reads as one plate
+    #: (the CZI converter's split-scene sets). Then a watched folder is passed
+    #: through unchanged and no single file is chosen.
+    folder_is_a_source: bool = False
 
     def __post_init__(self) -> None:
         if not self.plan_refusals:
@@ -186,6 +194,11 @@ class PackedConverterWorker(QThread):
 
 
 class PackedConverterController(DatasetToolController):
+    #: A line for the job's queue row and its recipe journal — here, which
+    #: file a conversion handed a watched folder chose
+    #: (``QueueBridge._on_status_text``).
+    statusText = Signal(str)
+
     """Wires a converter page to its background worker.
 
     A subclass supplies a :class:`ConverterSpec` and builds its page; every
@@ -364,8 +377,40 @@ class PackedConverterController(DatasetToolController):
         self.page.set_channel_roles(spec.get("channel_roles") or [])
 
     def start_from_queue(self, spec: dict) -> None:
+        """Run a queued job, first choosing its file if it was handed a folder.
+
+        A conversion linked to a Watch folder job receives the watched folder
+        as its source; which file in it to read is decided now, when the
+        acquisition has been written, and the choice is logged. When it cannot
+        be decided the job fails saying what the folder held, rather than
+        converting one of several plates and reporting success.
+        """
+        source = str(spec.get("source") or "")
+        try:
+            chosen = resolve_source(source, self.spec.source_suffixes,
+                                    folder_is_a_source=self.spec.folder_is_a_source,
+                                    noun=self.spec.noun)
+        except WatchedSourceError as exc:
+            self.show_job(spec)
+            message = str(exc)
+            self.page.clear_log()
+            self.page.append_log(f"✗ {message}")
+            self.page.set_outcome("failed", message)
+            self._last_result = (False, message, "")
+            try:
+                self.jobFinished.emit(False, message, "")
+            except Exception:
+                gui_swallowed()
+            return
+        if chosen != source:
+            spec = {**spec, "source": chosen}
         self.show_job(spec)
         self._launch()
+        if chosen != source:
+            line = (f"Converting {chosen} — the one {self.spec.noun} "
+                    f"file in the watched folder {source}.")
+            self.page.append_log(line)
+            self.statusText.emit(line)
 
     # ── worker results ───────────────────────────────────────────────────────
     def _on_succeeded(self, dest_root: str, summary: str) -> None:

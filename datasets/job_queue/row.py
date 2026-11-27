@@ -46,6 +46,7 @@ from services.job_kinds import (
     describe_detail,
     input_label,
     input_targets,
+    linkable_targets,
 )
 from services.job_queue import JobSpec, JobState
 from widgets.owned_action import owned_action
@@ -69,6 +70,7 @@ KIND_ICON = {
     "subset": "boxes",
     "import_loose": "download",
     "merge_plates": "layout-grid",
+    "watch_folder": "eye",
 }
 
 #: The tools a dataset can be handed to next, derived from what each kind
@@ -129,6 +131,8 @@ class JobRow(QWidget):
     moveDownClicked = Signal(str)
     editClicked = Signal(str)
     duplicateClicked = Signal(str)
+    saveRecipeClicked = Signal(str)
+    recipeLogClicked = Signal(str)
     stopClicked = Signal(str)
     # (job_id, with the jobs that used its output too)
     retryClicked = Signal(str, bool)
@@ -339,6 +343,12 @@ class JobRow(QWidget):
             # job otherwise reads exactly like a ready one until it fails.
             parts.append("no input folder — choose one with Input from ▸ or "
                          "edit the job")
+        recipe = job.recipe or {}
+        if recipe.get("run"):
+            step, steps = recipe.get("step"), recipe.get("steps")
+            where = (f" · step {step + 1}/{steps}"
+                     if isinstance(step, int) and isinstance(steps, int) else "")
+            parts.append(f"recipe “{recipe.get('name', '')}”{where}")
         detail = describe_detail(job.kind, job.spec)
         if detail:
             parts.append(detail)
@@ -386,6 +396,14 @@ class JobRow(QWidget):
 
         owned_action(menu, "Duplicate").triggered.connect(
             lambda: self.duplicateClicked.emit(self.job_id))
+
+        # Any job of a chain saves the whole chain: the jobs it reads from and
+        # the jobs that read from it (services.job_recipes).
+        owned_action(menu, "Save chain as recipe…").triggered.connect(
+            lambda: self.saveRecipeClicked.emit(self.job_id))
+        if (job.recipe or {}).get("run"):
+            owned_action(menu, "Recipe log…").triggered.connect(
+                lambda: self.recipeLogClicked.emit(self.job_id))
 
         # Only a job that ran can be retried: a pending one is already
         # waiting, a running one is already going, and a blocked one never ran
@@ -460,11 +478,18 @@ class JobRow(QWidget):
 
         Offers the jobs *above* this one, since a link that ran backwards
         would be refused by the queue's own order check anyway; showing the
-        rest would be offering choices that cannot be made. Absent on a kind
-        that reads files rather than a dataset (the converters, Zip loose):
-        no earlier job's output can be its input.
+        rest would be offering choices that cannot be made. A kind that reads
+        files rather than a dataset (the converters, Zip loose) is offered only
+        the Watch folder jobs, whose folder is where its files will be; the
+        page filters the lists to those (``JobQueuePage._sources_for``).
         """
-        if not input_targets(self._job.kind):
+        if not linkable_targets(self._job.kind):
+            return
+        if (not input_targets(self._job.kind) and not self._job.links()
+                and not self._predecessors and not self._below):
+            # A file-reading kind with no Watch folder job to offer: the menu
+            # would hold nothing but "Nothing", and offering it at all is what
+            # once let two conversions be linked.
             return
         # Constructed with the parent menu rather than via addMenu(str): the
         # QMenu that call returns is not kept alive by its parent on the

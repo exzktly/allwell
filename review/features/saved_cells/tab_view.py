@@ -36,7 +36,6 @@ from review.features.saved_cells import collect
 from review.features.saved_cells import controller as ctl
 from ui import theme
 from widgets.flow_layout import FlowLayout
-from widgets.page_body import build_page_body
 from ui import buttons
 
 _SET_COLUMNS = ("Name", "Cells", "From", "In use")
@@ -369,7 +368,13 @@ class SavedCellsPage(QWidget):
 
 def build_saved_cells_tab(ctx, parent: QWidget) -> None:
     """Build the page into *parent* and register it for refreshes."""
-    _band, body = build_page_body(parent, content_margins=(theme.Spacing.lg,) * 3)
+    # No control band: the page has no controls that scope what it shows, and an empty band strip reads as a
+    # row of missing controls (design language §6).
+    body = QWidget(parent)
+    QVBoxLayout(body).setContentsMargins(*(theme.Spacing.lg,) * 4)
+    outer = parent.layout() or QVBoxLayout(parent)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.addWidget(body, 1)
     # Scrolled, so on a short screen the lists keep their height and the page
     # scrolls, instead of every label being squeezed to fit.
     scroll = QScrollArea(body)

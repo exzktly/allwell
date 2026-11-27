@@ -89,7 +89,8 @@ _NO_SIDECAR_MESSAGE = (
 
 
 from widgets.canvas import make_canvas
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
+
 from widgets.page_body import build_page_body
 from util.well_token import canonical_well_label
 
@@ -205,17 +206,17 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_scope("Channel", channel_cb)
 
-    fov_cb = reg.register("_smfish_fov_cb", LabeledComboBox("FOV"))
+    fov_cb = reg.register("_smfish_fov_cb", unlabelled("FOV"))
     fov_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    ctrl.add_scope("", fov_cb)
+    ctrl.add_scope("FOV", fov_cb)
 
-    tp_cb = reg.register("_smfish_tp_cb", LabeledComboBox("Timepoint"))
+    tp_cb = reg.register("_smfish_tp_cb", unlabelled("Timepoint"))
     tp_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    ctrl.add_scope("", tp_cb)
+    ctrl.add_scope("Timepoint", tp_cb)
 
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500"))
     threshold_edit.setFixedWidth(_THRESHOLD_EDIT_W)

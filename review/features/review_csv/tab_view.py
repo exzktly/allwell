@@ -14,7 +14,8 @@ refresh_review_csv = _lazy(_RCSV, "refresh_review_csv")
 refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
 
-from widgets.labeled_combo import LabeledComboBox
+from widgets.labeled_combo import unlabelled
+
 from widgets.page_body import build_page_body
 from ui import buttons
 
@@ -45,21 +46,17 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     well_lbl.setProperty("textRole", "help")
     ctrl.add_scope("Well", well_lbl)
 
-    fov_cb = reg.register("_review_fov_cb", LabeledComboBox("FOV"))
-    # No setFixedWidth — LabeledComboBox already sizes to exactly the painted
-    # "FOV: …" text.
+    fov_cb = reg.register("_review_fov_cb", unlabelled("FOV"))
     fov_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    ctrl.add_scope("", fov_cb)
+    ctrl.add_scope("FOV", fov_cb)
 
-    tp_cb = reg.register("_review_tp_cb", LabeledComboBox("Timepoint"))
-    # No setFixedWidth — LabeledComboBox already sizes to exactly the painted
-    # "Timepoint: …" text.
+    tp_cb = reg.register("_review_tp_cb", unlabelled("Timepoint"))
     tp_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    ctrl.add_scope("", tp_cb)
+    ctrl.add_scope("Timepoint", tp_cb)
 
     refresh_btn = buttons.default("Refresh", ctrl)
     refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))

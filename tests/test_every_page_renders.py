@@ -82,13 +82,10 @@ DESIGN_PENDING: dict[tuple[str, str], str] = {
     ("Plotting/Response Curves", "label inside"): "D14",
     ("Plotting/Scatter Plot", "band rows"): "D14",
     ("Plotting/Scatter Plot", "label inside"): "D14",
-    ("Review CSV", "label inside"): "D19",
-    ("Saved Cells", "empty band"): "D19",
     ("Spatial", "band rows"): "D15",
     ("Spatial", "label inside"): "D15",
     ("Statistics", "band rows"): "D15",
     ("Statistics", "label inside"): "D15",
-    ("smFISH", "label inside"): "D17",
 }
 
 def _design_key(page: str, check: str) -> tuple[str, str]:

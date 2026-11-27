@@ -2532,6 +2532,10 @@ def main() -> None:
     except Exception:
         swallowed()
     _boot_diag.boot("mpl_bootstrap done")
+    # The figure settings the plots are laid out against, over any matplotlibrc on the machine
+    # (startup/mpl_rc.py): a site file's figure.dpi of 200 doubled every figure's text.
+    from startup import mpl_rc
+    mpl_rc.pin()
 
     # faulthandler is already armed onto the boot log by startup.boot_diag at import
     # time; nothing more to do here.

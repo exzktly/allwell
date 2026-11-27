@@ -27,7 +27,8 @@ def _slug(text: str) -> str:
 
 
 def start_window(qapp):
-    """Build the window as ``allwell.main`` does: the bundled fonts, then the shipped theme, then the window.
+    """Build the window as ``allwell.main`` does: the figure settings (``startup.mpl_rc``), the bundled fonts,
+    then the shipped theme, then the window.
 
     The fonts, so the pages are measured in the face the app ships rather than in whatever this machine's
     fontconfig makes of "Sans Serif" — DejaVu Sans on the CI runner. The theme, because the token classes in
@@ -39,8 +40,10 @@ def start_window(qapp):
     ``tests/test_the_render_harness_shows_the_shipped_theme.py`` holds both halves.
     """
     from allwell import AllWellApp, use_bundled_fonts
+    from startup import mpl_rc
     from ui.palette_setting import apply_startup_palette
 
+    mpl_rc.pin()
     use_bundled_fonts(qapp)
     apply_startup_palette()
     return AllWellApp(None)

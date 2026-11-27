@@ -109,3 +109,31 @@ def test_the_phone_form_moves_a_label_set_above_its_control_into_its_column(qtbo
     field = band.findChild(LabelledField)
     assert field.label().parentWidget() is field, "the label goes back above its control"
     assert field.layout().indexOf(field.label()) == 0
+
+
+def test_a_form_grid_puts_each_label_above_its_controls_on_a_phone(qapp):
+    """Its declared phone form (``widgets.form_registry``): every row laid out again with the label above, the
+    one arrangement a phone's width holds — and back beside it at the desk, each row's hidden state kept."""
+    from PySide6.QtWidgets import QLineEdit
+
+    from widgets import form_registry
+    from widgets.form_grid import FormGrid
+
+    form = FormGrid()
+    field, other = QLineEdit(), QLineEdit()
+    cap = form.add_row("Experiment name", field)
+    form.add_row("Workers", other)
+    other.setHidden(True)
+    form.resize(420, 200)
+    form.show()
+    _settle()
+    assert cap.geometry().right() < field.geometry().left()
+    arrange = form_registry.custom_apply(form)
+    arrange(True)
+    _settle()
+    assert cap.geometry().bottom() < field.geometry().top() and cap.geometry().left() == field.geometry().left()
+    arrange(False)
+    _settle()
+    assert cap.geometry().right() < field.geometry().left()
+    assert other.isHidden(), "laying the grid out again showed a row the page had hidden"
+    form.close()

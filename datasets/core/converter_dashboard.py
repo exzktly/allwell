@@ -154,9 +154,10 @@ class ConverterDashboard(PlateProgress):
         self._pick_invert.clicked.connect(self._invert_selection)
         row.addWidget(self._pick_invert)
 
-        host = self._center_host.layout()
-        # Directly under the plate, before the stretch that holds it up.
-        host.insertWidget(host.indexOf(self._plate) + 1, self._pick_row)
+        # Under the dashboard's whole body rather than inside its centre column: in a tool page's column
+        # (Metrics.tool_page_w) the centre is too narrow for the note and both buttons beside each other.
+        root = self.layout()
+        root.insertWidget(root.indexOf(self._body) + 1, self._pick_row)
 
     def _invert_selection(self) -> None:
         """Swap the wells that convert for the ones that do not.

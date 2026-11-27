@@ -129,8 +129,10 @@ def build_equation_row(
         if swap_note:
             note = QLabel(swap_note, swap_row)
             note.setProperty("textRole", "help")
-            sl.addWidget(note)
-        sl.addStretch(1)
+            note.setWordWrap(True)          # wraps beside the button in a tool page's column, rather than clipping
+            sl.addWidget(note, 1)
+        else:
+            sl.addStretch(1)
         outer.addWidget(swap_row)
 
     for field in (ds1, ds2, dest):

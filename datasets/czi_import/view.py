@@ -58,6 +58,7 @@ from core.worker_bridge import run_off_thread
 from pipeline.czi_explode import WELL_SOURCES
 from pipeline.czi_set import CZI_SUFFIXES, CziSet, siblings_of
 from datasets.core.tool_page import cards, foot_row, tool_page
+from widgets.form_grid import FormGrid
 from ui import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -298,23 +299,19 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._grid_host.setVisible(self.well_source() == "grid")
 
         self._sub_heading("Conversion options", outer)
-        options = QWidget(self)
-        options_layout = QHBoxLayout(options)
-        options_layout.setContentsMargins(0, 0, 0, 0)
-        options_layout.setSpacing(theme.Spacing.sm)
-        options_layout.addWidget(QLabel("Experiment name", options))
+        # A form grid, one setting a row (widgets.form_grid): beside each other in one line they held the page
+        # wider than a tool page's column (Metrics.tool_page_w).
+        options = FormGrid(self)
         self._experiment_edit = QLineEdit("", options)
         self._experiment_edit.setPlaceholderText("from the filename")
         self._experiment_edit.textChanged.connect(self._on_readout_input_changed)
-        options_layout.addWidget(self._experiment_edit)
-        options_layout.addWidget(QLabel("FOVs per well", options))
+        options.add_row("Experiment name", self._experiment_edit)
         self._fovs_edit = self._small("", placeholder="auto")
         self._fovs_edit.setToolTip(
             "Leave blank to use the tiles the file holds per scene. Only a "
             "grid-mapped file needs this set, and then only when its positions "
             "do not divide evenly by themselves.")
-        options_layout.addWidget(self._fovs_edit)
-        options_layout.addWidget(QLabel("Keep every nth timepoint", options))
+        options.add_row("FOVs per well", self._fovs_edit)
         self._stride_edit = self._small("", placeholder="all")
         self._stride_edit.setToolTip(
             "Leave blank to convert every timepoint. Set 3 to convert the "
@@ -322,17 +319,14 @@ class CziImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "densely-sampled timelapse is converted at a coarser resolution "
             "without re-exporting it. The kept timepoints keep their own "
             "names, so t0, t3, t6 stay three hours apart in Review.")
-        options_layout.addWidget(self._stride_edit)
-        options_layout.addWidget(QLabel("Timepoints", options))
+        options.add_row("Keep every nth timepoint", self._stride_edit)
         # Lists the source's own tokens once a plan resolves; until then it
         # holds whatever selection was restored, which the plan then checks.
         self._timepoint_pick = TimepointPicker(options)
         self._timepoint_pick.changed.connect(self._on_readout_input_changed)
-        options_layout.addWidget(self._timepoint_pick)
-        options_layout.addWidget(QLabel("Worker threads", options))
+        options.add_row("Timepoints", self._timepoint_pick)
         self._workers_edit = self._small("", placeholder="auto")
-        options_layout.addWidget(self._workers_edit)
-        options_layout.addStretch(1)
+        options.add_row("Worker threads", self._workers_edit)
         outer.addWidget(options)
 
         self._readout = QLabel("", self)

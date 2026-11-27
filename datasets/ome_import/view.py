@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from datasets.core.tool_page import cards, foot_row, tool_page
+from widgets.form_grid import FormGrid
 from ui import theme
 from datasets.core.log_panel import LogPanelMixin
 from util.plate_grid import block_well_labels
@@ -329,18 +330,15 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
         self._sub_heading("How was each well sampled?", outer)
 
-        row2 = QWidget(self)
-        hl2 = QHBoxLayout(row2)
-        hl2.setContentsMargins(0, 0, 0, 0)
-        hl2.setSpacing(theme.Spacing.md)
-        hl2.addWidget(QLabel("FOVs/well", row2))
+        # A form grid, one setting a row (widgets.form_grid): on one line they held the page wider than a tool
+        # page's column (Metrics.tool_page_w).
+        row2 = FormGrid(self)
         self._fovs_edit = self._small("", placeholder="auto")
         self._fovs_edit.setToolTip(
             "Fields of view per well (blank = derive it from the file's position "
             "count and the wells above)."
         )
-        hl2.addWidget(self._fovs_edit)
-        hl2.addWidget(QLabel("Keep every nth timepoint", row2))
+        row2.add_row("FOVs/well", self._fovs_edit)
         self._stride_edit = self._small("", placeholder="all")
         self._stride_edit.setToolTip(
             "Leave blank to convert every timepoint. Set 3 to convert the "
@@ -348,16 +346,13 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "densely-sampled timelapse is converted at a coarser resolution "
             "without re-exporting it. The kept timepoints keep their own "
             "names, so a four-hourly run gives 0h, 12h, 24h.")
-        hl2.addWidget(self._stride_edit)
-        hl2.addWidget(QLabel("Timepoints", row2))
+        row2.add_row("Keep every nth timepoint", self._stride_edit)
         # Lists the source's own tokens once a plan resolves; until then it
         # holds whatever selection was restored, which the plan then checks.
         self._timepoint_pick = TimepointPicker(row2)
         self._timepoint_pick.changed.connect(
             lambda: self.refresh_readout())
-        hl2.addWidget(self._timepoint_pick)
-        self._order_label = QLabel("Frame order", row2)
-        hl2.addWidget(self._order_label)
+        row2.add_row("Timepoints", self._timepoint_pick)
         self._frame_order_cb = QComboBox(row2)
         self._frame_order_cb.addItem("Single timepoint", userData="single")
         self._frame_order_cb.addItem("Positions within timepoint", userData="pos_in_time")
@@ -368,8 +363,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "timepoints inside each position."
         )
         self._frame_order_cb.currentIndexChanged.connect(lambda _=None: self.refresh_readout())
-        hl2.addWidget(self._frame_order_cb)
-        hl2.addStretch(1)
+        self._order_label = row2.add_row("Frame order", self._frame_order_cb)
         outer.addWidget(row2)
 
     def _build_plate(self, outer: QVBoxLayout) -> None:

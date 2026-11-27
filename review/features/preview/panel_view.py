@@ -7,9 +7,11 @@ top-hat-subtraction controls it hosted) has been removed.
 
 from __future__ import annotations
 
+from widgets.range_page import RangePage
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QComboBox, QHBoxLayout, QLabel, QScrollArea,
     QToolTip, QVBoxLayout, QWidget,
 )
 
@@ -300,25 +302,18 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     lut_btn, lut_panel, lut_lay = make_popover_button("Brightness", ctrl, ctx=ctx)
     lut_btn.setToolTip("Display brightness (min/max) for the active channel")
 
-    lut_range_row = QWidget(lut_panel)
-    lut_range_lay = QHBoxLayout(lut_range_row)
-    lut_range_lay.setContentsMargins(0, 0, 0, 0)
-    lut_range_lay.setSpacing(6)
-    lut_range_lay.addWidget(reg.register("_review_lut_chan_lbl", QLabel(
-        f"{ctx.state.channel.active_image_channel.upper()} LUT min:", lut_range_row,
-    )))
-    lmin_entry = reg.register("_review_lmin_entry", QLineEdit("auto", lut_range_row))
-    lmin_entry.setFixedWidth(theme.Metrics.num_field_w_lg)
-    lmin_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
-    lut_range_lay.addWidget(lmin_entry)
-    lut_range_lay.addWidget(QLabel("max:", lut_range_row))
-    lmax_entry = reg.register("_review_lmax_entry", QLineEdit("auto", lut_range_row))
-    lmax_entry.setFixedWidth(theme.Metrics.num_field_w_lg)
-    lmax_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
-    lut_range_lay.addWidget(lmax_entry)
-    lut_range_lay.addWidget(btn_secondary(lut_range_row, "Auto LUT",
-                                          lambda: review_image_auto_lut(ctx)))
-    lut_lay.addWidget(lut_range_row)
+    # The one range component (``widgets.range_page``). Its fields keep the
+    # registered names the renderer reads and writes; its caption names the
+    # channel. Auto fits the range to the image on screen, as Auto LUT did.
+    range_page = RangePage(lut_panel, auto_tip="Fit the range to the image on screen.")
+    range_page.setObjectName("ReviewImageRange")
+    range_page.setCaption(f"{ctx.state.channel.active_image_channel.upper()} channel")
+    reg.register("_review_lut_chan_lbl", range_page.caption)
+    reg.register("_review_lmin_entry", range_page.low_edit)
+    reg.register("_review_lmax_entry", range_page.high_edit)
+    range_page.changed.connect(
+        lambda low, _high: review_image_auto_lut(ctx) if low is None else review_image_commit_lut(ctx))
+    lut_lay.addWidget(range_page)
 
     view_lay.addWidget(as_display_row(lut_btn))      # a row of the Display tab
 

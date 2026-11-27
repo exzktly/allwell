@@ -8,6 +8,8 @@ fills incrementally as the worker composes thumbnails.
 
 from __future__ import annotations
 
+from widgets.range_page import RangePage
+
 from functools import partial
 
 from ui import theme
@@ -33,8 +35,6 @@ from widgets.lut_cmaps import resolve_channel_tint
 # inline so the number is stated once and a reader can see what it sizes
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 _SWATCH_H = 18
-_HI_E_W = 60
-_LO_E_W = 60
 _PAGESIZE_EDIT_W = 48
 _RESET_C_W = 22
 
@@ -342,27 +342,19 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
     iv = getattr(ctx.state, "image_view", None)
     rows = {}
     for i, tok in enumerate(channels):
+        # The channel's range is the one range component (``widgets.range_page``):
+        # minimum, maximum, Auto, and Reset back to what the page opened with.
+        lut = iv.get_lut(tok) if iv is not None else None
+        range_page = RangePage(panel, auto_tip="Auto-scale each cell of this channel.")
+        range_page.setObjectName(f"CellBrowserRange_{tok}")
+        range_page.setCaption(tok.upper())
+        range_page.setRange(None if lut is None else lut[0], None if lut is None else lut[1])
+        lay.addWidget(range_page)
+        lo_e, hi_e = range_page.low_edit, range_page.high_edit
         row = QWidget(panel)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(4)
-        name = QLabel(tok.upper(), row)
-        name.setFixedWidth(theme.Metrics.short_field_w)
-        rl.addWidget(name)
-        lut = iv.get_lut(tok) if iv is not None else None
-        rl.addWidget(QLabel("min", row))
-        lo_e = QLineEdit(_cb_fmt(None if lut is None else lut[0]), row)
-        lo_e.setFixedWidth(_LO_E_W)
-        lo_e.setPlaceholderText("auto")
-        rl.addWidget(lo_e)
-        rl.addWidget(QLabel("max", row))
-        hi_e = QLineEdit(_cb_fmt(None if lut is None else lut[1]), row)
-        hi_e.setFixedWidth(_HI_E_W)
-        hi_e.setPlaceholderText("auto")
-        rl.addWidget(hi_e)
-        auto_btn = QPushButton("Auto", row)
-        auto_btn.setProperty("variant", "secondary")
-        rl.addWidget(auto_btn)
 
         # Per-channel display colour: a swatch (opens a colour popover) + a reset
         # back to the default palette colour. Staged → applied on Generate.
@@ -378,13 +370,8 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         reset_c.setToolTip("Reset this channel's colour to the default.")
         rl.addWidget(reset_c)
 
-        def _commit(_=None, _t=tok, _lo=lo_e, _hi=hi_e):
-            _apply_cell_browser_lut(ctx, _t, _lo.text(), _hi.text())
-
-        def _auto(_=None, _t=tok, _lo=lo_e, _hi=hi_e):
-            _lo.clear()
-            _hi.clear()
-            _apply_cell_browser_lut(ctx, _t, "", "")
+        def _commit(low, high, _t=tok):
+            _apply_cell_browser_lut(ctx, _t, _cb_fmt(low), _cb_fmt(high))
 
         def _pick(_=None, _t=tok, _i=i, _sw=swatch):
             _cb_pick_color(ctx, _t, _i, _sw)
@@ -394,9 +381,7 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
                 iv.set_tint(_t, None)
             _paint_cb_swatch(_sw, _cb_effective_tint(iv, _t, _i))
 
-        lo_e.editingFinished.connect(_commit)
-        hi_e.editingFinished.connect(_commit)
-        auto_btn.clicked.connect(_auto)
+        range_page.changed.connect(_commit)
         swatch.clicked.connect(_pick)
         reset_c.clicked.connect(_reset_color)
         lay.addWidget(row)

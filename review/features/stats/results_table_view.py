@@ -70,5 +70,6 @@ def fill_table(ctx, key: str, rows) -> None:
         heading.setVisible(shown)
     if shown:
         # Every row on screen: the page scrolls, the table does not.
+        frame = table.contentsMargins()
         height = table.horizontalHeader().height() + sum(table.rowHeight(r) for r in range(len(rows)))
-        table.setFixedHeight(height + 2 * table.frameWidth())
+        table.setFixedHeight(height + frame.top() + frame.bottom())

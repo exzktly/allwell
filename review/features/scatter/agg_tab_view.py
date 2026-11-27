@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from review.core.inspector_panels import make_popover_button
+from review.features.scatter._axes_page import AxesPage
 from review.core.ui_helpers import (
     make_band_controls,
     build_plot_save_menu, make_plot_area,
@@ -43,7 +44,6 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Scatter Plot", "aggregate")
-    from review.features.scatter._axes_page import AxesPage
     axes = AxesPage(ctx, ctrl)
 
     # Per-axis channel + property selectors mirror the cells scatter tab.

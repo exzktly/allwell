@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from review.core.inspector_panels import make_popover_button
+from review.features.scatter._axes_page import AxesPage
 from review.core.ui_helpers import (
     make_plot_area,
     build_plot_save_menu, make_style_button,
@@ -51,7 +52,6 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Scatter Plot", "cells")
-    from review.features.scatter._axes_page import AxesPage
     axes = AxesPage(ctx, ctrl)
 
     # Per-axis channel + property selectors. The scatter tab overrides

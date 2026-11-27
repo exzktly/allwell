@@ -80,9 +80,11 @@ def test_action_zone_is_top_aligned_when_the_scope_zone_wraps(styled_app):
                for i in range(band.action_count())]
     top_margin = band.layout().contentsMargins().top()
     for a in actions:
-        assert a.geometry().top() <= top_margin + 4, (
+        # Level with the first line's controls: under where a label sits, never further down the band.
+        first_line = top_margin + band.caption_height() + theme.Spacing.xs
+        assert a.geometry().top() <= first_line + 4, (
             f"action '{a.text()}' sits {a.geometry().top()}px down; "
-            "it should hug the top of the band"
+            "it should sit level with the first line's controls"
         )
 
 

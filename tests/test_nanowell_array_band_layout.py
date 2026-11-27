@@ -43,14 +43,16 @@ def _band(ctx):
 
 
 def _rows(ctx) -> list[int]:
-    """The top of each row of the band's shown items. Items of different heights are centred in their row, so tops
-    a few pixels apart are one row; a new row starts more than half an item's height lower."""
+    """The bottom of each row of the band's shown items. Items of different heights — a control with its label above
+    it, a button with none — sit on their row's bottom edge (``FlowLayout.setAlignBottom``), so bottoms a few pixels
+    apart are one row; a new row ends more than half an item's height lower."""
     host = _band(ctx)._scope_host
-    items = [w for w in host.children() if getattr(w, "isWidgetType", lambda: False)() and w.isVisibleTo(host)]
+    items = [w for w in host.children() if getattr(w, "isWidgetType", lambda: False)() and w.isVisibleTo(host)
+             and w.height() > 0]                 # a line break (``flow_break``) has no height and is no row
     rows: list[int] = []
-    for top in sorted(w.y() for w in items):
-        if not rows or top - rows[-1] > 16:
-            rows.append(top)
+    for bottom in sorted(w.geometry().bottom() for w in items):
+        if not rows or bottom - rows[-1] > 16:
+            rows.append(bottom)
     return rows
 
 
@@ -66,8 +68,8 @@ def _row_of(ctx, name: str) -> int:
     widget = ctx.widgets.get(name)
     while widget.parentWidget() is not host:
         widget = widget.parentWidget()
-    tops = _rows(ctx)
-    return max(k for k, top in enumerate(tops) if widget.y() >= top - 16)
+    bottoms = _rows(ctx)
+    return min(k for k, bottom in enumerate(bottoms) if widget.geometry().bottom() <= bottom + 16)
 
 
 #: The band's rows, the same on every view, as the user laid them out: "Basic/central selectors need to go together

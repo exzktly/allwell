@@ -218,7 +218,10 @@ class ControlBand(QWidget):
 
         self._actions = QHBoxLayout()
         self._actions.setSpacing(s.sm)
-        self._actions.setAlignment(Qt.AlignBottom)
+        # Level with the first line's controls: below where a label sits, at the top of a wrapped band (not at its
+        # bottom, under the last line).
+        self._actions.setAlignment(Qt.AlignTop)
+        self._actions.setContentsMargins(0, self.caption_height() + s.xs, 0, 0)
 
         # The scope host takes the slack, which is what pins the actions right.
         #: Scope items pinned to the end of the row — see ``add_scope``.

@@ -13,6 +13,8 @@ from review.data.data_loading import (
 )
 from core.safe import swallow
 from review.domain.significance import p_phrase, significance_stars
+from review.features.stats import _result_rows as _rows
+from review.features.stats import results_table_view as _tables
 from review.features.stats._report import (
     dunnett_lines, effect_size_text, omnibus_lines, paired_lines, two_way_lines,
 )
@@ -1435,11 +1437,8 @@ def invalidate_stats_run(ctx) -> None:
 
 def _fill_result_tables(ctx, group_vals, pair_results, adjusted, show_adjusted, effects) -> None:
     """The Groups and Comparisons tables of a run (``results_table_view``), from the values its report used."""
-    from review.features.stats import _result_rows as rows
-    from review.features.stats import results_table_view as view
-
-    view.fill_table(ctx, view.GROUPS_KEY, rows.group_rows(group_vals))
-    view.fill_table(ctx, view.PAIRS_KEY, rows.pair_rows(pair_results, adjusted, show_adjusted, effects))
+    _tables.fill_table(ctx, _tables.GROUPS_KEY, _rows.group_rows(group_vals))
+    _tables.fill_table(ctx, _tables.PAIRS_KEY, _rows.pair_rows(pair_results, adjusted, show_adjusted, effects))
 
 
 def _stats_write_result(ctx, text: str) -> None:

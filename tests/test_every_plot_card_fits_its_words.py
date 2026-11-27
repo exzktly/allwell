@@ -44,3 +44,75 @@ def test_a_figure_whose_passes_never_settle_stops_asking_for_draws(qtbot, monkey
     for _ in range(10):
         card.canvas.draw()
     assert len(asked) == figure_fit._MAX_ROUNDS
+
+
+def _agg(w_in: float, h_in: float):
+    import matplotlib
+
+    matplotlib.use("agg")
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    fig = Figure(figsize=(w_in, h_in), dpi=100)
+    FigureCanvasAgg(fig)
+    return fig
+
+
+def test_a_title_too_wide_is_made_smaller_then_broken_and_every_word_kept():
+    from review.core import figure_fit
+
+    fig = _agg(2.0, 2.0)
+    ax = fig.add_subplot(1, 1, 1)
+    title = "GFP Mean Intensity (above threshold) ± SEM across replicate wells"
+    ax.set_title(title, fontsize=14)
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    assert figure_fit.fit_text_inside(ax.title, fig, r)
+    box = ax.title.get_window_extent(r)
+    assert box.x0 >= -1 and box.x1 <= fig.bbox.width + 1
+    assert ax.title.get_text().split() == title.split()
+    assert not figure_fit.fit_text_inside(ax.title, fig, r), "a second fit changed what the first settled"
+
+
+def test_a_key_over_a_label_moves_to_where_it_covers_none():
+    from review.core import figure_fit
+
+    fig = _agg(3.0, 2.0)
+    ax = fig.add_subplot(1, 1, 1)
+    ax.plot([0, 1], [0, 1], label="A01")
+    ax.text(0.95, 0.95, "a note in the corner", transform=ax.transAxes, ha="right", va="top")
+    legend = ax.legend(loc="upper right")
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    assert figure_fit.keep_keys_off_labels(fig, r)
+    note = ax.texts[0].get_window_extent(r)
+    assert not figure_fit._overlaps(legend.get_window_extent(r), note)
+
+
+def test_rows_of_panels_open_apart_when_a_label_runs_into_the_title_below():
+    from review.core import figure_fit
+
+    fig = _agg(3.0, 3.0)
+    top, bottom = fig.add_subplot(2, 1, 1), fig.add_subplot(2, 1, 2)
+    fig.subplots_adjust(hspace=0.1)                # close enough that the label passes the title, onto the panel
+    top.set_xlabel("Time (hours)", fontsize=12)
+    bottom.set_title("Events above threshold", fontsize=12)
+    fig.canvas.draw()
+    before = fig.subplotpars.hspace
+    assert figure_fit.keep_rows_apart(fig, fig.canvas.get_renderer())
+    assert fig.subplotpars.hspace > before
+
+
+def test_a_title_a_little_too_wide_is_only_made_smaller():
+    from review.core import figure_fit
+
+    probe = _agg(10.0, 2.0)
+    wide = probe.text(0, 0, "Fraction of cells above threshold", fontsize=14)
+    probe.canvas.draw()
+    width_in = wide.get_window_extent(probe.canvas.get_renderer()).width / 100.0
+    fig = _agg(width_in / 1.2, 2.0)                # the title a fifth wider than the figure
+    ax = fig.add_axes((0, 0.1, 1, 0.7))
+    ax.set_title("Fraction of cells above threshold", fontsize=14, loc="left")
+    fig.canvas.draw()
+    assert figure_fit.fit_text_inside(ax._left_title, fig, fig.canvas.get_renderer())
+    assert "\n" not in ax._left_title.get_text() and ax._left_title.get_fontsize() < 14

@@ -169,7 +169,6 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     # widget-side theme styling that setPlotTheme already applied. Let
     # PlotCard.setPlotTheme's own apply_axes_style walk handle spines / grid /
     # ticks / title / labels for the existing axes.
-    card.setStatsChipVisible(False)
     from review.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="line-chart",

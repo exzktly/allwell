@@ -163,7 +163,6 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     canvas = reg.register("_response_canvas", card.canvas)
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
     card.pinFigureHeight(int(_FIG_H * _DPI))
-    card.setStatsChipVisible(False)
 
     scroll = reg.register("_response_scroll", QScrollArea(parent))
     scroll.setWidgetResizable(True)

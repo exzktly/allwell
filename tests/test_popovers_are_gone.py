@@ -19,12 +19,8 @@ POPOVERS: dict[tuple[str, str], str] = {
         'pending S14: the colour page',
     ('review/features/image_browser/review_image/controller.py', 'pick_review_image_color'):
         'pending S14: the colour page',
-    ('review/features/nanowell/display_range_view.py', 'open_display_range'):
-        'pending S13: the range page',
     ('widgets/lut_selector.py', 'LutSelector._build_popover'):
         'pending S15: the colour-map list as a page',
-    ('widgets/plot_card.py', 'PlotCard._open_stats_popover'):
-        'pending S26: unreachable stats-chip popover, to delete',
     ('widgets/saved_selections_list.py', 'SavedSelectionsList._on_recolour_requested'):
         'pending S14: the colour page',
     ('widgets/saved_selections_list.py', '_SelectionRow._open_compose_popover'):

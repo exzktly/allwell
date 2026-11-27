@@ -422,10 +422,6 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
                     header=False)
     card.setFigureTitle("")
-    try:
-        card.setStatsChipVisible(False)
-    except Exception:
-        swallowed()
     reg.register("_sp_card", card)
     reg.register("_sp_fig", card.figure)
     reg.register("_sp_canvas", card.canvas)

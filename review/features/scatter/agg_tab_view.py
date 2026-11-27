@@ -143,7 +143,6 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_agg_canvas", card.canvas)
     # Error band now lives in the "Display ▾" popover on the control row above.
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_agg_orchestrate(ctx))
-    card.setStatsChipVisible(False)
     from review.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="scatter-chart",

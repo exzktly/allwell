@@ -338,7 +338,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
     card.panelCopied.connect(ctx.notify.set_status)
-    card.setStatsChipVisible(False)
 
     scroll_canvas = reg.register("_bar_scroll_canvas", QScrollArea(bar_right))
     scroll_canvas.setWidgetResizable(True)

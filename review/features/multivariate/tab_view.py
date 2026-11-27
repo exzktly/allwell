@@ -20,7 +20,6 @@ from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import build_plot_save_menu
 from review.features.export.service import export_cell_data_from
 from review.features.multivariate.cell_scope_compute import cell_scope
-from core.safe import swallowed
 from review.features.multivariate import state as mv_state
 from review.features.multivariate import controller as mv_ctrl
 from review.features.multivariate.collect import (
@@ -281,10 +280,6 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
                     header=False)
     card.setFigureTitle("")
-    try:
-        card.setStatsChipVisible(False)
-    except Exception:
-        swallowed()
     reg.register("_mv_card", card)
     reg.register("_mv_fig", card.figure)
     reg.register("_mv_canvas", card.canvas)

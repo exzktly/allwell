@@ -229,7 +229,6 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # No error-band controls here: the per-cell scatter draws individual points,
     # so SEM/SD has no meaning (it belongs only on the aggregate scatter).
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_orchestrate(ctx))
-    card.setStatsChipVisible(False)
     from review.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     # Wrap the card in a vertical scroll area: in "Separate axes" mode the card
     # is given a per-panel minimum height (see _setup_scatter_axes) so stacked

@@ -141,13 +141,10 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # no separate card-controls row beneath the header.
 
     # The Publication↔Screen toggle is wired through plot_style.apply_ax_style
-    # (it consults card.plotTheme() via ax.figure._plot_card). The stats chip is
-    # left hidden — its statsChanged signal isn't wired to typed state yet (the
-    # error band lives on the controls row above; Mean/Median is unsupported).
+    # (it consults card.plotTheme() via ax.figure._plot_card).
     card.plotThemeChanged.connect(lambda _m: redraw_app(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
     card.panelCopied.connect(ctx.notify.set_status)
-    card.setStatsChipVisible(False)
 
     scroll = reg.register("_line_scroll_canvas", QScrollArea(parent))
     scroll.setWidgetResizable(True)

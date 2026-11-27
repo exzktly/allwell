@@ -260,7 +260,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # use plot_style.apply_ax_style (it has its own inline ax styling), so a
     # redraw would wipe the widget-side theme styling that setPlotTheme already
     # applied. Let PlotCard.setPlotTheme's apply_axes_style walk stand.
-    card.setStatsChipVisible(False)
     # Deliberately *not* gated on the plate selection. This page draws whatever
     # its layout holds and reads the selection only to outline cells, so gating
     # it that way would hide a fully populated saved heat map the moment the

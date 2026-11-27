@@ -17,7 +17,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
-    QSplitter, QToolButton, QVBoxLayout, QWidget,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from review.features.export.service import export_cell_data_from
@@ -336,13 +336,10 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     st = ctx.state.feature_slice("nanowell")
     reg = ctx.widgets
     plot_area, plot_layout = make_plot_area(parent)
-    # The page is two columns: everything the page shows on the left — the band, the Subset's conditions, the guide,
-    # the figure and its footer — and the site detail on the right, from the top of the page to the bottom, the way
-    # the Heat Map's Layout panel sits beside its band and figure. The splitter lets the two share the width.
-    page_split = QSplitter(Qt.Horizontal, plot_area)
-    page_split.setChildrenCollapsible(False)
-    plot_layout.addWidget(page_split, 1)
-    main = QWidget(page_split)
+    # The page is one column: the band, the guide, the figure and its footer. The site detail is not part of it:
+    # it is the Detail tab of the window's inspector, beside the page at a desk and in the Controls sheet on a phone.
+    main = QWidget(plot_area)
+    plot_layout.addWidget(main, 1)
     layout = QVBoxLayout(main)
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
@@ -555,7 +552,8 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     load_timer.timeout.connect(lambda: nwc.run_queued_load(ctx))
     reg.register("_nw_load_timer", load_timer)
 
-    detail = QWidget(page_split)
+    # Built hidden, in no layout: the inspector borrows it as its Detail tab and gives it back here.
+    detail = QWidget(main)
     detail_layout = QVBoxLayout(detail)
     detail_layout.setContentsMargins(0, 0, 0, 0)
     detail_card = PlotCard(detail, figsize=(_DETAIL_W, _DETAIL_H), constrained=False, header=False)
@@ -578,10 +576,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     detail_layout.addWidget(strip_card, 1)
     detail.hide()
     reg.register("_nw_detail_pane", detail)
-    page_split.addWidget(main)
-    page_split.addWidget(detail)
-    page_split.setStretchFactor(0, 3)
-    page_split.setStretchFactor(1, 2)
     # The card goes into the empty-state stack inside a host of its own, as it went in inside the splitter before the
     # detail moved out to the page's right column: a stack resizes its page directly while showing its placeholder, and
     # the card as that page was laid out a few pixels across, so the first draw packed the swarms for no room at all.
@@ -604,11 +598,14 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     layout.addWidget(figures, 1)
     layout.addWidget(build_details_panel(ctx, plot_area))  # the Distribution's footer, out of its figure
 
-    show_detail = nw_phone.detail_placement(card, detail, detail_layout, strip_card,
-                                            desk=page_split, phone=(layout, figures),
-                                            redraw_figure=lambda: nwc.redraw(ctx),
-                                            refit_strip=lambda: nwc.refit_crop_strip(ctx),
-                                            refit_ms=_REFIT_MS)
+    show_detail = _detail_tab(ctx, detail, card)
+    # The crop strip wraps its crops to its own shape in phone layout (``_phone.strip_columns_for``): laid out again
+    # once a resize of it settles — the sheet opening, the phone turned, arrive as a burst.
+    strip_refit = QTimer(strip_card)
+    strip_refit.setSingleShot(True)
+    strip_refit.setInterval(_REFIT_MS)
+    strip_refit.timeout.connect(lambda: nwc.refit_crop_strip(ctx))
+    strip_card.canvas.mpl_connect("resize_event", lambda _event: strip_refit.start())
 
     def show_computing() -> None:
         computing.setVisible(nwc.computing_shown(ctx))
@@ -961,25 +958,54 @@ def _cells_box(ctx, name: str) -> QCheckBox:
     return box
 
 
-def _detail_header(ctx, parent) -> QHBoxLayout:
-    """The site detail's title row, with a close button (✕) that clears the nanowell selection — which is what hides
-    the pane (``controller.redraw_detail`` shows it only while a selected nanowell has a series). Without it the only
-    way to dismiss the pane was a click on empty space in the plot, which nothing on screen says."""
-    from ui import theme
+#: The Detail tab's title for the site detail, and its button that clears the nanowell selection.
+DETAIL_TITLE = "Selected nanowell"
+CLEAR_SELECTION_TEXT = "Clear selection"
 
+
+def _detail_tab(ctx, detail: QWidget, card):
+    """``show_detail(on)``: the site detail as the inspector's Detail tab while a nanowell is selected.
+
+    A nanowell **just picked** opens the inspector on the tab. A redraw of the one already picked — a setting
+    changed, its crops arriving — updates the detail in place and never re-opens an inspector the user closed: the
+    detail is redrawn on every redraw of the page, and one that re-opened itself each time could not be closed at
+    all. With no nanowell selected the tab is emptied."""
+    from review.core import inspector_service
+
+    opened_for: list = [None]
+
+    def show_detail(on: bool) -> None:
+        st = ctx.state.feature_slice("nanowell")
+        picked = tuple(tuple(site) for site in (st.selected_sites or [])) if on else None
+        if picked is None:
+            if opened_for[0] is not None or inspector_service.inspector(ctx).tabWidget("detail") is detail:
+                inspector_service.clear_detail(ctx)
+            opened_for[0] = None
+            return
+        fresh = picked != opened_for[0]
+        opened_for[0] = picked
+        inspector_service.show_detail(ctx, detail, DETAIL_TITLE, anchor=card, fill=True, reveal=fresh)
+
+    return show_detail
+
+
+def _detail_header(ctx, parent) -> QHBoxLayout:
+    """The site detail's title row, with **Clear selection** — which empties the Detail tab
+    (``controller.redraw_detail`` fills it only while a selected nanowell has a series). Without it the only way to
+    deselect was a click on empty space in the plot, which nothing on screen says. It is not a close button: the
+    inspector's header has the one Close, which leaves the selection as it is."""
     row = QHBoxLayout()
     row.setContentsMargins(0, 0, 0, 0)
-    title = QLabel("Selected nanowell", parent)
+    title = QLabel(DETAIL_TITLE, parent)
     title.setObjectName("Caption")
-    close = QPushButton("✕", parent)
-    close.setObjectName("Ghost")
-    close.setFixedWidth(theme.Metrics.icon_btn_w)
-    close.setToolTip("Close the site detail and clear the nanowell selection")
-    close.clicked.connect(lambda _=False: nwc.clear_selection(ctx))
-    ctx.widgets.register("_nw_detail_close_btn", close)
+    clear = QPushButton(CLEAR_SELECTION_TEXT, parent)
+    clear.setProperty("variant", "secondary")
+    clear.setToolTip("Deselect the nanowell: its rings and this detail go")
+    clear.clicked.connect(lambda _=False: nwc.clear_selection(ctx))
+    ctx.widgets.register("_nw_detail_clear_btn", clear)
     row.addWidget(title)
     row.addStretch(1)
-    row.addWidget(close)
+    row.addWidget(clear)
     return row
 
 

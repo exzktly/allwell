@@ -207,3 +207,58 @@ def test_deleting_the_inspector_gives_its_pages_back(qtbot):
 def test_it_declares_itself_to_the_form_registry(insp):
     assert form_registry.kind_of(insp) == FORM_KIND
     assert insp in form_registry.declared(FORM_KIND)
+
+
+def test_a_filled_tab_widget_gets_exactly_the_tab_s_height_even_when_it_wraps(insp, qtbot):
+    """A widget lent with ``fill`` (a figure, which has no height of its own to
+    ask for) takes its tab's height. One that holds a wrapping row has a height
+    for its width, and a scroll area gives such content the sum of everything's
+    *preferred* height instead: the Nanowells site detail was 1,547 px in an
+    820 px tab, scrolled, its crops under the fold. The tall child here prefers
+    1,500 px and can live in 40."""
+    from PySide6.QtCore import QSize
+
+    from widgets.flow_layout import FlowLayout
+
+    class Tall(QWidget):
+        def sizeHint(self):
+            return QSize(200, 1500)
+
+        def minimumSizeHint(self):
+            return QSize(40, 40)
+
+    home = QWidget()
+    qtbot.addWidget(home)
+    home_lay = QVBoxLayout(home)
+    panel = QWidget(home)
+    lay = QVBoxLayout(panel)
+    row = QWidget(panel)
+    flow = FlowLayout(row)
+    for text in ("one", "two", "three"):
+        flow.addWidget(QLabel(text))
+    lay.addWidget(row)
+    tall = Tall(panel)
+    lay.addWidget(tall, 1)
+    home_lay.addWidget(panel)
+    assert lay.hasHeightForWidth(), "premise: the panel's layout wraps"
+
+    insp.resize(320, 600)
+    insp.show()
+    qtbot.waitExposed(insp)
+    insp.setTabWidget("style", panel, fill=True)
+    insp.showTab("style")
+    slot = insp.slotOf(panel)
+    assert slot is not None
+    qtbot.waitUntil(lambda: panel.height() > 100 and slot.verticalScrollBar().maximum() == 0, timeout=2000)
+    assert panel.height() <= slot.viewport().height()
+    assert panel.height() >= slot.viewport().height() - 40, "it has the tab's height, not a strip of it"
+    assert tall.height() > 100, "the stretching child was given the room"
+
+    # Given back, it is in its own layout again and nothing of the box is left.
+    insp.setTabWidget("style", None)
+    assert panel.parentWidget() is home and home_lay.indexOf(panel) == 0
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    from widgets.inspector import _FillBox
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    assert not slot.widget().findChildren(_FillBox), "an empty box was left in the tab for every loan"

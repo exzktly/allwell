@@ -1,4 +1,5 @@
-"""The Nanowells page's site detail in phone layout, through the page's real builder in a minimal shell.
+"""The Nanowells page's site detail — the inspector's Detail tab — through the page's real builder in a minimal
+shell, at a desk and in phone layout.
 
 Rendered at phone size, selecting one nanowell squeezed the Distribution figure into a strip a few pixels wide beside
 the site detail, the detail's heading still said "Selected nanowells", the row of crop controls was cut to "Crops ove",
@@ -29,22 +30,26 @@ def page(qtbot, tmp_path):
     return ctx
 
 
-def test_on_a_phone_the_detail_takes_the_page_and_close_brings_the_figure_back(qtbot, page, phone):
+def test_on_a_phone_the_detail_is_in_the_controls_sheet_and_the_figure_keeps_the_page(qtbot, page, phone):
+    """The detail used to take the page from the figure on a phone. It is the inspector's Detail tab now, and on a
+    phone the inspector is the Controls sheet: the figure stays where it is, with its dots still there to tap."""
+    from review.core import inspector_service as svc
+    from tests.test_nanowell_subset_fits_a_phone import _Sheet
+
+    sheet = _Sheet(qtbot, page, (432, 818))
+    svc.set_phone_host(page, sheet)
     st = _loaded(qtbot, page)
     card, detail = page.widgets.get("_nw_card"), page.widgets.get("_nw_detail_pane")
     _click_dot(qtbot, page, ("A01", 1, 0))
     assert st.selected_sites == [["A01", 1, 0]]
-    assert detail.isVisible() and card.isHidden(), "the figure stayed beside the detail on a phone"
-    page.widgets.get("_nw_detail_close_btn").click()
-    assert st.selected_sites == [] and detail.isHidden() and not card.isHidden()
-    fig = page.widgets.get("_nw_fig")
-    qtbot.waitUntil(lambda: any(c.get_gid() == "nw-dots" for ax in fig.axes for c in ax.collections), timeout=5000)
-
-
-def test_at_a_desk_the_detail_opens_beside_the_figure(qtbot, page):
-    _loaded(qtbot, page)
-    _click_dot(qtbot, page, ("A01", 1, 0))
-    assert page.widgets.get("_nw_detail_pane").isVisible() and page.widgets.get("_nw_card").isVisible()
+    insp = svc.inspector(page)
+    assert sheet.inspector_is_open() and insp.currentTab() == "detail" and insp.tabWidget("detail") is detail
+    assert sheet.holder.isAncestorOf(detail) and detail.isVisibleTo(sheet.holder)
+    assert insp.wantedSize() == "half", "the detail asks for the whole sheet, covering the plot it describes"
+    assert not card.isHidden() and card.isVisibleTo(page.window), "the figure left the page for the detail"
+    page.widgets.get("_nw_detail_clear_btn").click()
+    assert st.selected_sites == [] and insp.tabWidget("detail") is None
+    assert not card.isHidden()
 
 
 def _window_rect(widget):
@@ -53,33 +58,72 @@ def _window_rect(widget):
     return QRect(widget.mapTo(widget.window(), widget.rect().topLeft()), widget.size())
 
 
-def test_at_a_desk_the_detail_is_a_right_column_from_the_top_of_the_page_to_the_bottom(qtbot, page):
-    """The site detail is the page's right column, as the Heat Map's Layout panel is: level with the top of the control
-    band and reaching the bottom of the page, with the band, the figure and its footer all to its left. Wrong
-    implementation: the detail beside the figure alone, under the band — its top then sits below the band's bottom.
-    Turned to phone layout and back, it returns to that column rather than staying where the phone put it."""
+def test_at_a_desk_the_detail_is_the_inspector_s_tab_beside_the_whole_page(qtbot, page):
+    """The site detail is the inspector's Detail tab: beside the page from its top to its bottom, with the band, the
+    figure and its footer all to its left. Wrong implementation: the detail still a column of the page's own — then
+    it is not inside the inspector, and Style opened beside it makes a second panel."""
+    from review.core import inspector_service as svc
     from widgets.control_band import ControlBand
 
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("A01", 1, 0))
     detail, card = page.widgets.get("_nw_detail_pane"), page.widgets.get("_nw_card")
-    band = next(b for b in detail.window().findChildren(ControlBand) if b.isVisible())
+    insp = svc.inspector(page)
+    assert svc.is_open(page) and insp.currentTab() == "detail" and insp.tabWidget("detail") is detail
+    band = next(b for b in page.window.findChildren(ControlBand) if b.isVisible())
+    qtbot.waitUntil(lambda: detail.isVisible() and detail.width() > 0)
+    d, i, b, c = _window_rect(detail), _window_rect(insp), _window_rect(band), _window_rect(card)
+    column = _window_rect(band.parentWidget())       # the page's column: band, figure and footer
+    assert i.top() <= b.top(), f"the inspector starts at y={i.top()}, below the band's top at y={b.top()}"
+    assert i.bottom() >= column.bottom(), f"the inspector ends at y={i.bottom()}, above the page's at {column.bottom()}"
+    assert b.right() < i.left() and c.right() < i.left(), "the band or the figure runs under the inspector"
+    # The detail has exactly the tab's height: a figure asks for none of its own, and given its preferred height
+    # instead it was 1,547 px in an 820 px tab, scrolled, its crops under the fold.
+    slot = insp.slotOf(detail)
+    qtbot.waitUntil(lambda: slot.verticalScrollBar().maximum() == 0, timeout=2000)
+    assert d.bottom() <= i.bottom(), f"the detail runs to y={d.bottom()}, past the inspector's {i.bottom()}"
+    assert d.height() >= i.height() * 0.6, f"the detail is {d.height()} px of the inspector's {i.height()}"
+    strip = page.widgets.get("_nw_strip_canvas")
+    assert _window_rect(strip).bottom() <= i.bottom() and strip.height() > 40, "the crop strip is under the fold"
 
-    def check() -> None:
-        qtbot.waitUntil(lambda: detail.isVisible() and detail.width() > 0)
-        d, b, c = _window_rect(detail), _window_rect(band), _window_rect(card)
-        column = _window_rect(band.parentWidget())       # the page's column: band, figure and footer
-        assert d.top() <= b.top(), f"the detail starts at y={d.top()}, below the band's top at y={b.top()}"
-        assert d.bottom() >= column.bottom(), f"the detail ends at y={d.bottom()}, above the page's at {column.bottom()}"
-        assert b.right() < d.left() and c.right() < d.left(), "the band or the figure runs under the detail"
 
-    check()
-    phone_layout.set_on(True)
-    try:
-        assert detail.isVisible() and card.isHidden()
-    finally:
-        phone_layout.set_on(False)
-    check()
+def test_picking_another_nanowell_updates_the_same_detail_in_place(qtbot, page):
+    from review.core import inspector_service as svc
+
+    st = _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    detail = page.widgets.get("_nw_detail_pane")
+    fig = page.widgets.get("_nw_detail_fig")
+    named = lambda: [t.get_text().split(" — ")[0] for t in fig.texts if " — " in t.get_text()]   # noqa: E731
+    first = named()
+    assert len(first) == 1 and first[0].startswith("A01"), first
+    _click_dot(qtbot, page, ("B01", 0, 0))
+    assert st.selected_sites == [["B01", 0, 0]]
+    assert svc.inspector(page).tabWidget("detail") is detail, "a second detail was built for the second pick"
+    second = named()
+    assert len(second) == 1 and second[0].startswith("B01"), f"the detail names {second}, not the nanowell just picked"
+
+
+def test_a_redraw_never_reopens_a_detail_the_user_closed_but_a_new_pick_does(qtbot, page):
+    """The detail is redrawn on every redraw of the page (a setting changed, its crops arriving). Wrong
+    implementation: opening the inspector on each of those — it could then not be closed at all while a nanowell
+    stayed selected."""
+    from review.core import inspector_service as svc
+    from review.features.nanowell import controller as nwc
+
+    st = _loaded(qtbot, page)
+    _click_dot(qtbot, page, ("A01", 1, 0))
+    assert svc.is_open(page)
+    svc.close(page)
+    nwc.redraw(page)
+    nwc.redraw_detail(page)
+    qtbot.wait(50)
+    assert st.selected_sites == [["A01", 1, 0]], "closing the inspector is not clearing the selection"
+    assert not svc.is_open(page), "a redraw re-opened the inspector the user closed"
+    # The tab is still the selected nanowell's: opening the inspector again finds it there.
+    assert svc.inspector(page).tabWidget("detail") is page.widgets.get("_nw_detail_pane")
+    _click_dot(qtbot, page, ("B01", 0, 0))
+    assert svc.is_open(page) and svc.inspector(page).currentTab() == "detail"
 
 
 def test_the_heading_names_one_nanowell(qtbot, page):
@@ -214,19 +258,3 @@ def test_the_footer_is_broken_to_the_figure_s_width_whatever_the_mode(phone):
     assert max(narrow_ends) <= 1.0, narrow_ends
     phone_layout.set_on(False)
     assert _footer_extents(2.6) == (narrow_lines, narrow_ends), "the mode changed what the renderer drew"
-
-
-def test_switching_phone_layout_with_a_nanowell_selected_re_places_the_figure_and_the_detail(qtbot, page):
-    """The layout flips while a nanowell stays selected: the detail takes the page on a phone and sits beside the
-    figure again at the desk, with no click in between. Wrong implementation: a page that places its detail only
-    when a dot is clicked, which every other test here passes."""
-    _loaded(qtbot, page)
-    _click_dot(qtbot, page, ("A01", 1, 0))
-    card, detail = page.widgets.get("_nw_card"), page.widgets.get("_nw_detail_pane")
-    assert detail.isVisible() and card.isVisible(), "at the desk the detail sits beside the figure"
-    phone_layout.set_on(True)
-    try:
-        assert detail.isVisible() and card.isHidden(), "the detail did not take the page when phone layout turned on"
-    finally:
-        phone_layout.set_on(False)
-    assert detail.isVisible() and card.isVisible(), "the figure did not come back when phone layout turned off"

@@ -62,7 +62,7 @@ def test_closing_the_site_detail_removes_the_rings_without_rebuilding_the_figure
     _click_dot(qtbot, page, ("A01", 1, 0))
     assert _rings(page) == _dots_of(page, ("A01", 1, 0)) and _rings(page)
     before = len(counted)
-    close = page.widgets.get("_nw_detail_close_btn")
+    close = page.widgets.get("_nw_detail_clear_btn")
     qtbot.waitUntil(lambda: close.isVisible(), timeout=5000)
     QTest.mouseClick(close, Qt.LeftButton)
     assert page.state.feature_slice("nanowell").selected_sites == []

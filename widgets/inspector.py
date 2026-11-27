@@ -40,7 +40,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import shiboken6
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLayout, QPushButton, QScrollArea, QSizePolicy,
     QStackedWidget, QToolButton, QVBoxLayout, QWidget,
@@ -73,6 +73,8 @@ class _Loan:
     widths: tuple[int, int]
     hidden: bool
     children: list[tuple[QWidget, tuple[int, int]]] = field(default_factory=list)
+    #: The box a widget lent with ``fill`` sits in (:class:`_FillBox`).
+    box: QWidget | None = None
 
 
 @dataclass
@@ -86,6 +88,41 @@ class _Page:
 
 def _alive(obj) -> bool:
     return obj is not None and shiboken6.isValid(obj)
+
+
+class _FillBox(QWidget):
+    """Holds one lent widget at exactly the box's own size.
+
+    A widget lent with ``fill`` takes its tab's whole height. Put straight into
+    the slot's layout it does not, when anything inside it wraps (a flow of
+    controls): the layout then has a height for its width, and a scroll area
+    sizes such content to that height — the sum of everything's *preferred*
+    height, a figure's included — and scrolls it (measured: a 1,547 px panel
+    in an 820 px tab). The box has no layout and asks only for its widget's
+    minimum, so the slot gives it the viewport and it gives that to the
+    widget."""
+
+    def __init__(self, widget: QWidget, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._widget = widget
+        widget.setParent(self)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def _need(self) -> QSize:
+        w = self._widget
+        return w.minimumSizeHint() if _alive(w) and w.parentWidget() is self else QSize(0, 0)
+
+    def sizeHint(self) -> QSize:  # Qt override
+        return self._need()
+
+    def minimumSizeHint(self) -> QSize:  # Qt override
+        return self._need()
+
+    def resizeEvent(self, event) -> None:  # Qt naming
+        super().resizeEvent(event)
+        w = self._widget
+        if _alive(w) and w.parentWidget() is self:
+            w.setGeometry(self.rect())
 
 
 def _widths(w: QWidget) -> tuple[int, int]:
@@ -426,7 +463,12 @@ class Inspector(QWidget):
         """The scroll area a lent widget sits in (a host fits its content)."""
         for slot in (*self._tab_slots.values(),
                      *(p.slot for st in self._pages.values() for p in st)):
-            if _alive(slot) and slot.widget() is not None and widget.parentWidget() is slot.widget():
+            if not _alive(slot) or slot.widget() is None:
+                continue
+            parent = widget.parentWidget()
+            if isinstance(parent, _FillBox):
+                parent = parent.parentWidget()
+            if parent is slot.widget():
                 return slot
         return None
 
@@ -448,7 +490,12 @@ class Inspector(QWidget):
                      if c.parentWidget() is widget] if free_children else [])
         loan = _Loan(widget, home, layout, index, _widths(widget), widget.isHidden(), children)
         self._loans.append(loan)
-        slot.widget().layout().insertWidget(0, widget, 100 if fill else 0)
+        if fill:
+            loan.box = _FillBox(widget, slot.widget())
+            slot.widget().layout().insertWidget(0, loan.box, 100)
+            loan.box.show()
+        else:
+            slot.widget().layout().insertWidget(0, widget, 0)
         for w in (widget, *(c for c, _ in children)):
             w.setMinimumWidth(0)
             w.setMaximumWidth(_QWIDGETSIZE_MAX)
@@ -485,6 +532,9 @@ class Inspector(QWidget):
             widget.setVisible(not loan.hidden and loan.layout is not None)
         except RuntimeError:
             pass  # the owner went while its widget was out
+        if loan.box is not None and _alive(loan.box):
+            loan.box.hide()
+            loan.box.deleteLater()      # empty now: the widget went home above
 
     def _drop(self, tab: str, page: _Page) -> None:
         stack = self._pages.get(tab, [])

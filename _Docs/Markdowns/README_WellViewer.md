@@ -6737,7 +6737,7 @@ The **Nanowell** box goes to one nanowell, the same way on every view. Type its 
 addresses are written on the images (`q,r`, for example `-2,3`) or as a ring label such as `3.7` — and lead it with
 a well to go to a nanowell in another well: `B04 2,-1` (also `B04: 2,-1`, `b4/3.7`). Without a well, the address is
 in the well the **Well** control shows. **Origin** goes to nanowell `0,0`. On every view the nanowell is then
-selected: its well becomes the page's well, the site detail opens as a panel down the right of the page with its
+selected: its well becomes the page's well, the site detail opens as the inspector's Detail tab with its
 plots over time and its crops (and **Pop out** shows it large), and then each view shows where it is —
 
 - **Distribution** rings its dot in each timepoint's swarm;
@@ -7590,12 +7590,13 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   other settings; a page saved on the old *Array map* or *Array QC* view opens on the Array view with the
   layers that view drew.
 
-**Site detail.** Click a dot to open that nanowell's history in a panel down the right of the page, from the top
-of the controls to the bottom of the figure — drag its edge to share the width with the plot: cell count,
+**Site detail.** Click a dot to open that nanowell's history as the **Detail** tab of the inspector, down the right
+of the window — drag its edge to share the width with the page: cell count,
 confluence, cell fluorescence and nanowell fluorescence against time. One nanowell is shown at a time: clicking another dot
-shows that one instead, whatever keys are held. The **✕** at the top of the site detail closes it and clears the
-selection, as does clicking empty space on the plot. In phone layout the site detail takes the whole screen while a
-nanowell is selected, and its crops wrap into rows; **✕** brings the plot back. A timepoint where the
+shows that one instead, whatever keys are held. **Clear selection** at the top of the site detail deselects the
+nanowell and empties the tab, as does clicking empty space on the plot; the inspector's **Close** closes the
+inspector and leaves the nanowell selected. In phone layout the site detail opens in the ⚙ Controls sheet over the
+lower half of the screen, with the plot still above it, and its crops wrap into rows. A timepoint where the
 nanowell has no number is a gap and a hatched band, with its state written above the plot — never a zero.
 Under the plots, a strip of crops shows the selected nanowell at each timepoint, cut at full resolution
 from the image the run segmented (the well's archive in `in/`). When that archive is not beside the dataset

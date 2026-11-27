@@ -2609,7 +2609,7 @@ def show_selected_in_popout(ctx) -> None:
 
 
 def clear_selection(ctx) -> None:
-    """Clear the nanowells selected for the site detail, which closes the pane — the site detail's ✕ button."""
+    """Clear the nanowells selected for the site detail, which empties the Detail tab — its **Clear selection**."""
     st = _state(ctx)
     if st is None or not st.selected_sites:
         return

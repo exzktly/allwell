@@ -382,14 +382,23 @@ def close(ctx) -> None:
     _close_desk(h)
 
 
-def show_detail(ctx, widget: QWidget, title: str, *, anchor: QWidget | None = None) -> bool:
+def show_detail(ctx, widget: QWidget, title: str, *, anchor: QWidget | None = None,
+                fill: bool = False, reveal: bool = True) -> bool:
     """Show *widget* on the Detail tab — the one thing just picked. Picking
-    another calls this again with the same widget, updated by its owner."""
+    another calls this again with the same widget, updated by its owner.
+
+    *fill* gives the widget the tab's whole height (a figure, which has no
+    height of its own to ask for). With *reveal* false the widget becomes the
+    Detail tab's without the inspector being opened or brought to that tab:
+    for an owner redrawing the thing already picked, which must not re-open an
+    inspector the user closed."""
     serve_widget(ctx, anchor)
     h = host(ctx)
     _fill_roots(ctx, h)
     insp = h.inspector
-    insp.setTabWidget("detail", widget)
+    insp.setTabWidget("detail", widget, fill=fill)
+    if not reveal:
+        return insp.tabWidget("detail") is widget
     if not _open_host(ctx, h):
         return False
     h.wanted = True

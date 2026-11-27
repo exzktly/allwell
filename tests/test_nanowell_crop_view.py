@@ -186,7 +186,7 @@ def test_the_site_detail_s_close_button_clears_the_selection_and_hides_the_pane(
     _loaded(qtbot, page)
     _click_dot(qtbot, page, ("A01", 1, 0))
     pane = page.widgets.get("_nw_detail_pane")
-    button = page.widgets.get("_nw_detail_close_btn")
+    button = page.widgets.get("_nw_detail_clear_btn")
     qtbot.waitUntil(lambda: pane.isVisible() and button.isVisible() and button.width() > 0, timeout=5000)
     qtbot.mouseClick(button, Qt.LeftButton)
     assert page.state.feature_slice("nanowell").selected_sites == []

@@ -174,3 +174,57 @@ def test_values_too_crowded_to_read_are_hidden_and_the_panel_says_so_and_they_re
     figure_fit.keep_values_apart(fig, fig.canvas.get_renderer())
     assert all(t.get_visible() for t in values)
     assert figure_fit.HIDDEN_GID not in [t.get_gid() for t in ax.texts]
+
+
+def test_a_y_label_taller_than_its_panel_is_fitted_to_it():
+    from review.core import figure_fit
+
+    fig = _agg(4.0, 1.2)
+    ax = fig.add_subplot(1, 1, 1)
+    ax.set_ylabel("GFP Mean Intensity (log10, +1)", fontsize=12)
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    assert figure_fit.fit_label_to_axis(ax, r)
+    assert ax.yaxis.label.get_window_extent(r).height <= ax.get_window_extent(r).height + 1
+    assert ax.yaxis.label.get_text().split() == "GFP Mean Intensity (log10, +1)".split()
+
+
+def test_an_x_label_under_the_figure_raises_the_bottom_margin():
+    from review.core import figure_fit
+
+    fig = _agg(3.0, 2.0)
+    ax = fig.add_subplot(1, 1, 1)
+    fig.subplots_adjust(bottom=0.02)
+    ax.set_xlabel("GFP mean intensity", fontsize=12)
+    fig.canvas.draw()
+    assert figure_fit.keep_labels_on_figure(fig, fig.canvas.get_renderer())
+    fig.canvas.draw()
+    assert ax.xaxis.label.get_window_extent(fig.canvas.get_renderer()).y0 >= -0.5
+
+
+def test_the_tick_check_pairs_each_tick_with_its_own_label(qtbot):
+    """The tour's tick check zipped the ticks with ``get_majorticklabels`` — the shown labels only — so once a label
+    was thinned it paired a tick with another's label and reported overlaps that were not drawn."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+    from matplotlib.figure import Figure
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    from review.core import figure_fit
+    from tests._layout_checks import figure_tick_overlap
+
+    window = QWidget()
+    qtbot.addWidget(window)
+    canvas = FigureCanvasQTAgg(Figure(figsize=(2.0, 1.0)))
+    QVBoxLayout(window).addWidget(canvas)
+    window.resize(220, 120)
+    window.show()
+    ax = canvas.figure.add_subplot(1, 1, 1)
+    ax.set_xticks(range(-10, 41))                  # ticks beyond the limits too: matplotlib keeps their labels
+    ax.set_xlim(0, 30)
+    canvas.draw()
+    assert figure_tick_overlap(window), "crowded labels not found"
+    figure_fit.thin_crowded_ticks(canvas.figure, canvas.get_renderer())
+    assert figure_tick_overlap(window) == []
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.processEvents()                   # the canvas's pending idle draw, while it is still alive

@@ -102,14 +102,26 @@ def keep_labels_on_figure(fig, renderer) -> bool:
              if ax.yaxis.label.get_visible() and ax.yaxis.label.get_text().strip()]
     lefts += [t.get_window_extent(renderer).x0 for ax in placed for t in ax.get_yticklabels()
               if t.get_visible() and t.get_text().strip()]
+    moved = False
     short = -min(lefts, default=0.0)
-    if short <= 0.5 or fig.bbox.width <= 0:
-        return False
-    left = fig.subplotpars.left + (short + 4.0) / fig.bbox.width
-    if left >= fig.subplotpars.right - 0.2:
-        return False
-    fig.subplots_adjust(left=left)
-    return True
+    if short > 0.5 and fig.bbox.width > 0:
+        left = fig.subplotpars.left + (short + 4.0) / fig.bbox.width
+        if left < fig.subplotpars.right - 0.2:
+            fig.subplots_adjust(left=left)
+            moved = True
+    # The same at the foot: an x label (or its tick labels) under the figure's lower edge — a desk card's figure
+    # short beside the open inspector cut "GFP mean intensity" off under the plot.
+    bottoms = [ax.xaxis.label.get_window_extent(renderer).y0 for ax in placed
+               if ax.xaxis.label.get_visible() and ax.xaxis.label.get_text().strip()]
+    bottoms += [t.get_window_extent(renderer).y0 for ax in placed for t in ax.get_xticklabels()
+                if t.get_visible() and t.get_text().strip()]
+    low = -min(bottoms, default=0.0)
+    if low > 0.5 and fig.bbox.height > 0:
+        bottom = fig.subplotpars.bottom + (low + 4.0) / fig.bbox.height
+        if bottom < fig.subplotpars.top - 0.2:
+            fig.subplots_adjust(bottom=bottom)
+            moved = True
+    return moved
 
 
 # ── words off the figure, a key over a label, a label into the next panel ────
@@ -290,16 +302,55 @@ def _say_hidden(ax, texts, hide: bool) -> bool:
     return was != hide
 
 
+def fit_label_to_axis(ax, renderer) -> bool:
+    """An axis label no longer than its axis: a y label taller than its panel ran past the figure's top or into the
+    x label under it (Line Graphs, Scatter). Made smaller, down to :data:`_SMALLEST`, then broken at spaces to the
+    axis' length; fitted from the label as its renderer wrote it. Returns whether either label changed."""
+    changed = False
+    box = ax.get_window_extent(renderer)
+    for label, along in ((ax.xaxis.label, box.width), (ax.yaxis.label, box.height)):
+        if not label.get_visible() or not label.get_text().strip() or along <= 4:
+            continue
+        now = (label.get_text(), label.get_fontsize())
+        if getattr(label, "_aw_axis_out", None) != now:
+            label._aw_axis_src = now
+        text, size = label._aw_axis_src
+        label.set_text(text)
+        label.set_fontsize(size)
+
+        def length() -> float:
+            e = label.get_window_extent(renderer)
+            return e.height if label is ax.yaxis.label else e.width
+
+        if length() > along:
+            for share in (0.9, 0.8, 0.7, _SMALLEST):
+                label.set_fontsize(size * share)
+                if length() <= along:
+                    break
+            else:
+                prop = label.get_fontproperties()
+                label.set_text(_greedy(text, lambda t: renderer.get_text_width_height_descent(t, prop, ismath=False)[0],
+                                       along))
+        label._aw_axis_out = (label.get_text(), label.get_fontsize())
+        changed = changed or label._aw_axis_out != now
+    return changed
+
+
 def fit_words(fig, renderer) -> bool:
     """Every text on the figure kept on it, keys moved off labels, rows opened apart. Returns whether anything
     changed."""
     changed = False
     # A panel's cell values are fitted together by ``keep_values_apart``, not one at a time.
     values = {id(t) for ax in fig.axes if len(ax.texts) >= 4 for t in ax.texts if t.get_gid() != HIDDEN_GID}
+    # Axis labels are fitted to their axis by ``fit_label_to_axis`` (and kept on the figure by the margins): two
+    # passes each fitting the same label would each take the other's result for the renderer's.
+    values |= {id(lb) for ax in fig.axes for lb in (ax.xaxis.label, ax.yaxis.label)}
     for t in figure_texts(fig):
         if hasattr(t, "_aw_source") or id(t) in values:    # fits itself as it draws (Nanowells), or a cell value
             continue
         changed = fit_text_inside(t, fig, renderer) or changed
+    for ax in fig.axes:
+        changed = fit_label_to_axis(ax, renderer) or changed
     changed = keep_values_apart(fig, renderer) or changed
     changed = keep_rows_apart(fig, renderer) or changed
     changed = keep_keys_off_labels(fig, renderer) or changed

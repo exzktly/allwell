@@ -36,7 +36,7 @@ class SelectionFooter(QWidget):
         super().__init__(parent)
         self.setObjectName("SelectionFooter")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(0, theme.Spacing.xs, 0, theme.Spacing.xs)
+        lay.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
         lay.setSpacing(theme.Spacing.sm)
 
         self._count = QLabel("No wells selected", self)
@@ -46,13 +46,13 @@ class SelectionFooter(QWidget):
         lay.addWidget(self._count, 1)
 
         self._all = QPushButton("All", self)
-        self._all.setProperty("variant", "default")
+        self._all.setProperty("variant", "quiet")
         self._all.setToolTip(all_tooltip)
         self._all.clicked.connect(lambda _=False: self.selectAllRequested.emit())
         lay.addWidget(self._all)
 
         self._none = QPushButton("None", self)
-        self._none.setProperty("variant", "default")
+        self._none.setProperty("variant", "quiet")
         self._none.setToolTip(none_tooltip)
         self._none.clicked.connect(lambda _=False: self.selectNoneRequested.emit())
         lay.addWidget(self._none)

@@ -18,7 +18,7 @@ import importlib
 #: the app; the app knowing its widgets' rules is the arrow running the right way.
 WIDGET_SHEETS = (
     "widgets.card", "widgets.chip_group", "widgets.collapsible_section", "widgets.empty_state", "widgets.icon_button",
-    "widgets.kbd_hint", "widgets.lut_selector", "widgets.mpl_toolbar", "widgets.plot_card", "widgets.popover",
+    "widgets.kbd_hint", "widgets.lut_selector", "widgets.mode_bar", "widgets.mpl_toolbar", "widgets.plot_card", "widgets.popover",
     "widgets.rail_nav", "widgets.saved_selections_list", "widgets.search_input", "widgets.segmented_control",
     "widgets.stepper", "widgets.toast", "widgets.well_plate_selector",
 )
@@ -28,8 +28,8 @@ def qss(c, t, r) -> str:
     """The rules, from the token classes *c* (``Colors``), *t* (``Typography``) and *r* (``Radii``)."""
     mono = f"font-family: {t.family_mono};" if t.family_mono else ""
     widgets = "".join(importlib.import_module(name).qss() for name in WIDGET_SHEETS)
-    return widgets + f"""
-#StatusBar {{ background-color: {c.titlebar}; border-top: 1px solid {c.border_subtle}; }}
+    from ui import shell_frame
+    return widgets + shell_frame.qss(c) + f"""
 QLabel#VersionPill {{
     background-color: {c.brand}; color: {c.brand_fg}; {mono} font-size: {t.small_size}px;
     font-weight: {t.semibold}; padding: 1px 6px; margin-left: 4px; border-radius: {r.xs}px;

@@ -42,7 +42,8 @@ def _label_colours(nav) -> list[str]:
 
 
 def _expected(selected: str) -> list[str]:
-    return [(theme.Colors.text_primary if k == selected else theme.Colors.text_secondary).lower()
+    # The selected row's ink is the selected fill's own (window style W1, design language §3.1).
+    return [(theme.Colors.selected_fg if k == selected else theme.Colors.text_secondary).lower()
             for k in _KEYS]
 
 

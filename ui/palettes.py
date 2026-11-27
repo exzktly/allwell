@@ -30,7 +30,7 @@ from __future__ import annotations
 #: shared by every palette.
 GREY: dict = {
     "Colors": {
-        "titlebar": "#191B1E", "rail": "#1F2226",
+        "titlebar": "#191B1E", "rail": "#1F2226", "frame": "#0B0D0F",
         # The three surfaces.
         "canvas": "#141618", "card": "#24272C", "control": "#2D3137",
         "hover": "#373C43", "active": "#3E444D",

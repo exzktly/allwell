@@ -20,7 +20,6 @@ from PySide6.QtWidgets import (
 from ui import theme
 from review.core.sidebar_view import build_sidebar
 from review.core.status_view import build_bottom
-from widgets.separator import build_hline_separator
 from review.domain.dataset_name import dataset_display_name
 from widgets.owned_action import owned_action
 from ui import buttons
@@ -494,7 +493,10 @@ def build_ui(win) -> None:
     # height it cost 43px on every Review tab to show one icon; at the tab bar's
     # height the band lines up with the tab row beside it and costs 10px less.
     from widgets.mode_bar import tab_bar_height as _tab_bar_height
+    # The shell's regions are named where they are built, so the theme's W1 rules (``ui/shell_frame``) reach them
+    # at their first polish.
     top = QWidget()
+    top.setObjectName("ShellBand")
     top.setFixedHeight(_tab_bar_height())
     top_layout = QHBoxLayout(top)
     top_layout.setContentsMargins(0, 0, theme.Spacing.md, 0)
@@ -514,15 +516,16 @@ def build_ui(win) -> None:
     # window and a caption at the other.
     outer.addWidget(top)
 
-    # Hairline under the topbar, matching the app-header separator above it.
-    win._top_sep = build_hline_separator(None)
-    outer.addWidget(win._top_sep)
+    # No hairline under the band: the shell's regions sit on the window's ground with no dividing lines, and the
+    # page below is a panel of its own (``ui/shell_frame``).
 
     # ── Horizontal splitter: sidebar | plots ───────────────────────────
     win._h_pane = QSplitter(Qt.Horizontal)
+    win._h_pane.setObjectName("ShellSplit")
     outer.addWidget(win._h_pane, 1)
 
     sidebar = QWidget()
+    sidebar.setObjectName("ShellRail")
     # The sidebar rail is a FIXED width — it must never change with the active
     # tab or its content (a wide row wraps/scales to fit instead of stretching
     # the rail). A single fixed value (min == max) keeps every tab's rail
@@ -574,7 +577,6 @@ def build_ui(win) -> None:
     win._dataset_btn = _dataset_button(win, sidebar)
     sidebar_layout.addWidget(win._dataset_btn)
     sidebar_layout.addWidget(win._section_nav)
-    sidebar_layout.addWidget(build_hline_separator(None))
 
     # One place for the well picker, above every section that offers one. The
     # three pickers (main / Segmentation / Image Table) are mounted here rather
@@ -634,6 +636,7 @@ def build_ui(win) -> None:
     # rail and the user can always switch back from Analyze).
     from PySide6.QtWidgets import QStackedWidget as _QStackedWidget
     win._central_pane_stack = _QStackedWidget()
+    win._central_pane_stack.setObjectName("ShellPage")
     centre = QWidget()
     QVBoxLayout(centre).setContentsMargins(0, 0, 0, 0)
     win._central_pane_stack.addWidget(centre)

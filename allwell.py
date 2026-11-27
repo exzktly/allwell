@@ -56,7 +56,6 @@ from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
 from core.safe import swallow, swallowed
-from widgets.separator import build_hline_separator
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -388,7 +387,7 @@ class AllWellApp(QMainWindow):
         # Header bar — v2: BrandTile + wordmark + dataset chip + status dot +
         # action IconButtons (Open / Help). Per DECISIONS_NEEDED #4 we keep
         # the native frame, so this is the app-shell strip.
-        header = QWidget(objectName="Sidebar")
+        header = QWidget(objectName="ShellHeader")
         hl = QHBoxLayout(header)
         hl.setContentsMargins(theme_v2.Spacing.md, theme_v2.Spacing.sm, theme_v2.Spacing.md, theme_v2.Spacing.sm)
         hl.setSpacing(theme_v2.Spacing.sm)
@@ -557,8 +556,6 @@ class AllWellApp(QMainWindow):
 
         rl.addWidget(header)
 
-        rl.addWidget(build_hline_separator(None))
-
         # Phase 11: the outer Review/Analyze QStackedWidget is gone — Analyze
         # now lives inside ReviewApp's central pane stack so that the
         # left rail (mode-seg + section nav + plate + saved) stays visible
@@ -593,6 +590,10 @@ class AllWellApp(QMainWindow):
         if review_topbar is not None and review_topbar.layout() is not None:
             review_topbar.layout().insertWidget(0, self._mode_seg)
         self._mount_review_actions(header)
+        # Window style W1 (design language §3.1): the shell's regions on the window's ground, the page a rounded
+        # panel beside them, no dividing lines.
+        from ui import shell_frame
+        shell_frame.install(self._review)
 
         self._analyze = AnalyzeTab(
             parent=None,

@@ -58,8 +58,6 @@ STYLE_SHEET: dict[str, int] = {
     "widgets/control_band_form.py": 1,
     # The drawer's edge rule depends on which side it opens from (per instance)
     "widgets/drawer.py": 1,
-    # The mode switch's per-segment fill and label: the switch becomes the top bar's pill in D20
-    "widgets/mode_bar.py": 3,
     # The toolbar's coordinate readout label: restyled with the plot pages (D14)
     "widgets/mpl_toolbar.py": 1,
     # The badge's fill in the tone it is showing (per instance)

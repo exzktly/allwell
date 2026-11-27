@@ -1,12 +1,9 @@
-"""RailNav — vertical accent-bar navigation for the left rail.
+"""RailNav — vertical navigation for the left rail.
 
-Mockup target: the eight section items (Plotting / smFISH / Statistics /
-Image Table / Segmentation / Review CSV / Home / Batch Export)
-between the rail's mode-seg and the plate. Each row carries a leading
-Lucide icon + label + optional trailing count chip. The active row has a
-``--accent-dim`` background **and** a 2-px left accent bar drawn via
-``::before`` in the mockup CSS — here we paint that as a ``QLabel`` strip
-inside the row widget so QSS handles it without a custom ``paintEvent``.
+The rail's pages, each a row with a leading icon, a label and an optional trailing count, grouped under
+eyebrow captions. In window style W1 (design language §3.1) a row has 7-pixel corners and the selected one is
+the selected fill in its ink, with no accent bar; the strip a bar once drew in is kept, empty, so the rows'
+geometry did not move.
 
 One-of-N selection model. Emits ``currentChanged(key)`` when the active row
 changes (either by user click or by ``setCurrentKey``). Items carry an
@@ -187,7 +184,7 @@ class _RailNavRow(QFrame):
         if not self._icon_name:
             return
         active = bool(self.property("active"))
-        token = "accent" if active else "text_secondary"
+        token = "selected_fg" if active else "text_secondary"
         dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
         self._glyph.setPixmap(
             icons.make_pixmap(self._icon_name, token, self._glyph_px, dpr or 1.0)
@@ -471,8 +468,12 @@ if __name__ == "__main__":
     _sys.exit(app.exec())
 
 
+#: A row's corners (§3.1: 7 pixels).
+_ROW_RADIUS = 7
+
+
 def qss() -> str:
-    c, t, r = theme.Colors, theme.Typography, theme.Radii
+    c, t = theme.Colors, theme.Typography
     return f"""
     QFrame#RailNav {{
         background: transparent;
@@ -486,18 +487,14 @@ def qss() -> str:
         background: transparent;
         border: 0;
     }}
-    QFrame#RailNavRowStrip[active="true"] {{
-        background-color: {c.accent};
-        border-top-right-radius: 2px;
-        border-bottom-right-radius: 2px;
-    }}
+    /* No accent bar on the selected row (design language §3.1, W1): the selected fill alone says it. */
     QFrame#RailNavRowBody {{
         background-color: transparent;
-        border-radius: {r.sm}px;
+        border-radius: {_ROW_RADIUS}px;
         margin: 0 4px 0 6px;
     }}
     QFrame#RailNavRowBody:hover {{
-        background-color: {c.card};
+        background-color: {c.control};
     }}
     QFrame#RailNavRowBody[active="true"] {{
         background-color: {c.selected};
@@ -529,7 +526,8 @@ def qss() -> str:
        that one styles the widget it names rather than a descendant of it,
        so the pseudo-state resolves normally. */
     QLabel#RailNavRowLabel[active="true"] {{
-        color: {c.text_primary};
+        color: {c.selected_fg};
+        font-weight: {t.semibold};
     }}
     /* A group caption: the row label's left edge (the 6px body margin,
        the accent strip and the body's own md padding), muted caption type,

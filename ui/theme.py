@@ -44,6 +44,7 @@ class Colors:
     # card on it, and a control's fill. ``hover`` / ``active`` are the states a
     # control passes through; ``titlebar`` / ``rail`` are the shell's regions.
     titlebar        = "#0A0E15"   # top window chrome
+    frame           = "#06090F"   # the window's ground under the header, sidebar and status bar (§3.1, W1)
     canvas          = "#0B0F17"   # the page: app canvas and a field's fill
     rail            = "#0E131C"   # left rail + properties rail base
     card            = "#131A24"   # a card on the canvas
@@ -924,22 +925,21 @@ QToolButton#RailToggle:hover {{
     border-color: {c.border_strong};
 }}
 
-/* The rail head: the loaded dataset's name plus its actions, spanning the rail.
-   Flat and full-bleed rather than an inset button — it is the rail's heading,
-   and an inset control there reads as one more item in the nav below it. */
+/* The rail head: the loaded dataset's name plus its actions. In window style W1 (design language §3.1) a raised
+   button at the head of the sidebar, inset from its edges and rounded, on the window's ground. */
 QToolButton#DatasetButton {{
-    background-color: {c.rail};
+    background-color: {c.control};
     color: {c.text_primary};
-    border: none;
-    border-bottom: 1px solid {c.border_subtle};
-    border-radius: 0px;
+    border: 1px solid transparent;
+    border-radius: {r.md}px;
+    margin: {s.xs}px {s.sm}px {s.sm}px {s.sm}px;
     /* Extra room on the right: the rail's collapse toggle floats over this
        row's outer corner, and without the inset it sat on top of the caret. */
     padding: {s.sm}px {s.xl}px {s.sm}px {s.md}px;
     text-align: left;
     font-weight: {t.semibold};
 }}
-QToolButton#DatasetButton:hover {{ background-color: {c.hover}; }}
+QToolButton#DatasetButton:hover {{ border-color: {c.button_edge}; }}
 QToolButton#DatasetButton::menu-indicator {{
     subcontrol-position: right center;
     subcontrol-origin: padding;

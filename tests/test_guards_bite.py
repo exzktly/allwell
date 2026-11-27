@@ -3734,7 +3734,7 @@ def open_export_style_panel(win, plot_key):
 def test_properties_guard_catches_a_button_for_a_key_the_roster_lacks(monkeypatch):
     """The shape that shipped: the Response tab's inert Properties button."""
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, "response")')
+                     'make_style_button(ctx, band, "response")')
     with pytest.raises(AssertionError) as exc:
         mod.test_every_properties_button_names_a_panel_that_exists()
     assert "response" in str(exc.value)
@@ -3743,7 +3743,7 @@ def test_properties_guard_catches_a_button_for_a_key_the_roster_lacks(monkeypatc
 def test_properties_guard_reads_the_key_passed_by_keyword(monkeypatch):
     """``figure_key=`` is the same call; a positional-only reader misses it."""
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, figure_key="ghost")')
+                     'make_style_button(ctx, band, figure_key="ghost")')
     with pytest.raises(AssertionError) as exc:
         mod.test_every_properties_button_names_a_panel_that_exists()
     assert "ghost" in str(exc.value)
@@ -3751,14 +3751,14 @@ def test_properties_guard_reads_the_key_passed_by_keyword(monkeypatch):
 
 def test_properties_guard_clears_a_tab_whose_key_is_in_the_roster(monkeypatch):
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, "line")')
+                     'make_style_button(ctx, band, "line")')
     mod.test_every_properties_button_names_a_panel_that_exists()
 
 
 def test_properties_guard_refuses_a_key_it_cannot_read(monkeypatch):
     """A non-literal key is unprotected, and silence would read as a pass."""
     mod = _keys_from(monkeypatch, _PANEL_WITH,
-                     'make_properties_button(ctx, band, chosen_key)')
+                     'make_style_button(ctx, band, chosen_key)')
     with pytest.raises(AssertionError) as exc:
         mod.test_every_properties_button_names_a_panel_that_exists()
     assert "non-literal" in str(exc.value)
@@ -5886,7 +5886,7 @@ def test_phone_guard_catches_an_unrostered_read_of_the_mode(tmp_path, monkeypatc
 
 @pytest.mark.parametrize("name", [
     "ui/phone_shell.py", "core/anything.py", "analyze/phone_view.py",
-    "review/features/home/_phone.py", "review/core/phone_panel_sheet.py"])
+    "review/features/home/_phone.py"])
 def test_phone_guard_clears_a_read_in_a_sanctioned_layer(tmp_path, monkeypatch, name):
     path = _write(tmp_path, name,
                   "from core import phone_layout\n\n\ndef f():\n    return phone_layout.is_on()\n")

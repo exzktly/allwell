@@ -27,7 +27,7 @@ PANELS = {
     "Line Graphs": [("Fold change", "data", False), ("Display", "display", True)],
     "Response Curves": [("Fit", "data", False), ("Fold change", "data", False),
                         ("Display", "display", True)],
-    "Heat Map": [("Display", "display", True)],
+    "Heat Map": [("Layout", "data", False), ("Display", "display", True)],
     "Multivariate": [("Features", "data", False)],
 }
 
@@ -115,7 +115,7 @@ def test_line_fold_change_inside_the_inspector_writes_the_shared_fold_change_sta
 
 def test_a_page_change_gives_the_panel_back_to_its_button(qtbot, mini_dataset, monkeypatch):
     ctx, window, _frame, _bands = build_page(qtbot, "Heat Map", mini_dataset)
-    (display,) = _buttons(ctx, window)
+    (display,) = [b for b in _buttons(ctx, window) if panels.panel_of(b).root]
     display.click()
     content = panels.panel_of(display).content
     assert svc.inspector(ctx).holds(content)

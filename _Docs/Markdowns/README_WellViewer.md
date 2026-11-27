@@ -4138,8 +4138,9 @@ variable".
 **By group.** If you have replicate groups defined, a list under the plate shows
 what each one resolves to. A group whose wells all agree shows that value. One
 whose wells disagree reads *—mixed—*. One containing even a single well with no
-value reads *no value*, and names the wells that are short. **Double-click any
-row to select that group's wells on the plate.**
+value reads *no value*, and names the wells that are short. **Select a row and
+press Select wells under the list — or double-click the row — to select that
+group's wells on the plate.**
 
 That last case is the one to know about. Wells are never given a value they were
 not assigned: if you add a well to a group after filling, it stays unassigned and
@@ -6214,25 +6215,30 @@ place cells in a grid that mirrors your plate or your experimental design.
 This is the first Plotting sub-tab, and the one Plotting opens on.
 
 - **Needs** — a well selection and a channel; a **Timepoint** chosen from the
-  dropdown; and wells placed in the grid, from the **Layout** panel.
-- **The Layout panel** — where you say which well goes in which cell. The
-  **Layout** button on the controls row opens it at the right of the figure,
-  in the same place the **Style** tab opens (one of the two at a time),
-  and closes it again; its **✕** closes it too. While the grid is still empty
-  the panel opens by itself when you come to the page, since the map has
-  nothing to draw until a cell holds a well; once the grid is filled it stays
-  out of the figure's way until you press **Layout**. In it:
+  dropdown; and wells placed in the grid, from the **Layout** page.
+- **The Layout page** — where you say which well goes in which cell. The
+  **Layout** row on the controls row reads the grid's size (`Layout: 8 × 12 ›`)
+  and opens the page in the inspector at the right of the window, where every
+  page's options open; pressing the row again leaves it, and the inspector's
+  **Close** closes it. While the grid is still empty the page opens by itself
+  when you come to the Heat Map, since the map has nothing to draw until a cell
+  holds a well; once the grid is filled it stays out of the way until you press
+  **Layout**. In it:
   - **Grid** — the number of rows × columns.
   - **Auto-populate from selection** — fills the grid with the wells the plate
     shows as selected (more below). **Clear** empties every cell and keeps the
     grid's size and any row / column names you typed.
   - **The grid itself.** Drag wells from the plate map at the left into its
     cells; drag a cell to another cell to move it (onto an occupied cell, the
-    two swap); double-click a cell, or drag it back onto the plate map, to
-    empty it. Wells already placed are drawn as tinted tiles. A grid bigger
-    than a whole 96-well plate scrolls.
+    two swap). To empty a cell, select it and press **Empty cell** — or
+    double-click it, or drag it back onto the plate map. Wells already placed
+    are drawn as tinted tiles. A grid bigger than a whole 96-well plate
+    scrolls.
 
-  To rename a row or column, double-click its label on the heat map itself.
+  To rename a row or column, open **Display** and press **Labels**: the page
+  has one field per row and per column, and a field left empty puts the grid's
+  own label back. Double-clicking a label on the heat map itself renames it
+  too.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
     *Rep-set avg*). **Events above threshold** colours each cell by how many
@@ -6310,8 +6316,8 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     across the columns and the cell line changing down the rows labels itself
     `1 µM` / `10 µM` and `HeLa` / `U2OS` instead of `1`–`12` and `A`–`H`. Three
     rules keep the labels worth reading:
-    - a **name you typed yourself** on a tick always wins. Double-clicking a row
-      or column header still renames it, and the sample map will not overwrite
+    - a **name you typed yourself** on a tick always wins. **Display › Labels**
+      (or a double click on the label) still renames it, and the sample map will not overwrite
       what you wrote — clear the name and the tick goes back to being one the
       sample map can speak for;
     - a variable that is the **same everywhere** names nothing, because a tick
@@ -6336,10 +6342,9 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
     blank to let the tab choose per metric — counts as whole numbers, fractions to
     two places, intensities scaled to their size.
-  - **On a phone** the **Layout** button is in the **⚙ Controls** sheet,
-    beside **Save** and **Style**, and opens the Layout panel across the
-    whole screen; its **✕** returns you to the map. It does not open by itself
-    there. Dragging by touch is not dependable, so choose wells under
+  - **On a phone** the **Layout** row is in the **⚙ Controls** sheet and
+    opens the Layout page inside that sheet; **Back** returns to the controls
+    and **Close** to the map. It does not open by itself there. Dragging by touch is not dependable, so choose wells under
     **Wells** and use **Auto-populate from selection**.
 - **Selecting wells.** The sidebar plate map does double duty on this tab: a
   *click* on a well selects or deselects it exactly as on every other tab, while
@@ -6941,11 +6946,13 @@ the sentence names it.
   The occupancy colours and *Starting cells* use the count at the same baseline.
 - **Subset** — which nanowells every view uses. The quick choices keep the nanowells that held a given number of
   cells at the Baseline: *All nanowells*, *Starting cells ≥1 (occupied)*, *1 (single cell)*, *1–2* and *≥2*.
-  *Custom subset…* or **Edit…** opens the subset editor under the controls, where you can combine any number of
+  *Custom subset…* or the **Conditions** row beside the list (it reads how many conditions the subset has) opens
+  the subset editor as a page of the inspector — beside the figure at a desk, in the ⚙ Controls sheet on a phone —
+  where you can combine any number of
   conditions and choose whether a nanowell must meet *all* of them or *any*. On a narrow screen each condition wraps
-  onto as many lines as it needs, and the editor scrolls once it holds more than its share of the page; on a screen
-  too short for the editor and the figure both, such as a phone held sideways, the editor takes the figure's place
-  until you press **Close**. Each condition tests one of:
+  onto as many lines as it needs, and the page scrolls once it holds more than fits; the figure keeps its place
+  either way. **Back** or **Close** in the inspector's header leaves the editor. A condition on the imaging
+  field or the identity verdict picks its values on a page of ticks. Each condition tests one of:
   - **Starting cells** — the count at the Baseline;
   - **a metric** — cell count, confluence, cell fluorescence and nanowell fluorescence (per channel), any fold change or the growth
     rate. A metric with a value per timepoint is read *at baseline*, at the well's *earliest* or *latest*
@@ -7842,8 +7849,9 @@ chooses what it draws:
   read each check.
 
 Every Compare mode zooms with the scroll wheel and pans by dragging. Side by side's two images move together, as do
-Diagnostics' two images. The zoom stays while the same well, timepoint and mode are shown and resets when any of them
-changes.
+Diagnostics' two images. **Reset zoom** on the controls row shows the whole of every image again (a double click on
+an image does the same for that image). The zoom stays while the same well, timepoint and mode are shown and resets
+when any of them changes.
 
 An address typed in the **Nanowell** box (*Going to one nanowell*, above) is also where the Identity view looks: the
 Distance map, Blink and Side by side zoom onto it and stay there as you change the timepoint, the well or the mode,
@@ -8222,8 +8230,9 @@ channel for every well).
   column has no count cutoff, so it keeps editing its ON threshold whatever the
   Property says · **Share ▾** (to file ·
   to PowerPoint · Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
-  % to reset to 100) · a **Style** button that slides out a
-  right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
+  % to reset to 100) · **Cell ›** (one cell's own well / channel / timepoint / FOV) ·
+  a **Style** button that opens the inspector's Style tab with the grouped
+  view's **spacing gaps** and **label font sizes**,
   plus the **Scale bar** and **Cell labels** options below.
 - **Scale bar** — **on by default**: enter the **pixel size (µm/px)** and a **bar
   length (µm)** in the Style tab to burn a scale bar into the images (pixel
@@ -8264,8 +8273,10 @@ channel for every well).
   to rest instead of reverting to the plain cell tooltip. Opening another dataset,
   or reloading this one, drops every remembered MFI, so the readout always quotes
   the data that is open.
-- **Per-cell tweak** — right-click any rendered cell to override just that cell's
-  well / channel / timepoint / FOV.
+- **Per-cell tweak** — press **Cell** on the action strip to override one
+  cell's well / channel / timepoint / FOV: choose the cell by its row and
+  column, then the value to change. Right-clicking a rendered cell opens the
+  same page on that cell.
 - **Export to PowerPoint…** — writes the grid as a slide of **editable frames**
   rather than as a picture of it. Every field of view becomes its own PowerPoint
   group holding that field's image, its identity label as a text box you can
@@ -8543,7 +8554,8 @@ Operates on **one well at a time** (spot detection is per-frame).
 **What it shows.** A tabular view of the loaded per-well CSVs — the raw
 per-nucleus rows behind every plot.
 
-- **Controls** — the **Well** picker; column filtering; **double-click a row**
+- **Controls** — the **Well** picker; column filtering; select a row and press
+  **Open in Segmentation** (or double-click the row)
   to jump to that cell in the Segmentation tab. The jump switches wells for
   you: the row's well becomes the Segmentation sidebar's selected well, and the
   view opens on that cell's field of view and timepoint, zoomed to the nucleus.
@@ -9544,7 +9556,7 @@ If you start the same plate with the same settings from a second window while th
 
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates. **Scroll on it to zoom, drag to move around, and
-double-click to fit the whole run again.** Each position numbers itself in
+press Fit whole path under it (or double-click it) to fit the whole run again.** Each position numbers itself in
 acquisition order as soon as there is room to print the number — so zoom into a
 well and its fields of view are labelled 1, 2, 3… in the order the stage took
 them, which is the detail a plate map can never show. A number is only printed
@@ -11328,8 +11340,8 @@ you tapped stays where it was, shown as pressed, so the same tap puts the panel
 away; opening one puts the other away. The four buttons are in the same place on
 every page — one a page cannot use is greyed out, never removed. Saved
 selections, and the extra panels some pages add under the plate, stay in
-**☰**. The Heat Map's **Layout** panel is not one of those: it opens from the
-**Layout** button in **⚙ Controls**.
+**☰**. The Heat Map's **Layout** page is not one of those: it opens from the
+**Layout** row in **⚙ Controls**.
 
 The **Style** button among those controls (the sliders icon) puts the
 controls away and opens the figure's Style tab across the whole screen.

@@ -663,12 +663,10 @@ def _install_cell_events(
 # ── Generate (render image table below the selector) ─────────────────────────
 
 
-def _cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
-    """Per-cell override popover (delegates to grid_ops; lazy to avoid a cycle)."""
-    from review.features.image_browser.image_table.grid_ops import (
-        image_table_cell_override_menu,
-    )
-    image_table_cell_override_menu(ctx, r, c, global_pos)
+def _open_cell_page(ctx, r: int, c: int) -> None:
+    """The Cell page on this cell (delegates to grid_ops; lazy to avoid a cycle)."""
+    from review.features.image_browser.image_table.grid_ops import open_cell
+    open_cell(ctx, r, c)
 
 
 def _cell_title(ctx, cell, overlay_chans) -> str:
@@ -982,12 +980,12 @@ def image_table_generate(ctx, *, retry_missing: bool = False) -> None:
                                      readout_chan=(overlay_chans[0]
                                                    if cell["chan"] == OVERLAY_CHAN
                                                    and overlay_chans else None))
-                # Right-click a rendered cell → one-off per-cell override popover
-                # (writes the cell combos the renderer reads, then re-renders).
+                # Right-click a rendered cell → the Cell page on that cell: a
+                # shortcut to the action strip's Cell row, which is the route a
+                # user can see (and the only one in phone layout).
                 img_label.setContextMenuPolicy(Qt.CustomContextMenu)
                 img_label.customContextMenuRequested.connect(
-                    lambda pos, rr=r, cc=c, _l=img_label:
-                    _cell_override_menu(ctx, rr, cc, _l.mapToGlobal(pos))
+                    lambda _pos, rr=r, cc=c: _open_cell_page(ctx, rr, cc)
                 )
                 if pix is not None:
                     img_label.setPixmap(pix)

@@ -3,13 +3,13 @@
 At the desk the Layout panel (``layout_view``) opens with the page while the
 grid is still empty, because an empty grid is the one state in which the page
 has nothing to draw and the panel is the only way forward. Its home is the
-plot's right dock, beside the figure.
+inspector, beside the page.
 
-In phone layout that dock is a full-width sheet over the page
-(``review/core/phone_panel_sheet.py``). Opened by itself it would cover the
+In phone layout the inspector is a sheet over the page
+(``ui/phone_inspector.py``). Opened by itself it would cover the
 page the user had just navigated to — and the placeholder under it that says
 what the page needs — before they had seen either. The interaction differs, not
-just the size, so the panel waits for its **Layout** toggle in the ⚙ Controls
+just the size, so the panel waits for its **Layout** row in the ⚙ Controls
 sheet there, which is where every other panel of the page is opened from.
 """
 

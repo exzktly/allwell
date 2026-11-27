@@ -65,9 +65,16 @@ def _page(qtbot, path):
     window._ctx, window._app_state, window._features = ctx, ctx.state, ctx.features   # as ReviewApp sets them
     load_dataset(ctx, path)
     ctx.state.channel.active_channel = "gfp"
+    # The splitter Review's pages sit in (``app_shell_view``); the desk
+    # inspector docks at its right.
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSplitter
+    split = QSplitter(Qt.Horizontal)
     frame = QWidget()
     QHBoxLayout(frame)
-    window.setCentralWidget(frame)
+    split.addWidget(frame)
+    window.setCentralWidget(split)
+    window._h_pane = split
     build_nanowell_tab(ctx, frame)
     window.resize(1500, 900)
     window.show()

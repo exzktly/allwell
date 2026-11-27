@@ -18,32 +18,42 @@ from tests import _surface_guards as scan
 #: starting ``kept`` is permanent and says why.
 GESTURES: dict[tuple[str, str], str] = {
     ('review/features/heatmap/controller.py', 'on_heatmap_label_drag_press'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: it only reads the double click to stand aside for the rename; the rename itself '
+        'is Display › Labels (heatmap/labels_view.py)',
     ('review/features/heatmap/layout_view.py', '_LayoutTable.mouseDoubleClickEvent'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a shortcut to the Layout page\'s Empty cell button, which empties the selected cell',
     ('review/features/heatmap/tab_view.py', '_on_canvas_press'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: routes a double click on a tick label to the rename that Display › Labels also does',
     ('review/features/heatmap/tab_view.py', '_on_label_double_click'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a shortcut to Display › Labels; both end in labels_view.rename_label',
     ('review/features/home/triage/tab_view.py', 'build_triage_subtab'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a double click on a row is a shortcut to the page\'s Anchor button (anchor_btn → _on_anchor)',
     ('review/features/home/variables/controller.py', 'wire_variables'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a shortcut to the Select wells button under the group list (_var_groups_select)',
     ('review/features/image_browser/image_table/controller.py', 'image_table_generate'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a right-click on a cell is a shortcut to the action strip\'s Cell page, on that cell (grid_ops.py)',
     ('review/features/nanowell/_identity_zoom.py', 'on_press'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a double click on a panel is a shortcut to the band\'s Reset zoom button (identity_view.py)',
     ('review/features/nanowell/controller.py', 'on_click'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a double click on a nanowell is a shortcut to the band\'s Go to field, which zooms onto '
+        'and rings the address typed in it (goto_view.py)',
     ('review/features/review_csv/tab_view.py', 'build_review_csv_tab'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a double click on a row is a shortcut to the band\'s Open in Segmentation button',
     ('widgets/plot_card.py', 'PlotCard.eventFilter'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: the copy and save buttons a hover reveals are shortcuts to the band\'s Share menu '
+        '(Copy figure, Save figure…)',
     ('widgets/removable_row.py', '_RemovableRow.enterEvent'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: hover reveals the × at the desk; where there is no hover the row\'s declared form draws it '
+        'always (setAlwaysShown, applied by the phone shell)',
     ('widgets/stage_path_view.py', 'StagePathView.mouseDoubleClickEvent'):
-        'pending S25: name the visible control that does the same thing',
+        'kept: a shortcut to the Fit whole path button under the path (datasets/ome_import/view.py)',
 }
+
+
+def test_no_gesture_is_still_pending():
+    """Every site names the visible control that does the same thing."""
+    pending = sorted(f"{f}::{fn}" for (f, fn), why in GESTURES.items() if not why.startswith("kept: "))
+    assert not pending, "these gesture sites name no visible control:\n  " + "\n  ".join(pending)
 
 
 def unrostered_gestures(trees=None, roster=None) -> list[str]:

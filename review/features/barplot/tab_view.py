@@ -17,8 +17,8 @@ from review.core.ui_helpers import (
     build_plot_save_menu,
     install_canvas_wheel_scroll,
     make_band_controls,
-    make_plot_with_right_dock,
-    make_properties_button,
+    make_plot_area,
+    make_style_button,
     plotting_band_slot,
 )
 from widgets.separator import build_hline_separator
@@ -62,8 +62,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # violin flags, drag state) and behaviour calls still reach the app.
     reg = ctx.widgets
 
-    plot_area, outer_layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_bar_export_dock", export_dock)
+    plot_area, outer_layout = make_plot_area(parent)
     parent = plot_area
 
     bar_right = QWidget(parent)
@@ -309,7 +308,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
             ctx, cell_scope),
     )
     bar_ctrl.add_action(export_btn)
-    bar_ctrl.add_action(make_properties_button(ctx, bar_ctrl, "bar"))
+    bar_ctrl.add_action(make_style_button(ctx, bar_ctrl, "bar"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
     from review.core.band_fixed_actions import finish_band

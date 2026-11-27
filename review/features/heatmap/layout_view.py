@@ -1,23 +1,24 @@
-"""Heat-map layout editor — the **Layout** panel in the Heat Map's right dock.
+"""Heat-map layout editor — the **Layout** page of the inspector.
 
-The Heat Map's control band carries one **Layout** toggle; it opens this panel
-in the plot's right dock (``ui_helpers.make_plot_with_right_dock``), the same
-slide-out the Properties panel uses, so the two share one place and one look
-and only one is open at a time. The panel holds the grid size (rows ×
-columns), **Auto-populate from selection**, **Clear**, and the grid itself.
-The user drags wells from the *rail plate map* (the sidebar's well picker)
-into cells, moves wells between cells by dragging, and clears a cell by
-double-clicking it (or by dragging the well back onto the plate map). The rail
-plate is the canonical drag source while the Heat Map tab is focused — the
-descriptor's ``plate_drag_source``, applied by
-``core/tab_controller.sync_rail_plate_drag_mode`` — and the dock sits on the
-far side of the figure from it, so a drag crosses the page it is building.
+The Heat Map's control band carries one **Layout** row reading the grid's size;
+it shows this panel as a page of the inspector's Data tab
+(``review.core.inspector_panels``), beside the page it builds. The panel holds
+the grid size (rows × columns), **Auto-populate from selection**, **Clear**,
+**Empty cell**, and the grid itself. The user drags wells from the *rail plate
+map* (the sidebar's well picker) into cells, moves wells between cells by
+dragging, and empties a cell by selecting it and pressing **Empty cell** (a
+double click, or dragging the well back onto the plate map, does the same).
+The rail plate is the canonical drag source while the Heat Map tab is focused —
+the descriptor's ``plate_drag_source``, applied by
+``core/tab_controller.sync_rail_plate_drag_mode`` — and the inspector sits on
+the far side of the figure from it, so a drag crosses the page it is building.
 
 At the desk the panel opens with the page when the layout is still empty,
 because the page has nothing to draw until the grid holds a well; once the grid
-is filled it stays out of the figure's way until the toggle opens it. In phone
-layout it never opens by itself (``_phone.layout_opens_with_page``): the dock
-is a full-width sheet there and would cover the page the user just opened.
+is filled it stays out of the figure's way until the row opens it. In phone
+layout it never opens by itself (``_phone.layout_opens_with_page``): the
+inspector is a sheet over the page there and would cover the page the user
+just opened.
 
 State of truth: ``ctx.runtime.heatmap.layouts``. The editor maintains exactly
 one layout named ``SIDEBAR_LAYOUT_NAME`` and synchronises the table widget to
@@ -36,7 +37,7 @@ move as a unit; the well token behind a cell is carried in
 from __future__ import annotations
 
 
-from PySide6.QtCore import QEvent, QMimeData, QObject, QRectF, QSize, Qt
+from PySide6.QtCore import QMimeData, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QDrag, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -69,11 +70,13 @@ from ui import theme
 from widgets.spin_box import SpinBox
 
 #: The one layout this editor owns. Persisted under this name, so it stays
-#: ``"Sidebar"`` although the editor is drawn in the plot's right dock.
+#: ``"Sidebar"`` although the editor is drawn in the inspector.
 SIDEBAR_LAYOUT_NAME = "Sidebar"
 
 #: The band toggle's label, and the panel's title: one word for one thing.
 LAYOUT_BUTTON_TEXT = "Layout"
+#: The button that does what double-clicking a cell does.
+EMPTY_CELL_TEXT = "Empty cell"
 
 #: The grid shows at most this many rows and columns before it scrolls: a whole
 #: 8×12 plate fits, and a 32×32 grid does not run the panel off the screen.
@@ -358,110 +361,53 @@ class _LayoutTable(QTableWidget):
 
 # ── Builder ──────────────────────────────────────────────────────────────────
 
-def build_heatmap_layout_editor(ctx, band_parent: QWidget, dock: QWidget | None) -> QWidget:
-    """Build the Layout panel into the plot's right *dock*; return its band toggle.
+def build_heatmap_layout_editor(ctx, band_parent: QWidget) -> QWidget:
+    """Build the Layout panel; return the band row that opens it.
 
-    The panel goes into *dock* hidden — the dock is the slide-out the
-    Properties panel shares, and ``mount_widget_in_plot_dock`` shows one of
-    them at a time. The returned **Layout** toggle (parented to *band_parent*,
-    added by the caller with ``band.add_action``) opens and closes it, and its
-    checked state follows whether the panel is on screen, so it also unchecks
-    when Properties takes the dock or the panel's own ✕ closes it.
+    The panel is a page of the inspector's Data tab
+    (``review.core.inspector_panels``): the returned row reads the grid's size
+    (``Layout: 8 × 12 ›``), pressing it shows the panel beside the page, and
+    pressing it again leaves it. The caller adds the row to the band.
     """
-    panel = _LayoutPanel(ctx, dock)
-    if dock is not None and dock.layout() is not None:
-        dock.layout().addWidget(panel)
-    panel.hide()
-
-    # A text toggle beside Display ▾ and Save ▾, filled like them; the theme's
-    # ``toggle`` variant rings it in the accent while the panel is open.
-    button = QPushButton(LAYOUT_BUTTON_TEXT, band_parent)
-    button.setCheckable(True)
-    button.setProperty("variant", "toggle")
+    from review.core import inspector_panels
+    button, content, content_layout = inspector_panels.make_popover_button(
+        LAYOUT_BUTTON_TEXT, band_parent, ctx=ctx, tab="data", large=True,
+        summary=lambda: grid_summary(ctx))
     button.setToolTip(
         "Show / hide the layout editor — the grid of wells this heat map draws")
-    # Click-and-act, like Properties beside it: phone layout's Controls sheet
-    # puts it in the Actions grid.
-    button.setProperty("bandRole", "action")
-    button.clicked.connect(lambda _=False: toggle_layout_panel(ctx))
-    panel.installEventFilter(_ButtonFollowsPanel(panel, button))
-
-    reg = ctx.widgets
-    reg.register("_heatmap_layout_button", button)
+    content_layout.addWidget(_LayoutPanel(ctx, content))
+    ctx.widgets.register("_heatmap_layout_button", button)
     refresh_heatmap_layout_panel(ctx)
     return button
 
 
-class _ButtonFollowsPanel(QObject):
-    """Keeps the band's Layout toggle checked exactly while the panel shows.
-
-    The panel is hidden by more than the toggle: the ✕ in its header hides the
-    dock, Properties opening hides it as a dock sibling, and in phone layout
-    the sheet it is lent to closes from its dimmed strip. Each of those reaches
-    the panel as a hide event (a hidden parent hides its children), so the
-    toggle reads the panel's own visibility rather than tracking its clicks.
-    """
-
-    def __init__(self, panel: QWidget, button) -> None:
-        super().__init__(panel)
-        self._panel = panel
-        self._button = button
-
-    def eventFilter(self, obj, ev) -> bool:  # Qt naming
-        if ev.type() in (QEvent.Show, QEvent.Hide):
-            _sync_button(self._button, self._panel)
-        return False
+def grid_summary(ctx) -> str:
+    """``8 × 12`` — the grid's size, which the band's Layout row reads."""
+    layout = _ensure_sidebar_layout(ctx)
+    return f"{layout.rows} × {layout.cols}"
 
 
-def _panel_shown(panel: QWidget) -> bool:
-    """Whether *panel* is open: visible as far as its window is concerned.
-
-    Relative to the window rather than ``isVisible()``, so the answer does not
-    depend on whether the window itself is on screen yet (a page built and
-    opened before the first show, or a window that is minimised).
-    """
-    return panel.isVisibleTo(panel.window())
-
-
-def _sync_button(button, panel: QWidget) -> None:
-    try:
-        on = _panel_shown(panel)
-        if button.isChecked() != on:
-            blocked = button.blockSignals(True)
-            try:
-                button.setChecked(on)
-            finally:
-                button.blockSignals(blocked)
-    except RuntimeError:
-        swallowed("heatmap: the Layout toggle outlived its panel")
+def layout_panel_shown(ctx) -> bool:
+    """Whether the Layout panel is the page the inspector is showing."""
+    from review.core import inspector_service
+    panel = ctx.widgets.get_or_none("_heatmap_layout_panel")
+    return panel is not None and inspector_service.is_showing(ctx, panel.parentWidget())
 
 
 def open_layout_panel(ctx) -> None:
-    """Show the Layout panel in the plot's right dock (a sheet in phone layout)."""
-    from review.core.ui_helpers import mount_widget_in_plot_dock
-    panel = ctx.widgets.get_or_none("_heatmap_layout_panel")
-    dock = ctx.widgets.get_or_none("_heatmap_export_dock")
-    if panel is None or dock is None:
-        return
-    mount_widget_in_plot_dock(dock, panel, theme.Metrics.dock_w)
+    """Show the Layout panel as a page of the inspector."""
+    from review.core import inspector_panels
     button = ctx.widgets.get_or_none("_heatmap_layout_button")
-    if button is not None:
-        _sync_button(button, panel)
+    if button is not None and not layout_panel_shown(ctx):
+        inspector_panels.press(button)
 
 
 def toggle_layout_panel(ctx) -> None:
-    """The band toggle's action: close the panel when it shows, else open it."""
-    from review.core.ui_helpers import hide_plot_dock
-    panel = ctx.widgets.get_or_none("_heatmap_layout_panel")
-    if panel is None:
-        return
-    if _panel_shown(panel):
-        hide_plot_dock(ctx.widgets.get_or_none("_heatmap_export_dock"))
-        button = ctx.widgets.get_or_none("_heatmap_layout_button")
-        if button is not None:
-            _sync_button(button, panel)
-    else:
-        open_layout_panel(ctx)
+    """What the band's Layout row does: leave the panel when it shows, else open it."""
+    from review.core import inspector_panels
+    button = ctx.widgets.get_or_none("_heatmap_layout_button")
+    if button is not None:
+        inspector_panels.press(button)
 
 
 def open_layout_panel_if_empty(ctx) -> None:
@@ -469,8 +415,8 @@ def open_layout_panel_if_empty(ctx) -> None:
 
     An empty grid is the one state in which the page has nothing to draw and
     the panel is the only way forward, so it is put in front of the user
-    rather than behind a toggle. A filled grid leaves the figure its full
-    width. In phone layout nothing opens: the dock is a full-width sheet there
+    rather than behind a row. A filled grid leaves the figure its full width.
+    In phone layout nothing opens: the inspector is a sheet over the page there
     and would cover the page just opened (``_phone.layout_opens_with_page``).
     """
     if not layout_opens_with_page():
@@ -483,27 +429,22 @@ def open_layout_panel_if_empty(ctx) -> None:
 
 
 class _LayoutPanel(QWidget):
-    """The Layout panel: a titled dock panel in the Properties panel's chrome.
+    """The Layout panel: the body of the inspector's Layout page.
 
-    Header (title and ✕) over a scrolling body: the grid size, the two bulk
-    actions, the grid, and one line saying how to use it. The body scrolls so
-    the panel fits a phone held sideways, where the sheet it is lent to is
-    shorter than the grid and its controls.
+    A scrolling body: the grid size, the bulk actions, the grid, and one line
+    saying how to use it. The inspector's header carries the title, Back and
+    Close. The body scrolls so the panel fits a phone held sideways, where the
+    sheet is shorter than the grid and its controls.
     """
 
-    def __init__(self, ctx, dock: QWidget | None) -> None:
-        super().__init__(dock)
+    def __init__(self, ctx, parent: QWidget | None) -> None:
+        super().__init__(parent)
         self.setObjectName("HeatmapLayoutPanel")
         self.setAttribute(Qt.WA_StyledBackground, True)
-        # The same width as every other right-hand dock panel (Properties,
-        # the Scatter cell viewer), so opening one after the other does not
-        # move the figure's edge. Phone layout's sheet lifts it while lent.
-        self.setFixedWidth(theme.Metrics.dock_w)
         sp = theme.Spacing
         root = QVBoxLayout(self)
-        root.setContentsMargins(sp.sm, sp.sm, sp.sm, sp.sm)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(sp.sm)
-        root.addWidget(self._build_header(ctx, dock))
 
         scroll = QScrollArea(self)
         scroll.setObjectName("HeatmapLayoutScroll")
@@ -539,6 +480,15 @@ class _LayoutPanel(QWidget):
         actions_l.addWidget(clear_btn, 0)
         body_l.addWidget(actions)
 
+        # What double-clicking a cell does, as a control that can be seen (and
+        # pressed where there is no double click): empty the cell selected in
+        # the grid. Disabled until the selected cell holds a well.
+        empty_btn = QPushButton(EMPTY_CELL_TEXT, body)
+        empty_btn.setProperty("variant", "secondary")
+        empty_btn.setToolTip("Take the well out of the cell selected in the grid below")
+        empty_btn.setEnabled(False)
+        body_l.addWidget(empty_btn)
+
         table = _LayoutTable(
             on_drop=lambda kind, rc, tok: _on_drop_event(ctx, kind, rc, tok),
             on_clear_cell=lambda r, c: _clear_cell(ctx, r, c),
@@ -550,13 +500,16 @@ class _LayoutPanel(QWidget):
             "remove its well."
         )
         body_l.addWidget(table)
+        empty_btn.clicked.connect(lambda _=False: _empty_selected_cell(ctx))
+        table.currentCellChanged.connect(lambda *_a: _sync_empty_button(ctx))
 
         # Auto-populate first: it is the one way in that works by touch too.
         hint = QLabel(
             "Select wells on the plate and press Auto-populate, or drag wells "
-            "from the plate map into a cell. Drag a cell to move it; "
-            "double-click it, or drag it back onto the plate, to empty it. "
-            "Double-click a row or column label on the heat map to rename it.",
+            "from the plate map into a cell. Drag a cell to move it. To empty "
+            "a cell, select it and press Empty cell — or double-click it, or "
+            "drag it back onto the plate. Row and column names are under "
+            "Display › Labels.",
             body,
         )
         hint.setObjectName("Muted")
@@ -569,24 +522,7 @@ class _LayoutPanel(QWidget):
         reg.register("_heatmap_layout_table", table)
         reg.register("_heatmap_layout_autopop_btn", autopop_btn)
         reg.register("_heatmap_layout_clear_btn", clear_btn)
-
-    def _build_header(self, ctx, dock: QWidget | None) -> QWidget:
-        """The title row and its close button, as the Properties panel has."""
-        from review.core.ui_helpers import hide_plot_dock
-        from widgets.icon_button import IconButton
-        hdr = QWidget(self)
-        hdr.setObjectName("HeatmapLayoutHeader")
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(theme.Spacing.xs, 0, 0, 0)
-        title = QLabel(LAYOUT_BUTTON_TEXT, hdr)
-        title.setObjectName("Heading")
-        hl.addWidget(title)
-        hl.addStretch(1)
-        close_btn = IconButton("x", hdr)
-        close_btn.setToolTip("Hide this panel")
-        close_btn.clicked.connect(lambda _=False: hide_plot_dock(dock))
-        hl.addWidget(close_btn)
-        return hdr
+        reg.register("_heatmap_layout_empty_cell_btn", empty_btn)
 
     def _build_size_row(self, ctx, body: QWidget) -> QWidget:
         """``Grid  [rows] × [columns]`` — the grid's size, on one line."""
@@ -634,7 +570,7 @@ def _fit_table(table: QTableWidget, rows: int, cols: int) -> None:
     than a 96-well token, so a set summarised as ``A01+3`` is not cut either.
 
     The grid is sized to what it holds rather than stretched without limit: an
-    8×12 plate shows whole in the dock, a wider host widens the cells up to
+    8×12 plate shows whole in the inspector, a wider host widens the cells up to
     ``_ROOMY_CELL_FACTOR`` times, and a larger grid scrolls inside a box of at
     most ``_MAX_SHOWN_ROWS`` × ``_MAX_SHOWN_COLS`` cells.
     """
@@ -774,6 +710,11 @@ def refresh_heatmap_layout_panel(ctx) -> None:
     finally:
         table.blockSignals(False)
     _fit_table(table, layout.rows, layout.cols)
+    _sync_empty_button(ctx)
+    button = ctx.widgets.get_or_none("_heatmap_layout_button")
+    if button is not None:
+        from review.core import inspector_panels
+        inspector_panels.refresh(button)
 
 
 def _on_size_changed(ctx) -> None:
@@ -827,6 +768,28 @@ def _clear_cell(ctx, r: int, c: int) -> None:
         layout.assign(r, c, [])
         _persist_and_redraw(ctx)
         refresh_heatmap_layout_panel(ctx)
+
+
+def _selected_cell(ctx) -> tuple[int, int] | None:
+    """The occupied cell selected in the grid, or ``None``."""
+    table = ctx.widgets.get_or_none("_heatmap_layout_table")
+    if table is None:
+        return None
+    r, c = table.currentRow(), table.currentColumn()
+    item = table.item(r, c) if r >= 0 and c >= 0 else None
+    return (r, c) if item is not None and _cell_token(item) else None
+
+
+def _sync_empty_button(ctx) -> None:
+    button = ctx.widgets.get_or_none("_heatmap_layout_empty_cell_btn")
+    if button is not None:
+        button.setEnabled(_selected_cell(ctx) is not None)
+
+
+def _empty_selected_cell(ctx) -> None:
+    cell = _selected_cell(ctx)
+    if cell is not None:
+        _clear_cell(ctx, *cell)
 
 
 def _on_clear_all(ctx) -> None:

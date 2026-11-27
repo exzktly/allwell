@@ -1,11 +1,9 @@
 """The one owner of whether the Nanowells page's figure stack is shown.
 
-Two things ask the figure stack to step aside, for unrelated reasons: the site detail, which on a phone takes the
-page's column instead of the figure (``_phone.detail_placement``), and the Subset editor, which takes a page too
-short for both (``subset_view.share_page``). Each used to set the stack's visibility outright, so whichever wrote
-last won — and the site detail writes on every redraw, which brought the figure back under an open editor the moment
-a condition was applied. Each writer now records its own reason here, and the stack is shown only while no reason
-holds.
+The site detail asks the figure stack to step aside: on a phone it takes the page's column instead of the figure
+(``_phone.detail_placement``), and it writes on every redraw. A writer records its reason here rather than setting
+the stack's visibility outright, and the stack is shown only while no reason holds — so a second reason, when one
+is added, cannot be undone by the first one's next redraw.
 
 The reasons are Qt dynamic properties on the stack, not Python attributes, so they live exactly as long as the
 widget does whichever wrapper reads them.
@@ -15,8 +13,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QWidget
 
-#: Why the figure stack may be aside: the site detail alone on a phone, the Subset editor on a short page.
-REASONS = ("detail", "subset")
+#: Why the figure stack may be aside: the site detail alone on a phone.
+REASONS = ("detail",)
 
 
 def _key(reason: str) -> str:

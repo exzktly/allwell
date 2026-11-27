@@ -9,7 +9,7 @@ every page, in the same order:
 * **Display** — opens the inspector on its Display tab (the page's root panel
   of display options, ``inspector_panels.make_popover_button(..., root=True)``).
 * **Style** — opens the inspector on its Style tab (the figure's export look,
-  ``ui_helpers.make_properties_button``).
+  ``ui_helpers.make_style_button``).
 * **Share** — a menu of commands: save the figure, copy it, save its data
   (``ui_helpers.build_plot_save_menu``).
 

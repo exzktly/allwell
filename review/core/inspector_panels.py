@@ -120,7 +120,7 @@ def make_popover_button(text: str, parent: QWidget, *, ctx=None, tab: str = "dis
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     btn.setProperty("variant", "secondary")
     btn.setProperty(PANEL_PROPERTY, PANEL_ROOT if root else PANEL_ROW)
-    btn.setProperty(ROLE_PROPERTY, "display" if root else "panel")
+    btn.setProperty(ROLE_PROPERTY, tab if root else "panel")
     content = QWidget(btn)
     content.setObjectName("InspectorPanel")
     content.hide()

@@ -1,7 +1,7 @@
 """Every tab's Properties button must name a panel that exists.
 
 A tab reaches the figure-properties sidebar by handing
-``core.ui_helpers.make_properties_button`` a plot key, and
+``core.ui_helpers.make_style_button`` a plot key, and
 ``features/export/style.open_export_style_panel`` looks that key up in a
 hardcoded roster. Both halves are string literals at opposite ends of the app,
 so they can disagree indefinitely: nothing imports across the seam, there is no
@@ -9,7 +9,7 @@ shared symbol to rename, and the failure is a status-bar line rather than an
 exception.
 
 The Response tab shipped with its Properties button inert for the whole of its
-existence — ``make_properties_button(ctx, band, "response")`` against a roster
+existence — ``make_style_button(ctx, band, "response")`` against a roster
 that had eight keys and not that one. Clicking it wrote "Unknown export panel:
 response" to the status bar and opened nothing. Roughly 4,950 fast-lane tests
 and a full slow-lane app construction were green throughout, because building
@@ -36,7 +36,7 @@ from tests._repo_scan import parsed_sources
 _PANEL_MODULE = "review/features/export/style.py"
 _PANEL_FUNCTION = "open_export_style_panel"
 #: The helper a tab calls to build the button.
-_BUTTON_HELPER = "make_properties_button"
+_BUTTON_HELPER = "make_style_button"
 
 
 def _panel_keys() -> set[str]:
@@ -109,7 +109,7 @@ def _requested_keys() -> dict[str, str]:
             elif arg is not None:
                 unreadable.append(f"{path.as_posix()}:{node.lineno}")
     assert not unreadable, (
-        "make_properties_button was passed a non-literal figure key at "
+        "make_style_button was passed a non-literal figure key at "
         + ", ".join(unreadable)
         + " — this guard can only read literals, so that call site is "
         "unprotected. Pass a literal, or extend this guard to resolve it."
@@ -120,7 +120,7 @@ def _requested_keys() -> dict[str, str]:
 def test_the_guard_can_see_both_halves():
     """A guard that found neither half would pass silently and measure nothing."""
     assert _panel_keys(), "no roster keys parsed out of the panel module"
-    assert _requested_keys(), "no make_properties_button call sites found"
+    assert _requested_keys(), "no make_style_button call sites found"
 
 
 def test_every_properties_button_names_a_panel_that_exists():

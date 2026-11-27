@@ -224,7 +224,7 @@ def open_export_style_panel(win, plot_key: str, *, show: bool = True) -> QWidget
     ``show=False``, only build that figure's panel and return it.
 
     A plot page reaches its style panel by handing
-    ``ui_helpers.make_properties_button`` a key, and the roster below maps that
+    ``ui_helpers.make_style_button`` a key, and the roster below maps that
     key to the figure. **This roster is the contract, and nothing in the app
     enforced it**: a key absent from it falls to the status line and the panel
     never opens — the Response tab shipped that way, its button inert for the
@@ -232,7 +232,7 @@ def open_export_style_panel(win, plot_key: str, *, show: bool = True) -> QWidget
     and looked up by a literal here, so the two can disagree forever without a
     name to grep or an import to break.
     ``tests/test_properties_panel_keys.py`` closes it: it reads every key any
-    tab passes to ``make_properties_button`` and fails on one this mapping
+    tab passes to ``make_style_button`` and fails on one this mapping
     does not carry.
     """
     mapping = {

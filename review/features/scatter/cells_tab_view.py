@@ -10,8 +10,8 @@ from PySide6.QtWidgets import (
 
 from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
-    make_plot_with_right_dock,
-    build_plot_save_menu, make_properties_button,
+    make_plot_area,
+    build_plot_save_menu, make_style_button,
     plotting_band_slot)
 from review.core.saved_set_combo import SavedSetHighlightCombo
 from review.features.scatter._cell_rings import paint_focus_ring
@@ -46,8 +46,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # behaviour calls still reach the app — a later layer.
     reg = ctx.widgets
 
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_scatter_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Scatter Plot", "cells")
@@ -208,7 +207,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
             unavailable="Pick both axes and a timepoint first."),
     )
     ctrl.add_action(_export_btn)
-    ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_cells"))
+    ctrl.add_action(make_style_button(ctx, ctrl, "scatter_cells"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
     from review.core.band_fixed_actions import finish_band

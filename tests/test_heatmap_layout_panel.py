@@ -1,17 +1,17 @@
-"""The Heat Map's Layout panel: a right-dock panel opened by the band's toggle.
+"""The Heat Map's Layout panel: a page of the inspector, opened by the band's row.
 
-The layout editor — grid size, **Auto-populate from selection**, **Clear** and
-the grid wells are dragged into — lives in the plot's right dock, the slide-out
-the Properties panel shares, and the control band carries one **Layout**
-toggle for it. These tests drive the controls a user drives: they press the
-toggle, the panel's ✕, the panel's own buttons, a spin box, a double-click and
-a drop on the grid, and assert what reached the layout model and the screen.
+The layout editor — grid size, **Auto-populate from selection**, **Clear**,
+**Empty cell** and the grid wells are dragged into — is a page of the
+inspector's Data tab, and the control band carries one **Layout** row for it.
+These tests drive the controls a user drives: they press the row, the
+inspector's Close, the panel's own buttons, a spin box, a double-click and a
+drop on the grid, and assert what reached the layout model and the screen.
 
-Most build the real panel (``build_heatmap_layout_editor``) into a real right
-dock (``make_plot_with_right_dock``) over a stub context whose only fakes are
-the layout store and the persistence call. The last builds the whole app and
-goes through ``build_heatmap_tab`` and the tab's activation hook, because the
-panel opening itself on an empty grid is decided there and nowhere a stub sees.
+Most build the real panel (``build_heatmap_layout_editor``) over a production
+context in a minimal shell (``tests/_minimal_shell``) whose only fake is the
+persistence call. The last builds the whole app and goes through
+``build_heatmap_tab`` and the tab's activation hook, because the panel opening
+itself on an empty grid is decided there and nowhere a stub sees.
 """
 
 from __future__ import annotations
@@ -22,44 +22,44 @@ import pytest
 from PySide6.QtCore import QMimeData, QPointF, Qt
 from PySide6.QtGui import QDropEvent
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QPushButton, QStackedWidget, QWidget
+from PySide6.QtWidgets import QPushButton, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
+from review.core import inspector_service as svc
 from review.core.dnd import WELL_MIME
-from review.core.widget_registry import WidgetRegistry
 from review.features.heatmap import layout_view as LV
 from review.features.heatmap.models import HeatmapLayout
+from tests._minimal_shell import minimal_shell
 
 
 def _rig(qtbot, *, cells=None, wells=("A01", "A02", "B01", "B02")):
-    """A real dock, band parent and Layout editor over a stub context."""
-    from review.core.ui_helpers import make_plot_with_right_dock
-
+    """A real window, band parent and Layout editor over a production context."""
     layout = HeatmapLayout(name=LV.SIDEBAR_LAYOUT_NAME, rows=8, cols=12)
     for (r, c), ws in (cells or {}).items():
         layout.assign(r, c, list(ws))
     saved: list[str] = []
-    ctx = types.SimpleNamespace(
-        widgets=WidgetRegistry(),
-        runtime=types.SimpleNamespace(heatmap=types.SimpleNamespace(layouts=[layout])),
-        state=types.SimpleNamespace(
-            heatmap=types.SimpleNamespace(
-                active_layout_name=LV.SIDEBAR_LAYOUT_NAME, repset_avg=False),
-            dataset=types.SimpleNamespace(well_paths={w: f"/x/{w}.zip" for w in wells}),
-        ),
-        persistence=types.SimpleNamespace(schedule_save=saved.append),
-    )
+    ctx, window = minimal_shell(qtbot)
+    ctx.runtime.heatmap.layouts = [layout]
+    ctx.state.heatmap.active_layout_name = LV.SIDEBAR_LAYOUT_NAME
+    ctx.state.dataset.well_paths = {w: f"/x/{w}.zip" for w in wells}
+    object.__setattr__(ctx, "persistence", types.SimpleNamespace(schedule_save=saved.append))
+    # The splitter Review's pages sit in; the desk inspector docks at its right.
+    split = QSplitter(Qt.Horizontal)
     host = QWidget()
-    qtbot.addWidget(host)
-    host.resize(1200, 800)
-    _plot_area, _plot_layout, dock = make_plot_with_right_dock(host)
-    ctx.widgets.register("_heatmap_export_dock", dock)
+    QVBoxLayout(host)
+    split.addWidget(host)
+    window.setCentralWidget(split)
+    window._h_pane = split
     band = QWidget(host)
-    button = LV.build_heatmap_layout_editor(ctx, band, dock)
-    host.show()
-    qtbot.waitExposed(host)
+    host.layout().addWidget(band)
+    QVBoxLayout(band)
+    button = LV.build_heatmap_layout_editor(ctx, band)
+    band.layout().addWidget(button)
+    window.resize(1400, 900)
+    window.show()
+    qtbot.waitExposed(window)
     panel = ctx.widgets.get("_heatmap_layout_panel")
-    return types.SimpleNamespace(ctx=ctx, layout=layout, dock=dock, button=button,
-                                 panel=panel, saved=saved, host=host)
+    return types.SimpleNamespace(ctx=ctx, layout=layout, button=button, panel=panel,
+                                 saved=saved, host=window)
 
 
 def _panel_button(panel, text: str) -> QPushButton:
@@ -70,55 +70,50 @@ def _panel_button(panel, text: str) -> QPushButton:
 
 # ── the toggle ───────────────────────────────────────────────────────────────
 
-def test_the_band_toggle_opens_the_panel_in_the_dock_and_closes_it_again(qtbot):
+def test_the_band_row_opens_the_panel_as_a_page_and_leaves_it_again(qtbot):
     rig = _rig(qtbot)
-    assert rig.button.text() == "Layout"
-    assert not rig.panel.isVisible() and not rig.button.isChecked()
+    assert rig.button.text() == "Layout: 8 × 12 ›"
+    assert not rig.panel.isVisible()
 
     rig.button.click()
-    assert rig.dock.isVisible(), "the toggle must show the plot's right dock"
-    assert rig.panel.isVisible(), "…with the Layout panel in it"
-    assert rig.button.isChecked()
+    insp = svc.inspector(rig.ctx)
+    assert svc.is_open(rig.ctx) and insp.currentTab() == "data"
+    assert insp.isAncestorOf(rig.panel) and rig.panel.isVisible()
+    assert LV.layout_panel_shown(rig.ctx)
 
     rig.button.click()
-    assert not rig.dock.isVisible()
-    assert not rig.button.isChecked()
+    assert not LV.layout_panel_shown(rig.ctx)
+    assert not insp.isAncestorOf(rig.panel), "the panel goes back to its button"
 
 
-def test_the_toggle_unchecks_when_the_panel_s_own_close_button_hides_it(qtbot):
+def test_the_inspector_s_close_closes_the_panel(qtbot):
+    rig = _rig(qtbot)
+    rig.button.click()
+    svc.inspector(rig.ctx).closeRequested.emit()
+    assert not svc.is_open(rig.ctx) and not rig.panel.isVisible()
+    assert not LV.layout_panel_shown(rig.ctx)
+
+
+def test_the_panel_has_no_header_or_close_of_its_own(qtbot):
+    """One Close: the inspector's. The panel carries no ✕ and no title."""
     from widgets.icon_button import IconButton
 
     rig = _rig(qtbot)
-    rig.button.click()
-    close = [b for b in rig.panel.findChildren(IconButton) if b.iconName() == "x"]
-    assert len(close) == 1
-    close[0].click()
-    assert not rig.dock.isVisible()
-    assert not rig.button.isChecked(), (
-        "the toggle still reads 'open' after the panel's ✕ closed it")
+    assert not rig.panel.findChildren(IconButton)
 
 
-def test_the_toggle_unchecks_when_properties_takes_the_dock(qtbot):
-    """Properties and Layout share one dock and show one at a time."""
-    from review.core.ui_helpers import mount_widget_in_plot_dock
+def test_the_row_reads_the_grid_s_size(qtbot):
+    rig = _rig(qtbot)
+    rig.ctx.widgets.get("_heatmap_layout_rows_spin").setValue(3)
+    rig.ctx.widgets.get("_heatmap_layout_cols_spin").setValue(5)
+    assert rig.button.text() == "Layout: 3 × 5 ›"
+
+
+def test_the_row_is_a_data_row_in_phone_layout_s_controls_sheet(qtbot):
+    from widgets.control_band_form import PANEL_PROPERTY, PANEL_ROW
 
     rig = _rig(qtbot)
-    rig.button.click()
-    other = QWidget()
-    mount_widget_in_plot_dock(rig.dock, other, 0)
-    assert other.isVisible() and not rig.panel.isVisible()
-    assert not rig.button.isChecked()
-    # And pressing the toggle again brings Layout back in Properties' place.
-    rig.button.click()
-    assert rig.panel.isVisible() and not other.isVisible()
-    assert rig.button.isChecked()
-
-
-def test_the_toggle_is_an_action_in_phone_layout_s_controls_sheet(qtbot):
-    from widgets.control_band_form import section_of_action
-
-    rig = _rig(qtbot)
-    assert section_of_action(rig.button) == "Actions"
+    assert rig.button.property(PANEL_PROPERTY) == PANEL_ROW
 
 
 # ── the panel's own controls ────────────────────────────────────────────────
@@ -178,6 +173,24 @@ def test_double_clicking_a_cell_in_the_panel_empties_it(qtbot):
     assert table.item(1, 2).text() == ""
 
 
+def test_empty_cell_does_what_the_double_click_does_for_the_selected_cell(qtbot):
+    """The visible route to what a double click does: select a cell, press
+    **Empty cell**. It is disabled until the selected cell holds a well."""
+    rig = _rig(qtbot, cells={(1, 2): ["B01"], (0, 0): ["A01"]})
+    rig.button.click()
+    table = rig.ctx.widgets.get("_heatmap_layout_table")
+    empty = _panel_button(rig.panel, LV.EMPTY_CELL_TEXT)
+    assert not empty.isEnabled(), "nothing is selected yet"
+    table.setCurrentCell(3, 3)
+    assert not empty.isEnabled(), "an empty cell has nothing to take out"
+    table.setCurrentCell(1, 2)
+    assert empty.isEnabled()
+    empty.click()
+    assert rig.layout.cells == {(0, 0): ["A01"]}
+    assert table.item(1, 2).text() == ""
+    assert rig.saved == ["heatmap_layouts"]
+
+
 def test_a_well_dropped_on_a_cell_of_the_panel_lands_in_that_cell(qtbot):
     """A drag from the rail plate ends in the table's ``dropEvent``."""
     rig = _rig(qtbot)
@@ -192,12 +205,14 @@ def test_a_well_dropped_on_a_cell_of_the_panel_lands_in_that_cell(qtbot):
     assert table.item(2, 4).text() == "B02"
 
 
-def test_a_whole_plate_shows_in_the_dock_without_scrolling(qtbot):
-    """The dock is ``Metrics.dock_w`` wide: an 8×12 plate fits it whole."""
+def test_a_whole_plate_shows_in_the_inspector_without_scrolling(qtbot):
+    """An 8×12 plate fits the inspector's width whole."""
     rig = _rig(qtbot)
     rig.button.click()
     table = rig.ctx.widgets.get("_heatmap_layout_table")
-    qtbot.waitUntil(lambda: table.width() > 0)
+    # The grid fits itself once the inspector has laid the page out.
+    qtbot.waitUntil(lambda: table.width() > 0 and not table.horizontalScrollBar().isVisible(),
+                    timeout=2000)
     assert not table.horizontalScrollBar().isVisible()
     assert not table.verticalScrollBar().isVisible()
     last = table.visualRect(table.model().index(7, 11))
@@ -212,7 +227,16 @@ def test_a_whole_plate_shows_in_the_dock_without_scrolling(qtbot):
 def test_the_panel_opens_with_the_page_while_the_grid_is_empty(qtbot):
     rig = _rig(qtbot)
     LV.open_layout_panel_if_empty(rig.ctx)
-    assert rig.panel.isVisible() and rig.button.isChecked()
+    assert rig.panel.isVisible() and LV.layout_panel_shown(rig.ctx)
+
+
+def test_opening_the_panel_while_it_shows_leaves_it_showing(qtbot):
+    """The page is activated more than once (a tab revisited with its grid
+    still empty); opening is not a toggle."""
+    rig = _rig(qtbot)
+    LV.open_layout_panel_if_empty(rig.ctx)
+    LV.open_layout_panel_if_empty(rig.ctx)
+    assert LV.layout_panel_shown(rig.ctx)
 
 
 @pytest.mark.parametrize("why", ["filled", "no dataset", "phone"])
@@ -225,7 +249,7 @@ def test_the_panel_stays_shut_when_the_page_has_something_else_to_show(qtbot, mo
         monkeypatch.setattr(phone_layout, "is_on", lambda: True)
     LV.open_layout_panel_if_empty(rig.ctx)
     assert not rig.panel.isVisible()
-    assert not rig.dock.isVisible()
+    assert not svc.is_open(rig.ctx)
 
 
 # ── through the real tab ────────────────────────────────────────────────────
@@ -236,7 +260,7 @@ def test_the_real_heat_map_page_opens_its_layout_panel_and_fills_from_it(loaded_
 
     The fixture's grid starts empty, so showing the page opens the panel; its
     Auto-populate button then fills the grid and the figure replaces the
-    placeholder; the band's toggle closes the panel again.
+    placeholder; the band's row leaves the panel again.
     """
     from tests.fixtures.mini_dataset import WELLS
 
@@ -250,10 +274,7 @@ def test_the_real_heat_map_page_opens_its_layout_panel_and_fills_from_it(loaded_
     button = ctx.widgets.get("_heatmap_layout_button")
     panel = ctx.widgets.get("_heatmap_layout_panel")
     assert not LV._ensure_sidebar_layout(ctx).cells
-    # The fixture's window is never shown, so "on screen" is visibility
-    # relative to the window: what the user would see once it is.
-    assert panel.isVisibleTo(app), "an empty grid must put the Layout panel in front"
-    assert button.isChecked()
+    assert LV.layout_panel_shown(ctx), "an empty grid must put the Layout panel in front"
 
     app._set_selected_wells(set(WELLS), commit=True)
     _panel_button(panel, "Auto-populate from selection").click()
@@ -268,4 +289,4 @@ def test_the_real_heat_map_page_opens_its_layout_panel_and_fills_from_it(loaded_
     assert stack is not None and stack.currentIndex() == 1
 
     button.click()
-    assert not panel.isVisibleTo(app) and not button.isChecked()
+    assert not LV.layout_panel_shown(ctx)

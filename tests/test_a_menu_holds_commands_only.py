@@ -41,8 +41,6 @@ SUBMENUS: dict[tuple[str, str], str] = {
         'pending S26: menu conventions — flatten or keep at one level with a reason',
     ('review/features/batch_export/variable_select_panel.py', 'VariableSelectMixin._vsel_add_quick_setup_menu'):
         'pending S26: menu conventions — flatten or keep at one level with a reason',
-    ('review/features/image_browser/image_table/grid_ops.py', 'image_table_cell_override_menu'):
-        'pending S25: the per-cell override gets a visible row',
     ('review/features/image_browser/image_table/tab_view.py', 'build_image_table_tab'):
         'pending S18: the quality submenu becomes a Style page',
     ('review/features/nanowell/tab_view.py', '_layers_button'):

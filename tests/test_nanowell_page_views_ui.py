@@ -416,17 +416,22 @@ _VALUE_CONTROLS = ("_nw_metric_cb", "_nw_channel_cb", "_nw_baseline_cb", "_nw_ri
 def test_a_control_with_no_role_on_a_view_is_not_shown_there(page, qtbot):
     """Asked for: "if it has no role on that tab, it shouldn't be displayed". QC and Identity draw no nanowell's
     value, so nothing that chooses or narrows values is on their band, and QC, one row per well, has no nanowell to
-    go to. Every other view draws values and shows them all. An open Subset editor goes with its control and comes
-    back as it was left."""
+    go to. Every other view draws values and shows them all. An open Subset editor leaves the inspector with its
+    control."""
     from review.features.nanowell import tab_view as tv
 
     _loaded(qtbot, page)
     shown = lambda name: page.widgets.get(name).isVisibleTo(page.window)          # noqa: E731
+    from review.core import inspector_service as svc
     page.widgets.get("_nw_subset_edit_btn").click()                               # the editor open
-    assert shown("_nw_subset_editor")
+    editor = page.widgets.get("_nw_subset_editor")
+    open_ = lambda: svc.inspector(page).isAncestorOf(editor)                      # noqa: E731
+    assert open_()
+    left = False                                    # a view with no Subset has been shown: the page was left
     for view, _label in tv.VIEWS:
         _choose_view(page, view)
         values = view not in ("identity", "qc")
         assert {name: shown(name) for name in _VALUE_CONTROLS} == {name: values for name in _VALUE_CONTROLS}, view
-        assert shown("_nw_subset_editor") == values, view
+        left = left or not values
+        assert open_() == (not left), view
         assert shown("_nw_goto_edit") == (view not in ("qc", "statistics", "position")), view

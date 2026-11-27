@@ -506,39 +506,14 @@ def build_section_header(
     return hdr
 
 
-def wrap_ctrl_row_with_properties(ctrl_row, on_click, *,
-                                  tooltip="Show / hide the figure properties panel"):
-    """Wrap a plot tab's control row so the figure-properties button pins to the
-    right edge of the plot area — aligned with where the export-style dock slides
-    out (``make_plot_with_right_dock``).
-
-    The control rows are ``FlowLayout``s, whose ``addStretch()`` and per-widget
-    alignment are no-ops (widgets/flow_layout.py), so the button cannot be
-    right-aligned inside them. Lift it into an outer ``QHBoxLayout``:
-    ``[ctrl_row (stretch 1)] [properties IconButton, top-right]``. ``AlignTop``
-    keeps the button in the top-right corner when the FlowLayout wraps to
-    multiple lines. ``on_click`` is invoked with no args on click.
-    """
-    from widgets.icon_button import IconButton
-    wrap = QWidget()
-    hl = QHBoxLayout(wrap)
-    hl.setContentsMargins(0, 0, 0, 0)
-    hl.setSpacing(4)
-    hl.addWidget(ctrl_row, 1)
-    btn = IconButton("sliders-horizontal", wrap, tooltip=tooltip)
-    btn.clicked.connect(lambda _=False: on_click())
-    hl.addWidget(btn, 0, Qt.AlignTop | Qt.AlignRight)
-    return wrap
-
-
-def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
-                           tooltip="Show / hide the figure properties panel"):
-    """The Properties toggle, for a tab whose controls are a ``ControlBand``.
+def make_style_button(ctx, parent: QWidget, figure_key: str, *,
+                      tooltip="Show / hide the figure's style options"):
+    """The **Style** button of a page whose controls are a ``ControlBand``: it
+    opens the inspector on its Style tab with *figure_key*'s style panel
+    (``review/core/style_tab.py``), and closes it on a second press.
 
     The band right-aligns its action zone itself, so a tab on the band adds this
-    with ``band.add_action(...)`` and needs none of the
-    :func:`wrap_ctrl_row_with_properties` scaffolding that a ``FlowLayout`` row
-    required to get a button to the right edge.
+    with ``band.add_action(...)``.
     """
     from PySide6.QtWidgets import QToolButton
     btn = QToolButton(parent)
@@ -674,113 +649,24 @@ def make_scrollable_canvas(parent: QWidget, **_kw) -> tuple[QScrollArea, QWidget
     return sa, inner
 
 
-class _PlotDockHost(QWidget):
-    """Container that hosts the plot area + a right-side dock as layout
-    siblings.
+def make_plot_area(parent: QWidget) -> tuple[QWidget, QVBoxLayout]:
+    """Build the area a plot page lays its band, figure and toolbar into.
 
-    Earlier the dock floated as a child overlay so that opening it never
-    resized matplotlib. That design clipped the dock when the host was
-    narrower than the panel's fixed width — content (incl. the close button)
-    fell off the window's right edge. We now lay the dock as a real layout
-    sibling: opening it does shrink the plot (a one-shot matplotlib redraw),
-    but the panel always renders at its full width with its close button
-    reachable.
-
-    ``set_overlay_dock`` is kept as a compatibility shim so existing callers
-    that pass a width hint still update the dock's fixed width.
-    """
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._overlay_dock: QWidget | None = None
-
-    def set_overlay_dock(self, dock: QWidget, width: int = 0) -> None:
-        # Written, never read: the host keeps a reference to the dock it is
-        # sizing itself around, so the dock outlives the call that mounted it.
-        self._overlay_dock = dock
-        if width > 0:
-            dock.setFixedWidth(int(width))
-
-
-def make_plot_with_right_dock(parent: QWidget) -> tuple[QWidget, QVBoxLayout, QWidget]:
-    """Build a plot area with a right-side dock as a layout sibling inside
-    ``parent``.
-
-    Returns ``(plot_area, plot_layout, right_dock)`` — callers lay their
-    figure/toolbar into ``plot_layout`` and the export-style sidebar docks
-    into ``right_dock``. ``right_dock`` is a layout sibling of ``plot_area``
-    so toggling it visible does shrink the plot (and re-renders the figure
-    once) — the trade-off accepted to keep the dock's full width on screen.
+    Returns ``(plot_area, plot_layout)``. The area fills *parent*; nothing
+    docks beside it — a page's panels are pages of the window's one inspector
+    (``review.core.inspector_service``), which sits beside the whole page.
     """
     root = parent.layout()
     if root is None:
         root = QVBoxLayout(parent)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
-
-    host = _PlotDockHost(parent)
-    host_layout = QHBoxLayout(host)
-    host_layout.setContentsMargins(0, 0, 0, 0)
-    host_layout.setSpacing(0)
-
-    plot_area = QWidget(host)
+    plot_area = QWidget(parent)
     plot_layout = QVBoxLayout(plot_area)
     plot_layout.setContentsMargins(0, 0, 0, 0)
     plot_layout.setSpacing(0)
-    host_layout.addWidget(plot_area, 1)
-
-    right_dock = QWidget(host)
-    right_dock_layout = QVBoxLayout(right_dock)
-    right_dock_layout.setContentsMargins(0, 0, 0, 0)
-    right_dock_layout.setSpacing(0)
-    right_dock.setVisible(False)
-    right_dock._dock_host = host  # type: ignore[attr-defined]
-    host_layout.addWidget(right_dock, 0)
-    host.set_overlay_dock(right_dock, 0)
-
-    root.addWidget(host, 1)
-    return plot_area, plot_layout, right_dock
-
-
-def mount_widget_in_plot_dock(dock: QWidget, widget: QWidget, width: int = 0) -> None:
-    """Show *widget* in a plot tab's right *dock*, hiding any sibling panel
-    already docked there.
-
-    A plot tab's right dock (``make_plot_with_right_dock``) is a shared
-    slide-out: the Export-Style / Properties sidebar and the Scatter cell viewer
-    both live there. This keeps exactly one of them visible at a time, so the
-    two coexist without overlapping — open one and the other slides away.
-    """
-    if dock is None or widget is None:
-        return
-    lay = dock.layout()
-    if lay is None:
-        return
-    if lay.indexOf(widget) < 0:
-        lay.addWidget(widget)
-    for i in range(lay.count()):
-        sibling = lay.itemAt(i).widget()
-        if sibling is not None and sibling is not widget:
-            sibling.hide()
-    widget.show()
-    host = getattr(dock, "_dock_host", None)
-    if host is not None and hasattr(host, "set_overlay_dock"):
-        host.set_overlay_dock(dock, width)
-    # In phone layout the panel opens as a full-width sheet over the page
-    # instead of squeezing the figure beside it (``phone_panel_sheet``). It is
-    # lent to the sheet *before* it is ever shown: shown in the plot first,
-    # even for an instant, it took its fixed width out of the figure, and the
-    # style pass that runs as the panel opens fitted the plot's titles and
-    # margins to that squeezed figure — for good.
-    from review.core import phone_panel_sheet
-    if not phone_panel_sheet.present(dock):
-        dock.setVisible(True)
-
-
-def hide_plot_dock(dock: QWidget) -> None:
-    """Hide a plot tab's right dock (and whatever panel it currently holds)."""
-    if dock is not None:
-        dock.setVisible(False)
+    root.addWidget(plot_area, 1)
+    return plot_area, plot_layout
 
 
 def _with_caret(text: str) -> str:

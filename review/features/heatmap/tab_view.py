@@ -18,14 +18,15 @@ from PySide6.QtWidgets import (
 from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     build_plot_save_menu,
-    make_plot_with_right_dock,
-    make_properties_button,
+    make_plot_area,
+    make_style_button,
     plotting_band_slot,
 )
 from review.core.channel_state_controller import refresh_metric_combo_for_channel
 from review.features.export.service import (
     export_cell_data_from, export_heatmap_data)
 from review.features.heatmap.cell_scope_compute import cell_scope
+from review.features.heatmap.labels_view import build_labels_row, label_text, rename_label
 from review.features.heatmap.layout_view import build_heatmap_layout_editor
 from review.core.channel_state_controller import refresh_heatmap_aggregation_options
 from core.safe import swallowed
@@ -63,8 +64,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(0, 0, 0, 0)
 
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_heatmap_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     # ── The control band ────────────────────────────────────────────────────
@@ -201,7 +201,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     # The Layout toggle first in the action zone, so Display / Save /
     # Properties stay flush to the right edge where every other tab has them.
-    band.add_action(build_heatmap_layout_editor(ctx, band, export_dock))
+    disp_l.addWidget(build_labels_row(ctx, disp))
+
+    band.add_action(build_heatmap_layout_editor(ctx, band))
     band.add_action(display_btn)
 
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
@@ -215,7 +217,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     )
     band.add_action(export_btn)
 
-    band.add_action(make_properties_button(ctx, band, "heatmap"))
+    band.add_action(make_style_button(ctx, band, "heatmap"))
 
     # The row ends in Display · Style · Share on every page; a slot this page
 
@@ -523,50 +525,15 @@ def _on_label_double_click(ctx, evt) -> None:
                 break
     if target is None:
         return
-    from review.features.heatmap.layout_view import (
-        _ensure_sidebar_layout, _persist_and_redraw,
-    )
-    layout = _ensure_sidebar_layout(ctx)
     kind, idx = target
-    current = ""
-    if kind == "row":
-        labels = list(layout.row_labels or [str(i + 1) for i in range(layout.rows)])
-        if 0 <= idx < len(labels):
-            current = labels[idx]
-        prompt = f"Row {idx + 1} label:"
-    else:
-        labels = list(layout.col_labels or [str(i + 1) for i in range(layout.cols)])
-        if 0 <= idx < len(labels):
-            current = labels[idx]
-        prompt = f"Column {idx + 1} label:"
+    prompt = f"Row {idx + 1} label:" if kind == "row" else f"Column {idx + 1} label:"
     new_text, ok = QInputDialog.getText(
         ctx.window,
-        "Edit label", prompt, text=current,
+        "Edit label", prompt, text=label_text(ctx, kind, idx),
     )
     if not ok:
         return
-    new_text = new_text.strip()
-    if kind == "row":
-        if not layout.row_labels:
-            layout.row_labels = [str(i + 1) for i in range(layout.rows)]
-        # Pad if shorter than rows.
-        while len(layout.row_labels) < layout.rows:
-            layout.row_labels.append(str(len(layout.row_labels) + 1))
-        layout.row_labels[idx] = new_text or str(idx + 1)
-    else:
-        if not layout.col_labels:
-            layout.col_labels = [str(i + 1) for i in range(layout.cols)]
-        while len(layout.col_labels) < layout.cols:
-            layout.col_labels.append(str(len(layout.col_labels) + 1))
-        layout.col_labels[idx] = new_text or str(idx + 1)
-    # Record that this tick's name is the user's, which is what makes it
-    # outrank the one the sample map would compose for the same tick. Without
-    # it the rename is a control that runs, writes, redraws, and shows the
-    # user something else — and on an annotated plate that is every rename.
-    # An emptied dialog clears the mark along with the name: the tick is back
-    # to the grid's own label, which the sample map may speak for again.
-    layout.mark_label_typed(kind, idx, bool(new_text))
-    _persist_and_redraw(ctx)
+    rename_label(ctx, kind, idx, new_text)
 
 
 def _on_canvas_press(ctx, evt) -> None:

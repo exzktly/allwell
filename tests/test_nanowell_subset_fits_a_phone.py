@@ -3,22 +3,25 @@
 Reported: "Subset definitions are completely broken in layout on mobile in nanowell distribution". Rendered on a
 432 x 936 phone, every line of the editor was a fixed row: the heading was cut to "Use the nanowe … of these
 conditi", a condition's combos to "Star" and "betw", the name box to "Name thi…" (one condition asked for 680-814 px
-of the phone's 432). With three conditions the editor needed 858 px of the 818 px page and every row was squeezed to
-half its height. Held sideways, the page is 381 px tall and the figure and its footer alone need 351 of them, so the
-editor was drawn over the figure.
+of the phone's 432).
 
-The phone shell lends the page's band to its Controls sheet, which hides it while the page is on screen; these tests
-hide the band the same way, so the page's height is the editor's and the figure's to share, as on a phone.
+The editor is a full-height page of the inspector now (the band's **Conditions** row opens it), and in phone
+layout the inspector is the Controls sheet: the sheet is the editor's, so it never shares a page with the figure and
+never opens under the sheet it was pressed in. These tests give the inspector a phone-sized host — a window of the
+sheet's size holding it, registered as the phone's host — and measure the editor there.
 """
 
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QAbstractSpinBox, QComboBox, QLabel, QLineEdit, QPushButton, QToolButton
+from PySide6.QtWidgets import (
+    QAbstractSpinBox, QComboBox, QLabel, QLineEdit, QPushButton, QToolButton, QVBoxLayout, QWidget,
+)
 
+from review.core import inspector_service as svc
 from tests.test_nanowell_page import _loaded, _page, _write_nanowell_dataset
 
-UPRIGHT = (432, 818)                                     # the Review page of a 432 x 936 phone, held upright
+UPRIGHT = (432, 818)                                     # the Controls sheet of a 432 x 936 phone, held upright
 SIDEWAYS = (936, 381)                                    # and held sideways
 
 
@@ -30,19 +33,39 @@ def page(qtbot, tmp_path):
     return ctx
 
 
-def _band(ctx):
-    from widgets.control_band import ControlBand
+class _Sheet:
+    """The phone's host for the inspector, as ``PhoneShell`` registers one: a surface of the sheet's size."""
 
-    (band,) = [b for b in ctx.window.findChildren(ControlBand) if b.objectName() == "ControlBand"
-               and b.isAncestorOf(ctx.widgets.get("_nw_subset_cb"))]
-    return band
+    def __init__(self, qtbot, ctx, size):
+        self._ctx = ctx
+        self.holder = QWidget()
+        qtbot.addWidget(self.holder)
+        lay = QVBoxLayout(self.holder)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.holder.resize(*size)
+
+    def open_inspector(self) -> bool:
+        insp = svc.inspector(self._ctx)
+        self.holder.layout().addWidget(insp)
+        insp.show()
+        self.holder.show()
+        return True
+
+    def close_inspector(self) -> None:
+        self.holder.hide()
+
+    def inspector_is_open(self) -> bool:
+        return self.holder.isVisible()
 
 
-def _open(qtbot, ctx, size, extra=0):
-    """The editor open with three conditions (and *extra* more counts) — a metric read at a timepoint, a count, and a range — on a page of
-    *size*, laid out."""
-    _band(ctx).hide()
-    ctx.window.resize(*size)
+def _open(qtbot, ctx, monkeypatch, size, extra=0):
+    """The editor open in a sheet of *size* with three conditions (and *extra* more counts) — a metric read at a
+    timepoint, a count, and a range — laid out. Returns ``(editor, sheet)``."""
+    from core import phone_layout
+
+    sheet = _Sheet(qtbot, ctx, size)
+    svc.set_phone_host(ctx, sheet)
+    monkeypatch.setattr(phone_layout, "is_on", lambda: True)
     ctx.widgets.get("_nw_subset_edit_btn").click()
     editor = ctx.widgets.get("_nw_subset_editor")
     for _ in range(3):
@@ -53,7 +76,7 @@ def _open(qtbot, ctx, size, extra=0):
     for _ in range(extra):
         editor.add_btn.click()
     qtbot.wait(50)
-    return editor
+    return editor, sheet
 
 
 def _controls(editor):
@@ -64,11 +87,13 @@ def _controls(editor):
     return [w for w in found if w.isVisibleTo(editor) and not isinstance(w.parentWidget(), (QComboBox, QAbstractSpinBox))]
 
 
-def test_on_an_upright_phone_no_control_of_the_editor_is_cut(qtbot, page):
-    editor = _open(qtbot, page, UPRIGHT)
+def test_on_an_upright_phone_no_control_of_the_editor_is_cut(qtbot, page, monkeypatch):
+    editor, sheet = _open(qtbot, page, monkeypatch, UPRIGHT)
+    assert sheet.holder.isAncestorOf(editor) and editor.isVisibleTo(sheet.holder)
     # Fixed rows asked for 680-814 px and held the window that wide: nothing was cut only because nothing was a phone.
     need = editor.minimumSizeHint().width()
     assert need <= UPRIGHT[0], f"the editor asks for {need} px, wider than the phone"
+    assert editor.width() <= UPRIGHT[0]
     row = editor.rows[0]
     assert row.at_cb.isVisibleTo(editor) and editor.rows[2].b_spin.isVisibleTo(editor)
     body = editor
@@ -83,97 +108,106 @@ def test_on_an_upright_phone_no_control_of_the_editor_is_cut(qtbot, page):
     assert not cut, "cut at phone width:\n" + "\n".join(cut)
 
 
-def test_beside_the_figure_the_editor_keeps_its_share_and_scrolls(qtbot, page):
-    """Upright there is room for both: the figure stays, and the editor takes no more than its share, scrolling."""
-    editor = _open(qtbot, page, UPRIGHT, extra=5)
+def test_the_editor_is_a_full_height_page_that_scrolls_inside_the_sheet(qtbot, page, monkeypatch):
+    """Held sideways the sheet is 381 px tall and eight conditions need more: the page asks for the sheet's full
+    height, every condition keeps its own height (none squeezed — they once were, to half), and the page scrolls
+    down, never sideways."""
+    editor, sheet = _open(qtbot, page, monkeypatch, SIDEWAYS, extra=5)
+    insp = svc.inspector(page)
+    assert insp.wantedSize() == "full"
+    slot = insp.currentSlot()
+    assert slot.widget().isAncestorOf(editor)
+    qtbot.waitUntil(lambda: slot.verticalScrollBar().maximum() > 0, timeout=2000)
+    assert slot.horizontalScrollBar().maximum() == 0
+    assert editor.height() > slot.viewport().height(), "eight conditions fit a sideways phone without scrolling?"
+    squeezed = [r for r in editor.rows if r.height() < r.minimumSizeHint().height()]
+    assert not squeezed, f"{len(squeezed)} of {len(editor.rows)} conditions are squeezed below their height"
+    # A condition added below the fold is scrolled to: the page was at its top, and moves.
+    bar = slot.verticalScrollBar()
+    bar.setValue(0)
+    qtbot.wait(20)
+    assert bar.value() == 0
+    editor.add_btn.click()
+    last = editor.rows[-1]
+    qtbot.waitUntil(lambda: bar.value() > 0, timeout=2000)
+    top = last.mapTo(slot.viewport(), last.rect().topLeft()).y()
+    assert 0 <= top and top + last.height() <= slot.viewport().height(), "the new condition is not on screen"
+
+
+def test_on_a_sideways_phone_the_editor_has_the_sheet_and_the_figure_keeps_the_page(qtbot, page, monkeypatch):
+    """Held sideways the page is 381 px tall. The editor used to take the page from the figure there; in the sheet
+    it takes nothing from the page, so the figure stays where it is and comes back with nothing to redraw."""
+    editor, sheet = _open(qtbot, page, monkeypatch, SIDEWAYS)
+    figure = page.widgets.get("_nw_card")
+    assert figure.isVisibleTo(page.window), "the editor's page took the figure off the page"
+    assert sheet.holder.isAncestorOf(editor)
+    svc.close(page)
+    assert not sheet.inspector_is_open() and figure.isVisibleTo(page.window)
+
+
+def test_at_a_desk_the_editor_is_beside_the_figure(qtbot, page):
+    page.widgets.get("_nw_subset_edit_btn").click()
+    editor = page.widgets.get("_nw_subset_editor")
+    for _ in range(3):
+        editor.add_btn.click()
+    first = editor.rows[0]
+    first.field_cb.setCurrentIndex(first.field_cb.findData("count_fc"))
     figure = page.widgets.get("_nw_card")
     assert figure.isVisibleTo(page.window)
-    plot_area = editor.parentWidget()
-    assert editor.height() <= plot_area.height() * 0.45 + 1
-    assert editor.scroll.verticalScrollBar().maximum() > 0, "eight conditions fit a phone's share without scrolling?"
-    assert editor.geometry().bottom() < figure.mapTo(plot_area, figure.rect().topLeft()).y()
-
-
-def test_on_a_sideways_phone_the_editor_takes_the_page_and_close_brings_the_figure_back(qtbot, page):
-    editor = _open(qtbot, page, SIDEWAYS)
-    figure = page.widgets.get("_nw_card")
-    assert not figure.isVisibleTo(page.window), "the figure kept its place on a page too short for both"
-    assert editor.height() >= editor.close_btn.height() * 4, f"the editor alone on the page is {editor.height()} px"
-    editor.close_btn.click()
-    qtbot.wait(20)
-    assert editor.isHidden() and figure.isVisibleTo(page.window)
-    fig = page.widgets.get("_nw_fig")
-    qtbot.waitUntil(lambda: any(c.get_gid() == "nw-dots" for ax in fig.axes for c in ax.collections), timeout=5000)
-
-
-def test_at_a_desk_the_figure_stays_beside_the_editor(qtbot, page):
-    editor = _open(qtbot, page, (1500, 900))
-    assert page.widgets.get("_nw_card").isVisibleTo(page.window)
-    # Waited for, not read at once: under load the scroll area's range can lag the layout by a pass or two.
-    bar = editor.scroll.verticalScrollBar()
-    for _ in range(20):
-        if bar.maximum() == 0:
-            break
-        qtbot.wait(100)
-    assert bar.maximum() == 0, f"a desk's three conditions still scroll ({bar.maximum()} px) after the layout settled"
+    insp = svc.inspector(page)
+    assert svc.is_open(page) and insp.currentTab() == "data" and insp.isAncestorOf(editor)
+    # Beside, not over: the inspector's left edge is at or past the figure's right.
+    left = insp.mapTo(page.window, insp.rect().topLeft()).x()
+    right = figure.mapTo(page.window, figure.rect().topRight()).x()
+    assert left >= right, f"the inspector ({left}) overlaps the figure ({right})"
     assert len(editor.rows) == 3 and editor.written().conditions[0].field == "count_fc"
 
 
-def test_edit_closes_the_controls_sheet_it_was_pressed_in(qtbot, page):
-    """On a phone, Edit… is one of the controls the ⚙ Controls sheet holds, and the sheet is drawn over the page: the
-    editor opened under it, only its heading showing above the sheet (found by pressing every control of every page's
-    sheet at phone size). Pressing Edit… closes the sheet, as opening Properties from it does."""
-    from widgets.drawer import Drawer
-
-    sheet = Drawer(page.window, edge="bottom", scrim=0.0)       # the shell's Controls sheet, as phone_shell builds it
-    sheet.setProperty("phoneSheet", True)
-    sheet.open()
-    qtbot.waitUntil(sheet.isOpen, timeout=2000)
-    page.widgets.get("_nw_subset_edit_btn").click()
-    assert not sheet.isOpen(), "the editor opened under the Controls sheet"
-    assert page.widgets.get("_nw_subset_editor").isVisibleTo(page.window)
+def test_the_editor_has_no_close_of_its_own_and_the_row_leaves_it(qtbot, page):
+    """One Close and one Back: the inspector's. Pressing the row again leaves the page."""
+    button = page.widgets.get("_nw_subset_edit_btn")
+    editor = page.widgets.get("_nw_subset_editor")
+    assert not hasattr(editor, "close_btn")
+    assert not [b for b in editor.findChildren(QPushButton) if b.text() == "Close"]
+    button.click()
+    assert svc.inspector(page).isAncestorOf(editor)
+    button.click()
+    assert not svc.inspector(page).isAncestorOf(editor)
 
 
-def test_the_editor_s_scroll_area_hooks_nothing_python_onto_its_own_tree(qtbot):
-    """Reported on Windows: ``Windows fatal exception: access violation``, the main thread inside
-    ``_EditorScroll.eventFilter``, on switching the Nanowells page to the QC view. The area overrode ``eventFilter``
-    and installed itself on its content and its page — and a QScrollArea installs itself on its content anyway — so
-    a Python call reached the area while its tree was torn down (``widgets/footer_scroll_area.py`` records the same
-    crash). The area now defines no ``eventFilter``; a separate watcher holds the references and checks each object
-    alive before it touches one."""
-    import shiboken6
-    from PySide6.QtCore import QEvent
-    from PySide6.QtWidgets import QScrollArea, QWidget
+def test_choosing_custom_subset_opens_the_editor_and_changes_nothing(qtbot, page):
+    """*Custom subset…* is on the one list with the presets and the saved subsets; choosing it shows the conditions
+    of the subset in use and applies nothing."""
+    from review.features.nanowell import starting_cells_compute as sc
 
-    from review.features.nanowell import subset_view as sv
-
-    assert "eventFilter" not in vars(sv._EditorScroll)
-    assert sv._EditorScroll.eventFilter is QScrollArea.eventFilter
-    host = QWidget()
-    qtbot.addWidget(host)
-    scroll = sv._EditorScroll(host)
-    body = QWidget()
-    scroll.setWidget(body)
-    watch = scroll._watch
-    assert watch.eventFilter(body, QEvent(QEvent.Resize)) is False         # alive: asks again, filters nothing
-    shiboken6.delete(scroll)                                                # the area and its content gone
-    assert watch.eventFilter(body, QEvent(QEvent.Resize)) is False         # does nothing, touches nothing
+    combo = page.widgets.get("_nw_subset_cb")
+    editor = page.widgets.get("_nw_subset_editor")
+    st = page.state.feature_slice("nanowell")
+    before = st.subset
+    labels = [combo.itemText(i) for i in range(combo.count()) if combo.itemText(i)]
+    assert labels[0] == "All nanowells" and labels[-1] == "Custom subset…"
+    assert not svc.inspector(page).isAncestorOf(editor)
+    combo.setCurrentIndex(combo.findData(sc.CUSTOM))
+    insp = svc.inspector(page)
+    assert svc.is_open(page) and insp.isAncestorOf(editor) and insp.currentTab() == "data"
+    assert st.subset == before
 
 
-def test_a_redraw_with_the_editor_open_on_a_sideways_phone_keeps_the_figure_aside(qtbot, page):
-    """The figure stack has two reasons to step aside — the site detail alone on a phone, the Subset editor on a page
-    too short for both — and every redraw re-places the site detail (``redraw_detail`` → ``show_detail(False)`` with
-    no nanowell selected). When that call owned the stack's visibility outright it brought the figure back under the
-    open editor on the first redraw after a condition was applied, the overflow the step-aside exists to prevent."""
+def test_the_row_reads_how_many_conditions_the_subset_has(qtbot, page):
+    from review.features.nanowell import controller as nwc
+    from review.features.nanowell import subset_compute as ss
+
+    button = page.widgets.get("_nw_subset_edit_btn")
+    assert button.text() == "Conditions ›"
+    nwc.set_subset(page, ss.Subset((ss.Condition("n0", "ge", 1), ss.Condition("n0", "le", 2))))
+    assert button.text() == "Conditions: 2 ›"
+
+
+def test_a_redraw_with_the_editor_open_leaves_it_open(qtbot, page, monkeypatch):
     from review.features.nanowell import controller as nwc
 
-    editor = _open(qtbot, page, SIDEWAYS)
-    figure = page.widgets.get("_nw_card")
-    assert not figure.isVisibleTo(page.window)
+    editor, sheet = _open(qtbot, page, monkeypatch, SIDEWAYS)
     nwc.redraw(page)
     qtbot.wait(20)
-    assert not editor.isHidden()
-    assert not figure.isVisibleTo(page.window), "a redraw brought the figure back under the open editor"
-    editor.close_btn.click()
-    qtbot.wait(20)
-    assert figure.isVisibleTo(page.window), "closing the editor did not bring the figure back"
+    assert editor.isVisibleTo(sheet.holder)
+    assert page.widgets.get("_nw_card").isVisibleTo(page.window)

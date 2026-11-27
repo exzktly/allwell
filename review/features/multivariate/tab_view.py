@@ -68,7 +68,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
     from review.core.ui_helpers import (
-        make_plot_with_right_dock, no_selection_reason,
+        make_plot_area, no_selection_reason,
         wrap_with_empty_state,
     )
 
@@ -87,8 +87,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # The Properties sidebar needs a dock to slide out of, exactly as the other
     # plot tabs have. Without one this tab had no Properties button at all, and
     # its figure was the only one in the pane that could not be styled.
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_mv_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     # ── the control band ────────────────────────────────────────────────────
@@ -122,7 +121,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     band.add_scope("", std_cb)
 
     from review.core.ui_helpers import (
-        make_properties_button,
+        make_style_button,
     )
     export_btn, export_menu, _export_data_act = build_plot_save_menu(
         ctx, band,
@@ -137,7 +136,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     band.add_action(export_btn)
     from review.core.cell_lasso_view import make_lasso_button
     band.add_action(make_lasso_button(ctx, band, "_mv_canvas", source="lasso · Multivariate"))
-    band.add_action(make_properties_button(ctx, band, "multivariate"))
+    band.add_action(make_style_button(ctx, band, "multivariate"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
     from review.core.band_fixed_actions import finish_band

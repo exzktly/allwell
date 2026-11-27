@@ -51,7 +51,7 @@ from review.features.nanowell.display_range_view import (
     refresh_display_range_buttons,
 )
 from review.features.nanowell.series_compute import baseline_at, baseline_timepoint
-from review.features.nanowell.subset_view import build_subset_control, share_page
+from review.features.nanowell.subset_view import build_subset_control
 from review.features.nanowell import moving_compute as mvc
 from review.features.nanowell.moving_compute import MAX_WINDOW
 from review.features.nanowell.state import EXTREMES_MAX_N
@@ -327,16 +327,15 @@ def build_view_bar(ctx, view: str):
 
 def build_nanowell_tab(ctx, parent: QWidget) -> None:
     from review.core.ui_helpers import (
-        apply_plot_card_decorators, build_plot_save_menu, install_canvas_wheel_scroll, make_plot_with_right_dock,
-        make_properties_button, wrap_with_empty_state,
+        apply_plot_card_decorators, build_plot_save_menu, install_canvas_wheel_scroll, make_plot_area,
+        make_style_button, wrap_with_empty_state,
     )
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
 
     st = ctx.state.feature_slice("nanowell")
     reg = ctx.widgets
-    plot_area, plot_layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_nanowell_export_dock", export_dock)
+    plot_area, plot_layout = make_plot_area(parent)
     # The page is two columns: everything the page shows on the left — the band, the Subset's conditions, the guide,
     # the figure and its footer — and the site detail on the right, from the top of the page to the bottom, the way
     # the Heat Map's Layout panel sits beside its band and figure. The splitter lets the two share the width.
@@ -500,7 +499,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
         cells_cb=lambda: export_cell_data_from(
             ctx, cell_scope, unavailable="Select wells with nanowell tables first."))
     band.add_action(export_btn)
-    band.add_action(make_properties_button(ctx, band, "nanowell"))
+    band.add_action(make_style_button(ctx, band, "nanowell"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
     from review.core.band_fixed_actions import finish_band
@@ -509,7 +508,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     band.place_trailing(exclusion.excluded_group, grp_baseline)
     reg.register("_nw_band_breaks", (selection_row_end, filter_row_end))
     layout.addWidget(band)
-    layout.addWidget(start.editor)                  # the Subset's conditions, under the band when shown
     # The Resolve walk's guide card, between the band and the figure it explains: shown only while a walk runs.
     guide = build_resolve_guide(ctx, plot_area)
     layout.addWidget(guide.frame)
@@ -604,9 +602,6 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     figure_layout.addWidget(figure_scroll)
     figures = wrap_with_empty_state(ctx.window, figure_host, icon="hexagon", reason=nwc.nanowell_empty_reason)
     layout.addWidget(figures, 1)
-    # A page too short for the Subset's conditions and the figures both (a phone held sideways) gives the editor
-    # the page while it is open.
-    share_page(start.editor, figures, redraw=lambda: nwc.redraw(ctx))
     layout.addWidget(build_details_panel(ctx, plot_area))  # the Distribution's footer, out of its figure
 
     show_detail = nw_phone.detail_placement(card, detail, detail_layout, strip_card,

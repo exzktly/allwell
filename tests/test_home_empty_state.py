@@ -746,6 +746,44 @@ def test_the_x_is_hidden_until_the_pointer_is_on_the_row(qtbot, tmp_path,
     assert not button.isVisibleTo(row), "the × stayed after the pointer left"
 
 
+def test_where_there_is_no_hover_the_x_is_always_drawn(qtbot, tmp_path, monkeypatch):
+    """Hover is the only thing that reveals the × at the desk, and a touch
+    screen has none. The row declares an alternate form; applied — as the phone
+    shell applies every declared form — the × is drawn with no pointer near it,
+    still works, and goes back to hover-only when the form is lifted."""
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    from review.core.recent_datasets import load
+    from review.core.recent_view import entry_rows
+    from widgets import form_registry
+
+    a, b = tmp_path / "plate_a", tmp_path / "plate_b"
+    a.mkdir()
+    b.mkdir()
+    ctx, _ = _ctx_with_recents(monkeypatch, [a, b])
+    empty = EmptyState("Load a directory.")
+    qtbot.addWidget(empty)
+    empty.resize(600, 400)
+    empty.setEntries(entry_rows(ctx, 5, on_removed=lambda: None))
+    empty.show()
+    qtbot.waitExposed(empty)
+    QTest.mouseMove(empty, QPoint(1, 1))
+
+    row = empty._entries_layout.itemAt(0).widget()
+    button = empty.removeButtonAt(0)
+    assert form_registry.kind_of(row) == form_registry.CUSTOM
+    assert not button.isVisibleTo(row)
+
+    form_registry.custom_apply(row)(True)
+    assert button.isVisibleTo(row), "no hover, and nothing draws the ×"
+    button.click()
+    assert [e.name for e in load(ctx.settings)] == ["plate_a"]
+
+    form_registry.custom_apply(row)(False)
+    assert not button.isVisibleTo(row), "the desk form draws the × unhovered"
+
+
 def test_a_row_runs_no_python_event_filter(qtbot):
     """No Python ``eventFilter`` anywhere in a removable row.
 

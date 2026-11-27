@@ -38,7 +38,6 @@ from PySide6.QtWidgets import (
 from ui import theme
 
 from core.safe import swallow
-from widgets import menu_exec
 from review.core.ui_helpers import parse_float_edit
 from widgets.flow_layout import FlowLayout
 from widgets.stepper import Stepper
@@ -119,6 +118,8 @@ QFrame#ITBRoot {
     background: $accent_dim; border: 1px solid $accent; border-radius: 7px;
 }
 QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: ${fs_small}px; }
+QToolButton#ITBRootBtn { color: $text_primary; font-weight: 640; font-size: ${fs_small}px;
+    border: none; background: transparent; padding: 0; }
 
 QWidget#ITBNest { border-left: 2px solid $accent_dim; background: transparent; }
 
@@ -1238,12 +1239,22 @@ def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
     h.setContentsMargins(9, 4, 5, 4)
     h.setSpacing(7)
     h.addWidget(_swatch(_DIM_SWATCH.get(dim, theme.Colors.text_secondary)))
-    lbl = _text(_ROOT_LABEL[dim], "ITBRootLbl")
-    lbl.setAttribute(Qt.WA_TransparentForMouseEvents, False)  # clickable for filter
-    lbl.setCursor(Qt.PointingHandCursor)
-    lbl.setToolTip("Wells come from the plate — click to focus it" if dim == "well"
-                   else "Click to choose which values appear on this axis")
-    lbl.mousePressEvent = lambda _e, d=dim, a=lbl: _open_root_filter(ctx, d, a)
+    if dim == "well":
+        # Wells come from the plate: there is no filter to open, so this is a
+        # label and nothing else.
+        lbl = _text(_ROOT_LABEL[dim], "ITBRootLbl")
+        lbl.setToolTip("Wells come from the plate")
+    else:
+        # A button, not a label that happens to take a press: it reads as
+        # something to press, takes the keyboard, and has a touch target. It
+        # opens the values as a page of ticks in the inspector.
+        lbl = QToolButton(pill)
+        lbl.setObjectName("ITBRootBtn")
+        lbl.setText(f"{_ROOT_LABEL[dim]} ›")
+        lbl.setAutoRaise(True)
+        lbl.setCursor(Qt.PointingHandCursor)
+        lbl.setToolTip("Choose which values appear on this axis")
+        lbl.clicked.connect(lambda _=False, d=dim, a=lbl: _open_root_filter(ctx, d, a))
     h.addWidget(lbl)
     h.addStretch(1)
     h.addWidget(_x_btn("Move to Fixed",
@@ -1812,71 +1823,39 @@ def _set_dim_filter(ctx, dim: str, values) -> None:
     _refresh_shape(ctx, builder_spec(ctx))
 
 
-class _StayOpenMenu(QMenu):
-    """A QMenu that keeps itself open when a *checkable* item (or one flagged
-    ``stayOpen``, e.g. Select all / Select none) is clicked, so the user can tick
-    several values in one pass. Other items and off-menu clicks close as usual."""
-
-    def mouseReleaseEvent(self, e):
-        act = self.activeAction()
-        if act is not None and act.isEnabled() and (
-                act.isCheckable() or bool(act.property("stayOpen"))):
-            act.trigger()            # act in place, don't dismiss
-            return
-        super().mouseReleaseEvent(e)
+#: The inspector page a root's value filter is, and its title per dimension.
+ROOT_FILTER_KEY = "image_table/root_filter"
+_ROOT_FILTER_TITLE = {"timepoint": "Timepoints", "fov": "FOVs"}
 
 
-def _root_filter_menu(ctx, dim: str, anchor: QWidget) -> QMenu | None:
-    """Build the checkable timepoint / FOV value-filter menu (all ticked ⇒ show
-    every value). Returns None when there are no values. Split from
-    :func:`_open_root_filter` so the wiring is drivable without a blocking exec."""
-    all_vals = _timepoint_options(ctx) if dim == "timepoint" else _fov_options(ctx)
-    if not all_vals:
-        return None
+def root_filter_values(ctx, dim: str) -> tuple[list, list]:
+    """``(every value, the values ticked)`` for a root's filter. An empty
+    filter means every value is shown, so every value is ticked."""
+    all_vals = list(_timepoint_options(ctx) if dim == "timepoint" else _fov_options(ctx))
     st = ctx.state.image_table
     active = set(getattr(st, "active_timepoints" if dim == "timepoint"
                          else "active_fovs", set()) or set())
-    menu = _StayOpenMenu(anchor)
-    acts = []
+    return all_vals, [v for v in all_vals if not active or v in active]
 
-    def _commit():
-        chosen = {a.text() for a in acts if a.isChecked()}
-        # all (or somehow none) ticked ⇒ canonical "all" = empty filter
-        _set_dim_filter(ctx, dim, set() if chosen == set(all_vals) else chosen)
 
-    def _bulk(check: bool):
-        for a in acts:
-            a.blockSignals(True)
-            a.setChecked(check)
-            a.blockSignals(False)
-        _commit()
-
-    sel_all = owned_action(menu, "Select all")
-    sel_all.setProperty("stayOpen", True)
-    sel_all.triggered.connect(lambda _c=False: _bulk(True))
-    sel_none = owned_action(menu, "Select none")
-    sel_none.setProperty("stayOpen", True)
-    sel_none.triggered.connect(lambda _c=False: _bulk(False))
-    menu.addSeparator()
-
-    for val in all_vals:
-        a = owned_action(menu, val)
-        a.setCheckable(True)
-        a.setChecked((not active) or val in active)  # empty filter = all shown
-        acts.append(a)
-        a.toggled.connect(lambda _c=False: _commit())
-    return menu
+def apply_root_filter(ctx, dim: str, chosen) -> None:
+    """Write the ticked values as the filter. All ticked (or, somehow, none)
+    is the canonical "all": an empty filter."""
+    all_vals, _checked = root_filter_values(ctx, dim)
+    chosen = set(chosen)
+    _set_dim_filter(ctx, dim, set() if chosen in (set(all_vals), set()) else chosen)
 
 
 def _open_root_filter(ctx, dim: str, anchor: QWidget) -> None:
-    """Pop a checkable value filter for a root on an axis. Wells come from the
-    plate, so for Well this just focuses the plate."""
-    if dim == "well":
-        with swallow("image table builder: focus plate"):
-            plate = getattr(_rt(ctx), "sidebar_plate", None)
-            if plate is not None:
-                plate.setFocus()
-        return
-    menu = _root_filter_menu(ctx, dim, anchor)
-    if menu is not None:
-        menu_exec.exec_transient_menu(menu, anchor.mapToGlobal(anchor.rect().bottomLeft()))
+    """Show a root's value filter as a page of ticks in the inspector."""
+    from review.core import inspector_pages
+    all_vals, checked = root_filter_values(ctx, dim)
+    # Anchored on the page's band, not on the pill's button: the shelf rebuilds
+    # its pills on every edit, and a page whose owner was deleted under it
+    # would go with it. One page per dimension, so the two do not share ticks.
+    anchor = ctx.widgets.get_or_none("_image_table_band") or anchor
+    inspector_pages.open_multi_select(
+        ctx, anchor, key=f"{ROOT_FILTER_KEY}/{dim}", title=_ROOT_FILTER_TITLE.get(dim, dim),
+        items=all_vals, checked=checked,
+        on_change=lambda keys, d=dim: apply_root_filter(ctx, d, keys),
+        empty_text="No values to choose from.")

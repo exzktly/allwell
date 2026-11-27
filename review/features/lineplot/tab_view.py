@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from review.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll,
-    make_band_controls, make_plot_with_right_dock, make_properties_button,
+    make_band_controls, make_plot_area, make_style_button,
     plotting_band_slot)
 from functools import partial
 from review.core.plot_orchestrator import redraw_app
@@ -42,8 +42,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # readers keep resolving. Non-widget state and behaviour calls still reach app.
     reg = ctx.widgets
 
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_line_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
 
     # ── the shared control band above the card ──────────────────────────────
@@ -105,7 +104,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
             ctx, cell_scope),
     )
     line_ctrl.add_action(export_btn)
-    line_ctrl.add_action(make_properties_button(ctx, line_ctrl, "line"))
+    line_ctrl.add_action(make_style_button(ctx, line_ctrl, "line"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
     from review.core.band_fixed_actions import finish_band

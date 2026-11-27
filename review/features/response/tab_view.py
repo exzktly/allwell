@@ -20,7 +20,7 @@ from review.core.fold_change_controls_view import (
 from review.core.inspector_panels import make_popover_button
 from review.core.ui_helpers import (
     build_plot_save_menu, install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_properties_button,
+    make_plot_area, make_style_button,
     plotting_band_slot,
 )
 # Module scope, not function-local: nothing in ``controller`` imports this
@@ -48,16 +48,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         apply_plot_card_decorators, no_selection_reason, wrap_with_empty_state,
     )
     reg = ctx.widgets
-    # The right-side dock the Properties sidebar mounts into, the same one every
-    # other plotting leaf builds. Without it ``style._resolve_export_dock``
-    # returns None and ``launch_export_editor`` falls back to appending the
-    # sidebar into the PlotCard's own layout — inside this tab's QScrollArea,
-    # below the toolbar — so the panel opened somewhere no other tab puts it.
-    # Adding the key to ``open_export_style_panel``'s roster alone was half the
-    # sweep: that file holds *two* rosters answering the same question, a
-    # hundred lines apart.
-    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
-    reg.register("_response_export_dock", export_dock)
+    plot_area, layout = make_plot_area(parent)
     parent = plot_area
     layout.setContentsMargins(0, 0, 0, 0)
 
@@ -146,7 +137,7 @@ def build_response_tab(ctx, parent: QWidget) -> None:
         cells_cb=lambda: export_cell_data_from(ctx, cell_scope),
     )
     band.add_action(export_btn)
-    band.add_action(make_properties_button(ctx, band, "response"))
+    band.add_action(make_style_button(ctx, band, "response"))
     # The row ends in Display · Style · Share on every page; a slot this page
     # does not use is a disabled button, never a gap.
     from review.core.band_fixed_actions import finish_band

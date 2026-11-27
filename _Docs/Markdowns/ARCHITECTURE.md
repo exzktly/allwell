@@ -785,7 +785,7 @@ writer of a placeholder's hint, and re-applied on every switch by a
 **Style, Detail and Share.** The figure's export-style panel
 (`features/export/properties_view.ExportStyleSidebar`) is the inspector's
 **Style** tab in both layouts. The band's Style button
-(`ui_helpers.make_properties_button`) is built with the key of the figure it
+(`ui_helpers.make_style_button`) is built with the key of the figure it
 styles; `review/core/style_tab.py` opens the tab on that figure's panel, closes
 it on a second press, and — as the inspector service's root finder — supplies
 the panel of the page on screen when no Style button was pressed (a page change
@@ -828,28 +828,20 @@ the dataset menu at the head of the rail (`app_shell_view._add_dataset_tools`);
 in phone layout it is a full-screen list behind ⋯, in which a tool closes the
 list before it runs and each reset asks first in an alert.
 
-**The plot's right dock.** Two panels still open at the desk in the plot's
-right dock, a layout sibling of the figure
-(`ui_helpers.make_plot_with_right_dock`): the Heat Map's Layout panel and the
-Image Table's own Properties. In phone layout that dock would be
-`Metrics.dock_w` wide on a screen barely wider, and it is opened from the
-Controls sheet, which is drawn over the page. So `ui_helpers.mount_widget_in_plot_dock`
-(and the Image Table's own Properties toggle) call
-`review/core/phone_panel_sheet.present(dock)` *instead of* showing the dock, and
-show it in the plot only when that returns `False`. The order matters: a dock
-shown beside the figure even for an instant takes its fixed width out of the
-plot, and the style pass that runs as Properties opens then fitted the phone
-titles and constrained layout to the squeezed figure (394 px of a 754 px
-canvas), where they stayed (`tests/test_phone_panel_sheet.py::test_mounting_a_panel_in_phone_layout_never_squeezes_the_plot`).
-In phone layout `present` closes the
-Controls sheet, lends the dock to a right-edge `Drawer` covering the window's
-whole width with the panel's fixed width lifted, and gives the dock back — at
-its index, with its width limits, hidden — when the panel's own ✕ hides it
-(an event filter on the dock), the sheet is dismissed, or phone layout ends. At
-the desk it returns `False` and changes nothing. A window has one such sheet,
-made on the first `present` and found again among the window's direct children
-by its `phonePanelSheet` property (`phone_panel_sheet.sheet_of(win)`) rather than
-kept in an attribute on the main window.
+**No panel docks beside a plot.** A plot page lays its band, figure and
+toolbar into one area (`ui_helpers.make_plot_area`) and nothing else: every
+panel a page has is a page of the window's one inspector, which sits beside the
+whole page at the desk and is the Controls sheet in phone layout. The Heat
+Map's **Layout** editor is a full-height page of the Data tab, opened by the
+band's `Layout: 8 × 12 ›` row (`heatmap/layout_view.build_heatmap_layout_editor`);
+the Image Table's spacing, label fonts, scale bar and cell labels are the first
+page of its Style tab, opened by the action strip's **Style** button
+(`image_table/tab_view._build_style_panel`); the Nanowells Subset's conditions
+are a full-height page of the Data tab, opened by the band's **Conditions** row
+or by choosing *Custom subset…* (`nanowell/subset_view.build_subset_control`).
+Because none of them is ever shown beside the figure, opening one in phone
+layout takes no width from the plot, and there is no second sheet to keep in
+step with the Controls sheet.
 
 **The Image Table** authors its grid through the builder shelf and acts on it
 through the action strip, neither of which is a `ControlBand` (its band is empty),
@@ -1878,7 +1870,6 @@ review/
 │   ├── style_tab.py                  ← which figure's style panel the inspector's Style tab shows (§2)
 │   ├── inspector_pages.py            ← open_multi_select: the one multi-select page, with settled
 │   │                                    application for an expensive choice (§2)
-│   ├── phone_panel_sheet.py          ← phone layout's sheet for a panel still in a plot's right dock
 │   │                                    (Heat Map Layout, the Image Table's Properties): lends the dock
 │   │                                    to a full-width Drawer over the page and gives it back (§2)
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
@@ -2646,10 +2637,9 @@ the scope zone, and `Display ▾` / `Save ▾` / Properties in the action zone.
 Everything about how the grid is *drawn* — colour map, scale, vmin/vmax,
 transpose, rep-set averaging, log scale, the per-cell `± error`, and whether
 the row and column ticks are named from the sample map — is appearance rather
-than scope and lives in the `Display ▾` popover. The tab no longer wraps its row with
-`ui_helpers.wrap_ctrl_row_with_properties`, since that helper exists to
-right-align a button a `FlowLayout` cannot, which is what the band's action
-zone already does.
+than scope and is the page's Display tab, as are the row and column names
+(**Labels**, a page of one field per row and column; a double click on a tick
+label is a shortcut to the same rename, `heatmap/labels_view.rename_label`).
 
 **Statistics** states the same five selectors — Channel, Property, Statistic,
 Timepoint, Test — as scope groups, with **Run test** as the single action. It
@@ -2663,8 +2653,8 @@ and summary parameters; Multivariate's held the per-mode option group and the
 timepoint filter. Both are conditional: only the groups the current (level, viz)
 or mode consumes are visible, and a flow layout skips a hidden widget, so those
 groups now live in the band's scope zone and the row carries a handful of live
-controls rather than a second row of mostly-hidden ones. `ui_helpers.make_properties_button`
-replaces `wrap_ctrl_row_with_properties` at every one of these call sites.
+controls rather than a second row of mostly-hidden ones. Each adds its **Style**
+button with `ui_helpers.make_style_button`.
 
 **Playground** keeps every control it had; what changed is which side they are
 on. Its column moved from the left to the right and took the `ExportStyleSidebar`
@@ -5360,9 +5350,9 @@ accessor `ctx.window`) directly — there is no `ctx.app` (the `CTX_APP_BUDGET =
 ratchet hard-bans it).
 The function:
 
-1. Creates a `make_plot_with_right_dock(parent)` host (returns
-   `(plot_area, layout, right_dock)`) — the right-side dock is reserved for
-   the Properties / Export Style sidebar.
+1. Creates the page's plot area with `make_plot_area(parent)` (returns
+   `(plot_area, layout)`). Nothing docks beside it: the page's panels are
+   pages of the window's inspector.
 2. Adds the per-tab controls row (channel, metric combo, timepoint combo, an
    **Export** dropdown, **Properties**). Plotting's row is the shared
    `ControlBand` (§5.2).
@@ -7154,11 +7144,12 @@ and read the pre-reset value back.
 
 ### 5.8 The Export Style sidebar
 
-Each plot tab pre-allocates a right-side dock via
-`make_plot_with_right_dock(parent)`. The dock is hidden by default and a
-**Properties** button on the tab's controls row toggles it. When opened, the
-dock hosts an `ExportStyleSidebar` (from `features/export/properties_view.py`)
-backed by a `plot_style.figure_prefs(ctx, fig)` view. `_build_ui` assembles
+Each plot page's band has a **Style** button (`ui_helpers.make_style_button`).
+Pressing it opens the window's inspector on its Style tab with that figure's
+`ExportStyleSidebar` (from `features/export/properties_view.py`) as the tab's
+first page (`review/core/style_tab.py`); pressing it again closes the
+inspector. The panel is backed by a `plot_style.figure_prefs(ctx, fig)` view.
+`_build_ui` assembles
 the panel from one builder per section — `_build_header`, then
 `_build_profile_section`, `_build_scatter_sections`, `_build_cell_values_section`,
 `_build_colours_section`, `_build_bars_section`, `_build_axes_section`,
@@ -7375,30 +7366,23 @@ Nothing drawn changes; only what an edit reaches does
 `features/export/style.py` also owns the **Properties-panel roster**.
 `open_export_style_panel` maps a plot key to the figure, canvas and default
 export name it opens over, and a tab reaches it by handing that key to
-`core/ui_helpers.make_properties_button`. Both halves are string literals at
+`core/ui_helpers.make_style_button`. Both halves are string literals at
 opposite ends of the app: nothing imports across the seam, there is no shared
 symbol a rename would break, and a key the roster lacks writes `Unknown export
 panel: <key>` to the status bar and opens nothing. So the two drifted — a tab
 shipped with an inert Properties button, past a full fast lane and a real app
 construction, because building a button is not pressing it.
-**There are two rosters in that file and a tab needs both.**
-`open_export_style_panel` maps the key to its figure; `_resolve_export_dock`
-maps that figure to the pre-allocated right-side dock `make_plot_with_right_dock`
-builds. A tab in the first and not the second does not half-work:
-`launch_export_editor` takes its `dock is None` fallback and appends the sidebar
-into the plot card's own layout — inside whatever scroll area the tab wraps it
-in — so the panel opens somewhere no other tab puts it, and nothing goes red.
-Response Curves was added to the first roster alone and shipped exactly that,
-under a commit whose own message argues about rosters drifting.
+**There is one roster.** `open_export_style_panel` maps the key to its figure,
+and the figure's panel is shown as the inspector's Style tab
+(`review/core/style_tab.py`), so there is no second mapping from a figure to a
+place to put its panel for the first to drift from.
 
-`tests/test_properties_panel_keys.py` closes both seams: it reads every key any
-tab passes to `make_properties_button` and fails on one the panel roster does
-not carry; it fails on a figure the dock roster does not name, and on a dock
-name no tab registers; it selects the roster dict by the shape of its values
-rather than by its variable name, so an unrelated dict in the same function
-cannot vouch for a missing row; and it refuses a key it cannot read as a
-literal rather than skipping it. Adding a plotting leaf means a row in each
-roster and a `make_plot_with_right_dock` call in its `tab_view`.
+`tests/test_properties_panel_keys.py` closes the seam: it reads every key any
+tab passes to `make_style_button` and fails on one the panel roster does
+not carry; it selects the roster dict by the shape of its values rather than by
+its variable name, so an unrelated dict in the same function cannot vouch for a
+missing row; and it refuses a key it cannot read as a literal rather than
+skipping it. Adding a plotting leaf means a row in that roster.
 
 **A Properties click is never silent.** The button's `clicked` slot is the only
 caller, and an exception raised in a slot reaches stderr alone, which a
@@ -8099,11 +8083,9 @@ one-file-per-role package that mirrors Multivariate (see §5.3 recipe): a
 `SpatialState` slice, a Qt-free `collect.py` walker, a `controller.py`
 that owns state mutation + the compute→render pipeline, a `renderer.py`
 that draws the six MVP visualisations, and a `tab_view.py` builder. Its
-per-tab controls live in the top-of-canvas rows; the only right-dock
-occupant is the shared **Properties (Export-Style) panel** — the
-`tab_view` pre-allocates the dock (`make_plot_with_right_dock`, registered
-`_spatial_export_dock`) and a Properties button toggles
-`ctx.figures.open_style_panel("spatial")`, so the Spatial figure now styles
+per-tab controls live in the shared band; its **Style** button calls
+`ctx.figures.open_style_panel("spatial")`, which shows the shared export-style
+panel as the inspector's Style tab, so the Spatial figure styles
 identically to every other plotting tab (`render_spatial` re-applies the
 export-style prefs at the end of each recompute so edits survive it).
 
@@ -15267,26 +15249,19 @@ the new dataset's bookkeeping; each worker bridge is kept on the state until it 
 **The page** (`tab_view.build_nanowell_tab`, `controller`). The view switch — the seven views, as a tab strip
 (`build_view_bar`) in the shell's mode band where every page's sub-tabs sit (§6a), each tab carrying its view's
 tooltip — is not on the page's own band. The control band holds, in this order, Metric, Channel, Along x, Baseline, *Fixed cohort*, Rim focus, the two moving averages, then *Subset* — last of the data controls, since it narrows the nanowells rather than choosing what is measured of them (`subset_view.build_subset_control`: a
-combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — the subsets saved by name in this dataset, and *Custom subset…*, with an **Edit…** button,
+combo of the Starting cells presets — All nanowells, ≥1, 1, 1–2, ≥2 — the subsets saved by name in this dataset, and *Custom subset…*, with a **Conditions** row beside it reading how many conditions the subset has,
 on every view, the combo outlined in the accent through the `filterActive` QSS property while a subset is set; the
-editor, `SubsetEditor`, is a panel the page places under the band — never a dialog — with one `_ConditionRow` per
+editor, `SubsetEditor`, is a full-height page of the inspector's Data tab (`inspector_panels.make_popover_button`,
+`large=True`), opened by the Conditions row or by choosing *Custom subset…* — never a dialog, and never a panel
+of the page — with one `_ConditionRow` per
 condition, *all* / *any*, *Add condition*, *Clear*, *Reset* and *Apply* (each line a `FlowLayout` that wraps rather
 than cutting its words and controls at a phone's width, each condition's × kept at its right edge, and its field,
-timepoint and gate combos making room for twelve characters rather than their longest entry; the whole panel sits in
-`_EditorScroll`, which takes as much of its page's height as it needs up to `_ROWS_SHARE` and scrolls past it (it
-re-asks when its content or page changes size through `_GrowWatch`, a separate watcher that checks each object
-alive with `shiboken6.isValid` — the area itself overrides no `eventFilter`, since a Python filter on its own
-tree was reached during teardown and crashed Windows with an access violation), and
-`share_page` lets the editor take the figure's place while it is open on a page too short for both — a phone held
-sideways, where the figure and its footer alone fill the page — decided by the page's height, not by phone layout,
-with the figure redrawn when Close brings it back. The figure stack has one owner of its visibility,
-`_figure_aside.set_aside(figures, reason, aside)`: the editor (`"subset"`) and the site detail on a phone (`"detail"`,
-`_phone.detail_placement`) each record their own reason as a dynamic property on the stack, and it is shown only while
-neither holds it — the detail is re-placed on every redraw, and when each wrote the stack's visibility outright the
-first redraw after an Apply brought the figure back under an open editor
-(`tests/test_nanowell_subset_fits_a_phone.py::test_a_redraw_with_the_editor_open_on_a_sideways_phone_keeps_the_figure_aside`); opening it closes the ⚙ Controls sheet,
-`phone_panel_sheet.close_controls_sheets`, since on a phone Edit… is in that sheet, which is drawn over the page the
-editor opens in, and at a desk there is no such sheet); an edit changes only the draft the rows
+timepoint and gate combos making room for twelve characters rather than their longest entry; the editor has no
+scroll area and no Close of its own — the inspector's page scrolls it and the inspector's header closes it — and a
+condition added below the fold is scrolled to; a category condition's values (imaging fields, identity verdicts)
+are ticked on a multi-select page pushed over the editor's, `_ConditionRow.open_tiles`; because the editor is
+beside the page at the desk and in the Controls sheet on a phone, it never takes the figure's place and never opens
+under the sheet it was pressed in); an edit changes only the draft the rows
 hold — `SubsetEditor.changed` says in the panel's `Warn` line that it is not applied yet (or why it is not a subset
 yet) — and *Apply* passes the draft through `controller.set_subset` once, so the page redraws once per Apply rather
 than per keystroke; *Reset* rebuilds the rows from the page's subset; Apply and Reset are enabled only while the rows have
@@ -25282,7 +25257,7 @@ named `ssh` or `rsync`.
 1. Create `review/features/<name>/` with `__init__.py`, `controller.py`
    (and, if you're rendering matplotlib, `renderer.py`), and `tab_view.py`.
    The `tab_view.build_<name>_tab(ctx, parent)` minimum:
-   - `make_plot_with_right_dock(parent)` for the export dock.
+   - `make_plot_area(parent)` for the area the band, figure and toolbar go in.
    - A controls row with `btn_secondary("Properties", …,
      icon="sliders-horizontal")` as the rightmost widget.
    - A `PlotCard` that hosts your figure(s).

@@ -20,7 +20,7 @@ from review.features.barplot.tab_view import build_bar_plots_tab
 from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (
-    "_bar_export_dock", "_chan_cb_bar", "_metric_selector_frame_bar", "_metric_cb_bar",
+    "_chan_cb_bar", "_metric_selector_frame_bar", "_metric_cb_bar",
     "_bar_reset_order_btn", "_bar_tp_button", "_bar_tp_cb", "_bar_tp_var",
     "_bar_group_mode_btn", "_bar_pool_reps_btn",
     "_bar_show_seg", "_violin_slider", "_hist_bins_spin", "_bar_significance_btn",

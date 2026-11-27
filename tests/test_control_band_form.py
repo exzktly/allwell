@@ -273,13 +273,13 @@ def test_the_shared_builders_declare_their_role(qtbot):
     from types import SimpleNamespace
 
     from review.core.inspector_panels import make_popover_button
-    from review.core.ui_helpers import make_action_menu_button, make_properties_button
+    from review.core.ui_helpers import make_action_menu_button, make_style_button
     host = QWidget()
     qtbot.addWidget(host)
     root, _c, _l = make_popover_button("Display", host, root=True)
     row, _c2, _l2 = make_popover_button("Fold change", host, tab="data", summary=lambda: "vs DMSO")
     cmd, _m = make_action_menu_button("Save ▾", host)
-    prop = make_properties_button(SimpleNamespace(figures=None), host, "bar")
+    prop = make_style_button(SimpleNamespace(figures=None), host, "bar")
     assert section_of_action(root) == "Parked" and root.text() == "Display"
     assert section_of_action(row) == "Data" and row.text() == "Fold change: vs DMSO ›"
     assert section_of_action(cmd) == "Actions"

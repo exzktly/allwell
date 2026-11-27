@@ -1,6 +1,6 @@
 """The Style tab: which figure's export-style panel the inspector shows.
 
-Every plot page's band has a **Style** button (``ui_helpers.make_properties_button``),
+Every plot page's band has a **Style** button (``ui_helpers.make_style_button``),
 built with the key of the figure it styles. Pressing it opens the inspector on
 its Style tab with that figure's panel; pressing it again closes it. The panel
 is the feature layer's (``review/features/export``), which core may not import,

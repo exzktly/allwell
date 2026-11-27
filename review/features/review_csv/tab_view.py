@@ -17,6 +17,17 @@ refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 from widgets.labeled_combo import LabeledComboBox
 from widgets.page_body import build_page_body
 
+#: The button that does what double-clicking a row does.
+OPEN_ROW_TEXT = "Open in Segmentation"
+
+
+def open_selected_row(ctx) -> None:
+    """Show the cell of the row selected in the table in Segmentation."""
+    table = ctx.widgets.get_or_none("_review_csv_table")
+    item = table.currentItem() if table is not None else None
+    if item is not None:
+        on_review_csv_row_double_click(ctx, item)
+
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``)
     # instead of being stashed on the app god-object. ``register`` also stamps
@@ -54,6 +65,15 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))
     ctrl.add_action(refresh_btn)
 
+    # What double-clicking a row does, as a button a user can see: open the
+    # selected row's cell in Segmentation. Enabled while a row is selected.
+    open_btn = reg.register("_review_csv_open_btn", QPushButton(OPEN_ROW_TEXT, ctrl))
+    open_btn.setProperty("variant", "secondary")
+    open_btn.setToolTip("Show the selected row's cell in Segmentation "
+                        "(double-clicking the row does the same)")
+    open_btn.setEnabled(False)
+    ctrl.add_action(open_btn)
+
     table = reg.register("_review_csv_table", QTableWidget(0, 0, parent))
     table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
     table.horizontalHeader().setHighlightSections(False)
@@ -68,6 +88,9 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     table.itemDoubleClicked.connect(
         lambda item: on_review_csv_row_double_click(ctx, item)
     )
+    open_btn.clicked.connect(lambda _=False: open_selected_row(ctx))
+    table.itemSelectionChanged.connect(
+        lambda: open_btn.setEnabled(bool(table.selectedItems())))
     from review.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, table, icon="file-spreadsheet",

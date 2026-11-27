@@ -86,7 +86,7 @@ FEATURE_PREFIX = "review.features"
 # extraction, exactly like grid_ops above.
 #
 # +1 (125 → 126) for the Image Table builder's per-cell override: ``controller.
-# _cell_override_menu`` lazily imports ``grid_ops.image_table_cell_override_menu``
+# _open_cell_page`` lazily imports ``grid_ops.open_cell``
 # — the same controller↔grid_ops cycle break the two grid_ops imports above use
 # (grid_ops imports controller at module scope, so controller must defer).
 #

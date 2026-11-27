@@ -379,25 +379,55 @@ def test_chip_claims_the_mouse_press_that_starts_a_drag(qtbot):
     assert chip._press is not None
 
 
-def test_root_filter_menu_actually_filters(qtbot):
-    from PySide6.QtWidgets import QWidget
+def test_root_filter_values_and_apply_actually_filter():
+    """The filter's two halves: what the page lists and ticks, and what a
+    change of ticks writes. An empty filter means every value is shown."""
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01", "T02", "T03"])
-    host = QWidget()
-    qtbot.addWidget(host)
-    menu = B._root_filter_menu(ctx, "timepoint", host)
-    checkable = [a for a in menu.actions() if a.isCheckable()]
-    # empty filter ⇒ every value shown/ticked
-    assert len(checkable) == 3 and all(a.isChecked() for a in checkable)
-    checkable[0].setChecked(False)                     # toggled → commit
+    values, checked = B.root_filter_values(ctx, "timepoint")
+    assert len(values) == 3 and checked == values       # empty filter ⇒ every value ticked
+    B.apply_root_filter(ctx, "timepoint", values[1:])
     st = ctx.state.image_table
-    assert st.active_timepoints == {checkable[1].text(), checkable[2].text()}
+    assert st.active_timepoints == set(values[1:])
     assert ctx.runtime.image_table.builder_dirty is True
-    boxes = [a for a in menu.actions() if a.isCheckable()]
-    [a for a in menu.actions() if a.text() == "Select none"][0].trigger()
-    assert not any(a.isChecked() for a in boxes)       # Select none unchecks all
-    [a for a in menu.actions() if a.text() == "Select all"][0].trigger()
-    assert all(a.isChecked() for a in boxes)           # Select all rechecks all
-    assert st.active_timepoints == set()               # all ticked ⇒ show all
+    assert B.root_filter_values(ctx, "timepoint")[1] == values[1:]
+    B.apply_root_filter(ctx, "timepoint", values)        # all ticked ⇒ show all
+    assert st.active_timepoints == set()
+    B.apply_root_filter(ctx, "timepoint", values[:1])
+    B.apply_root_filter(ctx, "timepoint", [])            # none ticked is "all" too, never an empty table
+    assert st.active_timepoints == set()
+
+
+def test_the_root_pill_s_button_opens_the_filter_as_a_page_of_ticks(qtbot, monkeypatch):
+    """A root's filter is opened by a button on its pill — not by pressing a
+    plain label — and it is the application's one multi-select page, whose
+    ticks reach the filter."""
+    from PySide6.QtWidgets import QToolButton
+
+    from review.core import inspector_pages
+
+    from review.core.widget_registry import WidgetRegistry
+
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01", "T02", "T03"])
+    ctx.widgets = WidgetRegistry()
+    opened = []
+    monkeypatch.setattr(inspector_pages, "open_multi_select",
+                        lambda _ctx, anchor, **kw: opened.append(kw))
+    spec = B.builder_spec(ctx)
+    pill = B._root_pill(ctx, spec, "rows", "timepoint")
+    qtbot.addWidget(pill)
+    (button,) = pill.findChildren(QToolButton, "ITBRootBtn")
+    assert button.text().endswith("›")
+    button.click()
+    (call,) = opened
+    assert call["title"] == "Timepoints" and call["key"] == "image_table/root_filter/timepoint"
+    assert list(call["items"]) == list(call["checked"]) and len(call["items"]) == 3
+    call["on_change"](list(call["items"])[:1])
+    assert ctx.state.image_table.active_timepoints == set(list(call["items"])[:1])
+
+    # Wells come from the plate: that pill has nothing to press.
+    well = B._root_pill(ctx, spec, "rows", "well")
+    qtbot.addWidget(well)
+    assert not well.findChildren(QToolButton, "ITBRootBtn")
 
 
 def test_channel_menu_is_flat_no_submenus(qtbot):

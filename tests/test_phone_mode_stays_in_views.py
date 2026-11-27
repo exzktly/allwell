@@ -9,7 +9,7 @@ phone-layout flag. These rules hold that in place:
    how a second mode spreads through code that should not know there is one.
 2. **Reads of the mode outside the sanctioned layers only go down.** The
    sanctioned layers are ``ui/``, ``core/``, the ``*_phone.py`` /
-   ``*phone_view.py`` siblings and ``review/core/phone_panel_sheet.py``. A read
+   ``*phone_view.py`` siblings. A read
    anywhere else is on a roster keyed by *file and function* with a written
    reason, and an entry that no longer describes a real read fails the test, so
    the roster can only shrink.
@@ -63,7 +63,6 @@ MODE_READS = ("is_on", "add_listener", "is_switching")
 SANCTIONED_DIRS = ("ui", "core")
 SANCTIONED_SUFFIXES = ("_phone.py", "phone_view.py")
 SANCTIONED_FILES = (
-    "review/core/phone_panel_sheet.py",
     # The Image Table's phone form, owned by the Image Table: it listens to the
     # mode and refits its own grid. One of the five views that already own
     # their phone form ().

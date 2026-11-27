@@ -43,6 +43,8 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Scatter Plot", "aggregate")
+    from review.features.scatter._axes_page import AxesPage
+    axes = AxesPage(ctx, ctrl)
 
     # Per-axis channel + property selectors mirror the cells scatter tab.
     # The previous monolithic stat-string combo ("Mean Fluorescence GFP")
@@ -61,27 +63,29 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     agg_ch_x_cb.addItems(["GFP"])
     agg_ch_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_ch_x_cb.currentIndexChanged.connect(lambda _i: on_scatter_agg_axis_change(ctx, "x"))
-    ctrl.add_scope("X-axis · channel", agg_ch_x_cb)
+    axes.add_scope("X channel", agg_ch_x_cb)
 
     agg_metric_x_cb = reg.register("_scatter_agg_metric_x_cb", QComboBox())
     agg_metric_x_cb.addItems(AGG_METRIC_ORDER)
     agg_metric_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx))
-    ctrl.add_scope("property", agg_metric_x_cb)
+    axes.add_scope("X property", agg_metric_x_cb)
 
     agg_ch_y_cb = reg.register("_scatter_agg_ch_y_cb", QComboBox())
     agg_ch_y_cb.addItems(["GFP"])
     agg_ch_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_ch_y_cb.currentIndexChanged.connect(lambda _i: on_scatter_agg_axis_change(ctx, "y"))
-    ctrl.add_scope("Y-axis · channel", agg_ch_y_cb)
+    axes.add_scope("Y channel", agg_ch_y_cb)
 
     agg_metric_y_cb = reg.register("_scatter_agg_metric_y_cb", QComboBox())
     agg_metric_y_cb.addItems(AGG_METRIC_ORDER)
     agg_metric_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     agg_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx))
-    ctrl.add_scope("property", agg_metric_y_cb)
+    axes.add_scope("Y property", agg_metric_y_cb)
     # Under Observations: Nanowells these four give way to an X / Y nanowell-metric pair (well medians).
-    build_axis_controls(ctx, ctrl, "aggregate")
+    build_axis_controls(ctx, axes, "aggregate")
+    axes.finish()
+    ctrl.add_scope("", axes.button)
 
     # Legacy stat combos — hidden, kept in sync for back-compat. Export
     # / save-figure code still reads from these by name (+ ``_var`` aliases).

@@ -267,7 +267,20 @@ def build_centre(win, parent: QWidget) -> None:
         scatter_view.currentChanged.connect(_on_scatter_view)
         win._plotting_scatter_view = win._ctx.widgets.register(
             "_plotting_scatter_view", scatter_view)
-        win._plotting_scatter_grp = band.add_scope("Points", scatter_view)
+        # A Data row, "Points: Each observation ›", whose page holds the switch, rather than a band item (the user's
+        # decision, tracker §9.1 step 20).
+        from review.core import inspector_panels as _points_panels
+
+        _points_btn, _points_panel, _points_lay = _points_panels.make_popover_button(
+            "Points", band, ctx=win._ctx, tab="data", summary=lambda: scatter_view.segmentText(
+                max(0, scatter_view.currentIndex())))
+        _points_btn.setToolTip("Each observation is a point, or one point per well")
+        scatter_view.setParent(_points_panel)
+        _points_lay.addWidget(scatter_view)
+        _points_lay.addStretch(1)
+        scatter_view.currentChanged.connect(lambda _i: _points_panels.refresh(_points_btn))
+        win._ctx.widgets.register("_plotting_scatter_points_btn", _points_btn)
+        win._plotting_scatter_grp = band.add_scope("", _points_btn)
         win._plotting_scatter_grp.setVisible(False)
 
         # Phase 11b (A4): the channel selector is now a single global combo

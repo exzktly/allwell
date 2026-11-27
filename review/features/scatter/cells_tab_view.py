@@ -51,6 +51,8 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     parent = plot_area
 
     ctrl = plotting_band_slot(ctx, "Scatter Plot", "cells")
+    from review.features.scatter._axes_page import AxesPage
+    axes = AxesPage(ctx, ctrl)
 
     # Per-axis channel + property selectors. The scatter tab overrides
     # Plotting's band channel/property combos (those are hidden when
@@ -61,31 +63,33 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ch_x_cb.addItems(["GFP"])
     ch_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     ch_x_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "x"))
-    ctrl.add_scope("X-axis · channel", ch_x_cb)
+    axes.add_scope("X channel", ch_x_cb)
     reg.register("_scatter_ch_x_var", ch_x_cb)
 
     metric_x_cb = reg.register("_scatter_metric_x_cb", QComboBox(ctrl))
     metric_x_cb.addItems(_METRIC_ORDER)
     metric_x_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
-    ctrl.add_scope("property", metric_x_cb)
+    axes.add_scope("X property", metric_x_cb)
     reg.register("_scatter_metric_x_var", metric_x_cb)
 
     ch_y_cb = reg.register("_scatter_ch_y_cb", QComboBox(ctrl))
     ch_y_cb.addItems(["GFP"])
     ch_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     ch_y_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "y"))
-    ctrl.add_scope("Y-axis · channel", ch_y_cb)
+    axes.add_scope("Y channel", ch_y_cb)
     reg.register("_scatter_ch_y_var", ch_y_cb)
 
     metric_y_cb = reg.register("_scatter_metric_y_cb", QComboBox(ctrl))
     metric_y_cb.addItems(_METRIC_ORDER)
     metric_y_cb.setSizeAdjustPolicy(QComboBox.AdjustToContents)   # widest entry, refitted when repopulated
     metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
-    ctrl.add_scope("property", metric_y_cb)
+    axes.add_scope("Y property", metric_y_cb)
     reg.register("_scatter_metric_y_var", metric_y_cb)
     # Under Observations: Nanowells these four give way to an X / Y nanowell-metric pair.
-    build_axis_controls(ctx, ctrl, "cells")
+    build_axis_controls(ctx, axes, "cells")
+    axes.finish()
+    ctrl.add_scope("", axes.button)
 
     # Self-describing — the button's own text carries the "Timepoints: …
     # selected" readout (see update_scatter_tp_selection_display), so it needs

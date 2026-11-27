@@ -57,7 +57,10 @@ def test_the_subset_picker_lists_the_page_s_subsets_and_choosing_one_sets_the_pa
     _page(ctx).subset = ss.Subset()                    # the page draws every nanowell
     every = _draw(ctx)
     combo = ctx.widgets.get("_scatter_cells_nw_subset_cb")
-    assert combo.parentWidget().isVisibleTo(ctx.window)
+    # On the band's Axes page (tracker §9.1 step 20), which the inspector shows when the row is pressed: shown on
+    # that page, not hidden by ``sync_controls``.
+    assert not combo.parentWidget().isHidden()
+    assert ctx.widgets.get("_scatter_cells_nw_subset_cb_grp") is combo.parentWidget()
     assert _items(combo) == [("", "All nanowells"), ("Two+", "Two+")]
     assert combo.currentData() == ""
     _choose(combo, "Two+")

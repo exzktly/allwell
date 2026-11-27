@@ -65,3 +65,29 @@ def test_the_rows_sit_in_cards_and_a_card_of_hidden_rows_hides(tab):
 
 def test_the_rail_groups_the_tools_under_three_eyebrows(tab):
     assert tab._nav.captions() == ["Combine", "Convert", "Maintain"]
+
+
+def _browse_to(field, path) -> None:
+    """Browse… as a user presses it, the folder dialog answered with *path*."""
+    field._pick = lambda _current, _parent=None: str(path)
+    field._browse()
+
+
+def test_the_foot_row_says_which_folder_is_missing(tab, tmp_path):
+    """Read off the page's own folder fields: the first one with no path names itself, and once the fields are
+    filled the reason goes. Driven through the fields the user fills."""
+    tab.show_tool("Subset / Split")
+    page = tab._pages.currentWidget()
+    row = page._action_row
+    assert not page._run_btn.isEnabled()
+    assert row.reason() == "Choose a folder for “Source dataset”."
+    not_a_dataset = tmp_path / "plain"
+    not_a_dataset.mkdir()
+    _browse_to(page._src_field, not_a_dataset)                # filled, refused: Subset stays disabled
+    assert not page._run_btn.isEnabled()
+    assert row.reason() == "Choose a folder for “Destination folder”."
+    _browse_to(page._dest_field, tmp_path / "out")
+    assert row.reason() == page._src_field.message() != "", row.reason()
+    tab.show_tool("Validate & Repair")
+    page = tab._pages.currentWidget()
+    assert page._action_row.reason() == "Choose a folder for “Dataset folder”."

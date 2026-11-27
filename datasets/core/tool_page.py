@@ -80,7 +80,48 @@ def foot_row(page: QWidget, primary_text: str, *, on_run, on_queue=None,
         page._queue_btn.clicked.connect(on_queue)
         others += (page._queue_btn,)
     others += tuple(after)
-    return ActionRow(page._run_btn, page, others=others)
+    row = ActionRow(page._run_btn, page, others=others)
+    page._run_btn.installEventFilter(_ReasonFromFields(page, row))
+    return row
+
+
+def fields_reason(page: QWidget) -> str:
+    """Why *page*'s primary action cannot run, read off its folder fields: the first shown field with no path
+    ("Choose a folder for “Source dataset”."), else the first one whose path is refused, in its own words. Empty when every
+    field is filled and valid — the tool's other conditions say their own reasons in place (a plate verdict, a
+    well count)."""
+    from widgets.path_field import PathField
+    fields = [f for f in page.findChildren(PathField) if f.isVisibleTo(page) and f.isEnabled()]
+    for f in fields:
+        if not f.path() and not f.is_pending():
+            return f"Choose a folder for “{f.title()}”."
+    for f in fields:
+        if not f.is_pending() and not f.is_valid() and f.message():
+            return f.message()
+    return ""
+
+
+class _ReasonFromFields(QObject):
+    """Re-reads :func:`fields_reason` whenever the primary action is enabled or disabled, so the foot row's reason
+    follows the tool's own readiness check without each tool computing a second answer."""
+
+    def __init__(self, page: QWidget, row: ActionRow) -> None:
+        super().__init__(row)
+        self._page, self._row = page, row
+        from widgets.path_field import PathField
+        # A field can change without the action's state changing (the source filled, the destination still
+        # empty), so each field's own change re-reads the reason too.
+        for field in page.findChildren(PathField):
+            field.changed.connect(self._refresh)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        self._row.setDisabledReason(fields_reason(self._page))
+
+    def eventFilter(self, obj, ev) -> bool:  # noqa: N802 — Qt naming
+        if ev.type() == QEvent.EnabledChange:
+            self._refresh()
+        return False
 
 
 def into_card(outer: QVBoxLayout, title: str, items) -> Card:

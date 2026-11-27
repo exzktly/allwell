@@ -76,6 +76,7 @@ class PathField(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self._title = title
         self._pick = pick
         self._validator = validator
         self._path = ""
@@ -269,6 +270,10 @@ class PathField(QWidget):
         button that actually does something keeps the path fully legible.
         """
         self._browse_btn.setEnabled(not locked)
+
+    def title(self) -> str:
+        """The field's own caption — "Source dataset", "Destination folder"."""
+        return self._title
 
     def path(self) -> str:
         return self._path

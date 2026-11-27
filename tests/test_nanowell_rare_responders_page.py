@@ -7,6 +7,8 @@ from the baseline while every other nanowell doubles to quadruples, so the flagg
 
 from __future__ import annotations
 
+from widgets.menu_marks import is_current
+
 import numpy as np
 import pytest
 
@@ -522,4 +524,4 @@ def test_grid_sets_how_many_flagged_rows_a_page_holds_and_the_pager_follows(page
     assert _drawn_rows(page)[0].startswith("#5 ")
     menu = page.widgets.get("_nw_popout_grid_menu")
     menu.aboutToShow.emit()                                 # opened again, it ticks the choice in force alone
-    assert [a.data() for a in menu.actions() if a.isChecked()] == [("rows", 4)]
+    assert [a.data() for a in menu.actions() if is_current(a)] == [("rows", 4)]

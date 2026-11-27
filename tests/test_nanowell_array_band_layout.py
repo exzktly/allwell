@@ -186,7 +186,7 @@ def test_no_layer_choice_moves_a_control(qc_page, themed, qtbot):
         assert where() == before, key
         _toggle(ctx, key)
     for colour in ("state", "metric"):
-        ctx.widgets.get(f"_nw_colour_{colour}").trigger()
+        ctx.widgets.get(f"_nw_colour_{colour}").click()
         assert where() == before, colour
     image = ctx.widgets.get("_nw_image_cb")
     for key in ("off", "tiles", "montage"):

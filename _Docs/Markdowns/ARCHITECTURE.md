@@ -7810,7 +7810,7 @@ applies through the Nanowells controller and reads the page's rows.
 `exclude`, so rename and delete follow it; saved in `cell_sets.json` and in the
 Scatter's view_state snapshot) is chosen from Display ▾ → *Highlight saved
 cells* (`core/saved_set_combo.SavedSetHighlightCombo`) or the Saved cells panel's
-*Highlight on the scatter plot*; `set_highlighted` emits `plot_options_changed`, so the
+*Highlight on scatter*; `set_highlighted` emits `plot_options_changed`, so the
 plot redraws. `_cell_rings.paint_saved_cells` does not ring the set — a 14-px
 ring per cell merges at a few hundred and hides the focused one — it fades every
 cloud artist to `FADE` of its own opacity (colour kept) and redraws the set's

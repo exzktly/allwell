@@ -6,7 +6,7 @@ buttons under a list act on its selected row:
 
 * **Saved cell sets** — a line naming every set in force and where (excluded
   from analysis, highlighted on Scatter, shown in Cell Browser), then
-  *View in Cell Browser*, *Highlight on the scatter plot*,
+  *View in Cell Browser*, *Highlight on scatter*,
   *Exclude from analysis* (each a toggle; one set at a time can be highlighted
   and one excluded), rename and delete.
 * **Gates** — *View in Cell Browser* (the cells inside that gate alone) and
@@ -187,7 +187,7 @@ class SavedCellsPage(QWidget):
                                 "Open Image Browser → Cell Browser showing this set's cells.")
         self.view_set.clicked.connect(lambda: self._on_set(ctl.view_set))
         self.highlight = _button(
-            self, "Highlight on the scatter plot",
+            self, "Highlight on scatter",
             "Draw this set's cells solid over a faded cloud on the per-cell Scatter. "
             "Changes no number. Click again to stop.", checkable=True)
         self.highlight.clicked.connect(lambda: self._on_set(ctl.toggle_highlight, refresh=True))

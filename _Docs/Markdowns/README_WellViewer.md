@@ -6079,7 +6079,7 @@ cells it kept.
   one you are looking at. A cell that cannot be shown says why where the image
   would be (no segmentation mask for the field, the nucleus is not in it, or
   the plot is out of date and needs redrawing).
-- **Highlight saved cells** (under **Display ▾**, or **Highlight on the scatter plot** in
+- **Highlight saved cells** (under **Display ▾**, or **Highlight on scatter** in
   Cell Gating → Saved cells). Draws one saved set's cells solid in cyan over the
   rest of the cloud, which fades but keeps its colours. A line under the plot
   says how many of the set are shown and why the others are not (in wells you
@@ -8539,7 +8539,7 @@ on a nanowell plate a third, the subsets saved on the Nanowells page:
   deleted. Renaming a set keeps it highlighted, excluded and as the Cell
   Browser's Source under its new name; deleting one ends all three. Under the
   list, for the selected set: **View in Cell Browser** (Image Browser → Cell
-  Browser with the set as its Source), **Highlight on the scatter plot** and **Exclude
+  Browser with the set as its Source), **Highlight on scatter** and **Exclude
   from analysis** (click again to undo; one set at a time can be highlighted and
   one excluded), a box to rename it, and **Delete**. A set saved before some of
   its wells were segmented again says how many of its cells it leaves out.

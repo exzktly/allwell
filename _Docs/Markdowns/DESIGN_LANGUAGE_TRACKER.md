@@ -112,8 +112,20 @@ Settled; do not reopen. If one cannot be met, stop and report.
    Share buttons; then the content in cards; conditions that apply shown as
    neutral chips, amber only for an alert. A form page is a title, cards with a
    label column, and one row of actions at the foot.
-8. **Tokens** (grey theme; the blue variant takes the same roles with its own
-   hues, and both must pass the contrast test of row D03):
+8. **Both palettes are offered: grey and blue.** The user was shown the two
+   side by side in a working example and asked for both as options. Grey stays
+   the one the application starts in. Every rule, role and building block in
+   this plan is palette-independent, both palettes must pass the contrast test
+   of row D03, and every page row is judged in both. The choice is the user's,
+   in the application, and remembered (row D34); today it is a developer-facing
+   environment variable, `ALLWELL_THEME`.
+9. **Tokens.** Grey's values are below. Blue takes the same roles with its own
+   hues: canvas / card / control `#0B0F17` / `#131A24` / `#1D2633`; text
+   `#E6E9EF` / `#98A2B3` / `#5F6B7C`; hairline / button edge / field edge
+   `#2A3343` / `#3B475C` / `#5E6B82`; accent `#6B8AFD` with a `#0B0F17` label;
+   selected `#24315C` with `#C9D4FF` text. Blue's values were drawn for the
+   mock-up and have not all been measured: row D02 measures each against D03
+   and adjusts any that fail.
 
    | Role | Value | Contrast on a card |
    |---|---|---|
@@ -133,7 +145,6 @@ Settled; do not reopen. If one cannot be met, stop and report.
 
 | Question | Blocks |
 |---|---|
-| **Which palette is the default?** The application starts grey. The image the user pointed at was drawn in the blue variant. Rows are palette-independent except D02, which sets values. | D02 |
 | **"Colour" or "Color"** in what users read. Both appear. | D13 |
 | **Whether to change the 96 well colours.** 19 fail contrast on the plot and the first eight fail a colour-blind separation check, but the colours are written into every dataset's sample definitions (`domain/well_palette.py`, `domain/plot_groups.py`), so a change needs a migration. Not assumed by any other row. | D30 |
 
@@ -141,7 +152,7 @@ Settled; do not reopen. If one cannot be met, stop and report.
 
 A page's row is `done` when all of these hold, and the evidence cell says so:
 
-1. **A render of the real application, in the shipped theme, beside the
+1. **A render of the real application, in each of the two palettes, beside the
    mock-up's redraw**, attached to the pull request. The comparison is of
    structure: the same regions, the same roles, the same controls in the same
    places. Exact pixel sizes are settled in the application.
@@ -188,6 +199,7 @@ says: no application knowledge → `widgets/`; shared by every pane → `ui/`.
 Guards read the source through `tests/_repo_scan`; each has a per-site roster
 that only shrinks, a liveness check, a case in `tests/test_guards_bite.py`, and a
 proof by `scripts/prove_guard.sh` or by mutation on HEAD (CLAUDE.md §7.5, §7.7).
+The measured checks and the page renders of §4 run once per palette.
 
 | Test | Rule | Ends at |
 |---|---|---|
@@ -309,7 +321,7 @@ For a session that cannot open the mock-up.
 ## 9. Order of work
 
 - **Phase 0 — measure the right thing (D01).**
-- **Phase 1 — tokens and the contrast test (D02, D03).** The application looks
+- **Phase 1 — tokens, the contrast test and the palette choice (D02, D03, D34).** The application looks
   slightly different everywhere and no page's structure has changed.
 - **Phase 2 — building blocks (D04–D09).** They exist and nothing uses them.
 - **Phase 3 — sweeps (D10–D13).** Mechanical, app-wide, each held by a guard.
@@ -360,6 +372,7 @@ awk -F'|' '/^\| D[0-9]+ /{gsub(/ /,"",$4); n[$4]++} END{for(s in n) print s, n[s
 | D28 | Dialogs and windows: Manage Remote Servers and those under it, Storage, Reset analysis, Copy analysis, the curve windows, Test detection, the message-box wording | todo | `analyze/remote_dialog.py` and the others in `SURFACES_TRACKER.md` §11.5 | A render of each, before and after |
 | D29 | Phone layout: the touch sizes re-derived from the new tokens; every page on all six screens | todo | `core/phone_layout.py`, `ui/theme.py` (`_touch_qss`), `ui/phone_shell.py` | `tests/test_every_page_renders.py` green; shots reviewed |
 | D30 | The well colours, **only if the user decides to change them**: a palette that passes contrast and colour-blind separation on the plot background and on white, and a migration for saved sample definitions | todo | `domain/well_palette.py`, `domain/plot_groups.py`, `review/persistence/` | Not started until §3's question is answered |
+| D34 | The palette is the user's choice, in the application: a Grey / Blue setting, remembered between sessions (`core/app_settings.py`), honoured at start-up ahead of `DEFAULT_THEME` and behind an explicit `ALLWELL_THEME` or `--theme`. `ui/theme.py` says a live switch is not possible while widgets cache inline style sheets built from the tokens, so the setting applies at the next start and says so beside the control; once row D12 has removed those style sheets, make it live and delete that sentence. Where the control lives is the surfaces plan's question: the dataset-tools / `⋯` menu of `SURFACES_TRACKER.md` S23 unless a settings page exists by then | todo | `ui/theme.py` (`select_theme_from_env`), `core/app_settings.py`, `allwell.py` | A test through the real start-up path: with the setting stored as blue and no environment variable, the built window's card colour is blue's; with `ALLWELL_THEME=grey` set, grey's. Mutation: ignoring the stored setting fails the first, ignoring the variable the second |
 | D31 | Every roster from D09 is empty or holds only reasoned entries; the per-widget names in the theme's sheet that only restated a role are gone | todo | `tests/`, `ui/theme.py` | The rosters; the count of named widgets in the sheet, from a script, before and after |
 | D32 | Reconcile: re-render every page and compare each against §2's rules, not against this table; list anything that does not follow them | todo | this file | The reconciliation, in the pull request body |
 | D33 | Docs and help; delete this tracker | todo | `_Docs/Markdowns/`, `ui/help_topics.py` | The docs lane green; the pull request body says the tracker is gone |

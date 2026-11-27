@@ -18,14 +18,6 @@ from tests import _surface_guards as scan
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
 #: starting ``kept`` is permanent and says why.
 WIDGET_ACTIONS: dict[tuple[str, str], str] = {
-    ('review/features/home/cell_gating/fov_view.py', 'open_fov_menu'):
-        'pending S12: one of the multi-select builds',
-    ('review/features/home/cell_gating/tab_view.py', '_open_gate_filter_menu'):
-        'pending S12: one of the multi-select builds',
-    ('review/features/image_browser/cell_browser/criteria_view.py', '_open_gate_select'):
-        'pending S12: one of the multi-select builds',
-    ('review/features/image_browser/cell_browser/criteria_view.py', '_open_multiselect'):
-        'pending S12: one of the multi-select builds',
     ('review/features/nanowell/popout_view.py', '_check_entry'):
         'pending S21: the crops pop-out takes the multi-select component',
     ('ui/phone_shell.py', 'PhoneShell._menu_caption'):

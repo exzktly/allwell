@@ -62,3 +62,71 @@ def test_the_summary_is_all_none_or_a_count(picker):
 ])
 def test_summarise(checked, total, expect):
     assert summarise(checked, total) == expect
+
+
+# ── a multi-select shown as an inspector page (review/core/inspector_pages) ───
+
+@pytest.fixture
+def page_ctx(qtbot):
+    """A real context with the splitter the desk inspector docks in, and a
+    button to open a page from."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QPushButton, QSplitter, QVBoxLayout, QWidget
+
+    from tests._minimal_shell import minimal_shell
+    ctx, window = minimal_shell(qtbot)
+    split = QSplitter(Qt.Horizontal)
+    split.addWidget(QWidget())
+    page = QWidget()
+    QVBoxLayout(page)
+    button = QPushButton("Timepoints", page)
+    page.layout().addWidget(button)
+    split.addWidget(page)
+    window.setCentralWidget(split)
+    window._h_pane = split
+    window.resize(1200, 700)
+    window.show()
+    return ctx, button
+
+
+def test_a_settled_page_applies_once_after_the_burst_with_the_last_choice(page_ctx, qtbot):
+    """An expensive application runs once per burst of ticks, with what the
+    boxes read at the end — not once per tick, and not with the first tick."""
+    from review.core import inspector_pages
+    ctx, button = page_ctx
+    applied: list[list] = []
+    picker = inspector_pages.open_multi_select(
+        ctx, button, key="t", title="Timepoints", items=["0", "6", "24"], checked=["0", "6", "24"],
+        on_change=applied.append, settle_ms=60)
+    picker.boxes()[0].click()
+    picker.boxes()[1].click()
+    picker.boxes()[1].click()
+    assert applied == [], "a tick applied before the burst had settled"
+    qtbot.waitUntil(lambda: bool(applied), timeout=3000)
+    assert applied == [["6", "24"]]
+
+
+def test_leaving_a_settled_page_applies_a_pending_choice_at_once(page_ctx, qtbot):
+    """A choice still waiting out its pause when the page is left is applied
+    then, not lost — there is no close every route out passes through."""
+    from review.core import inspector_pages, inspector_service
+    ctx, button = page_ctx
+    applied: list[list] = []
+    picker = inspector_pages.open_multi_select(
+        ctx, button, key="t", title="Timepoints", items=["0", "6"], checked=["0", "6"],
+        on_change=applied.append, settle_ms=60_000)        # would not fire in this test's life
+    picker.none_button.click()
+    assert applied == []
+    inspector_service.close(ctx)
+    assert applied == [[]]
+
+
+def test_an_unsettled_page_applies_on_the_tick(page_ctx):
+    from review.core import inspector_pages
+    ctx, button = page_ctx
+    applied: list[list] = []
+    picker = inspector_pages.open_multi_select(
+        ctx, button, key="t", title="Timepoints", items=["0", "6"], checked=["0"],
+        on_change=applied.append)
+    picker.boxes()[1].click()
+    assert applied == [["0", "6"]]

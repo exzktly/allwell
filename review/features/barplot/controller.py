@@ -365,9 +365,11 @@ def rep_sets_active(ctx) -> list[ReplicateSet]:
 # core.lazy proxies to keep core feature-import-free.
 
 
-def toggle_bar_group_mode(ctx) -> None:
-    """Flip the bar-tab x-axis grouping (well ↔ timepoint) and redraw."""
+def set_bar_group_mode(ctx, mode) -> None:
+    """Cluster the bar-tab x axis by *mode* (``"well"`` or ``"timepoint"``) and redraw; nothing when it already is."""
     from review.features.barplot.renderer import redraw_bars
+    if mode not in ("well", "timepoint") or ctx.state.plot.bar_group_mode == mode:
+        return
     ctx.state.plot.toggle_bar_group_mode()
     refresh_bar_layout_btn_state(ctx)
     redraw_bars(ctx)
@@ -471,9 +473,8 @@ def open_bar_timepoint_selector(ctx) -> None:
 def refresh_bar_layout_btn_state(ctx) -> None:
     """Sync the bar-tab layout toggle buttons with PlotState.
 
-    Updates the *Grouping* and *Pooled* button labels / checked states using the
-    "State: On/Off" convention (label and accent highlight always agree). The
-    *Pooled* button stays visible in the Display ▾ popover and is enable-gated
+    Sets the *Group by* segmented control and the *Pool replicates* switch from
+    the state. The switch stays visible in the Display ▾ popover and is enable-gated
     instead of visibility-toggled (toggling a child's visibility inside a closed
     QMenu widget-action does not surface reliably); it is enabled only when ≥1
     replicate set is active. It governs pooling for bars *and* violin/beeswarm:
@@ -490,19 +491,11 @@ def refresh_bar_layout_btn_state(ctx) -> None:
     pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)
     has_rsets = bool(plot_replicate_sets(ctx))
     if group_btn is not None:
-        # Two-way mode selector: label names the current mode, highlight tracks
-        # the non-default "timepoint" mode so label and highlight never conflict.
-        if plot.bar_group_mode == "well":
-            group_btn.setText("Grouping: Well")
-        else:
-            group_btn.setText("Grouping: Timepoint")
-        group_btn.setChecked(plot.bar_group_mode == "timepoint")
+        group_btn.setCurrentByData(str(plot.bar_group_mode or "well"))
         group_btn.setEnabled(True)
     if pool_btn is not None:
         pool_btn.setVisible(True)
         pool_btn.setEnabled(has_rsets)
-        # State-label + matching highlight: highlighted iff pooling is on.
-        pool_btn.setText("Pooled: On" if plot.bar_pool_replicates else "Pooled: Off")
         pool_btn.setChecked(bool(plot.bar_pool_replicates))
         pool_btn.setToolTip(
             "Collapse each replicate set's wells into one pooled column "

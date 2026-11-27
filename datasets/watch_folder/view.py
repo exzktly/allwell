@@ -1,7 +1,7 @@
 """Qt builder for the Watch folder page.
 
 A folder picker, the quiet period, whether the folder must change before the
-countdown starts, an optional give-up time, a **Start watching** / **+ Queue**
+countdown starts, an optional give-up time, a **Start watching** / **Add to queue**
 row and a one-line live status — the countdown a person checks on — above the
 usual raw log.
 
@@ -78,8 +78,8 @@ class WatchFolderPage(LogPanelMixin, QWidget):
 
         blurb = QLabel(
             "Wait for a folder to finish receiving files, then let the jobs "
-            "queued after this one run. Put it first in a chain — Watch, then "
-            "Convert, then Analyze — so an acquisition is processed as soon as "
+            "queued after this one run. Put it first in a chain — a watch, then "
+            "a conversion, then an Analyze run — so an acquisition is processed as soon as "
             "the microscope stops writing it.",
             self,
         )
@@ -144,11 +144,11 @@ class WatchFolderPage(LogPanelMixin, QWidget):
         bl = QHBoxLayout(btn_row)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("▶  Start watching", self)
+        self._run_btn = buttons.primary("Start watching", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         bl.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("+ Queue", self)
+        self._queue_btn = buttons.default("Add to queue", self)
         self._queue_btn.setToolTip(
             "Add this watch to the Job Queue, to run ahead of the jobs that "
             "should wait for the folder.")
@@ -196,16 +196,19 @@ class WatchFolderPage(LogPanelMixin, QWidget):
     def show_status(self, status: WatchStatus) -> None:
         self.set_status_text(status.sentence())
 
-    def set_status_text(self, text: str) -> None:
+    def set_status_text(self, text: str, *, failed: bool = False) -> None:
+        """The outcome under the button: words, and the failure tone when it is one — no ✓ / ✗ in front."""
+        from ui import text_roles
         self._status_label.setText(text)
         self._status_label.setVisible(bool(text))
+        text_roles.set_role(self._status_label, text_roles.HELP, tone=text_roles.FAILURE if failed else None)
 
     def status_text(self) -> str:
         return self._status_label.text()
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._run_btn.setText("Watching…" if running else "▶  Start watching")
+        self._run_btn.setText("Watching…" if running else "Start watching")
         self._folder_field.setLocked(running)
         for widget in (self._quiet_spin, self._require_change_cb, self._give_up_spin):
             widget.setEnabled(not running)

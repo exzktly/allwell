@@ -196,7 +196,7 @@ if __name__ == "__main__":
     rev.toggled.connect(g_func.setReversed)
     outer.addWidget(rev)
 
-    echo = QLabel("colorAt(0.5) of the first strip: " + g_pairs.colorAt(0.5).name())
+    echo = QLabel("colorAt(0.5) of the first strip — " + g_pairs.colorAt(0.5).name())
     echo.setProperty("textRole", "label")
     outer.addWidget(echo)
     outer.addStretch(1)

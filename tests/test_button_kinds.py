@@ -76,3 +76,36 @@ def test_set_kind_repaints_a_built_button(qapp, sheet):
 def test_a_kind_that_is_not_one_of_the_four_is_refused():
     with pytest.raises(ValueError, match="not a kind of button"):
         buttons.button("Run", "secondary")
+
+
+def _tool_fill(qapp, build, *, checked):
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    b = build(host)
+    b.setChecked(checked)
+    lay.addWidget(b)
+    host.resize(160, 60)
+    host.show()
+    qapp.processEvents()
+    img = host.grab().toImage()
+    g = b.geometry()
+    fill = img.pixelColor(g.left() + 4, g.center().y()).name().upper()
+    ink = b.palette().color(QPalette.ButtonText).name().upper()
+    host.close()
+    return fill, ink
+
+
+def test_a_mode_tool_is_pressed_in_only_while_armed(qapp, sheet):
+    """``mode_tool``: the default look at rest, the selected pair while its pointer mode is armed — and its label
+    never changes, so the look is the only thing that says the mode is on."""
+    c = sheet.Colors
+    build = lambda host: buttons.mode_tool("Delete cell", host)  # noqa: E731
+    # The fill from a grab; a palette reports the resting ink whatever the pseudo-state, so only the fill is read.
+    assert _tool_fill(qapp, build, checked=False)[0] == c.control.upper()
+    assert _tool_fill(qapp, build, checked=True)[0] == c.selected.upper()
+
+
+def test_an_icon_button_has_no_words_but_its_tooltip(qapp):
+    b = buttons.icon_button("x", "Remove this row")
+    assert b.text() == "" and not b.icon().isNull()
+    assert b.toolTip() == b.accessibleName() == "Remove this row"

@@ -1,4 +1,4 @@
-"""A Distribution window frozen into the Subset (*Use as Subset*): the ``window_sites`` condition, from hand-built tables.
+"""A Distribution window frozen into the Subset (*Use as subset*): the ``window_sites`` condition, from hand-built tables.
 
 Asked for: use the window as a subset, so the Distribution itself loses the nanowells outside it. The condition holds
 the window's nanowells — it cannot be bound to the window live, since the Subset filters the figure the window is

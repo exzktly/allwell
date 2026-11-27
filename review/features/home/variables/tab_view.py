@@ -114,7 +114,7 @@ def set_variables_phone_form(ctx, on: bool) -> None:
     the empty state's sentence ran down a column a few words wide. On a phone
     the two columns are one, **plate first** — the plate is what the layer is
     for (the module docstring's "a canvas with a form beside it"), and with no
-    variables yet its place holds the empty state and its *+ Variable*, which is
+    variables yet its place holds the empty state and its *Add variable*, which is
     the one thing to do — and the definition under it, at the full width, with
     no left inset of its own (the rail toggle it clears is hidden in phone
     layout). ``BottomToTop`` reverses the desk's left-to-right order without

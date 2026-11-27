@@ -72,7 +72,7 @@ _VIZ_LABELS = {
 
 _VIZ_TOOLTIPS = {
     sp_state.VIZ_SPATIAL_MAP:
-        "Scatter of every cell centroid in the well plane, coloured by the "
+        "Scatter of every cell centroid in the well plane, colored by the "
         "selected metric / colony id / normalised radial position (r/R). "
         "Convex-hull overlays show colony footprints when detected.",
     sp_state.VIZ_NND_HISTOGRAM:
@@ -116,7 +116,7 @@ _VIZ_TOOLTIPS = {
 }
 
 _METRIC_PICKER_TOOLTIP = (
-    "Per-cell CSV column used as the signal in colour maps, radial "
+    "Per-cell CSV column used as the signal in color maps, radial "
     "profiles, per-colony violins, and the boundary/interior split.\n"
     "Any <channel>_<property> intensity / count column, any shape_* "
     "morphology column, and any user-defined ratio channel is eligible."
@@ -350,7 +350,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     summary_display_cb.addItem("Line plot", sp_state.SUMMARY_DISPLAY_LINE)
     _select_combo_by_data(summary_display_cb, st.summary_display)
     summary_display_cb.setToolTip(
-        "Heatmap: wells × timepoints matrix, coloured by the summary metric.\n"
+        "Heatmap: wells × timepoints matrix, colored by the summary metric.\n"
         "Line plot: one line per well, X = timepoint, Y = summary metric."
     )
     summary_display_cb.currentIndexChanged.connect(

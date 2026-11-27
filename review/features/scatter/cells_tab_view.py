@@ -111,13 +111,13 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # the X/Y Channel & Property selectors are the controls that matter inline.
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
     _disp_btn.setToolTip(
-        "Scatter display options: layout, colour-by-time, the gate filter and a highlighted set of saved cells")
+        "Scatter display options: layout, color-by-time, the gate filter and a highlighted set of saved cells")
     ctrl.add_action(_disp_btn)
 
     # Layout: overlay every group on one axis (default, interactive) or stack
     # one group per axis below the other (view-only comparison) — mirrors the
     # Distribution tab's Overlay / Faceted choice.
-    _disp_lay.addWidget(QLabel("Layout:", _disp_panel))
+    _disp_lay.addWidget(QLabel("Layout", _disp_panel))
     layout_cb = reg.register("_scatter_layout_cb", QComboBox(_disp_panel))
     layout_cb.addItems(["Overlay", "Separate axes"])
     layout_cb.currentIndexChanged.connect(
@@ -129,35 +129,31 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # identity, so a well's cloud shows its evolution over time. With more than
     # one well selected the view auto-stacks into one panel per well (overlaying
     # several time-coloured clouds on one axis would be unreadable).
-    color_by_tp_btn = reg.register(
-        "_scatter_color_by_tp_btn", buttons.default("Color by time: Off", ctrl))
-    color_by_tp_btn.setProperty("variant", "toggle")
-    color_by_tp_btn.setCheckable(True)
+    # Switches, each acting at once, named for what is true when on (§2.5).
+    from widgets.toggle_switch import ToggleSwitch as _ToggleSwitch
+    color_by_tp_btn = reg.register("_scatter_color_by_tp_btn", _ToggleSwitch("Color by time", ctrl))
+    color_by_tp_btn.setChecked(bool(ctx.state.scatter.color_by_tp))
     color_by_tp_btn.setToolTip(
-        "Colour each point by its timepoint. With multiple wells selected, "
+        "Color each point by its timepoint. With multiple wells selected, "
         "wells are shown as stacked panels.")
 
     def _toggle_color_by_tp(checked: bool) -> None:
         on = bool(checked)
         ctx.state.scatter.color_by_tp = on
-        # State-label + matching highlight (label and accent always agree).
-        color_by_tp_btn.setText(
-            "Color by time: On" if on else "Color by time: Off")
         redraw_scatter_orchestrate(ctx)
 
     color_by_tp_btn.clicked.connect(_toggle_color_by_tp)
     _disp_lay.addWidget(color_by_tp_btn)
 
-    # "Apply gates" — in Display ▾ with the other view options. Default off:
+    # "Plot only the gated cells" — in Display ▾ with the other view options. Default off:
     # the per-cell scatter is where gates are drawn, so it shows the full cloud
     # with the boxes over it (see collect.scatter_points_gated). The axes title
     # carries a "· gate-filtered" tag whenever it is on, which is what keeps a
     # filter tucked inside a popover from being forgotten — and what travels
     # into a copied or saved figure, where no control does.
-    apply_gates_btn = reg.register(
-        "_scatter_apply_gates_btn", buttons.default("Apply gates: Off", _disp_panel))
-    apply_gates_btn.setProperty("variant", "toggle")
-    apply_gates_btn.setCheckable(True)
+    apply_gates_btn = reg.register("_scatter_apply_gates_btn",
+                                   _ToggleSwitch("Plot only the gated cells", _disp_panel))
+    apply_gates_btn.setChecked(bool(ctx.state.scatter.apply_gates_to_points))
     apply_gates_btn.setToolTip(
         "Plot only the cells inside the gate boxes shown on this plot.\n"
         "Off (default): the full cloud, with the boxes drawn over it, so you "
@@ -168,14 +164,13 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     def _toggle_apply_gates(checked: bool) -> None:
         on = bool(checked)
         ctx.state.scatter.apply_gates_to_points = on
-        apply_gates_btn.setText("Apply gates: On" if on else "Apply gates: Off")
         redraw_scatter_orchestrate(ctx)
 
     apply_gates_btn.clicked.connect(_toggle_apply_gates)
     _disp_lay.addWidget(apply_gates_btn)
 
     # One saved set drawn solid over the faded cloud (``_cell_rings``).
-    _disp_lay.addWidget(QLabel("Highlight saved cells:", _disp_panel))
+    _disp_lay.addWidget(QLabel("Highlight saved cells", _disp_panel))
     _disp_lay.addWidget(reg.register("_scatter_highlight_cb", SavedSetHighlightCombo(ctx, _disp_panel)))
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live

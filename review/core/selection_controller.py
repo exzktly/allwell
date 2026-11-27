@@ -1050,7 +1050,7 @@ def labels_apply_affix(ctx, *, where: str) -> None:
         )
         return
 
-    title = "Add Prefix" if where == "prefix" else "Add Suffix"
+    title = "Add prefix" if where == "prefix" else "Add suffix"
     verb = "prepend to" if where == "prefix" else "append to"
     plural = "s" if len(selected) != 1 else ""
     prompt = (f"Text to {verb} the custom label of {len(selected)} "

@@ -621,7 +621,7 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True,
     ``include_gate=False`` drops the ``Gate_Pass`` layer. The per-cell scatter —
     where the gates are drawn — passes it by default, so it keeps showing the
     full cloud with the gates over it rather than filtering itself by its own
-    gates; its "Apply gates" toggle opts back in.
+    gates; its "Plot only the gated cells" toggle opts back in.
 
     ``except_layer`` drops one named verdict column, for a surface that is
     **about** that layer and must not filter its own evidence by it: the focus

@@ -453,7 +453,7 @@ OVERLAYS_NOT_IN_BUILD = " Nanowell overlays are not in this build."
 
 
 def set_cell_editing(ctx, enabled: bool) -> None:
-    """Enable or disable Delete Cell, Crop cells and Edit ▾ — they act on outlined cells, and a frame with no
+    """Enable or disable Delete cell, Crop cells and Edit ▾ — they act on outlined cells, and a frame with no
     label map has none. A disabled one says why in its tooltip."""
     why = "This frame has no label map, so there are no outlined cells to act on."
     for name in ("_review_image_delete_btn", "_review_image_crop_btn", "_review_image_edit_btn"):
@@ -689,7 +689,7 @@ def draw_review_image(
     # **Both modes, once, outside the branch.** The overlay used to be drawn
     # inside the ``else`` above, so turning it on in Binary mode computed every
     # reason -- a full row fetch and verdict walk per refresh -- and then threw
-    # them away, while the button went on reading "Why removed: On". A toggle
+    # them away, while the switch went on reading on. A toggle
     # that is on and does nothing is §7.6 exactly, and Binary is the mode where
     # the question is asked most, because a binary mask is already a picture of
     # which cells counted. Hoisting it here is what makes that unrepeatable:
@@ -1016,7 +1016,7 @@ def review_image_zoom_fit(ctx) -> None:
 
 
 def toggle_selected_review_cell(ctx) -> None:
-    """Flip include-edit (delete) mode — the Delete Cell toolbar toggle."""
+    """Flip include-edit (delete) mode — the Delete cell tool."""
     set_review_image_include_mode(
         ctx, not ctx.state.review_image.include_edit_mode
     )
@@ -1069,7 +1069,6 @@ def refresh_review_image_binary_btn(ctx) -> None:
         return
     on = bool(ctx.state.review_image.binary_mask)
     btn.setChecked(on)
-    btn.setText("Binary: On" if on else "Binary: Off")
     btn.setToolTip(
         "Binary mask: cells above the active threshold are drawn white,\n"
         "cells below are drawn black, on a black background.\n"
@@ -1185,7 +1184,6 @@ def refresh_review_image_outline_btn(ctx) -> None:
         return
     on = bool(ctx.state.review_image.show_outline)
     btn.setChecked(on)
-    btn.setText("Outline: On" if on else "Outline: Off")
     btn.style().unpolish(btn)
     btn.style().polish(btn)
 
@@ -1410,16 +1408,15 @@ def refresh_review_image_layers_btn(ctx) -> None:
         return
     on = bool(ctx.state.review_image.show_exclusion_layers)
     btn.setChecked(on)
-    btn.setText("Why removed: On" if on else "Why removed: Off")
     btn.setToolTip(
-        "Colour each excluded cell by the layer that removed it — you\n"
+        "Color each excluded cell by the layer that removed it — you\n"
         "deleted it, the debris gate, the crop, the scatter gates, the\n"
-        "run's field verdict, or the focus cut. The colour key appears\n"
+        "run's field verdict, or the focus cut. The color key appears\n"
         "under the picture, listing only the layers this field actually\n"
         "has cells for.\n"
         "\n"
         "Inclusion is the AND of all six, so a cell can fail more than one.\n"
-        "An outline can only be one colour, so it shows the first — hover a\n"
+        "An outline can only be one color, so it shows the first — hover a\n"
         "cell to read every layer that dropped it. That also means clicking\n"
         "a cell back in CANNOT restore one a verdict column removed —\n"
         "raise the threshold, or turn that layer off, instead.\n"

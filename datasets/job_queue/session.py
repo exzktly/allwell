@@ -76,13 +76,13 @@ class QueueSession:
     # ── wiring ───────────────────────────────────────────────────────────
     def register_collector(self, kind: str, collect: Callable[[], dict]) -> None:
         """How this session reads a tool's page back — the tool's own
-        ``collect_spec``, which is also what its "+ Queue" button uses."""
+        ``collect_spec``, which is also what its "Add to queue" button uses."""
         self._collectors[kind] = collect
 
     def register_validator(self, kind: str, validate: Callable[[], bool]) -> None:
         """How this session asks a tool's page whether it is fit to queue.
 
-        Optional, and only Analyze has one. Its "+ Queue" button refuses a
+        Optional, and only Analyze has one. Its "Add to queue" button refuses a
         form that its Run button would refuse — no input folder, an
         unparseable schema, an out-of-range number — and the banner's Save is
         the same act by another route. Without the check here, Save collected
@@ -428,7 +428,7 @@ class QueueSession:
                          "uses the folder shown on the page instead.", "warn")
 
     def queue_from_page(self, kind: str, spec: dict) -> bool:
-        """The page's own "+ Queue" pressed while a session has that page open.
+        """The page's own "Add to queue" pressed while a session has that page open.
 
         Without this the button bypassed the session: a next step's inputs
         were queued as plain folders — the planned paths — with no link, and

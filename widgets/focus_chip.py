@@ -44,7 +44,10 @@ class FocusChip(QFrame):
             self._button.setToolTip(tooltip)
         self._button.clicked.connect(lambda _=False: self.activated.emit())
         lay.addWidget(self._button)
-        self._close = QPushButton("✕", self)
+        from widgets import icons
+        self._close = QPushButton(self)
+        self._close.setIcon(icons.make_icon("x", 12))
+        self._close.setAccessibleName("Stop focusing this cell")
         self._close.setObjectName("FocusChipClear")
         self._close.setFlat(True)
         self._close.setToolTip("Stop focusing this cell")

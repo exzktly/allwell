@@ -159,7 +159,7 @@ class RemoteHost:
     ssh_key_path: str = ""
     """Optional path to an SSH private key (``~`` expanded at use time).
 
-    Set by the "Setup SSH Key…" wizard (v5.2.1) or by hand. When empty,
+    Set by the "Set up SSH key…" wizard (v5.2.1) or by hand. When empty,
     ssh falls back to whatever ``~/.ssh/config`` provides — the typical
     case for developers who already have a working ssh setup. When set,
     every ssh / rsync invocation gets ``-i <expanded_path>`` so the

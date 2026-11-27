@@ -269,7 +269,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             for w in (self._sc_density_cb, self._sc_xlog_cb, self._sc_ylog_cb,
                       self._sc_color_tp_cb, self._sc_gates_cb):
                 row.addWidget(w)
-            row.addWidget(QLabel("Layout:"))
+            row.addWidget(QLabel("Layout"))
             self._sc_layout_cb = QComboBox()
             self._sc_layout_cb.addItems(["Overlay", "Separate axes"])
             self._sc_layout_cb.setToolTip(
@@ -322,12 +322,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
         ch_cb = QComboBox()
         ch_cb.setMinimumWidth(theme.Metrics.combo_min_w)
-        row.addWidget(QLabel("Channel:"))
+        row.addWidget(QLabel("Channel"))
         row.addWidget(ch_cb)
 
         prop_cb = QComboBox()
         prop_cb.setMinimumWidth(theme.Metrics.combo_min_w)
-        row.addWidget(QLabel("Property:"))
+        row.addWidget(QLabel("Property"))
         row.addWidget(prop_cb)
         row.addStretch(1)
         layout.addLayout(row)
@@ -500,7 +500,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def _warn_if_live_gates_ignored(self) -> None:
         """Say so when the Scatter tab is filtering by gate and this batch is not.
 
-        Batch export deliberately does not inherit the tab's live "Apply gates"
+        Batch export deliberately does not inherit the tab's live "Plot only the gated cells"
         toggle — a batch job that silently changed its population because of a
         checkbox left on in another tab would be worse. But the *other* silence
         is just as bad: with the toggle on, the tab's figure and this batch's

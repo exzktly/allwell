@@ -42,7 +42,17 @@ from ui import buttons
 _is_dataset = is_dataset
 
 
-_SEVERITY_PREFIX = {"error": "✗", "warning": "⚠", "info": "ℹ"}
+#: Each finding's severity as an icon from the drawn set and the ink it is drawn in — not a ✗ / ⚠ / ℹ glyph in
+#: front of its words.
+_SEVERITY_ICON = {"error": ("x", "danger"), "warning": ("alert-triangle", "warn"), "info": ("info", "text_secondary")}
+
+
+def _finding_item(text: str, severity: str) -> QListWidgetItem:
+    from widgets import icons
+    item = QListWidgetItem(text)
+    name, ink = _SEVERITY_ICON.get(severity, ("info", "text_secondary"))
+    item.setIcon(icons.make_icon(name, 14, normal=ink, active=ink, disabled=ink))
+    return item
 
 
 class ValidatePage(LogPanelMixin, QWidget):
@@ -77,7 +87,7 @@ class ValidatePage(LogPanelMixin, QWidget):
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
 
-        heading = QLabel("Validate & Repair Dataset", self)
+        heading = QLabel("Validate & Repair", self)
         heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
@@ -108,14 +118,14 @@ class ValidatePage(LogPanelMixin, QWidget):
         bl = QHBoxLayout(btn_row)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("▶  Check", self)
+        self._run_btn = buttons.primary("Check", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.checkRequested)
         bl.addWidget(self._run_btn)
         # Second, right after the primary action -- matching every other
         # Datasets tool's run-row ordering (Run, then +Queue, then any
         # secondary actions specific to this tool).
-        self._queue_btn = buttons.default("+ Queue", self)
+        self._queue_btn = buttons.default("Add to queue", self)
         self._queue_btn.setToolTip("Add this check to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -206,7 +216,7 @@ class ValidatePage(LogPanelMixin, QWidget):
         """
         self._dataset_root = ""
         self._findings_list.clear()
-        item = QListWidgetItem(f"✗ Check failed — {message}")
+        item = _finding_item(f"Check failed — {message}", "error")
         item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
         self._findings_list.addItem(item)
         self._show_findings()
@@ -250,7 +260,7 @@ class ValidatePage(LogPanelMixin, QWidget):
             # which the QThread's own `finished` always fires after) has
             # already set the correct enabled state for the fresh report.
             self._repair_btn.setEnabled(False)
-        self._run_btn.setText("Checking…" if running else "▶  Check")
+        self._run_btn.setText("Checking…" if running else "Check")
         # Locked for the run's duration — picking a new dataset mid-run would
         # let the running worker's report land against a path the user has
         # already moved on from (ValidateController._on_succeeded uses the
@@ -266,10 +276,7 @@ class ValidatePage(LogPanelMixin, QWidget):
             item = QListWidgetItem("No issues found.")
             self._findings_list.addItem(item)
         for f in report.findings:
-            prefix = _SEVERITY_PREFIX.get(f.severity, "•")
-            text = f"{prefix} {f.message}"
-            item = QListWidgetItem(text)
-            self._findings_list.addItem(item)
+            self._findings_list.addItem(_finding_item(f.message, f.severity))
         self._show_findings()
         self._repair_btn.setEnabled(report.repairable)
         # A greyed button with findings still listed above it looks broken

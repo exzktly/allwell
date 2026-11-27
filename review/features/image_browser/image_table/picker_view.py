@@ -81,8 +81,8 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     # rail's foot a screen's height away.
     help_lbl = QLabel(
         "Select wells here, then build the table on the shelf — drag a root "
-        "(Well/Timepoint/FOV) onto Rows or Columns and nest channels under it — "
-        "and press Generate.", parent,
+        "(well, timepoint or FOV) onto “Rows” or “Columns” and nest channels under it — "
+        "and press “Generate”.", parent,
     )
     help_lbl.setProperty("textRole", "help")
     help_lbl.setWordWrap(True)

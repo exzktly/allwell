@@ -57,7 +57,7 @@ def _band(qtbot):
     display = QToolButton()
     display.setText("Display ▾")
     display.setProperty("bandRole", "display")
-    reset = QPushButton("Reset Order")
+    reset = QPushButton("Reset order")
     save = QToolButton()
     save.setText("Save ▾")
     save.setPopupMode(QToolButton.InstantPopup)
@@ -88,7 +88,7 @@ def test_split_labelled_text():
     assert split_labelled_text("Timepoints: 1/3 selected") == ("Timepoints", "1/3 selected")
     assert split_labelled_text("Series: None") == ("Series", "None")
     assert split_labelled_text("Display ▾") is None
-    assert split_labelled_text("Reset Order") is None
+    assert split_labelled_text("Reset order") is None
 
 
 def test_every_scope_control_is_a_row_with_its_label_in_one_column(qtbot):

@@ -53,8 +53,8 @@ from analyze.seg_params import AnalyzeSegParamsMixin
 from widgets.flow_layout import FlowLayout, sync_flow_height
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
-from ui import buttons
-from ui import theme
+from ui import buttons, theme
+from ui.text_roles import NOT_SET
 
 
 #: The nanowell section, or a stand-in that is nothing, by the build's profile (``analyze.nanowell_hook``).
@@ -135,7 +135,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         ipl.setSpacing(theme.Spacing.xs)
         self._input_edit = QLineEdit(in_pick)
         self._input_edit.setReadOnly(True)
-        self._input_edit.setPlaceholderText("(not set)")
+        self._input_edit.setPlaceholderText(NOT_SET)
         self._input_edit.setMinimumWidth(0)
         self._input_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         ipl.addWidget(self._input_edit, 1)
@@ -156,7 +156,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeAdvancedSectionMixin,
         out_cap = QLabel("Output to", self._output_row)
         out_cap.setProperty("textRole", "help")
         orl.addWidget(out_cap, 0, Qt.AlignTop)
-        self._output_lbl = QLabel("—", self._output_row)
+        self._output_lbl = QLabel("", self._output_row)    # hidden until a folder is chosen
         self._output_lbl.setWordWrap(True)
         self._output_lbl.setMinimumWidth(0)
         orl.addWidget(self._output_lbl, 1)

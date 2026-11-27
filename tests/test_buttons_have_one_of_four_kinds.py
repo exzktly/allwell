@@ -6,10 +6,10 @@ fell through to the bare default without anyone deciding they should. The scan r
 set: ``setProperty("variant", …)``, ``widgets._support.set_variant``, ``ui.buttons.set_kind`` and the
 ``ui_helpers._btn`` funnel, and every string a conditional or a table could hand them.
 
-The buttons that carry an on/off state (``toggle``, ``toggle_active``, ``toggle_muted``, ``toggle_accent``,
-``sem``, ``sem_warn``) are on :data:`PENDING`, per site, because the design language makes each of them a
-switch, a checkbox or a segmented control rather than a fifth kind of button — that conversion is
-``DESIGN_LANGUAGE_TRACKER.md`` row D13, and the roster only shrinks.
+The six values that once marked a button carrying an on/off state (``toggle``, ``toggle_active``,
+``toggle_muted``, ``toggle_accent``, ``sem``, ``sem_warn``) are gone: each such control is a switch, a checkbox,
+a segmented control or a pressed-in tool (``ui.buttons.mode_tool``), never a fifth kind of button. What
+:data:`PENDING` still holds is per site, with its reason, and only shrinks.
 """
 
 from __future__ import annotations
@@ -23,26 +23,8 @@ from tests._repo_scan import parse_source, python_sources, rel
 
 KINDS = {"primary", "default", "quiet", "destructive"}
 
-_STATE = "carries an on/off state: a switch, checkbox or segmented control under D13, not a kind of button"
-
 #: ``(file, value)`` → how many sites there set that value, and why it is not one of the four yet.
 PENDING: dict[tuple[str, str], tuple[int, str]] = {
-    ("review/core/ui_helpers.py", "sem"): (1, _STATE),
-    ("review/core/ui_helpers.py", "sem_warn"): (1, _STATE),
-    ("review/core/ui_helpers.py", "toggle"): (1, _STATE),
-    ("review/data/crop_tool.py", "toggle"): (2, _STATE),
-    ("review/features/barplot/_drag_reorder.py", "toggle_accent"): (1, _STATE),
-    ("review/features/barplot/_drag_reorder.py", "toggle_muted"): (1, _STATE),
-    ("review/features/barplot/tab_view.py", "toggle"): (3, _STATE),
-    ("review/features/barplot/tab_view.py", "toggle_muted"): (1, _STATE),
-    ("review/features/batch_export/base_panel.py", "sem"): (1, _STATE),
-    ("review/features/batch_export/base_panel.py", "sem_warn"): (1, _STATE),
-    ("review/features/batch_export/base_panel.py", "toggle"): (1, _STATE),
-    ("review/features/heatmap/layout_view.py", "toggle"): (1, _STATE),
-    ("review/features/nanowell/anchor_queue_view.py", "toggle"): (1, _STATE),
-    ("review/features/nanowell/tab_view.py", "toggle"): (3, _STATE),
-    ("review/features/preview/panel_view.py", "toggle"): (5, _STATE),
-    ("review/features/scatter/cells_tab_view.py", "toggle"): (2, _STATE),
     ("widgets/selection_chip.py", "accent"): (1, "SelectionChip's own variant parameter: a chip, not a button. "
                                                   "It is the rail's count, which only reports: row D21 makes it plain text"),
 }

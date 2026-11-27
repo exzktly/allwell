@@ -37,14 +37,14 @@ def well_cloud(df, *, col_x: str, col_y: str, target_tps, fluor_gate_x: float, f
     # The Gate_Pass layer stays off here: the per-cell scatter is where the
     # gates are drawn, so it shows the full cloud with the boxes over it
     # while every other view filters via df_included_mask. The tab's
-    # "Apply gates" toggle filters through ``gates`` below instead — against
+    # "Plot only the gated cells" toggle filters through ``gates`` below instead — against
     # the boxes on screen, not against a column another tab's worker wrote.
     mask = df_included_mask(df, include_gate=False).to_numpy(copy=True)
     # Two masks when the tab is filtering by gate geometry: the drawn one,
     # and the one the gate percentages have to be denominated by. "42% of
     # well A fell in this gate" is a statement about the cloud the gate was
     # drawn over — filter first and every gate reads 100.0%, which is what
-    # "Apply gates" used to do to its own labels.
+    # "Plot only the gated cells" used to do to its own labels.
     # ``nanowell_values=None``: both callers hand this function rows already
     # joined with the plotted axes' nanowell columns (``with_nanowell_columns``),
     # and the gates it is given are those same axes' (``gates_for_axes``).

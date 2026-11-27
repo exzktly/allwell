@@ -180,7 +180,8 @@ class LutSelector(QWidget):
 
         self._reverse_btn = QToolButton(self)
         self._reverse_btn.setObjectName("LutReverse")
-        self._reverse_btn.setText("⇄")
+        from widgets import icons
+        self._reverse_btn.setIcon(icons.make_icon("arrow-left-right", 14))
         self._reverse_btn.setCheckable(True)
         self._reverse_btn.setChecked(self._reversed)
         self._reverse_btn.setCursor(Qt.PointingHandCursor)

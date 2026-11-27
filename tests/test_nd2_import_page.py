@@ -530,7 +530,7 @@ def test_analyze_redirects_a_raw_nd2_to_this_page(qapp, tmp_path):
         # Not another converter's page: either would refuse the file.
         assert "Convert OME-TIFF" not in hint
         assert "Convert CZI" not in hint
-        assert tab._output_lbl.text() == "—"
+        assert tab._output_lbl.text() == ""
         assert "Convert ND2" in tab._layout_lbl.text()
     finally:
         tab.deleteLater()
@@ -681,7 +681,7 @@ def test_a_destination_the_run_would_refuse_also_disables_the_buttons(
         controller, tmp_path, prepare, why):
     """A red hint under the field is not a gate.
 
-    Convert stayed live and produced a worker-side refusal; **+ Queue** put a
+    Convert stayed live and produced a worker-side refusal; **Add to queue** put a
     job in the queue that was guaranteed to fail, which the user only finds
     out about when the queue reaches it.
     """

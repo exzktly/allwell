@@ -121,7 +121,7 @@ def build_equation_row(
         sl = QHBoxLayout(swap_row)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(theme.Spacing.sm)
-        swap = buttons.default("⇄  Swap dataset 1 and 2", swap_row)
+        swap = buttons.default("Swap dataset 1 and 2", swap_row)
         swap.setObjectName("EquationSwap")
         swap.setProperty("variant", "default")
         swap.clicked.connect(lambda _checked=False: on_swap())

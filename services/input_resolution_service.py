@@ -92,7 +92,7 @@ NO_INPUT = "no_input"
 #: folders of per-well images; the Datasets converter is what de-interleaves a
 #: packed file into one.
 PACKED_OME_MESSAGE = (
-    "⚠ This is a packed OME-TIFF. Convert it to a dataset folder first in the "
+    "This is a packed OME-TIFF. Convert it to a dataset folder first in the "
     "Datasets tab → “Convert OME-TIFF”, then open that folder here "
     "to process it."
 )
@@ -101,7 +101,7 @@ PACKED_OME_MESSAGE = (
 #: because the remedy is a *different page* and naming the wrong one sends the
 #: user to a converter that will refuse their file.
 PACKED_CZI_MESSAGE = (
-    "⚠ This is a Zeiss CZI (or a folder of them, as ZEN writes when it splits "
+    "This is a Zeiss CZI (or a folder of them, as ZEN writes when it splits "
     "scenes). Convert it to a dataset folder first in the Datasets tab → "
     "“Convert CZI”, then open that folder here to process it."
 )
@@ -110,7 +110,7 @@ PACKED_CZI_MESSAGE = (
 #: NIS-Elements writes a plate as one file, so a folder holding several ND2s is
 #: several plates and Analyze has no way to know which one was meant.
 PACKED_ND2_MESSAGE = (
-    "⚠ This is a Nikon ND2. Convert it to a dataset folder first in the "
+    "This is a Nikon ND2. Convert it to a dataset folder first in the "
     "Datasets tab → “Convert ND2”, then open that folder here to process it."
 )
 
@@ -198,7 +198,7 @@ def _too_large_plan(where: str) -> InputPlan:
     """The refusal for a folder whose walk ran past the planner's bound."""
     return InputPlan(
         TOO_LARGE, None, None, 0,
-        f"⚠ {where} holds more than {PLANNER_MAX_FOLDERS:,} folders — more than one plate's "
+        f"{where} holds more than {PLANNER_MAX_FOLDERS:,} folders — more than one plate's "
         f"input. Choose the plate's own folder: the one holding in/, or the per-well zips.",
     )
 
@@ -210,7 +210,7 @@ def _needs_zipping_plan(found: NonZipInput, where: str) -> InputPlan:
         more = f" (and {len(found.duplicates) - 1} more)" if len(found.duplicates) > 1 else ""
         return InputPlan(
             NEEDS_ZIPPING, None, None, len(found.loose),
-            f"⚠ {where} names well {well} with more than one archive ({', '.join(names)}){more}. Each would "
+            f"{where} names well {well} with more than one archive ({', '.join(names)}){more}. Each would "
             f"be run as {well} and the last to finish would replace the others' results — keep one archive "
             f"per well.",
         )
@@ -223,7 +223,7 @@ def _needs_zipping_plan(found: NonZipInput, where: str) -> InputPlan:
         parts.append(f"{len(found.nested)} folder(s) of images that are not well folders")
     return InputPlan(
         NEEDS_ZIPPING, None, None, len(found.loose),
-        f"⚠ {where} holds {' and '.join(parts)}. Analyze reads per-well zips — "
+        f"{where} holds {' and '.join(parts)}. Analyze reads per-well zips — "
         f"convert them first in Datasets → Zip loose folder.",
     )
 
@@ -249,8 +249,8 @@ def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool) -> Input
     if well_zips:
         return InputPlan(
             GROUPED, root, output_dir, 0,
-            "✓ Using selected folder as input" if named_in
-            else f"✓ Found {root.name}/ subfolder — using as input",
+            "Using the selected folder as input" if named_in
+            else f"Found the {root.name}/ subfolder — using it as input",
         )
     if dir_has_entries(root):
         return InputPlan(

@@ -85,6 +85,7 @@ from review.data.fov_selection import available_fovs, normalise_selection, selec
 from review.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 from widgets.squeeze_label import SqueezeWrapLabel
 from ui import theme
+from ui.text_roles import show_value
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -1575,7 +1576,7 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
         tp_combo = ctx.runtime.cell_gating.opt_timepoint_combo
         timepoint = tp_combo.currentData() if tp_combo is not None else None
     except ValueError:
-        _status("Optimize ThreshFracOn: Min, Max, Max points and Spec. weight "
+        _status("Optimize ThreshFracOn: “Min”, “Max”, “Max points” and “Spec. weight” "
                 "must be numeric.")
         return
     except Exception as exc:
@@ -1588,16 +1589,16 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
     # floor stays, with a message that states what the field now means.
     if steps < 10:
         _status(
-            "Optimize ThreshFracOn: Max points must be at least 10 — it caps "
+            "Optimize ThreshFracOn: “Max points” must be at least 10 — it caps "
             "how many of the thresholds the data offers get scanned, and a cap "
             "that small leaves nothing to choose between."
         )
         return
     if not (weight > 0):
         _status(
-            "Optimize ThreshFracOn: Spec. weight must be greater than 0 — it "
-            "is what a cell counted ON in Well B costs relative to a cell "
-            "missed in Well A. Use 1 to weigh the two alike."
+            "Optimize ThreshFracOn: “Spec. weight” must be greater than 0 — it "
+            "is what a cell counted ON in “Well B” costs relative to a cell "
+            "missed in “Well A”. Use 1 to weigh the two alike."
         )
         return
 
@@ -1875,8 +1876,9 @@ def _build_threshold_grid(ctx, host, *, kind: str) -> None:
                 count_edits[channel].setParent(table)
                 grid.addWidget(count_edits[channel], r, 2)
             else:
-                absent = QLabel("\u2014", table)
+                absent = QLabel(table)
                 absent.setProperty("textRole", "help")
+                show_value(absent, None)
                 absent.setToolTip(
                     "This channel has no smFISH count column, so there is no "
                     "count cutoff to set.")

@@ -810,7 +810,7 @@ class JobQueueController(QObject):
         one path rather than Analyze keeping a second, special one.
 
         *validate* is ``AnalyzeTab.validate_for_queue`` — the same gate its
-        own "+ Queue" button applies — so saving a session cannot queue a form
+        own "Add to queue" button applies — so saving a session cannot queue a form
         that button would have refused."""
         self.sessions.register_collector("analyze", collect_spec)
         if validate is not None:
@@ -836,7 +836,7 @@ class JobQueueController(QObject):
 
     def add_job(self, kind: str, spec: dict) -> None:
         """Called by each Datasets controller's ``on_add_to_queue`` callback,
-        and by Analyze's "+ Queue". While a session has that tool's page open
+        and by Analyze's "Add to queue". While a session has that tool's page open
         the press goes through the session, which knows the page's links
         (``QueueSession.queue_from_page``)."""
         if self.sessions.queue_from_page(kind, spec):

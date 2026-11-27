@@ -13,6 +13,12 @@ The design language (``_Docs/Markdowns/DESIGN_LANGUAGE_TRACKER.md`` §2.4):
 A button's kind is its ``variant`` dynamic property, and :func:`qss` writes the rules for the four (included by
 ``ui.theme.qss``). Build a button with :func:`button` or one of the four named builders; change a built
 button's kind with :func:`set_kind`, which re-polishes — a dynamic property is read only on a polish.
+
+**A tool is not a setting.** A button that arms a pointer mode — *Delete cell*, *Crop cells*, *Lasso cells*: the
+next click or drag on the picture does something different — is a default tool button that stays pressed in while
+the mode is armed (:func:`mode_tool`, its selected look the ``:checked`` rule below), the way a drawing program's
+tools are. Its label names the tool and never its state. An on/off *setting* is a switch or a checkbox and a choice
+among a few is a segmented control (§2.5), never a pressed-in button.
 """
 
 from __future__ import annotations
@@ -78,6 +84,36 @@ def tool_button(parent: QWidget | None = None, kind: str = DEFAULT) -> QToolButt
     return b
 
 
+def icon_button(name: str, tooltip: str, parent: QWidget | None = None, *, kind: str = QUIET,
+                on_click: Callable[[], object] | None = None) -> QToolButton:
+    """A tool button of *kind* that shows the drawn icon *name* (``widgets/icons.py``) and no text: remove (``x``),
+    a step (``minus`` / ``plus``), a direction (the chevrons), more (``more-horizontal``), edit (``pencil``).
+    *tooltip* is required — it is the button's only words, and its accessible name."""
+    set_icon(tool := tool_button(parent, kind), name)
+    tool.setToolTip(tooltip)
+    tool.setAccessibleName(tooltip)
+    if on_click is not None:
+        tool.clicked.connect(lambda _checked=False: on_click())
+    return tool
+
+
+def set_icon(b, name: str, size: int = 14) -> None:
+    """Show the drawn icon *name* on *b* in place of any text it had."""
+    from widgets import icons
+    b.setText("")
+    b.setIcon(icons.make_icon(name, size, dpr=b.devicePixelRatioF() or 1.0))
+
+
+def mode_tool(text: str, parent: QWidget | None = None) -> QToolButton:
+    """A default-kind tool button labelled *text* that stays pressed in while its pointer mode is armed: checkable,
+    its ``toggled(bool)`` the mode going on and off."""
+    tool = tool_button(parent, DEFAULT)
+    tool.setText(text)
+    tool.setCheckable(True)
+    tool.setProperty("modeTool", True)
+    return tool
+
+
 def set_kind(b, kind: str) -> None:
     """Change a built button's kind, and repaint it in the new one."""
     if kind not in KINDS:
@@ -124,6 +160,9 @@ def qss(c, t) -> str:
     background-color: {c.control}; border-color: {c.button_edge}; color: {c.danger}; font-weight: {t.medium};
 }}
 {state(x, "hover")} {{ border-color: {c.danger}; }}
+QToolButton[modeTool="true"]:checked {{
+    background-color: {c.selected}; border-color: {c.accent}; color: {c.selected_fg};
+}}
 {state(x, "disabled")} {{
     background-color: {c.control}; border-color: {c.hairline}; color: {c.text_disabled};
 }}

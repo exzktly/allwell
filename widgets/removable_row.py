@@ -90,7 +90,10 @@ def remove_button(parent: QWidget, object_name: str, tooltip: str) -> QPushButto
     caller that builds its own row around it. :func:`row_remove_button` is how
     a caller holding a finished row gets back to it.
     """
-    button = QPushButton("✕", parent)
+    from widgets import icons
+    button = QPushButton(parent)
+    button.setIcon(icons.make_icon("x", 12))
+    button.setAccessibleName(tooltip or "Remove")
     button.setObjectName(object_name)
     button.setFixedSize(QSize(REMOVE_PX, REMOVE_PX))
     button.setCursor(Qt.PointingHandCursor)

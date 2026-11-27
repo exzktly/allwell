@@ -307,7 +307,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "grid-mapped file needs this set, and then only when its positions "
             "do not divide evenly by themselves.")
         options_layout.addWidget(self._fovs_edit)
-        options_layout.addWidget(QLabel("Keep every Nth timepoint", options))
+        options_layout.addWidget(QLabel("Keep every nth timepoint", options))
         self._stride_edit = self._small("", placeholder="all")
         self._stride_edit.setToolTip(
             "Leave blank to convert every timepoint. Set 3 to convert the "
@@ -360,11 +360,11 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.default("▶  Convert", row)
+        self._run_btn = buttons.default("Convert", row)
         set_variant(self._run_btn, "primary")
         self._run_btn.clicked.connect(self.runRequested.emit)
         layout.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("+ Queue", row)
+        self._queue_btn = buttons.default("Add to queue", row)
         set_variant(self._queue_btn, "default")
         self._queue_btn.setToolTip("Add this conversion to the Job Queue "
                                    "instead of running it now")
@@ -380,7 +380,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         outer.addWidget(row)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Convert ND2 Output")
+        self.build_log_header(outer, "Convert ND2 output")
         self._dashboard = Nd2ImportDashboard(self)
         # Picking wells on the plate is how a subset conversion is chosen. It
         # already shows the mapping the settings resolve to, so a selection
@@ -557,7 +557,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
     def set_running(self, running: bool) -> None:
         self._running = bool(running)
-        self._run_btn.setText("Converting…" if running else "▶  Convert")
+        self._run_btn.setText("Converting…" if running else "Convert")
         self._run_btn.setEnabled(not running and self._can_convert())
         self._queue_btn.setEnabled(not running and self._can_convert())
         if running:
@@ -819,7 +819,7 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # its own field. Without this the buttons stayed live for a folder
         # already holding a converted plate, for a finished dataset, and for a
         # resume whose settings had changed — the run then refused on the
-        # worker thread, and **+ Queue** put a job in the queue that was
+        # worker thread, and **Add to queue** put a job in the queue that was
         # guaranteed to fail. The OME-TIFF page has always gated on it.
         if ready and self._dest_rule(self.destination_path()):
             ready = False

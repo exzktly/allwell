@@ -15,7 +15,7 @@ clicking the chevron expands it to the selection's well chips.
 
 **Composition (opt-in via ``setComposable(True)``):** the expanded
 row becomes editable — a single flat strip of the group's well chips (each a
-click-menu: *Remove*) plus a ``+ wells…`` button that opens a ``Popover``
+click-menu: *Remove*) plus a ``Add wells…`` button that opens a ``Popover``
 hosting a ``WellPlateSelector`` (multi-select). A group is one condition: its
 wells are implicitly its replicate set, so there are no replicate sub-lists /
 solo strips. The widget does *not* enforce cross-selection well exclusivity (a
@@ -197,7 +197,7 @@ class _SelectionRow(QFrame):
         self._dot = QToolButton(top)
         self._dot.setObjectName("RowDot")
         self._dot.setCursor(Qt.PointingHandCursor)
-        self._dot.setToolTip("Recolour")
+        self._dot.setToolTip("Recolor")
         self._dot.clicked.connect(
             lambda: self.recolourRequested.emit(self._id, self._dot))
         row.addWidget(self._dot)
@@ -374,18 +374,18 @@ class _SelectionRow(QFrame):
     def _build_composable(self, bv: QVBoxLayout, parent: QWidget) -> None:
         # A group is one condition: all its wells are its replicate set, so the
         # editor is a single flat strip of well chips (each chip → Remove) plus
-        # the "+ wells…" picker. No replicate sub-lists / solo strips.
+        # the "Add wells…" picker. No replicate sub-lists / solo strips.
         if not self._wells:
-            lbl = QLabel("(no wells — use “+ wells…”)", parent)
+            lbl = QLabel("(no wells — use “Add wells…”)", parent)
             lbl.setProperty("textRole", "label")
             bv.addWidget(lbl)
         else:
-            bv.addWidget(self._chip_strip("wells:", self._wells,
+            bv.addWidget(self._chip_strip("wells", self._wells,
                                           parent=parent))
         # + wells…
         addw = QToolButton(parent)
         addw.setObjectName("RepBtn")
-        addw.setText("+ wells…")
+        addw.setText("Add wells…")
         addw.setCursor(Qt.PointingHandCursor)
         addw.clicked.connect(self._open_compose_popover)
         self._compose_btn = addw
@@ -797,7 +797,7 @@ class SavedSelectionsList(QWidget):
             # large void above the marooned "From selection" / "Import" footer.
             self._vbox.insertStretch(0)
             hint = QLabel(
-                "No groups yet.\nUse “+ Add” above or “From selection” below "
+                "No groups yet.\nUse “Add” above or “From selection” below "
                 "to create one."
             )
             hint.setProperty("textRole", "help")
@@ -890,7 +890,7 @@ class SavedSelectionsList(QWidget):
         cl = QVBoxLayout(content)
         cl.setContentsMargins(theme.Spacing.sm, theme.Spacing.sm,
                               theme.Spacing.sm, theme.Spacing.sm)
-        cl.addWidget(QLabel("Recolour"))
+        cl.addWidget(QLabel("Recolor"))
         cl.addWidget(sw)
         pop.setContentWidget(content)
 
@@ -909,7 +909,7 @@ class SavedSelectionsList(QWidget):
             return
         m = QMenu(self)
         a_rename = m.addAction("Rename")
-        a_recolour = m.addAction("Recolour…")
+        a_recolour = m.addAction("Recolor…")
         a_dup = m.addAction("Duplicate")
         a_hide = m.addAction("Show" if s["hidden"] else "Hide")
         m.addSeparator()
@@ -1041,7 +1041,7 @@ if __name__ == "__main__":
     lay.addWidget(echo)
     lst.entryActivated.connect(lambda i: echo.setText(f"activated → {i}"))
     lst.entryRenamed.connect(lambda i, n: echo.setText(f"renamed {i} → {n}"))
-    lst.entryRecoloured.connect(lambda i, c: echo.setText(f"recoloured {i} → {c}"))
+    lst.entryRecoloured.connect(lambda i, c: echo.setText(f"recolored {i} → {c}"))
     lst.entryVisibilityToggled.connect(lambda i, h: echo.setText(f"{i} hidden={h}"))
     lst.orderChanged.connect(lambda ids: echo.setText("order → " + ", ".join(ids)))
     lst.entryDeleted.connect(lambda i: echo.setText(f"deleted → {i}"))

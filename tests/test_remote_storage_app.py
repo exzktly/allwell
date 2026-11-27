@@ -114,5 +114,5 @@ def test_analyze_manage_then_storage_lists_and_deletes_on_the_selected_host(qapp
     assert "storage" in seen, "Manage Remotes' Storage… did not open the Storage browser"
     assert seen["storage"]._host.name == "cluster"
     assert seen["row"][0] == "MyProject" and seen["row"][2] == RUN, seen["row"]
-    assert not run.exists(), "Delete… in the browser did not remove the folder on the host"
+    assert not run.exists(), "Delete in the browser did not remove the folder on the host"
     assert seen["storage"]._status.text().startswith("1 folder(s) deleted."), seen["storage"]._status.text()

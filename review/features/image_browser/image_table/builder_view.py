@@ -58,6 +58,7 @@ from review.features.image_browser.image_table.image_compose import (
 from widgets.owned_action import owned_action
 from review.data.nanowell_images import display_token, is_metric_map as _is_metric_token
 from ui import buttons
+from widgets import icons
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
@@ -735,7 +736,7 @@ def _wrapping(lbl: QLabel) -> QLabel:
 def _x_btn(tip: str, on_click) -> QToolButton:
     b = buttons.tool_button()
     b.setObjectName("ITBX")
-    b.setText("✕")
+    buttons.set_icon(b, "x")
     b.setCursor(Qt.PointingHandCursor)
     b.setToolTip(tip)
     b.clicked.connect(lambda _=False: on_click())
@@ -918,7 +919,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # first N wells across all channels, then the next N below. Writes the spec's
     # wrap; disabled only in plate mode, which pins both axes to the plate's own
     # row/column dims and so has nothing left to band.
-    wrap_lbl = QLabel("Wrap cols:", parent)
+    wrap_lbl = QLabel("Wrap cols", parent)
     wrap_lbl.setObjectName("ITBSub")
     header.addWidget(wrap_lbl)
     wrap = Stepper(parent, value=float(getattr(builder_spec(ctx), "wrap", 0) or 0),
@@ -1214,7 +1215,7 @@ def _build_tree(ctx, spec, axis: str) -> None:
     if ax.root:
         lay.addWidget(_root_pill(ctx, spec, axis, ax.root))
     else:
-        lay.addWidget(_text("drop a Well / Timepoint / FOV root", "ITBHint"))
+        lay.addWidget(_text("drop a well, timepoint or FOV root", "ITBHint"))
 
     # nested channels (indented under a left accent rail)
     if ax.channels:
@@ -1265,7 +1266,9 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
     h.addStretch(1)
     gear = buttons.tool_button(pill)
     gear.setObjectName("ITBOpt")
-    gear.setText(f"⚙ {_render_label(cs)}")
+    gear.setText(_render_label(cs))
+    gear.setIcon(icons.make_icon("sliders", 12))       # the drawn set's settings icon, not a "⚙" in the text
+    gear.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
     gear.setCursor(Qt.PointingHandCursor)
     gear.setPopupMode(QToolButton.InstantPopup)
     # Build the menu LAZILY on open, not eagerly for every chip at load. Parent it
@@ -1497,11 +1500,11 @@ def _build_lut_box(ctx, spec) -> None:
     # than the screen). The panel is a column, so at the desk they keep its width.
     if inert:
         lay.addWidget(_wrapping(_text(
-            "no display range (unchanged by any LUT edit): " + ", ".join(inert),
+            "no display range (unchanged by any LUT edit) — " + ", ".join(inert),
             "ITBHint")))
     if hidden:
         lay.addWidget(_wrapping(_text(
-            "not shown in plate mode (one channel per plate): " + ", ".join(hidden),
+            "not shown in plate mode (one channel per plate) — " + ", ".join(hidden),
             "ITBHint")))
 
 
@@ -1606,7 +1609,7 @@ def _centre_checkbox(ctx, row, specs) -> QCheckBox | None:
     box = QCheckBox("centre on 0" if scale == "log" else "centre on 1", row)
     box.setObjectName("ITBLutCentre")
     box.setChecked(bool(cs0.centre_on_change))
-    box.setToolTip("Auto window centred on no change, so the diverging colours' middle means unchanged and a gain "
+    box.setToolTip("Auto window centred on no change, so the diverging colors' middle means unchanged and a gain "
                    "and a loss of the same size look alike. Off: Auto spans the data's own min and max.")
 
     def _toggled(on: bool):
@@ -1655,7 +1658,7 @@ def _build_tray(ctx, spec) -> None:
         toggle.setObjectName("ITBOpt")
         toggle.setText(f"{'▾' if open_ else '▸'} Nanowell metrics ({len(metrics)})")
         toggle.setCursor(Qt.PointingHandCursor)
-        toggle.setToolTip("Each nanowell drawn as a disc in its metric's colour — show or hide the metrics")
+        toggle.setToolTip("Each nanowell drawn as a disc in its metric's color — show or hide the metrics")
 
         def _flip(_c=False):
             _rt(ctx).metric_tray_open = not bool(getattr(_rt(ctx), "metric_tray_open", False))
@@ -1718,8 +1721,8 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     lc.setChecked(bool(cs.label_colors))
     lc.setEnabled(cs.render in ("mask", "threshold"))
     lc.setToolTip(
-        "Give every cell its own colour instead of painting them all white — two "
-        "nuclei that touch are otherwise one white shape. The colour is a fixed "
+        "Give every cell its own color instead of painting them all white — two "
+        "nuclei that touch are otherwise one white shape. The color is a fixed "
         "function of the label id, so it does not change between redraws."
     )
     lc.triggered.connect(
@@ -1736,7 +1739,7 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
     lg.triggered.connect(lambda c=False: (_set_attr(cs, "log", bool(c)), _edit(ctx)))
 
     menu.addSeparator()
-    chdr = menu.addAction("Colour / LUT")
+    chdr = menu.addAction("Color / LUT")
     chdr.setEnabled(False)
     for name in ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]:
         act = owned_action(menu, name)

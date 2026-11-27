@@ -404,7 +404,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
                 lambda _=False, gid=group.get("id", ""): _plot_groups_load(ctx, gid)
             )
             rl.addWidget(load_btn, 1)
-            del_btn = buttons.default("×", row)
+            del_btn = buttons.icon_button("x", "Delete this saved selection", row)
             del_btn.setFixedWidth(theme.Metrics.icon_btn_w)
             del_btn.setToolTip("Delete this saved selection")
             del_btn.clicked.connect(

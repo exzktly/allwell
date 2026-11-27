@@ -86,8 +86,8 @@ class RecipesPage(QWidget):
         outer.addWidget(_hrule(self))
 
         blurb = QLabel(
-            "A recipe is a chain of jobs saved as a plan — Watch, Convert, "
-            "Analyze, say — that you apply to each new acquisition. Applying one "
+            "A recipe is a chain of jobs saved as a plan — a watch, a conversion "
+            "and an Analyze run, say — that you apply to each new acquisition. Applying one "
             "adds its jobs to the Job Queue. Save a recipe from any queued job's "
             "⋯ menu: “Save chain as recipe…”.", self)
         blurb.setProperty("textRole", "help")

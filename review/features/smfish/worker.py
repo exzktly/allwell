@@ -431,7 +431,7 @@ def apply_global_threshold_async(
     def _run_guarded() -> None:
         # A raise anywhere in _run (e.g. a pd.read_csv ParserError in
         # _write_counts_to_csvs) previously killed the daemon thread with
-        # done_cb never firing, so "Apply Global Threshold" hung forever
+        # done_cb never firing, so "Apply global threshold" hung forever
         # (audit E8). Route any unhandled failure through done_cb so the UI
         # always gets a terminal signal.
         try:

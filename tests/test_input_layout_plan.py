@@ -197,9 +197,10 @@ def test_the_readout_never_promises_more_than_the_run_delivers(tmp_path):
             tab._refresh_output()
             label = tab._layout_lbl.text()
             runnable = action == GROUPED
-            assert label.startswith("✓") is runnable, (target, action, label)
+            # A refusal is said in the failure tone, the words carrying no mark of their own.
+            assert (tab._layout_lbl.property("textTone") != "failure") is runnable, (target, action, label)
             assert tab._output_lbl.text() == (
-                str(root / "out") if runnable else "—")
+                str(root / "out") if runnable else "")
 
 
 # ── a sidecar is not one of the run's images ────────────────────────────────

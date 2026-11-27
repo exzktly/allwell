@@ -45,7 +45,7 @@ def build_cell_browser_sort_section(ctx, parent_layout) -> None:
     ctx.runtime.cell_browser.sort_host = rows_lay
     ctx.runtime.cell_browser.sort_rows = []
 
-    add_btn = buttons.default("+ Add sort key")
+    add_btn = buttons.default("Add sort key")
     add_btn.clicked.connect(lambda _=False: add_sort_row(ctx))
     parent_layout.addWidget(add_btn)
 
@@ -68,19 +68,17 @@ def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
             combo.setCurrentIndex(idx)
     combo.setMinimumWidth(theme.Metrics.combo_min_w_sm)
 
-    # Direction toggle: checked = descending (▼), unchecked = ascending (▲).
-    dir_btn = buttons.default("▲ Asc", row)
-    dir_btn.setCheckable(True)
-    dir_btn.setFixedWidth(theme.Metrics.short_field_w)
-    dir_btn.setToolTip("Toggle ascending / descending")
+    # Direction: one of two, a segmented control with the drawn arrows, each named by its tooltip (§2.5).
+    from widgets import icons
+    from widgets.segmented_control import SegmentedControl
+    dir_btn = SegmentedControl(row)
+    dir_btn.addSegment(icon=icons.make_icon("chevron-up", 14), data="asc")
+    dir_btn.addSegment(icon=icons.make_icon("chevron-down", 14), data="desc")
+    dir_btn.setSegmentToolTip(0, "Ascending")
+    dir_btn.setSegmentToolTip(1, "Descending")
+    dir_btn.setCurrentByData("asc" if ascending else "desc")
 
-    def _sync_dir(_checked=None) -> None:
-        dir_btn.setText("▼ Desc" if dir_btn.isChecked() else "▲ Asc")
-    dir_btn.setChecked(not ascending)
-    _sync_dir()
-    dir_btn.toggled.connect(_sync_dir)
-
-    rm = buttons.default("✕", row)
+    rm = buttons.icon_button("x", "Remove this sort key", row)
     rm.setFixedWidth(_RM_W)
     rm.setObjectName("Ghost")
 

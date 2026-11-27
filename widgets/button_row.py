@@ -2,7 +2,7 @@
 
 A ``QHBoxLayout`` full of buttons reports the sum of their widths as its
 minimum, and that minimum propagates: on the Statistics page the three
-group actions (**+ Add group**, **Clear All**, **↻ Load from Replicates**) made
+group actions (**Add group**, **Clear all**, **Load from replicates**) made
 the column they sit in about 370px at its narrowest, which was enough to push
 the well map out of the row beside it at a pane width where the two still fitted
 comfortably. Wrapping, the row's minimum is its widest single button and the

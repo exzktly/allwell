@@ -166,7 +166,7 @@ ALLOWLIST = {
     # denominators moved behind ``fold_change_pairing.ControlDenominators`` and
     # the per-member normalize call became ``normalize_member_pts``, shared with
     # the batch line runner. Removed from the allowlist.
-    # DONE: draw_per_cell_bar_mode dropped below the threshold once the "Pooled"
+    # DONE: draw_per_cell_bar_mode dropped below the threshold once the "Pool replicates"
     # toggle unified the two rset base-column branches (the old pool_rset_cells
     # and pool_reps branches merged into one). Removed from the allowlist.
     "review/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",

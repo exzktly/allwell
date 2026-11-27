@@ -120,7 +120,7 @@ def series_button_text(ctx) -> str:
     order = {vid: i for i, vid in enumerate(selected_series_ids(ctx))}
     by_id = {v.id: v.name for v in series_variables(ctx)}
     names = [by_id[vid] for vid in sorted(order, key=order.get) if vid in by_id]
-    return f"Series: {NAME_JOIN.join(names)}" if names else f"Series: {NO_SERIES_LABEL}"
+    return f"Series: {NAME_JOIN.join(names)}" if names else f"Series: {NO_SERIES_LABEL.lower()}"
 
 
 def refresh_series_control(ctx) -> None:

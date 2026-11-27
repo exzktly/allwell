@@ -397,7 +397,7 @@ def build_centre(win, parent: QWidget) -> None:
         from review.core.ui_helpers import make_popover_button
 
         _dec_btn, _dec_panel, _dec_lay = make_popover_button("Decorate ▾", band)
-        _dec_btn.setToolTip("Colour and split the plot by a sample variable")
+        _dec_btn.setToolTip("Color and split the plot by a sample variable")
         win._ctx.widgets.register("_plotting_decorate_btn", _dec_btn)
         for _field, _name, _label in _DECORATION_CONTROLS:
             _cb = win._ctx.widgets.register(_name, _QComboBox(

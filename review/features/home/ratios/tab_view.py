@@ -101,7 +101,7 @@ class RatioMetricsPanel(QWidget):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(theme.Spacing.xs)
-        add_btn = buttons.default("+ Add ratio", self)
+        add_btn = buttons.default("Add ratio", self)
         add_btn.clicked.connect(self._on_add)
         btn_row.addWidget(add_btn)
 

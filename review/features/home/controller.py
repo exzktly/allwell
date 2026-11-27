@@ -736,7 +736,7 @@ def _paint_saved_plots(ctx) -> None:
     shown = strip["shown"]
     if not shown:
         note.setText("No plots saved from this dataset yet — hover a plot's "
-                     "top-right corner and click Save to put one here.")
+                     "top-right corner and click “Save” to put one here.")
         return
     hidden = total - len(shown)
     note.setText(

@@ -151,10 +151,13 @@ class Stepper(QFrame):
         self._repolishing = False
         self._minus = QToolButton(self)
         self._minus.setObjectName("StepperMinus")
-        self._minus.setText("−")
+        from widgets import icons
+        self._minus.setIcon(icons.make_icon("minus", 12))
+        self._minus.setAccessibleName("Step down")
         self._plus = QToolButton(self)
         self._plus.setObjectName("StepperPlus")
-        self._plus.setText("+")
+        self._plus.setIcon(icons.make_icon("plus", 12))
+        self._plus.setAccessibleName("Step up")
         for b, step in ((self._minus, -1), (self._plus, +1)):
             b.setFocusPolicy(Qt.NoFocus)
             b.setAutoRepeat(True)

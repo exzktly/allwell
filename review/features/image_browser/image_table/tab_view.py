@@ -288,13 +288,13 @@ def _build_properties_dock(ctx, dock) -> None:
            "Bar thickness (px, relative to a 240 px cell). Increase it if the bar "
            "is too thin to see once cells are downscaled.")
     _check("Label the bar", "scale_bar_label",
-           "Write the bar's length (e.g. 50 µm) beside it, in the bar's colour.")
+           "Write the bar's length (e.g. 50 µm) beside it, in the bar's color.")
     _combo("Show on", "scale_bar_cells", _CELLS,
            "Which cell(s) show the scale bar: every cell, or one grid corner.")
     _combo("Position", "scale_bar_img_corner", _CORNERS,
            "Where in the image the bar sits.")
-    _combo("Colour", "scale_bar_color", _BAR_COLORS,
-           "Scale-bar colour. 'Auto' picks black or white per cell for contrast "
+    _combo("Color", "scale_bar_color", _BAR_COLORS,
+           "Scale-bar color. 'Auto' picks black or white per cell for contrast "
            "(so a white bar isn't lost on a light 'Greys' background).")
 
     _cap("Cell labels")
@@ -306,7 +306,7 @@ def _build_properties_dock(ctx, dock) -> None:
            "Where in the image the label sits.")
     _propf("Font (px)", "label_font_px", 12, 6, 48, 1.0, 0,
            "Label font size (relative to a 240 px cell, so live and export match).")
-    _combo("Colour", "label_color", _COLORS, "Label text colour.")
+    _combo("Color", "label_color", _COLORS, "Label text color.")
     _check("Background box", "label_bg",
            "Draw a translucent dark box behind the label for legibility.")
 
@@ -575,7 +575,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Zoom: − [level] +  (clicking the % resets to 100%). No "Zoom:" caption —
     # the readout in the middle already reads "100%", which says what the two
     # buttons either side of it do.
-    zoom_out = buttons.default("−", action_row)
+    zoom_out = buttons.icon_button("minus", "Zoom out", action_row, kind=buttons.DEFAULT)
     zoom_out.setFixedWidth(_ZOOM_OUT_W)
     zoom_out.setToolTip("Zoom out")
     zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1 / 1.25, relative=True))
@@ -590,7 +590,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     reg.register("_image_table_zoom_lbl", zoom_lbl)
     tr.addWidget(zoom_lbl)
 
-    zoom_in = buttons.default("+", action_row)
+    zoom_in = buttons.icon_button("plus", "Zoom in", action_row, kind=buttons.DEFAULT)
     zoom_in.setFixedWidth(_ZOOM_IN_W)
     zoom_in.setToolTip("Zoom in")
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))

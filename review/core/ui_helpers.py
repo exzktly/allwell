@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from review.data.metric_labels import spread_label
 
 from typing import Any
 from collections.abc import Callable
@@ -1001,40 +1000,19 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     ctx-native ``core.plot_toggles`` handlers, and registers the buttons on the
     ``ctx.runtime.sem`` / ``ctx.runtime.fov`` banks (mirrors the batch-export
     controls row)."""
-    from review.core.plot_toggles import (
-        register_fov_button,
-        toggle_fov_replicates,
-        toggle_sem,
-    )
-    from widgets.reserved_width_button import ReservedWidthButton
+    from review.core.plot_toggles import make_fov_switch, make_spread_choice
     w = QWidget(parent)
     h = QHBoxLayout(w)
     h.setContentsMargins(0, 0, 0, 0)
     h.setSpacing(theme.Spacing.sm)
 
-    eb_lbl = QLabel("Error Band", w)
+    eb_lbl = QLabel("Error band", w)
     eb_lbl.setProperty("textRole", "help")
     h.addWidget(eb_lbl)
-    initial = bool(ctx.state.plot.use_sem)
-    sem_btn = ui_buttons.default(spread_label(initial), w)
-    sem_btn.setProperty("variant", "sem" if initial else "sem_warn")
-    sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
-    h.addWidget(sem_btn)
-    if ctx.runtime.sem.btns is None:
-        ctx.runtime.sem.btns = []
-    ctx.runtime.sem.btns.append(sem_btn)
-    if not ctx.runtime.sem.btn:
-        ctx.runtime.sem.btn = sem_btn
+    h.addWidget(make_spread_choice(ctx, w))
 
     if with_fov:
-        sp_lbl = QLabel("Spread", w)
-        sp_lbl.setProperty("textRole", "help")
-        h.addWidget(sp_lbl)
-        fov_btn = ReservedWidthButton("FOV", w)
-        fov_btn.setProperty("variant", "toggle")
-        fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
-        h.addWidget(fov_btn)
-        register_fov_button(ctx, fov_btn)
+        h.addWidget(make_fov_switch(ctx, w))
 
     h.addStretch(1)
     return w

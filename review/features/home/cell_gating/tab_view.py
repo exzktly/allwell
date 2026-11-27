@@ -191,7 +191,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # cleared on the Scatter Plot tab: refresh the summary AND recompute Included
     # immediately so every other view tracks the gates without waiting for a tab
     # switch. (Safe: the per-cell scatter shows the full cloud by default, and
-    # its opt-in "Apply gates" filter is suppressed mid-draw — see
+    # its opt-in "Plot only the gated cells" filter is suppressed mid-draw — see
     # scatter.collect.scatter_points_gated.)
     ctx.runtime.scatter.gates_changed_cb = lambda: cell_gating_sync_scatter_gates(ctx)
     _cell_gating_refresh_gate_filter(ctx)
@@ -316,7 +316,7 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
 
     # The QC debris gate leads: it is applied to every cell no matter what the
     # rest of this section says, so it cannot be one of the alternatives below.
-    layout.addWidget(_lead_in(frame, "Always applied:"))
+    layout.addWidget(_lead_in(frame, "Always applied"))
     try:
         layout.addWidget(build_qc_gate_controls(ctx, frame))
     except Exception:
@@ -326,7 +326,7 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
     layout.addWidget(build_fov_selection_row(
         ctx, frame, indent=_RADIO_INDENT, on_apply=apply_fov_selection_with_progress))
 
-    layout.addWidget(_lead_in(frame, "Then include cells by (choose one):"))
+    layout.addWidget(_lead_in(frame, "Then include cells by (choose one)"))
     per_channel = _source_radio(
         frame, layout, "Per-channel intensity minimum (table below)",
         "Exclude cells whose mean fluorescence intensity is at or below the "
@@ -362,7 +362,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
 
     # Mirrors the "Then include cells by" lead-in above: both sections offer the
     # same exclusive pair, so both name the choice before presenting it.
-    layout.addWidget(_lead_in(frame, "Count an included cell as ON by (choose one):"))
+    layout.addWidget(_lead_in(frame, "Count an included cell as ON by (choose one)"))
     per_channel = _source_radio(
         frame, layout, "Per-channel ON cutoff (table below)",
         "Count an included cell as 'on' when its mean fluorescence intensity "

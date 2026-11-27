@@ -1290,12 +1290,12 @@ class ExportStyleSidebar(QWidget):
             c_hi.setAccessibleName("Colour limit, high end")
             for edit in (c_lo, c_hi):
                 edit.setPlaceholderText("auto")
-                edit.setToolTip("The colour scale's range, as MATLAB's clim: values below the low end take the "
-                                "first colour, above the high end the last. Blank keeps the plot's own end. "
-                                "Applies to every plot on this figure with a colour bar.")
+                edit.setToolTip("The color scale's range, as MATLAB's clim: values below the low end take the "
+                                "first color, above the high end the last. Blank keeps the plot's own end. "
+                                "Applies to every plot on this figure with a color bar.")
             self._bind_getter_setter("c_lim_min", c_lo)
             self._bind_getter_setter("c_lim_max", c_hi)
-            kit.add_row(s_lim, "Colour limits", kit.hrow(c_lo, QLabel("…"), c_hi, spacing=sp.xs),
+            kit.add_row(s_lim, "Color limits", kit.hrow(c_lo, QLabel("…"), c_hi, spacing=sp.xs),
                         facet="colour_limits")
         # Give the limits back to the plot. Typing a limit is easy and undoing
         # it was not: blanking the four fields by hand leaves the axes exactly
@@ -1305,7 +1305,7 @@ class ExportStyleSidebar(QWidget):
         # amount to "forget them".
         auto_btn = buttons.default("Auto scale")
         auto_btn.setToolTip(
-            "Clear the typed limits — X, Y and colour — on every panel of this "
+            "Clear the typed limits — X, Y and color — on every panel of this "
             "figure and let the plot scale its own axes again.")
         auto_btn.clicked.connect(lambda _=False: self._autoscale_axes())
         kit.add_full(s_lim, kit.hrow(auto_btn))
@@ -1508,7 +1508,7 @@ class ExportStyleSidebar(QWidget):
         act_row.setSpacing(sp.xs)
         reset_btn = buttons.default("Reset")
         reset_btn.clicked.connect(lambda _=False: self._reset_defaults())
-        save_btn = buttons.default("Save Preset")
+        save_btn = buttons.default("Save preset")
         save_btn.clicked.connect(lambda _=False: self._save_preset())
         exp_btn = buttons.default("Export…")
         exp_btn.setObjectName("Primary")

@@ -1,4 +1,4 @@
-"""smFISH "Apply Global Threshold" progress reporting.
+"""smFISH "Apply global threshold" progress reporting.
 
 Apply to All drives the shared status-row progress bar the same way a dataset
 load does. The bar is only honest if the worker reports every step of both

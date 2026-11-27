@@ -267,5 +267,5 @@ def test_qc_gate_row_gives_each_quantity_its_own_row(qtbot):
     assert at[(4, 1)] is w["min_circularity"] and at[(4, 2)] is w["max_circularity"]
 
     # The two one-sided quantities say so rather than leaving an empty cell.
-    assert isinstance(at[(2, 2)], QLabel) and at[(2, 2)].text() == "—"
-    assert isinstance(at[(3, 1)], QLabel) and at[(3, 1)].text() == "—"
+    assert isinstance(at[(2, 2)], QLabel) and at[(2, 2)].text() == "No bound"
+    assert isinstance(at[(3, 1)], QLabel) and at[(3, 1)].text() == "No bound"

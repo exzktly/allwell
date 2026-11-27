@@ -233,7 +233,7 @@ def test_a_shift_drag_adds_its_box_to_the_window_drawn(page, qtbot):
 
 
 def test_a_shift_drag_on_a_window_in_the_subset_carries_its_nanowells_into_the_new_one(page, qtbot, monkeypatch):
-    """After *Use as Subset* a second box with Shift held keeps the first window's nanowells as well as its own, so
+    """After *Use as subset* a second box with Shift held keeps the first window's nanowells as well as its own, so
     the Subset is built up region by region — where a plain drag would start over (the test above this one)."""
     st = _drawn(page, qtbot)
     qtbot.mouseClick(page.widgets.get("_nw_window_subset_btn"), Qt.LeftButton)

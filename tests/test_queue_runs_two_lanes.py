@@ -287,14 +287,14 @@ def test_the_header_says_it_stops_both_and_a_row_stops_one(qtbot, tmp_path):
     c.bridge.queue.add(_remote("r", "/d/prev/in"))
     c.bridge.start()
     c._refresh_page()
-    assert c.page._stop_btn.text() == "■  Stop both jobs"
+    assert c.page._stop_btn.text() == "Stop both jobs"
     row = next(r for r in c.page._rows.values() if r.job_id == "c")
     stop = next(a for a in row.build_menu().actions() if a.text() == "Stop this job")
     stop.trigger()
     assert tools["czi_import"].stops == 1 and tools["analyze"].stops == 0
     tools["czi_import"].finish(ok=False)
     c._refresh_page()
-    assert c.page._stop_btn.text() == "■  Stop job"
+    assert c.page._stop_btn.text() == "Stop job"
 
 
 def test_a_remote_analysis_row_names_its_host():

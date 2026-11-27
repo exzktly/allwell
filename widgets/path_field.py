@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui import theme
+from ui.text_roles import NOT_SET
 from widgets.icons import make_icon
 from widgets.owned_action import owned_action
 
@@ -98,7 +99,7 @@ class PathField(QWidget):
         row_layout.setSpacing(theme.Spacing.xs)
         self._edit = QLineEdit(row)
         self._edit.setReadOnly(True)
-        self._edit.setPlaceholderText("(not set)")
+        self._edit.setPlaceholderText(NOT_SET)
         self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row_layout.addWidget(self._edit, 1)
         self._browse_btn = QToolButton(row)

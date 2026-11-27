@@ -178,7 +178,7 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
         controller.set_analyze_provider(
             tab._analyze_controller.collect_spec,
             getattr(tab._analyze_controller, "validate_for_queue", None))
-        # The reverse of the injection above: Analyze's own "+ Queue" button
+        # The reverse of the injection above: Analyze's own "Add to queue" button
         # needs somewhere to send a run, and neither module imports the other.
         sink = getattr(tab._analyze_controller, "set_queue_sink", None)
         if callable(sink):

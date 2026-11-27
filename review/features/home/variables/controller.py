@@ -1094,7 +1094,7 @@ def _clear_plate(ctx, wells) -> None:
     With no variable defined there is no plate to show: a full ninety-six well
     grid greyed out around a two-paragraph explainer reads as software that has
     broken, not as software waiting to be told what the plate is about. The one
-    thing a user can do here is press ``+ Variable``, and that is what is left
+    thing a user can do here is press ``Add variable``, and that is what is left
     on screen.
     """
     from PySide6.QtWidgets import QListWidget

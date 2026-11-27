@@ -171,7 +171,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
 
     # ── job queue (QueueableController hooks) ───────────────────────────────
     def set_queue_sink(self, sink) -> None:
-        """Where "+ Queue" sends a run. Injected by the Datasets pane, which
+        """Where "Add to queue" sends a run. Injected by the Datasets pane, which
         owns the queue — so this module never imports it, exactly as the queue
         never imports ``analyze.tab``. Left unset when the pane is not in the
         build, and the button hides itself rather than failing on click."""
@@ -191,7 +191,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         ``QHBoxLayout``. The four buttons want 398px and the panel they sit in
         is ``theme.Metrics.rail_w`` (329) wide and fixed, so a box layout — which cannot wrap
         — would compress them until their labels were unreadable. FlowLayout
-        also watches its children for show/hide, which matters here: "+ Queue"
+        also watches its children for show/hide, which matters here: "Add to queue"
         appears only once the Datasets pane injects a sink, and the row has to
         re-wrap when it does.
         """
@@ -199,14 +199,14 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         layout = FlowLayout(row, margin=0)
         layout.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)
 
-        self._run_btn = buttons.primary("▶  Run Pipeline", row)
+        self._run_btn = buttons.primary("Run pipeline", row)
         self._run_btn.clicked.connect(self._run)
         layout.addWidget(self._run_btn)
 
         layout.addWidget(self._build_suspend_button(row))
         layout.addWidget(self._build_queue_button(row))
 
-        self._stop_btn = buttons.destructive("■  Stop", row)
+        self._stop_btn = buttons.destructive("Stop", row)
         self._stop_btn.setEnabled(False)
         self._stop_btn.clicked.connect(self._stop)
         layout.addWidget(self._stop_btn)
@@ -231,7 +231,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         self._stop_btn.setVisible(running)
 
     def _build_queue_button(self, parent) -> QPushButton:
-        self._queue_btn = buttons.default("+ Queue", parent)
+        self._queue_btn = buttons.default("Add to queue", parent)
         self._queue_btn.setToolTip(
             "Add this run to the Job Queue instead of running it now. It waits "
             "its turn in Datasets → Job Queue, which runs one job at a time.")
@@ -242,7 +242,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
     def _on_queue_requested(self) -> None:
         """Queue the current form, through the same gate as Run.
 
-        "+ Queue" used to hand the sink whatever ``collect_spec`` produced,
+        "Add to queue" used to hand the sink whatever ``collect_spec`` produced,
         skipping ``_validate_run_request`` entirely — so an unparseable schema,
         no fluorescent channels or an out-of-range numeric field was accepted
         without a word and sat in the queue looking identical to a valid job.
@@ -268,7 +268,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
     def validate_for_queue(self) -> bool:
         """Whether the form is a run the queue may accept, reporting why not.
 
-        The one gate for every route into the queue: this page's "+ Queue",
+        The one gate for every route into the queue: this page's "Add to queue",
         and the Job Queue's edit-session banner (``Add to queue`` / ``Save
         changes``), which the Datasets pane reaches through the injected
         collector registry. Two routes with two checks would disagree about
@@ -422,7 +422,7 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin, AnalyzeRunProblemsMixin):
         section unfolded and scrolled to (``analyze.run_problems``). It used to
         stop at the first problem and raise it in a modal dialog.
 
-        *for_queue* is the "+ Queue" / queue-banner path, and it defers what a
+        *for_queue* is the "Add to queue" / queue-banner path, and it defers what a
         queued job cannot know yet. Its input may be a folder an earlier job
         has not written — or blank, for a job about to be chained after one —
         so nothing that reads the input is asked; ``start_run`` refuses a run

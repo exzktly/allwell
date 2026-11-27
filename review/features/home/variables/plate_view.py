@@ -111,7 +111,7 @@ def _build_empty_state(ctx, parent: QWidget, reg) -> QWidget:
     points at the existing control otherwise, and a plate with no variables on it
     is exactly the start of the flow.
 
-    **Two ``+ Variable`` buttons is deliberate.** The rail keeps its own, at
+    **Two ``Add variable`` buttons is deliberate.** The rail keeps its own, at
     secondary weight, because it is where the control lives for the rest of the
     tab's life and every test that needs a variable presses it there; this one
     is the primary action on the one page where adding a variable is the entire
@@ -133,12 +133,12 @@ def _build_empty_state(ctx, parent: QWidget, reg) -> QWidget:
     empty = reg.register("_var_empty", EmptyState(
         "No variables on this plate yet", icon="grid", parent=parent,
         hint=EMPTY_HINT))
-    empty.setAction("+ Variable", lambda: _add_variable(ctx), keep_hint=True)
+    empty.setAction("Add variable", lambda: _add_variable(ctx), keep_hint=True)
     return empty
 
 
 def _add_variable(ctx) -> None:
-    """The placeholder's button, doing exactly what the rail's ``+ Variable`` does.
+    """The placeholder's button, doing exactly what the rail's ``Add variable`` does.
 
     Imported at call time rather than at module scope: ``controller`` imports
     this module for the plate builder, so a module-scope import back would be a

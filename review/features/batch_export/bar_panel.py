@@ -145,7 +145,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
         layout_row = QHBoxLayout()
         layout_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
-        layout_row.addWidget(QLabel("When spanning timepoints \u2014 cluster by:"))
+        layout_row.addWidget(QLabel("When spanning timepoints, cluster by"))
         self._group_mode_cb = QComboBox()
         self._group_mode_cb.addItem("Well")
         self._group_mode_cb.addItem("Timepoint")
@@ -164,7 +164,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # ── Display mode (bars / beeswarm / violin / histogram) ────────
         mode_row = QHBoxLayout()
         mode_row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, 0)
-        mode_row.addWidget(QLabel("Mean panel display:"))
+        mode_row.addWidget(QLabel("Mean panel display"))
         self._display_mode_grp = QButtonGroup(self)
         self._mode_bar_rb = QRadioButton("Bars")
         self._mode_bar_rb.setChecked(True)
@@ -183,7 +183,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # ── Violin smoothing slider (5–200, default 100; matches on-tab) ─
         smooth_row = QHBoxLayout()
         smooth_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
-        smooth_row.addWidget(QLabel("Violin smoothing:"))
+        smooth_row.addWidget(QLabel("Violin smoothing"))
         self._violin_smooth_slider = QSlider(Qt.Horizontal)
         self._violin_smooth_slider.setRange(5, 200)
         self._violin_smooth_slider.setValue(100)
@@ -200,7 +200,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # ── Histogram bins (the tab's range and default) ───────────────
         bins_row = QHBoxLayout()
         bins_row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, theme.Spacing.xs)
-        bins_row.addWidget(QLabel("Histogram bins:"))
+        bins_row.addWidget(QLabel("Histogram bins"))
         self._hist_bins_spin = SpinBox()
         self._hist_bins_spin.setRange(BINS_MIN, BINS_MAX)
         self._hist_bins_spin.setValue(BINS_DEFAULT)

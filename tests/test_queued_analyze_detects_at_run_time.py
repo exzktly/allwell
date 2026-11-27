@@ -1,7 +1,7 @@
 """A queued Analyze run detects its schema and channels when it starts.
 
 Driven through the real ``AnalyzeTab`` (§7.8 rule 3): the checkbox a user
-ticks, the "+ Queue" button they press, and ``start_from_queue`` — with the
+ticks, the "Add to queue" button they press, and ``start_from_queue`` — with the
 assertion at the boundary, on the options ``PipelineRunner.start`` actually
 receives (§7.4 #1), not on anything the tab computed along the way.
 

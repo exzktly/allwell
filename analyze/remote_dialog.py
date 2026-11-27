@@ -57,6 +57,14 @@ from services.subprocess_text import TEXT_UTF8
 from ui import theme
 from widgets.spin_box import SpinBox
 from ui import buttons
+from ui import text_roles
+
+
+def _say(label: QLabel, text: str, tone: str | None = None) -> None:
+    """A test's or a key step's result in *label*: words, in the failure or attention tone when it is one
+    (``ui/text_roles.py``), rather than a ✓ / ✗ / ⚠ glyph in front of them."""
+    label.setText(text)
+    text_roles.set_role(label, text_roles.HELP, tone=tone)
 
 
 # Alias must look like a TOML bare key — letters, digits, dash, underscore.
@@ -265,7 +273,7 @@ class RemoteFormDialog(QDialog):
             "Empty = use ~/.ssh/config (recommended) or click Setup…"
         )
         key_row_layout.addWidget(self._ssh_key_edit, 1)
-        self._setup_key_btn = buttons.default("Setup SSH Key…", key_row)
+        self._setup_key_btn = buttons.default("Set up SSH key…", key_row)
         self._setup_key_btn.setToolTip(
             "Generate a passphrase-less Ed25519 key and walk through "
             "copying it to the remote so future runs don't need a password."
@@ -423,7 +431,7 @@ class RemoteFormDialog(QDialog):
         # The node "Request a node" keeps granted between runs (services.remote_hold): how long it stays at most,
         # and how long it may sit unused. Both are per host (RemoteHost.granted_time_limit_h / granted_idle_release_min).
         # The scheduler command's own --time is a different thing: it is one run's.
-        sched_layout.addWidget(QLabel("Granted node (Request a node in Manage Remotes)", self._scheduled_box))
+        sched_layout.addWidget(QLabel("Granted node (request one in “Manage remotes”)", self._scheduled_box))
         limit_row = QHBoxLayout()
         limit_row.setSpacing(theme.Spacing.xs)
         limit_row.addWidget(QLabel("Time limit (hours)", self._scheduled_box))
@@ -661,13 +669,13 @@ class RemoteFormDialog(QDialog):
         if not error and not self._ssh_alias_edit.text().strip():
             error = "Set an SSH alias first."
         if error:
-            self._test_result_lbl.setText(f"✗ {error}")
+            _say(self._test_result_lbl, error, text_roles.FAILURE)
             return
         host = self.result_host()
         try:
             probe = ProbeRun(host)
         except ValueError as exc:
-            self._test_result_lbl.setText(f"✗ {exc}")
+            _say(self._test_result_lbl, str(exc), text_roles.FAILURE)
             return
         self._scheduler_test = SchedulerTestDialog(self, probe, host.name or host.ssh_alias)
         self._scheduler_test.show()
@@ -840,7 +848,7 @@ class RemoteFormDialog(QDialog):
 
     def _set_profile_status(self, name: str, *, saved: bool) -> None:
         if name and saved:
-            text = f"✓ Saved profile: {name}"
+            text = f"Saved profile “{name}”."
         elif name:
             text = f"Profile “{name}” selected — click OK to save."
         elif not self._compute_launcher_edit.text().strip():
@@ -860,13 +868,11 @@ class RemoteFormDialog(QDialog):
         result is cached locally so reopening the host doesn't re-Fetch."""
         alias = self._ssh_alias_edit.text().strip()
         if not alias:
-            self._test_result_lbl.setText("Set an SSH alias first to fetch profiles.")
+            _say(self._test_result_lbl, "Set an SSH alias first to fetch profiles.", text_roles.ATTENTION)
             return
         host = self.result_host()
         self._fetch_prof_btn.setEnabled(False)
-        self._test_result_lbl.setText(
-            f"Reading JupyterHub profiles from {alias}…"
-        )
+        _say(self._test_result_lbl, f"Reading JupyterHub profiles from {alias}…")
         result_q: queue.Queue = queue.Queue()
 
         def _runner() -> None:
@@ -884,7 +890,7 @@ class RemoteFormDialog(QDialog):
             self._fetch_prof_btn.setEnabled(True)
             if not ok:
                 msg = detail.splitlines()[-1] if detail else "profile discovery failed"
-                self._test_result_lbl.setText(f"✗ {msg[:160]}")
+                _say(self._test_result_lbl, msg[:160], text_roles.FAILURE)
                 return
             # Cache for next open, repopulate, and keep the current command's
             # profile selected if it's still in the freshly-fetched list.
@@ -894,10 +900,9 @@ class RemoteFormDialog(QDialog):
             )
             # On success *detail* names anything a profile's launcher had to
             # leave out — a word attached to no option, a line it could not fill.
-            self._test_result_lbl.setText(
-                f"✓ {len(profiles)} profile(s) from {alias}'s JupyterHub config."
-                + (f" {detail}" if detail else "")
-            )
+            _say(self._test_result_lbl,
+                 f"{len(profiles)} profile(s) from {alias}'s JupyterHub config."
+                 + (f" {detail}" if detail else ""))
 
         poll_queue_on(self, result_q, _done)
 
@@ -952,7 +957,7 @@ class RemoteFormDialog(QDialog):
         """
         alias = self._ssh_alias_edit.text().strip()
         if not alias:
-            self._test_result_lbl.setText("Set an SSH alias first.")
+            _say(self._test_result_lbl, "Set an SSH alias first.", text_roles.ATTENTION)
             return
 
         key_path = self._ssh_key_edit.text().strip()
@@ -960,10 +965,10 @@ class RemoteFormDialog(QDialog):
         def _done(ok: bool, detail: str) -> None:
             self._test_btn.setEnabled(True)
             if ok:
-                self._test_result_lbl.setText(f"✓ {alias} reachable.")
+                _say(self._test_result_lbl, f"{alias} is reachable.")
             else:
                 msg = detail.splitlines()[-1] if detail else "(no error message)"
-                self._test_result_lbl.setText(f"✗ {msg[:120]}")
+                _say(self._test_result_lbl, msg[:120], text_roles.FAILURE)
 
         # Start first, then take the control. A refused probe means one is
         # already running and owns both the button and the label; disabling
@@ -973,7 +978,7 @@ class RemoteFormDialog(QDialog):
             return
         self._test_btn.setEnabled(False)
         suffix = f" (with key {Path(key_path).name})" if key_path else ""
-        self._test_result_lbl.setText(f"Testing {alias}{suffix}…")
+        _say(self._test_result_lbl, f"Testing {alias}{suffix}…")
 
     # ── geometry persistence ──────────────────────────────────────────────
 
@@ -1049,7 +1054,7 @@ class SSHKeyWizardDialog(QDialog):
         layout.addWidget(intro)
 
         # Step 1: generate key ────────────────────────────────────────────
-        step1_title = QLabel("Step 1 — Generate the key locally", self)
+        step1_title = QLabel("Step 1 — generate the key locally", self)
         step1_title.setProperty("textRole", "sectionHeading")
         layout.addWidget(step1_title)
         self._key_path_lbl = QLabel(f"Key path: {self._key_path}", self)
@@ -1065,7 +1070,7 @@ class SSHKeyWizardDialog(QDialog):
 
         # Step 2: copy command ────────────────────────────────────────────
         step2_title = QLabel(
-            "Step 2 — Copy the public key to the remote", self,
+            "Step 2 — copy the public key to the remote", self,
         )
         step2_title.setProperty("textRole", "sectionHeading")
         layout.addWidget(step2_title)
@@ -1091,7 +1096,7 @@ class SSHKeyWizardDialog(QDialog):
         layout.addLayout(cmd_row)
 
         # Step 3: verify ──────────────────────────────────────────────────
-        step3_title = QLabel("Step 3 — Verify", self)
+        step3_title = QLabel("Step 3 — verify", self)
         step3_title.setProperty("textRole", "sectionHeading")
         layout.addWidget(step3_title)
         self._verify_btn = buttons.primary("I ran the command — verify now", self)
@@ -1119,18 +1124,16 @@ class SSHKeyWizardDialog(QDialog):
         # (AllWell can't use it under BatchMode=yes → warn).
         if self._key_path.is_file():
             if ssh_key_setup.key_has_passphrase(self._key_path):
-                self._generate_status_lbl.setText(
-                    f"⚠ Existing key at {self._key_path} has a passphrase. "
-                    "Click Generate to replace it with a passphrase-less key."
-                )
+                _say(self._generate_status_lbl,
+                     f"The existing key at {self._key_path} has a passphrase. "
+                     "Click “Generate” to replace it with a passphrase-less key.", text_roles.ATTENTION)
                 # Don't populate Step 2 — the existing key won't pass
                 # AllWell's BatchMode=yes verify even if it's copied
                 # to the remote.
             else:
-                self._generate_status_lbl.setText(
-                    f"✓ Key already exists at {self._key_path}. "
-                    "Click Generate to re-use it, or jump to Step 2."
-                )
+                _say(self._generate_status_lbl,
+                     f"A key already exists at {self._key_path}. "
+                     "Click “Generate” to re-use it, or go on to step 2.")
                 self._populate_step2()
 
     # ── steps ────────────────────────────────────────────────────────────
@@ -1138,7 +1141,7 @@ class SSHKeyWizardDialog(QDialog):
     def _on_generate(self) -> None:
         replacing = False
         self._generate_btn.setEnabled(False)
-        self._generate_status_lbl.setText("Checking key…")
+        _say(self._generate_status_lbl, "Checking key…")
         QApplication.processEvents()
 
         # v5.2.6: detect the "existing key has a passphrase" trap. The
@@ -1162,11 +1165,10 @@ class SSHKeyWizardDialog(QDialog):
             )
             if ans != QMessageBox.Yes:
                 self._generate_btn.setEnabled(True)
-                self._generate_status_lbl.setText(
-                    "✗ Existing key has a passphrase — wizard cannot proceed. "
-                    "Delete or rename the key file manually, then click "
-                    "Generate again."
-                )
+                _say(self._generate_status_lbl,
+                     "The existing key has a passphrase, so the wizard cannot go on. "
+                     "Delete or rename the key file by hand, then click "
+                     "“Generate” again.", text_roles.FAILURE)
                 return
             # User opted in: remove both halves so generate_keypair's
             # idempotency check produces a fresh key. If either unlink fails,
@@ -1180,22 +1182,21 @@ class SSHKeyWizardDialog(QDialog):
             failed = self._unlink_key_halves(self._key_path, pub)
             if failed:
                 self._generate_btn.setEnabled(True)
-                self._generate_status_lbl.setText(
-                    f"✗ Could not remove the existing key: {failed}. The "
-                    "passphrase-protected key is still in place and AllWell "
-                    "cannot use it. Delete it yourself, then click Generate "
-                    "again."
-                )
+                _say(self._generate_status_lbl,
+                     f"Could not remove the existing key: {failed}. The "
+                     "passphrase-protected key is still in place and All-Well "
+                     "cannot use it. Delete it yourself, then click “Generate” "
+                     "again.", text_roles.FAILURE)
                 return
 
             replacing = True
 
-        self._generate_status_lbl.setText("Generating…")
+        _say(self._generate_status_lbl, "Generating…")
         QApplication.processEvents()
         created, err = ssh_key_setup.generate_keypair(self._key_path)
         self._generate_btn.setEnabled(True)
         if err:
-            self._generate_status_lbl.setText(f"✗ {err}")
+            _say(self._generate_status_lbl, str(err), text_roles.FAILURE)
             QMessageBox.critical(
                 self, "Key generation failed",
                 f"Could not generate {self._key_path}:\n{err}",
@@ -1205,15 +1206,14 @@ class SSHKeyWizardDialog(QDialog):
             # Both halves were deleted a moment ago, so "no work done" cannot
             # be true here. Whatever happened, this is not the fresh key the
             # user asked for, and "reusing" would be the wrong word for it.
-            self._generate_status_lbl.setText(
-                f"✗ {self._key_path} was replaced, but no new key was "
-                "generated in its place. Check the path by hand before "
-                "trying again."
-            )
+            _say(self._generate_status_lbl,
+                 f"{self._key_path} was replaced, but no new key was "
+                 "generated in its place. Check the path by hand before "
+                 "trying again.", text_roles.FAILURE)
             return
-        msg = f"✓ Key generated at {self._key_path}" if created else \
-              f"✓ Key already present at {self._key_path} — reusing."
-        self._generate_status_lbl.setText(msg)
+        msg = f"Key generated at {self._key_path}." if created else \
+              f"A key is already present at {self._key_path}; reusing it."
+        _say(self._generate_status_lbl, msg)
         self._populate_step2()
 
     @staticmethod
@@ -1245,7 +1245,7 @@ class SSHKeyWizardDialog(QDialog):
         cb = QGuiApplication.clipboard()
         if cb is not None:
             cb.setText(self._command_edit.text())
-            self._copy_btn.setText("Copied ✓")
+            self._copy_btn.setText("Copied")
             # Bound to the button, so closing the wizard inside those two
             # seconds cannot fire it at a deleted widget.
             QTimer.singleShot(2000, self._copy_btn,
@@ -1264,15 +1264,13 @@ class SSHKeyWizardDialog(QDialog):
                                self._on_verified):
             return          # one already in flight; it owns the button
         self._verify_btn.setEnabled(False)
-        self._verify_status_lbl.setText("Verifying…")
+        _say(self._verify_status_lbl, "Verifying…")
 
     def _on_verified(self, ok: bool, detail: str) -> None:
         self._verify_btn.setEnabled(True)
         if ok:
-            self._verify_status_lbl.setText(
-                f"<span style='color: {theme.Colors.success};'>✓ Key accepted by "
-                f"{self._ssh_alias}. AllWell will use this key going forward.</span>"
-            )
+            _say(self._verify_status_lbl,
+                 f"Key accepted by {self._ssh_alias}. All-Well will use this key from now on.")
             self.installed_key_path = self._key_path
             # Replace the Close button with OK so the user can commit
             # the path back to RemoteFormDialog.
@@ -1281,12 +1279,10 @@ class SSHKeyWizardDialog(QDialog):
             ok_btn.clicked.connect(self.accept)
             ok_btn.setDefault(True)
         else:
-            self._verify_status_lbl.setText(
-                f"<span style='color: {theme.Colors.danger};'>✗ {detail}</span><br>"
-                "<small>The key may not be installed yet. Make sure you "
-                "ran the Step 2 command and the remote accepted your "
-                "password. Then click Verify again.</small>"
-            )
+            _say(self._verify_status_lbl,
+                 f"{detail}\nThe key may not be installed yet. Make sure you "
+                 "ran the step 2 command and the remote accepted your "
+                 "password, then click “Verify” again.", text_roles.FAILURE)
 
     # ── geometry persistence ──────────────────────────────────────────────
 
@@ -1582,7 +1578,7 @@ class ManageRemotesDialog(QDialog):
         # ── List ────────────────────────────────────────────────────────
         left = QVBoxLayout()
         left.setSpacing(theme.Spacing.sm)
-        title = QLabel("Configured Remotes", self)
+        title = QLabel("Configured remotes", self)
         title.setProperty("textRole", "sectionHeading")
         left.addWidget(title)
 
@@ -1590,7 +1586,7 @@ class ManageRemotesDialog(QDialog):
         self._list.itemSelectionChanged.connect(self._refresh_button_state)
         left.addWidget(self._list, 1)
         self._empty_hint = QLabel(
-            "No remotes configured yet. Click Add to create one.", self,
+            "No remotes configured yet. Click “Add” to create one.", self,
         )
         self._empty_hint.setProperty("textRole", "help")
         self._empty_hint.setWordWrap(True)

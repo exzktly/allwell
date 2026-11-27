@@ -6,7 +6,7 @@ budgets, and because these members are one job that is neither form-building
 nor run-driving. The form gathers the settings a run is launched with, the run
 mixins start it and drain its queue; this shows what the run then said.
 
-* ``_build_log`` — the "Pipeline Output" band (the raw-log toggle and Clear)
+* ``_build_log`` — the "Pipeline output" band (the raw-log toggle and Clear)
   over the log view itself.
 * ``_on_toggle_raw_log`` — reveal or hide that view. It is open at build; the
   toggle is there to put it away.
@@ -168,7 +168,7 @@ class AnalyzeLogPaneMixin:
         rl = body.layout()
         rl.setSpacing(0)
 
-        title = QLabel("Pipeline Output", band)
+        title = QLabel("Pipeline output", band)
         band.add_scope("", title)
         # The dashboard above is the summary; the log is where several things
         # are said and nowhere else — why a run refused to start, the `errors/`

@@ -105,7 +105,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
 
         blurb = QLabel(
             "Join two different datasets along the well axis into one — the "
-            "well-axis sibling of Concatenate, which joins the same dataset "
+            "well-axis sibling of Concatenate Datasets, which joins the same dataset "
             "across time. A well present in both is refused, not stitched: "
             "remap dataset 2's wells onto free positions first if they overlap.",
             self,
@@ -121,11 +121,11 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("▶  Merge", self)
+        self._run_btn = buttons.primary("Merge", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("+ Queue", self)
+        self._queue_btn = buttons.default("Add to queue", self)
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -166,7 +166,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         hl = QHBoxLayout(row)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.sm)
-        self._remap_cb = QCheckBox("Place dataset 2 starting at well:", row)
+        self._remap_cb = QCheckBox("Place dataset 2 starting at well", row)
         self._remap_cb.toggled.connect(self._on_input_changed)
         hl.addWidget(self._remap_cb)
         self._remap_origin_edit = QLineEdit("E01", row)
@@ -185,7 +185,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         outer.addWidget(self._remap_hint)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Merge Output")
+        self.build_log_header(outer, "Merge output")
 
         self.dashboard = MergePlatesDashboard(self)
         # Hidden until both datasets are valid — _update_status_preview()
@@ -261,7 +261,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if self._swap_btn is not None:
             self._swap_btn.setEnabled(not running)
-        self._run_btn.setText("Merging…" if running else "▶  Merge")
+        self._run_btn.setText("Merging…" if running else "Merge")
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")

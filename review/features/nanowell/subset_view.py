@@ -96,7 +96,7 @@ _VERDICTS_TIP = ("The identity check's verdicts the condition names. A verdict i
                  "inconclusive that the check could not decide (for one, the array's fitted rim centre disagreed "
                  "with the square's registration by more than the fit can be trusted to). Identity contradicted is "
                  "the per-nanowell answer.")
-_WINDOW_TIP = ("The nanowells a Distribution window held when it was turned into a subset (Use as Subset). The list is "
+_WINDOW_TIP = ("The nanowells a Distribution window held when it was turned into a subset (Use as subset). The list is "
                "frozen; choose inside to keep them or outside to keep the rest, and remove the row to bring the others back.")
 _GATE_TIP = ("A gate drawn on the Scatter Plot over two nanowell metrics (Observations: Nanowells, or the "
              "\"Nanowell ▸\" axes). Inside: the nanowell's point at the chosen timepoint lies in the box. The box "
@@ -295,7 +295,7 @@ class _ConditionRow(QWidget):
         self.window_label = QLabel()
         self.window_label.setToolTip(_WINDOW_TIP)
         self.remove_btn = buttons.tool_button()
-        self.remove_btn.setText("×")
+        buttons.set_icon(self.remove_btn, "x")
         self.remove_btn.setToolTip("Remove this condition")
         self.remove_btn.setProperty("variant", "default")
         for combo in (self.field_cb, self.at_cb, self.gate_cb):     # the comparisons are short: they keep their width
@@ -483,7 +483,7 @@ class SubsetEditor(QFrame):
         self.match_cb.setToolTip(_MATCH_TIP)
         self.match_cb.currentIndexChanged.connect(lambda _i: self.changed())
         head.addWidget(self.match_cb)
-        head.addWidget(QLabel("of these conditions:"))
+        head.addWidget(QLabel("of these conditions"))
         self.close_btn = buttons.default("Close")
         top = QHBoxLayout()
         top.addWidget(head_host, 1)
@@ -520,7 +520,7 @@ class SubsetEditor(QFrame):
         lay.addLayout(self.rows_box)
         foot_host = QWidget(body)
         foot = _flow(foot_host)
-        self.add_btn = buttons.default("+ Add condition")
+        self.add_btn = buttons.default("Add condition")
         self.add_btn.clicked.connect(self.add)
         self.clear_btn = buttons.default("Clear")
         self.clear_btn.setToolTip("Remove every condition: every nanowell is used.")

@@ -94,7 +94,7 @@ def test_refit_follows_a_height_hint_that_settles_after_open(qtbot):
 
 def test_a_bottom_inset_keeps_a_strip_at_the_foot_usable(qtbot):
     """Phone layout's bottom bar opens the Controls and Wells sheets; each rises
-    from *above* the bar, so the button that opened it — reading "Done ✕" —
+    from *above* the bar, so the button that opened it — reading "Done" —
     stays where the thumb left it. The wrong implementation this rejects is a
     sheet laid over the bar, which hid its own close button."""
     host = _host(qtbot, h=600)

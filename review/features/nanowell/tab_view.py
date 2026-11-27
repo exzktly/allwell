@@ -64,6 +64,7 @@ from widgets.labeled_combo import LabeledComboBox
 from widgets.owned_action import owned_action
 from widgets.spin_box import SpinBox
 from ui import buttons
+from ui.text_roles import NOT_SET
 
 #: The views the page draws, in the order the switch lists them.
 VIEWS = (("distribution", "Distribution"), ("qc", "QC"), ("array", "Array"), ("trajectories", "Trajectories"),
@@ -87,7 +88,7 @@ _POSITIONS = (("measured", "Measured"), ("lattice", "Lattice"))
 #: The band's *Notes* button: the Layers menu's *Notes*, where it can be found.
 #: The views whose footer the *Notes* switch shortens (the Distribution's footer is in its Details field instead).
 NOTES_VIEWS = ("array",)
-_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colours — under the array, in room kept for it so the array never moves. "
+_NOTES_TIP = ("How to read the array — the positions, the fill and outlines, the tile colors — under the array, in room kept for it so the array never moves. "
               "Off, the footer keeps the counts and anything that went wrong. The same switch as Layers → Notes.")
 _LAYERS = (("nanowells", "Nanowells", "Each nanowell, filled by the metric or outlined by its state."),
            ("addresses", "Addresses", "Each nanowell's q,r, wherever it is drawn large enough to hold it."),
@@ -225,8 +226,8 @@ _IMAGE_TIP = ("What the Array view draws under the nanowells (measured positions
 _POSITIONS_TIP = ("Measured: where the run found each nanowell, over the image, tiles and anchor.\n"
                   "Lattice: each nanowell at its address on an ideal lattice, so it keeps its place from one "
                   "timepoint to the next even when the plate was put back rotated.")
-_LAYERS_TIP = "Turn the Array view's elements on and off, colour the nanowells, or set them all from a preset."
-_OVERLAYS_TIP = ("Show or hide every coloured overlay at once — the nanowells, the tiles, the anchor and the cells — to see the "
+_LAYERS_TIP = "Turn the Array view's elements on and off, color the nanowells, or set them all from a preset."
+_OVERLAYS_TIP = ("Show or hide every colored overlay at once — the nanowells, the tiles, the anchor and the cells — to see the "
                  "image beneath. The Layers menu's choices are kept: showing them again restores exactly those.")
 _ZOOM_TIP = ("How far the view is zoomed against Fit. The wheel zooms about the pointer (over VNC from a phone, a "
              "two-finger swipe); − and + zoom about the centre.")
@@ -443,7 +444,7 @@ def build_nanowell_tab(ctx, parent: QWidget) -> None:
     grp_moving = band.add_scope("", moving_kind_cb, moving_spin)
 
     responding_edit = QLineEdit()
-    responding_edit.setPlaceholderText("not set")
+    responding_edit.setPlaceholderText(NOT_SET)
     responding_edit.setToolTip(_RESPONDING_TIP)
     responding_edit.setFixedWidth(_RESPONDING_W)
     responding_edit.editingFinished.connect(lambda: nwc.set_responding_above(ctx, responding_edit.text()))
@@ -973,7 +974,7 @@ def _detail_header(ctx, parent) -> QHBoxLayout:
     row.setContentsMargins(0, 0, 0, 0)
     title = QLabel("Selected nanowell", parent)
     title.setProperty("textRole", "label")
-    close = buttons.default("✕", parent)
+    close = buttons.icon_button("x", "Close the site detail and clear the nanowell selection", parent)
     close.setObjectName("Ghost")
     close.setFixedWidth(theme.Metrics.icon_btn_w)
     close.setToolTip("Close the site detail and clear the nanowell selection")
@@ -1392,17 +1393,16 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     grp_image = band.add_scope("Image", image_cb, image_channel_cb, range_btn)
 
     layers_btn, layer_actions, colour_actions = _layers_button(ctx, band)
-    overlays_btn = _button("Overlays", _OVERLAYS_TIP, None)
-    overlays_btn.setCheckable(True)
-    overlays_btn.setProperty("variant", "toggle")         # a default button paints checked and unchecked the same
-    overlays_btn.setChecked(True)
+    # Two settings of the figure, each acting at once: switches named for what is true when on (§2.5).
+    from widgets.toggle_switch import ToggleSwitch
+    overlays_btn = ToggleSwitch("Show overlays", checked=True)
+    overlays_btn.setToolTip(_OVERLAYS_TIP)
     overlays_btn.toggled.connect(lambda on: nwc.set_overlays(ctx, on))
     reg.register("_nw_overlays_btn", overlays_btn)
     # The footer's Notes, also a button: the Layers menu's entry alone was hard to find (UX review N6). Like
     # Overlays it shows or hides what is on the figure, so it sits beside Overlays under the figure.
-    notes_btn = _button("Notes", _NOTES_TIP, None)
-    notes_btn.setCheckable(True)
-    notes_btn.setProperty("variant", "toggle")
+    notes_btn = ToggleSwitch("Show notes")
+    notes_btn.setToolTip(_NOTES_TIP)
     notes_btn.toggled.connect(lambda on: nwc.set_layer(ctx, "notes", on))
     reg.register("_nw_notes_btn", notes_btn)
     grp_layers = band.add_scope("", layers_btn)
@@ -1432,9 +1432,9 @@ def _build_array_controls(ctx, band, positions_seg, grp_positions) -> SimpleName
     reg.register("_nw_refresh_zoom", refresh_zoom)
 
     # The anchor's buttons last: actions on the picture, after the settings that say how it is drawn.
-    anchor_btn = _button("Set anchor", _ANCHOR_TIP, None)
-    anchor_btn.setCheckable(True)
-    anchor_btn.setProperty("variant", "toggle")         # a default button paints checked and unchecked the same
+    # A tool: pressed in while the next click on the picture sets the anchor (``ui.buttons.mode_tool``).
+    anchor_btn = buttons.mode_tool("Set anchor")
+    anchor_btn.setToolTip(_ANCHOR_TIP)
     anchor_btn.toggled.connect(lambda on: nwc.set_anchor_mode(ctx, on))
     clear_anchor_btn = _button("Clear anchor", _CLEAR_ANCHOR_TIP, lambda: nwc.clear_anchor(ctx))
     # Shorter here than on the QC view, where it has room: every button beside it already says "anchor".

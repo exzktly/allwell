@@ -89,7 +89,7 @@ if __name__ == "__main__":
     lay.setContentsMargins(theme.Spacing.xl, theme.Spacing.xl, theme.Spacing.xl, theme.Spacing.xl)
     lay.setSpacing(theme.Spacing.md)
 
-    lay.addWidget(QLabel("Standalone:"))
+    lay.addWidget(QLabel("Standalone"))
     row = QFrame()
     rl = QHBoxLayout(row)
     rl.setContentsMargins(0, 0, 0, 0)
@@ -101,12 +101,12 @@ if __name__ == "__main__":
     rl.addStretch(1)
     lay.addWidget(row)
 
-    lay.addWidget(QLabel("Composed with a button:"))
+    lay.addWidget(QLabel("Composed with a button"))
     open_btn = QPushButton("Open")
     open_btn.setProperty("variant", "primary")
     lay.addWidget(KbdHint.attach(open_btn, "⌘O"))
 
-    lay.addWidget(QLabel("Composed with an IconButton:"))
+    lay.addWidget(QLabel("Composed with an IconButton"))
     ib = IconButton("folder-open")
     ib.setText("  Open")
     lay.addWidget(KbdHint.attach(ib, "⌘O"))

@@ -218,11 +218,11 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("▶  Zip folder", self)
+        self._run_btn = buttons.primary("Zip folder", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("+ Queue", self)
+        self._queue_btn = buttons.default("Add to queue", self)
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -246,7 +246,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         outer.addStretch(1)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Zip Output")
+        self.build_log_header(outer, "Zip output")
 
         self.dashboard = ImportLooseDashboard(self)
         # Hidden until the source folder scans to at least a real answer —
@@ -292,7 +292,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._can_run())
         self._queue_btn.setEnabled(not running and self._can_run())
-        self._run_btn.setText("Zipping…" if running else "▶  Zip folder")
+        self._run_btn.setText("Zipping…" if running else "Zip folder")
         if running:
             # The run changes the folder; whatever scan the page holds is about
             # to describe a tree that no longer exists.

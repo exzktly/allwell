@@ -21,7 +21,7 @@ MODES = (("distance", "Distance map"), ("blink", "Blink"), ("sides", "Side by si
 #: What the Distance map colours by, as its switch lists them (``state.IDENTITY_COLOURS``).
 COLOURS = (("auto", "Auto"), ("status", "Status"), ("distance", "Distance"))
 _MODE_TIP = ("What the Identity view shows of the chosen timepoint against the well's reference timepoint:\n"
-             "Distance map: each nanowell at its reference position, coloured by its status or by how far its address\n"
+             "Distance map: each nanowell at its reference position, colored by its status or by how far its address\n"
              "lands from itself; the compared timepoint's tiles mapped onto the reference.\n"
              "Blink: the two montages alternating in the reference's frame — a correct mapping keeps the lattice still,\n"
              "and each frame's own address labels jump where the addresses name other nanowells.\n"
@@ -30,7 +30,7 @@ _MODE_TIP = ("What the Identity view shows of the chosen timepoint against the w
              "Diagnostics: the central square looked for, where it was found and how clearly, and every check the\n"
              "verdict rests on with its numbers and thresholds.\n"
              "Every mode zooms: the wheel about the pointer, drag to pan, double-click for the whole view.")
-_COLOUR_TIP = ("What the Distance map colours each nanowell by:\n"
+_COLOUR_TIP = ("What the Distance map colors each nanowell by:\n"
                "Status: lands on itself, imprecise, wrong name, in a tile placed a lattice step off, or not compared —\n"
                "with a count of each, so the nanowells left out are seen at once.\n"
                "Distance: how far its address lands from itself, in nanowell spacings.\n"
@@ -72,7 +72,7 @@ def build_identity_controls(ctx, band) -> IdentityControls:
     timer.setInterval(idc.BLINK_MS)
     timer.timeout.connect(lambda: idc.blink_tick(ctx))
     ctx.widgets.register("_nw_blink_timer", timer)
-    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Colour", colour))
+    return IdentityControls(seg, colour, band.add_scope("Compare", seg), band.add_scope("Color", colour))
 
 
 def refresh_identity_controls(st, controls: IdentityControls, on_view: bool) -> None:

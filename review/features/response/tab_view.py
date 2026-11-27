@@ -28,6 +28,7 @@ from review.core.ui_helpers import (
 from review.features.export.service import export_cell_data_from
 from review.features.response.cell_scope_compute import cell_scope
 from review.features.response.controller import (
+    series_button_text,
     export_response_csv, fit_model_labels, fit_settings,
     on_response_channel_changed, on_response_metric_changed,
     on_x_variable_changed, open_series_selector, open_timepoint_selector,
@@ -100,11 +101,11 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     # variables a figure can be split by is the number the plate has.
     # Self-describing, so it needs no caption: the button names what it splits
     # by, which is what a reader of four curves needs to know.
-    series_btn = reg.register("_response_series_btn", buttons.default("Series: None"))
+    series_btn = reg.register("_response_series_btn", buttons.default(series_button_text(ctx)))
     series_btn.setProperty("variant", "default")
     series_btn.setToolTip(
         "Split the members into one curve per combination of these variables' "
-        "values — colour carries the series, dashes carry the timepoint. "
+        "values — color carries the series, dashes carry the timepoint. "
         "Pick more than one to cross them; None draws one curve per timepoint.")
     series_btn.clicked.connect(lambda _=False: open_series_selector(ctx))
     band.add_scope("", series_btn)

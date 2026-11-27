@@ -163,7 +163,7 @@ class SubsetPage(LogPanelMixin, QWidget):
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
 
-        heading = QLabel("Subset / Split Dataset", self)
+        heading = QLabel("Subset / Split", self)
         heading.setProperty("textRole", "sectionHeading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
@@ -247,7 +247,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("+ Queue", self)
+        self._queue_btn = buttons.default("Add to queue", self)
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -313,7 +313,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         outer.addWidget(self._raw_box)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Subset Output")
+        self.build_log_header(outer, "Subset output")
 
         self.dashboard = SubsetDashboard(self)
         # Hidden until the inputs are valid enough to answer "what would

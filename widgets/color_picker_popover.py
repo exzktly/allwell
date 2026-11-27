@@ -464,7 +464,7 @@ if __name__ == "__main__":
     _show(QColor("#6B8AFD"))
     lay.addWidget(swatch)
 
-    btn = QPushButton("Open colour picker")
+    btn = QPushButton("Open color picker")
     btn.setObjectName("Primary")
     btn.setCursor(Qt.PointingHandCursor)
     lay.addWidget(btn, 0, Qt.AlignLeft)

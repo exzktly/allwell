@@ -291,7 +291,7 @@ class RawFields:
             out.append("Workers must be 1 or more, or blank for auto.")
         stride, ok = parse_count(self.timepoint_stride)
         if not ok or (stride is not None and stride <= 0):
-            out.append("Keep every Nth timepoint must be a positive whole "
+            out.append("Keep every nth timepoint must be a positive whole "
                        "number, or blank to convert every timepoint.")
         if not self.timepoints_ticked:
             out.append("Tick at least one timepoint to convert.")

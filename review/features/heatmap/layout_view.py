@@ -373,11 +373,10 @@ def build_heatmap_layout_editor(ctx, band_parent: QWidget, dock: QWidget | None)
         dock.layout().addWidget(panel)
     panel.hide()
 
-    # A text toggle beside Display ▾ and Save ▾, filled like them; the theme's
-    # ``toggle`` variant rings it in the accent while the panel is open.
-    button = buttons.default(LAYOUT_BUTTON_TEXT, band_parent)
-    button.setCheckable(True)
-    button.setProperty("variant", "toggle")
+    # Beside Display ▾ and Save ▾: a tool button that stays pressed in while the
+    # editor it opens is showing (``ui.buttons.mode_tool``), the way a sidebar's
+    # show button does.
+    button = buttons.mode_tool(LAYOUT_BUTTON_TEXT, band_parent)
     button.setToolTip(
         "Show / hide the layout editor — the grid of wells this heat map draws")
     # Click-and-act, like Properties beside it: phone layout's Controls sheet
@@ -551,7 +550,7 @@ class _LayoutPanel(QWidget):
 
         # Auto-populate first: it is the one way in that works by touch too.
         hint = QLabel(
-            "Select wells on the plate and press Auto-populate, or drag wells "
+            "Select wells on the plate and press “Auto-populate from selection”, or drag wells "
             "from the plate map into a cell. Drag a cell to move it; "
             "double-click it, or drag it back onto the plate, to empty it. "
             "Double-click a row or column label on the heat map to rename it.",

@@ -1093,6 +1093,20 @@ _SWEEP_MS = 300
 _P_WATCHED = "_awPhoneWatched"
 #: Dynamic property marking a widget a sweep has already looked at.
 _P_SEEN = "_awPhoneSeen"
+
+def _show_as(button, text: str, icon: str = "", *, tip: str = "") -> None:
+    """Label a bottom-bar button: words, a drawn icon, or both. A sheet's close is the ✕ symbol with its tooltip,
+    not the word (design language §3.6), and the gear the Controls button carries is the drawn icon, not "⚙"."""
+    from PySide6.QtGui import QIcon
+    from PySide6.QtCore import Qt
+    from widgets import icons
+    button.setText(text)
+    button.setIcon(icons.make_icon(icon, 16, dpr=button.devicePixelRatioF() or 1.0) if icon else QIcon())
+    button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon if text and icon
+                              else Qt.ToolButtonIconOnly if icon else Qt.ToolButtonTextOnly)
+    button.setToolTip(tip)
+    button.setAccessibleName(tip or text)
+
 class PhoneShell(QObject):
     """Owns phone layout's controls and drives the switch both ways."""
 
@@ -1317,7 +1331,7 @@ class PhoneShell(QObject):
         # threshold, …) live in a sheet behind this, so the plot gets the screen.
         self.controls_button = buttons.tool_button()
         self.controls_button.setObjectName("PhoneControlsButton")
-        self.controls_button.setText("⚙ Controls")
+        _show_as(self.controls_button, "Controls", "sliders")
         self.controls_button.clicked.connect(self.toggle_controls)
 
         # The well picker, one tap from the page: the page's plate and its
@@ -1346,7 +1360,8 @@ class PhoneShell(QObject):
         # desk — one flat menu, no submenus.
         self.options_button = buttons.tool_button()
         self.options_button.setObjectName("PhoneOptionsButton")
-        self.options_button.setText("⋯")
+        buttons.set_icon(self.options_button, "more-horizontal")
+        self.options_button.setToolTip("More")
         self.options_button.setPopupMode(QToolButton.InstantPopup)
         self._menu = QMenu(self.options_button)
         self._menu.aboutToShow.connect(self._fill_menu)
@@ -2144,7 +2159,7 @@ class PhoneShell(QObject):
     def _foot_strip(self) -> int:
         """How much of the window's foot the strip holds, while it shows: a
         bottom sheet rises from above it, so the button that opened the sheet
-        — which then reads "Done ✕" — stays where the thumb left it."""
+        — which then reads "Done" — stays where the thumb left it."""
         strip = self._strip
         if not strip.isVisibleTo(self._win):
             return 0
@@ -2280,7 +2295,10 @@ class PhoneShell(QObject):
         fit = getattr(sheet, "_aw_fit", None)
         if fit is not None:
             fit.refit_now()
-        self.controls_button.setText("Hide controls" if docked else "Done ✕")
+        if docked:
+            _show_as(self.controls_button, "Hide controls")
+        else:
+            _show_as(self.controls_button, "", "x", tip="Close the controls")
 
     def close_controls(self, *, now: bool = False) -> None:
         if self._sheet is None:
@@ -2342,7 +2360,7 @@ class PhoneShell(QObject):
             w.show()
         self._sweep(force=False)    # the sheet's own scroll area, if new
         sheet.open()
-        self.wells_button.setText("Done ✕")
+        _show_as(self.wells_button, "", "x", tip="Close the wells")
         self._wells_timer.start()
         self.refresh()
 
@@ -2373,11 +2391,11 @@ class PhoneShell(QObject):
 
     def _sync_wells_label(self) -> None:
         """"Wells · 4" — the count is what the plot shows, so it is worth a
-        glance from the foot of the screen — or "Done ✕" while the sheet is
+        glance from the foot of the screen — or "Done" while the sheet is
         open."""
         sheet = self._wells_sheet
         if sheet is not None and sheet.isOpen():
-            self.wells_button.setText("Done ✕")
+            _show_as(self.wells_button, "", "x", tip="Close the wells")
             return
         fn = self._h.wells_count
         try:
@@ -2385,11 +2403,11 @@ class PhoneShell(QObject):
         except RuntimeError:
             swallowed()  # read while the dataset was being swapped
             n = None
-        self.wells_button.setText(f"Wells · {n}" if n else "Wells")
+        _show_as(self.wells_button, f"Wells · {n}" if n else "Wells")
 
     def _give_band_back(self) -> None:
         band, self._sheet_band = self._sheet_band, None
-        self.controls_button.setText("⚙ Controls")
+        _show_as(self.controls_button, "Controls", "sliders")
         if band is None:
             return
         try:
@@ -2421,7 +2439,8 @@ class PhoneShell(QObject):
             return
         open_ = self._h.navigator_open()
         self.menu_button.setChecked(open_)
-        self.menu_button.setText("✕" if open_ else "☰")
+        buttons.set_icon(self.menu_button, "x" if open_ else "menu")
+        self.menu_button.setToolTip("Close the menu" if open_ else "Menu")
         review = self._h.mode() == "review"
         tools = self._h.mode() == "datasets" and bool(self._h.tool_names())
         views = self._h.mode() == "analyze" and bool(self._h.page_views())
@@ -2585,10 +2604,14 @@ class PhoneShell(QObject):
         lay.setContentsMargins(self.pt(16), self.pt(4), self.pt(12), self.pt(4))
         lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
         lay.addWidget(QLabel("Text size", row), 1)
+        # One choice of three: touch-sized segments of one exclusive group, the chosen one selected — a
+        # segmented control spread to touch size, not three push buttons that each carry a state.
         for size in phone_layout.TEXT_SIZES:
-            b = buttons.default(phone_layout.TEXT_SIZE_LABEL[size][0], row)
+            b = buttons.tool_button(row)
+            b.setText(phone_layout.TEXT_SIZE_LABEL[size][0])
             b.setObjectName("PhoneTextSizeButton")
             b.setCheckable(True)
+            b.setAutoExclusive(True)
             b.setChecked(size == self._text_size)
             b.setFixedSize(self.pt(phone_layout.TOUCH_ROW_PT),
                            self.pt(phone_layout.TOUCH_MIN_PT))

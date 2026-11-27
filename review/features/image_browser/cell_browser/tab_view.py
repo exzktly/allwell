@@ -113,7 +113,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     _src_lay = QHBoxLayout(_src_row)
     _src_lay.setContentsMargins(0, 0, 0, 0)
     _src_lay.setSpacing(theme.Spacing.xs)
-    _src_lay.addWidget(QLabel("Source:", _src_row))
+    _src_lay.addWidget(QLabel("Source", _src_row))
     source_seg = _SegmentedControl(_src_row)
     for _lbl, _data in (("Raw", "raw"), ("Corrected", "corrected")):
         source_seg.addSegment(_lbl, data=_data)
@@ -366,13 +366,13 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         rl.addWidget(QLabel("color", row))
         swatch = buttons.default("", row)
         swatch.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)
-        swatch.setToolTip("Display colour for this channel. Applied on Generate.")
+        swatch.setToolTip("Display color for this channel. Applied on Generate.")
         _paint_cb_swatch(swatch, _cb_effective_tint(iv, tok, i))
         rl.addWidget(swatch)
-        reset_c = buttons.default("✕", row)
+        reset_c = buttons.icon_button("x", "Reset this channel's colour to the default.", row)
         reset_c.setFixedWidth(_RESET_C_W)
         reset_c.setObjectName("Ghost")
-        reset_c.setToolTip("Reset this channel's colour to the default.")
+        reset_c.setToolTip("Reset this channel's color to the default.")
         rl.addWidget(reset_c)
 
         def _commit(_=None, _t=tok, _lo=lo_e, _hi=hi_e):

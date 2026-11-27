@@ -791,7 +791,7 @@ def _no_significance(ctx, ax, reason: str) -> None:
     substitution however many brackets it carries.
 
     Every way this renderer can decline to draw used to be a bare ``return``.
-    Six of them, and only one said anything — so with "Significance: On" showing
+    Six of them, and only one said anything — so with "Show significance" on
     on the toolbar, a plot with no asterisks looked identical whether no test had
     been run, the test was run on another channel, the bars had moved to another
     timepoint, or every comparison genuinely came back drawable and simply had
@@ -1707,7 +1707,7 @@ def draw_per_cell_bar_mode(
     pool_reps = bool(getattr(plot, "bar_pool_replicates", True))
 
     # Build a base (well, color, well_label, cluster_label) sequence for
-    # one timepoint. When rsets are active and "Pooled" is on, collapse each
+    # one timepoint. When rsets are active and "Pool replicates" is on, collapse each
     # replicate set into ONE column with its cells pooled across the set's
     # wells (see ``pool_groups`` below); when off, expand wells inside each
     # rset (keeping the rset rank colour). The cluster_label is used as the

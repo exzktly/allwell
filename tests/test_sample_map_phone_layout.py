@@ -310,7 +310,7 @@ def test_every_layer_is_one_column_that_fits_the_phone(
 
 
 def test_a_layer_that_grows_on_the_phone_is_fitted_again(shell_ctx, qtbot, phone_type):
-    """Pressing the empty state's *+ Variable* on a phone swaps the empty state
+    """Pressing the empty state's *Add variable* on a phone swaps the empty state
     for the plate, the chips and the fill sentence — rows the fit has never
     seen, built after it ran, at the same viewport width. Wrong
     implementation: re-fitting only when the width changes, which left the

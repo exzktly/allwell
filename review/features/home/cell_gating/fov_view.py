@@ -62,7 +62,7 @@ def build_fov_selection_row(ctx, parent: QWidget, *, indent: int,
     row = QWidget(box)
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 0, 0)
-    label = QLabel("Fields of view:", row)
+    label = QLabel("Fields of view", row)
     label.setToolTip(_TOOLTIP)
     layout.addWidget(label)
     btn = buttons.default("All FOVs", row)

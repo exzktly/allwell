@@ -190,7 +190,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
 
         row = QHBoxLayout()
         row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "Subset:", min_width=_FIELD_LABEL_W)
+        self._add_bold_label(row, "Subset", min_width=_FIELD_LABEL_W)
         self._subset_box = QCheckBox("Use the page's subset")
         self._subset_box.setChecked(True)
         self._subset_box.setToolTip("Draw and summarise only the nanowells in the Nanowells page's Subset — its "
@@ -206,7 +206,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
 
         row = QHBoxLayout()
         row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "Metrics:", min_width=_FIELD_LABEL_W)
+        self._add_bold_label(row, "Metrics", min_width=_FIELD_LABEL_W)
         self._metric_list = QListWidget()
         self._metric_list.setToolTip("One figure per ticked metric. Cell fluorescence and nanowell fluorescence use the channel "
                                      "chosen in the app's channel selector; each figure's axis names the "
@@ -226,7 +226,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
         # summary CSV's fraction responding is computed at it, and there is no default cut to fall back on.
         row = QHBoxLayout()
         row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "Responding above:", min_width=_FIELD_LABEL_W)
+        self._add_bold_label(row, "Responding above", min_width=_FIELD_LABEL_W)
         self._threshold_host = QWidget()
         self._threshold_form = QFormLayout(self._threshold_host)
         self._threshold_form.setContentsMargins(0, 0, 0, 0)
@@ -478,7 +478,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
             return self._export_group(grp, write_dir, data, metrics, settings, used_stems)
 
         self._run_batch_jobs(jobs=groups, progress_text_fn=_progress, run_job_fn=_run_group,
-                             success_text=f"✓ {len(groups)} group(s)",
+                             success_text=f"Exported {len(groups)} group(s)",
                              status_text=f"Nanowells batch export: {len(groups)} group(s)", out_dir=out_dir)
 
     def _figure_groups(self, grp: BarGroup, have: set) -> dict:

@@ -211,16 +211,16 @@ class ResponseBatchExportPanel(BatchExportPanel):
         """The x variable, the series split, and the x axis scale."""
         row = QHBoxLayout()
         row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "X variable:", min_width=_FIELD_LABEL_W)
+        self._add_bold_label(row, "X variable", min_width=_FIELD_LABEL_W)
         self._x_var_cb = QComboBox()
         self._x_var_cb.setMinimumWidth(_VAR_COMBO_MIN_W)
         self._x_var_cb.setToolTip(
             "The Number sample variable the curves are plotted against.\n"
-            "Text variables group and colour perfectly well but have nowhere to "
+            "Text variables group and color perfectly well but have nowhere to "
             "sit on a numeric axis, so they are not offered here.")
         row.addWidget(self._x_var_cb)
 
-        self._add_bold_label(row, "Series:")
+        self._add_bold_label(row, "Series")
         self._series_var_cb = QComboBox()
         self._series_var_cb.setMinimumWidth(_VAR_COMBO_MIN_W)
         self._series_var_cb.setToolTip(
@@ -246,7 +246,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
         """The fit model and its pinned plateaus, shared by every curve."""
         row = QHBoxLayout()
         row.setContentsMargins(theme.Spacing.md, theme.Spacing.xs, theme.Spacing.md, theme.Spacing.xs)
-        self._add_bold_label(row, "Fit:", min_width=_FIELD_LABEL_W)
+        self._add_bold_label(row, "Fit", min_width=_FIELD_LABEL_W)
         self._fit_model_cb = QComboBox()
         self._fit_models: list[str] = []
         for label, model in _fit_model_labels():
@@ -259,12 +259,12 @@ class ResponseBatchExportPanel(BatchExportPanel):
             "the figure and in the CSV.")
         row.addWidget(self._fit_model_cb)
 
-        row.addWidget(QLabel("Top:"))
+        row.addWidget(QLabel("Top"))
         self._fit_top_edit = QLineEdit()
         self._fit_top_edit.setFixedWidth(_BOUND_EDIT_W)
         self._fit_top_edit.setPlaceholderText("free")
         row.addWidget(self._fit_top_edit)
-        row.addWidget(QLabel("Bottom:"))
+        row.addWidget(QLabel("Bottom"))
         self._fit_bottom_edit = QLineEdit()
         self._fit_bottom_edit.setFixedWidth(_BOUND_EDIT_W)
         self._fit_bottom_edit.setPlaceholderText("free")
@@ -520,7 +520,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
             jobs=groups_with_data,
             progress_text_fn=_progress,
             run_job_fn=_run_group,
-            success_text=f"✓ {len(groups_with_data)} group(s)",
+            success_text=f"Exported {len(groups_with_data)} group(s)",
             status_text=(f"Response batch export: {len(groups_with_data)} group(s)"),
             out_dir=out_dir,
         )

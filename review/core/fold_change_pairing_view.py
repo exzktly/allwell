@@ -52,6 +52,7 @@ from review.domain.fold_change_pairing import (
     summary_text,
 )
 from ui import buttons
+from ui.text_roles import NOT_SET
 
 #: Combo text for "this member has no control".
 NONE_LABEL = "—"
@@ -401,4 +402,4 @@ def _fill_row(ctx, scope: str, table: QTableWidget, r: int, row: dict,
     table.setItem(r, COL_STATUS, status_item)
 
     table.setItem(r, COL_RESOLVES,
-                  QTableWidgetItem(", ".join(row["resolves_to"]) or "—"))
+                  QTableWidgetItem(", ".join(row["resolves_to"]) or NOT_SET))

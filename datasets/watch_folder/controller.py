@@ -89,7 +89,7 @@ class WatchFolderController(DatasetToolController):
         if not folder:
             message = "No folder to watch selected."
             self.page.append_log(f"✗ {message}")
-            self.page.set_status_text(f"✗ {message}")
+            self.page.set_status_text(message, failed=True)
             self._last_result = (False, message, "")
             # No worker starts on this path, so _on_finished never fires: a
             # queued job would sit "running" for ever without this.
@@ -163,12 +163,12 @@ class WatchFolderController(DatasetToolController):
     # ── worker results ───────────────────────────────────────────────────────
     def _on_succeeded(self, folder: str, summary: str) -> None:
         self.page.append_log(f"✓ {summary}")
-        self.page.set_status_text(f"✓ {summary}")
+        self.page.set_status_text(summary)
         self._last_result = (True, summary, folder)
 
     def _on_failed(self, message: str) -> None:
         self.page.append_log(f"✗ {message}")
-        self.page.set_status_text(f"✗ {message}")
+        self.page.set_status_text(message, failed=True)
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:

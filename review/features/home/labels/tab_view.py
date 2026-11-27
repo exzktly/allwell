@@ -456,7 +456,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     help_lbl = QLabel(
         "Custom names used in legends + axis labels. Type into a cell to "
         "edit one well; click row/column headers or Shift-click cells to "
-        "select multiple, then use Add Prefix / Add Suffix.",
+        "select multiple, then use “Add prefix” or “Add suffix”.",
     )
     help_lbl.setProperty("textRole", "help")
     help_lbl.setWordWrap(True)
@@ -471,7 +471,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     al.setSpacing(theme.Spacing.sm)
 
     prefix_btn = ctx.widgets.register("_lbl_add_prefix", btn_secondary(
-        affix, "Add Prefix", lambda: labels_apply_affix(ctx, where="prefix")))
+        affix, "Add prefix", lambda: labels_apply_affix(ctx, where="prefix")))
     prefix_btn.setToolTip(
         "Prepend text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "
@@ -480,7 +480,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     al.addWidget(prefix_btn)
 
     suffix_btn = ctx.widgets.register("_lbl_add_suffix", btn_secondary(
-        affix, "Add Suffix", lambda: labels_apply_affix(ctx, where="suffix")))
+        affix, "Add suffix", lambda: labels_apply_affix(ctx, where="suffix")))
     suffix_btn.setToolTip(
         "Append text to the labels of every cell currently selected in the "
         "grid. Falls back to the sidebar's selected wells if no cell is "

@@ -338,7 +338,7 @@ def compute_gate_stats(
 
     Percentages are denominated by each group's own total (the FACS reading:
     "what fraction of well A fell in this gate") — and *total* means the cloud
-    the gate was drawn over, not what survived it. When the tab's "Apply gates"
+    the gate was drawn over, not what survived it. When the tab's "Plot only the gated cells"
     toggle is on, ``collect_scatter_data`` also stashes the pre-gate arrays
     under ``x_ungated`` / ``y_ungated`` / ``tp_ungated``, and they are what
     these percentages count against. Reading the drawn arrays instead made

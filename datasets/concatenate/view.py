@@ -163,11 +163,11 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("▶  Concatenate", self)
+        self._run_btn = buttons.primary("Concatenate", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("+ Queue", self)
+        self._queue_btn = buttons.default("Add to queue", self)
         self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -233,7 +233,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._undo_note = QLabel("", self._undo_row)
         text_roles.set_role(self._undo_note, text_roles.HELP, tone=text_roles.ATTENTION)
         self._undo_note.setWordWrap(True)
-        self._undo_btn = buttons.default("Undo the unfinished addition…", self._undo_row)
+        self._undo_btn = buttons.default("Undo the unfinished addition", self._undo_row)
         self._undo_btn.setObjectName("ConcatUndoAppend")
         self._undo_btn.setProperty("variant", "default")
         self._undo_btn.clicked.connect(lambda: self.undoAppendRequested.emit(self._undo_root))
@@ -282,7 +282,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(
-            outer, "Concatenate Output",
+            outer, "Concatenate output",
             toggle_tooltip="Show the full per-file merge log beneath the progress dashboard")
 
         self.dashboard = ConcatDashboard(self)
@@ -411,7 +411,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if self._swap_btn is not None:
             self._swap_btn.setEnabled(not running)
-        self._run_btn.setText("Concatenating…" if running else "▶  Concatenate")
+        self._run_btn.setText("Concatenating…" if running else "Concatenate")
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
@@ -481,7 +481,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
     def set_undo_busy(self, busy: bool) -> None:
         """While an undo runs, its button is a status rather than a control."""
         self._undo_btn.setEnabled(not busy)
-        self._undo_btn.setText("Undoing…" if busy else "Undo the unfinished addition…")
+        self._undo_btn.setText("Undoing…" if busy else "Undo the unfinished addition")
 
     def datasets_changed_on_disk(self) -> None:
         """Re-read both datasets after something outside the fields changed them."""
@@ -592,7 +592,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self._gap_hint.style().polish(self._gap_hint)
         self._gap_hint.setVisible(bool(self._gap_hint.text()))
         self._gap_labels.setText(
-            "Dataset 2's timepoints become: " + ", ".join(preview.labels)
+            "Dataset 2's timepoints become " + ", ".join(preview.labels)
             if preview.labels else "")
         self._gap_labels.setVisible(bool(preview.labels))
 

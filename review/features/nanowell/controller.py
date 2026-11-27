@@ -1979,7 +1979,7 @@ def anchor_unavailable_reason(ctx) -> str | None:
     if st.layers.lattice():
         return "Choose Positions ▸ Measured: an anchor is set in the well frame."
     if not drawn_layers(st).anchor:
-        return "Turn on Layers ▸ Anchor and show Overlays."
+        return "Turn on Layers ▸ Anchor and Show overlays."
     if fmc.anchors_file(st.data) is None:
         return "This dataset has no in/ folder to save an anchor beside."
     well = page_well(ctx)

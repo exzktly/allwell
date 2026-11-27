@@ -1092,9 +1092,9 @@ if __name__ == "__main__":
         from PySide6.QtWidgets import QHBoxLayout as _QHB
         ctrls = _QW()
         _cl = _QHB(ctrls); _cl.setContentsMargins(0, 0, 0, 0); _cl.setSpacing(theme.Spacing.sm)
-        _cl.addWidget(QLabel("Across:"))
+        _cl.addWidget(QLabel("Across"))
         _cl.addWidget(_make_segmented([("Replicates", "rep"), ("FOV", "fov")], current="rep"))
-        _cl.addWidget(QLabel("Error:"))
+        _cl.addWidget(QLabel("Error"))
         _cl.addWidget(_make_segmented([("SEM", "SEM"), ("SD", "SD"), ("None", "None")], current="SEM"))
         card.setControlsWidget(ctrls)
         lay.addWidget(card, 1)
@@ -1103,7 +1103,7 @@ if __name__ == "__main__":
         btn.clicked.connect(lambda: (card.setPlotTheme(
             "publication" if card.plotTheme() == "screen" else "screen"), _plot()))
         lay.addWidget(btn)
-        echo = QLabel("(left header: view-switcher · header: Publication↔Screen toggle + 'preview only' chip + stats chip → popover · controls row beneath the header)")
+        echo = QLabel("(left header: view-switcher · header: publication↔screen toggle + 'preview only' chip + stats chip → popover · controls row beneath the header)")
         echo.setProperty("textRole", "label")
         echo.setWordWrap(True)
         lay.addWidget(echo)

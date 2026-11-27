@@ -599,7 +599,7 @@ def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | No
     vmax = fixed_vmax if fixed_vmax is not None else auto_vmax
     if vmin is not None and vmax is not None and vmax <= vmin:
         ctx.notify.set_status(
-            f"Heat Map: the fixed colour scale needs vmax above vmin "
+            f"Heat Map: the fixed color scale needs vmax above vmin "
             f"(got vmin {vmin:g}, vmax {vmax:g}) — showing the automatic range."
         )
         return auto_vmin, auto_vmax
@@ -818,7 +818,7 @@ def _draw_heatmap(ctx) -> None:
             # The grid still draws — on the data's own positive range — so
             # without this the fixed numbers are ignored and nothing says so.
             ctx.notify.set_status(
-                "Heat Map: a log colour scale needs both fixed limits above "
+                "Heat Map: a log color scale needs both fixed limits above "
                 "zero — showing the automatic log range instead."
             )
         if log_vmin is not None and log_vmax is not None and log_vmax > log_vmin > 0:
@@ -831,7 +831,7 @@ def _draw_heatmap(ctx) -> None:
             # looks identical to the toggle having no effect at all.
             ctx.notify.set_status(
                 "Heat Map: log scale needs two or more distinct positive values — "
-                "showing the linear colour scale."
+                "showing the linear color scale."
             )
 
     ax.clear()

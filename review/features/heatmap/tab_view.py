@@ -116,9 +116,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # labels are appearance by the same test and live here too.
     display_btn, disp, disp_l = make_popover_button("Display ▾", band)
     display_btn.setToolTip(
-        "Colour map, scale, layout, per-cell error and tick labels")
+        "Color map, scale, layout, per-cell error and tick labels")
 
-    disp_l.addWidget(QLabel("Color map:", disp))
+    disp_l.addWidget(QLabel("Color map", disp))
     # v2: LutSelector (gradient strip + name + searchable popover + reverse-LUT
     # button) in place of the legacy QComboBox of mpl colormap names.
     from widgets.lut_selector import LutSelector
@@ -132,25 +132,25 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx))
     disp_l.addWidget(cmap_cb)
 
-    disp_l.addWidget(QLabel("Scale:", disp))
+    disp_l.addWidget(QLabel("Scale", disp))
     scale_cb = reg.register("_heatmap_scale_cb", QComboBox(disp))
     scale_cb.addItems(_SCALE_OPTIONS)
     scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx))
     disp_l.addWidget(scale_cb)
 
-    disp_l.addWidget(QLabel("vmin:", disp))
+    disp_l.addWidget(QLabel("vmin", disp))
     vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(disp))
     vmin_edit.setFixedWidth(theme.Metrics.num_field_w)
     vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     disp_l.addWidget(vmin_edit)
 
-    disp_l.addWidget(QLabel("vmax:", disp))
+    disp_l.addWidget(QLabel("vmax", disp))
     vmax_edit = reg.register("_heatmap_vmax_edit", QLineEdit(disp))
     vmax_edit.setFixedWidth(theme.Metrics.num_field_w)
     vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     disp_l.addWidget(vmax_edit)
 
-    transpose_btn = buttons.default("⇄ Transpose", disp)
+    transpose_btn = buttons.default("Transpose", disp)
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
     transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx))
     disp_l.addWidget(transpose_btn)

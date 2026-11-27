@@ -31,7 +31,7 @@ _LISTW_MIN_H = 260
 
 def build_feature_picker(ctx, panel_layout) -> None:
     """Build the checkable feature list into *panel_layout* (a popover body)."""
-    panel_layout.addWidget(QLabel("Feature columns:"))
+    panel_layout.addWidget(QLabel("Feature columns"))
     listw = QListWidget()
     listw.setObjectName("MvFeatureList")
     listw.setMinimumSize(_LISTW_MIN_W, _LISTW_MIN_H)

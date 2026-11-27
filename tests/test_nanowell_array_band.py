@@ -109,8 +109,8 @@ def test_set_anchor_says_which_of_its_conditions_is_missing(montage_page):
     assert ctx.widgets.get("_nw_anchor_btn").isEnabled()             # t_a is unaddressed: an anchor can be set
     assert nwc.anchor_unavailable_reason(ctx) is None
     ctx.widgets.get("_nw_layer_anchor").trigger()                     # the anchor layer off
-    assert _reason(ctx, "_nw_anchor_btn") == "Turn on Layers ▸ Anchor and show Overlays."
-    assert _reason(ctx, "_nw_clear_anchor_btn") == "Turn on Layers ▸ Anchor and show Overlays."
+    assert _reason(ctx, "_nw_anchor_btn") == "Turn on Layers ▸ Anchor and Show overlays."
+    assert _reason(ctx, "_nw_clear_anchor_btn") == "Turn on Layers ▸ Anchor and Show overlays."
     ctx.widgets.get("_nw_layer_anchor").trigger()
     ctx.widgets.get("_nw_positions_seg").setCurrentIndex(1)
     assert _reason(ctx, "_nw_anchor_btn") == "Choose Positions ▸ Measured: an anchor is set in the well frame."

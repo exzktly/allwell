@@ -214,7 +214,7 @@ def test_the_toggle_is_off_by_default_and_flips():
     assert cls().show_exclusion_layers is False
 
 
-def test_the_toggle_reaches_the_state_and_the_button_text():
+def test_the_switch_reaches_the_state_and_carries_no_state_in_its_label():
     from review.features.image_browser.review_image.renderer import (
         refresh_review_image_layers_btn, toggle_review_image_exclusion_layers,
     )
@@ -241,7 +241,8 @@ def test_the_toggle_reaches_the_state_and_the_button_text():
 
     assert ctx.state.review_image.show_exclusion_layers is True
     assert seen["checked"] is True
-    assert "On" in seen["text"]
+    # A switch says its state by being on; its words name the setting and are never rewritten (§2.5).
+    assert "text" not in seen
     # The tooltip has to say the thing a user cannot discover by clicking:
     # that a click will not undo a verdict column.
     assert "CANNOT restore" in seen["tip"]

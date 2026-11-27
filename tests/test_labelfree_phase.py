@@ -82,7 +82,7 @@ def test_analyze_form_fits_narrow_sidebar_with_a_wider_font(qapp):
 def test_qc_debris_toggle_hides_its_labels(qapp):
     """Regression: 'Remove debris' off must hide the size/solidity LABELS too,
     not just their input cells. ``_row()`` returns the right-hand cell (the label
-    lives in the cell's parent), so toggling the cells left 'Min / Max area (px)'
+    lives in the cell's parent), so toggling the cells left 'Min / max area (px)'
     / 'Min solidity (0-1)' stranded/centered with no fields when debris was off —
     the toggle must target the parent rows (like _bg_radius_rows et al.)."""
     from PySide6.QtWidgets import QLabel
@@ -90,8 +90,8 @@ def test_qc_debris_toggle_hides_its_labels(qapp):
 
     tab = AnalyzeTab()
     labels = [l for l in tab.findChildren(QLabel)
-              if l.text() in ("Min / Max area (px)", "Min solidity (0-1)")]
-    assert {l.text() for l in labels} == {"Min / Max area (px)", "Min solidity (0-1)"}
+              if l.text() in ("Min / max area (px)", "Min solidity (0-1)")]
+    assert {l.text() for l in labels} == {"Min / max area (px)", "Min solidity (0-1)"}
     # Each debris label's containing row is one of the toggled rows (so hiding the
     # row hides the label, not just the input cell beside it).
     for lbl in labels:

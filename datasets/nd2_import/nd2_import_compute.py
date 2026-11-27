@@ -290,7 +290,7 @@ class RawFields:
             out.append("Worker threads must be a positive whole number, or "
                        "blank for automatic.")
         if not parse_count(self.timepoint_stride)[1]:
-            out.append("Keep every Nth timepoint must be a positive whole "
+            out.append("Keep every nth timepoint must be a positive whole "
                        "number, or blank to convert every timepoint.")
         if not self.timepoints_ticked:
             out.append("Tick at least one timepoint to convert.")

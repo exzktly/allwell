@@ -170,7 +170,7 @@ def refresh_dataset_button(win) -> None:
     dataset = getattr(state, "dataset", None) if state is not None else None
     path = str(getattr(dataset, "data_dir", "") or "")
     if not path:
-        btn.setText("No dataset — Open")
+        btn.setText("No dataset — open one")
         btn.setToolTip("No dataset loaded. Choose a folder to review.")
         return
     # ``dataset_display_name`` holds the rule: the standard Analyze-pipeline

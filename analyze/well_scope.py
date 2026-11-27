@@ -29,6 +29,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QLineEdit, QWidget
 
 from analyze.domain.well_list import parse_well_list, well_scope_error
+from ui.text_roles import NOT_SET
 from widgets.value_combo import ValueCombo
 
 #: The existing-output choice, ``(value, label)``. ``skip`` is the pipeline's
@@ -143,7 +144,7 @@ def build_well_scope_rows(form, sec: QWidget) -> None:
                              ("Force these wells", "_force_wells_edit", FORCE_WELLS_TIP)):
         row = form._row(sec, label)
         edit = QLineEdit(row)
-        edit.setPlaceholderText("(all wells)" if attr == "_only_wells_edit" else "(none)")
+        edit.setPlaceholderText("all wells" if attr == "_only_wells_edit" else NOT_SET)
         edit.setToolTip(tip)
         row.layout().addWidget(edit, 1)
         setattr(form, attr, edit)

@@ -333,7 +333,7 @@ class AnalyzeSuspendMixin:
         back — and Stop is the escape hatch beside it. Disabled until a run is
         going, in step with Stop.
         """
-        self._suspend_btn = buttons.default("⏸  Suspend", parent)
+        self._suspend_btn = buttons.default("Suspend", parent)
         self._suspend_btn.setEnabled(False)
         self._suspend_btn.setToolTip(
             "Wind the run down at the next field boundary and remember where it "

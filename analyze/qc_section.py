@@ -285,7 +285,7 @@ class AnalyzeQCSectionMixin:
             "Remove debris (drop regions outside the size / solidity bounds)", sec)
         sec.layout().addWidget(self._qc_remove_debris_cb)
 
-        ra = self._row(sec, "Min / Max area (px)")
+        ra = self._row(sec, "Min / max area (px)")
         self._qc_min_area_edit = self._entry(ra, "0", width=80)
         self._qc_max_area_edit = self._entry(ra, "0", width=80)
         ra.layout().addStretch(1)
@@ -382,7 +382,7 @@ class AnalyzeQCSectionMixin:
 
         rf = self._row(sec, "Out of focus below")
         self._focus_min_edit = self._entry(rf, "", width=80)
-        self._focus_min_edit.setPlaceholderText("none")
+        self._focus_min_edit.setPlaceholderText(text_roles.NOT_SET)
         self._focus_min_edit.setToolTip(
             "The focus value below which a cell is out of focus. Recorded with "
             "the dataset, not applied here: Review's Cell Gating excludes the "

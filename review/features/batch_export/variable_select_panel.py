@@ -52,6 +52,7 @@ from review.features.batch_export._variable_groups import (
     remove_membership,
 )
 from ui import theme
+from ui.text_roles import NOT_SET
 
 # The same roster the plate drag reads (``base_panel._rep_sets_loaded``), so a
 # set chosen here is the set a drag would have pulled in.
@@ -121,7 +122,7 @@ class VariableSelectMixin:
         self._vsel_controls = QWidget()
         row = QHBoxLayout(self._vsel_controls)
         row.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs, theme.Spacing.sm, theme.Spacing.xs)
-        row.addWidget(QLabel("Select by variable:"))
+        row.addWidget(QLabel("Select by variable"))
         self._vsel_var_cb = QComboBox()
         self._vsel_var_cb.setMinimumWidth(_VSEL_COMBO_MIN_W)
         self._vsel_var_cb.setToolTip("A sample variable from Home → Sample Map → Variables")
@@ -132,7 +133,7 @@ class VariableSelectMixin:
         row.addWidget(self._vsel_val_cb, 1)
         layout.addWidget(self._vsel_controls)
 
-        # "Add wells", not "Add": the header's "+ Add" a few centimetres away
+        # "Add wells", not "Add": the header's "Add" a few centimetres away
         # makes a group, and two buttons reading the same word must not do
         # different things.
         btns = QHBoxLayout()
@@ -213,7 +214,7 @@ class VariableSelectMixin:
                 for value in variable.values:
                     combo.addItem(variable.display_label(value.id) or value.label,
                                   value.id)
-                combo.addItem("(not set)", _UNASSIGNED)
+                combo.addItem(NOT_SET, _UNASSIGNED)
             idx = combo.findData(previous) if previous is not None else -1
             combo.setCurrentIndex(idx if idx >= 0 else (0 if combo.count() else -1))
         finally:
@@ -304,7 +305,7 @@ class VariableSelectMixin:
         grp = self._active_group()
         if grp is None:
             # The obvious intent of "add these wells" with no group: a group of
-            # them. Refusing would make the user find "+ Add" and come back.
+            # them. Refusing would make the user find "Add" and come back.
             grp = BarGroup("New Group")
             self._groups.append(grp)
             self._auto_named_group_ids.add(id(grp))

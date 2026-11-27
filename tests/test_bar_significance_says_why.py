@@ -1,4 +1,4 @@
-"""With "Significance: On", a plot without asterisks has to say why.
+"""With "Show significance", a plot without asterisks has to say why.
 
 The bracket renderer declines to draw for six different reasons, and five of
 them used to be a bare ``return``. The gates themselves are right — the

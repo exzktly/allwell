@@ -55,15 +55,17 @@ def build_queue_controls(ctx, band) -> SimpleNamespace:
     position = QLabel("")
     position.setObjectName("NanowellQueueLabel")
     position.setToolTip("Where the Resolve walk is. ← Back · → Skip · Esc Stop.")
-    back = _button("Back", f"Show the previous timepoint in the queue; a click there replaces its anchor "
-                   f"({_KEY_NAMES['back']}).", lambda: aq.step(ctx, -1))
+    # Back is the symbol with its tooltip, not the word (design language §3.6).
+    back = buttons.icon_button("arrow-left", f"Back: show the previous timepoint in the queue; a click there "
+                               f"replaces its anchor ({_KEY_NAMES['back']}).", kind=buttons.DEFAULT,
+                               on_click=lambda: aq.step(ctx, -1))
     skip = _button("Skip", f"Leave this timepoint without an anchor and show the next one ({_KEY_NAMES['skip']}).",
                    lambda: aq.step(ctx, +1))
     stop = _button("Stop", f"End the queue here and restore the selection it started with ({_KEY_NAMES['stop']}).",
                    lambda: aq.stop(ctx))
-    per_well = buttons.default("One per well")
-    per_well.setProperty("variant", "toggle")       # a default button paints checked and unchecked the same
-    per_well.setCheckable(True)
+    # A setting that acts at once: a switch (§2.5).
+    from widgets.toggle_switch import ToggleSwitch
+    per_well = ToggleSwitch("One per well")
     per_well.setToolTip(PER_WELL_TIP)
     per_well.toggled.connect(lambda on: aq.set_per_well(ctx, on))
     for name, widget in (("_nw_queue_lbl", position), ("_nw_queue_back_btn", back), ("_nw_queue_skip_btn", skip),

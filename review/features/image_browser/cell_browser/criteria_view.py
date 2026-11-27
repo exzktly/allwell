@@ -135,7 +135,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     ctx.runtime.cell_browser.criteria_rows_host = rows_host
     ctx.runtime.cell_browser.criteria_rows = []
 
-    add_btn = buttons.default("+ Add criterion", parent)
+    add_btn = buttons.default("Add criterion", parent)
     add_btn.clicked.connect(lambda _=False: _add_row(ctx))
     lay.addWidget(add_btn)
     ctx.runtime.cell_browser.add_criterion_btn = add_btn
@@ -143,9 +143,9 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     # Why the criteria editor above is greyed out. "From scatter gate" is a
     # sticky choice — it survives tab switches and dataset loads — so without
     # this line a user who ticked it earlier meets a permanently dead
-    # "+ Add criterion" button with nothing on screen explaining it.
+    # "Add criterion" button with nothing on screen explaining it.
     criteria_off_hint = QLabel(
-        "Criteria apply only when Source is Criteria.", parent)
+        "Criteria apply only when the source is “Criteria”.", parent)
     criteria_off_hint.setProperty("textRole", "help")
     criteria_off_hint.setWordWrap(True)
     criteria_off_hint.setVisible(False)
@@ -361,7 +361,7 @@ def _add_row(ctx, column: str = "") -> None:
     combo.setMinimumWidth(theme.Metrics.combo_min_w_sm)
     lo = QLineEdit(row); lo.setPlaceholderText("min"); lo.setFixedWidth(_LO_W)
     hi = QLineEdit(row); hi.setPlaceholderText("max"); hi.setFixedWidth(_HI_W)
-    rm = buttons.default("✕", row)
+    rm = buttons.icon_button("x", "Remove this criterion", row)
     rm.setFixedWidth(_RM_W)
     rm.setObjectName("Ghost")
     rl.addWidget(combo, 1)

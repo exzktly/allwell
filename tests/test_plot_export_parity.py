@@ -29,7 +29,7 @@ def _gate_stats(scatter_data, gate, tps):
 
 
 def test_gate_percentage_is_not_denominated_by_the_filtered_cloud():
-    """With "Apply gates" on, the drawn cloud *is* the gate's contents, so a
+    """With "Plot only the gated cells" on, the drawn cloud *is* the gate's contents, so a
     percentage taken against it reads 100.0% for every gate — arithmetically
     true and useless. The pre-gate arrays collect stashes are what it counts
     against."""

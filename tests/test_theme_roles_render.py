@@ -50,7 +50,7 @@ def test_label_roles_differ_from_plain_body_text(styled_app, object_name):
     )
 
 
-@pytest.mark.parametrize("variant", ["primary", "destructive", "toggle_accent"])
+@pytest.mark.parametrize("variant", ["primary", "destructive", "quiet"])
 def test_button_variants_differ_from_default(styled_app, variant):
     from PySide6.QtWidgets import QPushButton
 

@@ -1,5 +1,5 @@
 """Smoke tests for DatasetsTab's wiring: the page builds with every tool
-controller plus a fake Analyze registered, "+ Queue" on a tool's page lands a
+controller plus a fake Analyze registered, "Add to queue" on a tool's page lands a
 job the Job Queue page can see, and the left rail carries the tools and
 nothing else.
 
@@ -125,7 +125,7 @@ def test_add_to_queue_from_a_tool_lands_a_job_in_the_bridge(qapp, tmp_path):
 
 
 def test_analyze_s_own_queue_button_lands_a_job(qapp, tmp_path):
-    """Analyze's page gained its own "+ Queue", wired through a sink the
+    """Analyze's page gained its own "Add to queue", wired through a sink the
     Datasets side injects — so neither module imports the other."""
     tab, fake_analyze = _make_tab(tmp_path)
     try:

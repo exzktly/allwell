@@ -114,7 +114,7 @@ def build_relative_to_row(ctx, parent: QWidget, layout) -> QWidget:
     within_line = QWidget(box)
     within_row = QHBoxLayout(within_line)
     within_row.setContentsMargins(0, 0, 0, 0)
-    within_row.addWidget(QLabel("within each:", within_line))
+    within_row.addWidget(QLabel("within each", within_line))
     checks_box = QWidget(within_line)
     checks_row = QHBoxLayout(checks_box)
     checks_row.setContentsMargins(0, 0, 0, 0)

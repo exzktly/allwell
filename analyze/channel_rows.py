@@ -55,10 +55,10 @@ class AnalyzeChannelRowsMixin:
     """The channel rows' builders and readers. Binds to the ``AnalyzeTab``."""
 
     def _build_channel_list_controls(self, sec: QWidget) -> None:
-        """Under the rows: "+ Add channel", and the option that adds the
+        """Under the rows: "Add channel", and the option that adds the
         input's own channels to the rows when the run starts
         (``services.run_detect.add_detected_channels``)."""
-        add_btn = buttons.default("+ Add channel", sec)
+        add_btn = buttons.default("Add channel", sec)
         add_btn.setFixedWidth(self._ADD_BTN_W)
         add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
         sec.layout().addWidget(add_btn)
@@ -102,9 +102,8 @@ class AnalyzeChannelRowsMixin:
         role.setToolTip(ROLE_TIP)
         rl.addWidget(role)
 
-        remove_btn = buttons.default("✕", row)
-        remove_btn.setFixedWidth(self._REMOVE_BTN_W)   # wide enough that the button padding doesn't clip ✕
-        remove_btn.setProperty("variant", "default")
+        remove_btn = buttons.icon_button("x", "Remove this channel", row)
+        remove_btn.setFixedWidth(self._REMOVE_BTN_W)
         remove_btn.setToolTip("Remove this channel")
         rl.addWidget(remove_btn)
 

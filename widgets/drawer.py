@@ -310,7 +310,7 @@ if __name__ == "__main__":
     hv = QVBoxLayout(host)
     pad = theme.Spacing.lg
     hv.setContentsMargins(pad, pad, pad, pad)
-    title = QLabel("Drawer — click 'Open Analyze' (Esc / click-outside to dismiss)")
+    title = QLabel("Drawer — click “Open Analyze” (Esc or a click outside dismisses it)")
     title.setProperty("textRole", "pageTitle")
     title.setWordWrap(True)
     hv.addWidget(title)
@@ -327,7 +327,7 @@ if __name__ == "__main__":
     h2 = QLabel("Analyze")
     h2.setProperty("textRole", "pageTitle")
     cv.addWidget(h2)
-    cv.addWidget(QLabel("Pipeline input directory:"))
+    cv.addWidget(QLabel("Pipeline input directory"))
     cv.addWidget(QLineEdit())
     cv.addWidget(QPushButton("Run pipeline"))
     cv.addStretch(1)

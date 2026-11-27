@@ -169,7 +169,7 @@ class StorageDialog(QDialog):
             rl.addWidget(detail)
             if area.confirm:
                 # The warning's first sentence; the whole of it is asked on Clear.
-                warn = QLabel(f"⚠ {area.confirm.split('. ')[0]}.", row)
+                warn = QLabel(f"{area.confirm.split('. ')[0]}.", row)
                 text_roles.set_role(warn, text_roles.HELP, tone=text_roles.ATTENTION)
                 warn.setWordWrap(True)
                 warn.setContentsMargins(_DETAIL_INDENT, theme.Spacing.xs, 0, 0)

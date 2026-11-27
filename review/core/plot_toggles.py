@@ -39,13 +39,6 @@ _refresh_bar_layout_btn_state = _lazy(
 )
 
 
-#: Room the FOV toggle reserves beyond its widest label, in pixels: the QSS
-#: padding on both sides plus the border. Written at the call site until the
-#: pixel-literal ratchet reached this module; named here so the number has a
-#: reason attached rather than an allowlist entry.
-_FOV_BTN_SLACK_PX = 26
-
-
 def _live_buttons(bank) -> list:
     """The still-alive buttons in *bank*, with the dead ones dropped from it.
 
@@ -114,21 +107,19 @@ def _notify_observers(bank, value) -> None:
 
 
 def register_fov_button(ctx, btn) -> None:
-    """Put *btn* on the per-FOV toggle bank and bring it into the shared state.
+    """Put *btn* on the per-FOV spread bank and bring it into the shared state.
 
     The one way onto ``ctx.runtime.fov.btns``. *btn* must be a
-    :class:`widgets.reserved_width_button.ReservedWidthButton`: the bank's
-    restyle reserves room for the wider checked label ("FOV ✓"), and a plain
-    button has no reservation, so its ✓ clips inside a popover sized at first
-    show, with nothing to say so. Such a button is refused here, at the moment
-    it is wired, rather than restyled without its reservation.
+    :class:`widgets.toggle_switch.ToggleSwitch`: the setting acts at once, so it is
+    a switch (design language §2.5), and the bank sets every member's checked state
+    from the shared one. Anything else is refused here, at the moment it is wired,
+    rather than restyled into something it is not.
     """
-    from widgets.reserved_width_button import ReservedWidthButton
+    from widgets.toggle_switch import ToggleSwitch
 
-    if not isinstance(btn, ReservedWidthButton):
+    if not isinstance(btn, ToggleSwitch):
         raise TypeError(
-            f"a per-FOV toggle must be a ReservedWidthButton, not {type(btn).__name__}: "
-            "the bank reserves room for the 'FOV ✓' label on every restyle")
+            f"a per-FOV spread control must be a ToggleSwitch, not {type(btn).__name__}")
     if ctx.runtime.fov.btns is None:
         ctx.runtime.fov.btns = []
     ctx.runtime.fov.btns.append(btn)
@@ -137,31 +128,29 @@ def register_fov_button(ctx, btn) -> None:
     refresh_fov_btn_state(ctx)
 
 
+def _set_quietly(widget, setter, value) -> None:
+    """Call ``setter(value)`` on *widget* with its signals blocked: the bank mirrors a state that has already
+    changed, and a mirrored control that fired its own change signal would flip it back."""
+    blocked = widget.blockSignals(True)
+    try:
+        setter(value)
+    finally:
+        widget.blockSignals(blocked)
+
+
 def refresh_fov_btn_state(ctx) -> None:
-    """Sync every per-FOV toggle button's text/variant state."""
+    """Set every per-FOV spread switch from the shared state."""
     is_on = bool(ctx.state.plot.use_fov_replicates)
-    text = "FOV ✓" if is_on else "FOV"
-    variant = "toggle_active" if is_on else "toggle"
     tooltip = (
         "Compute error bands across per-FOV means.\n"
         "With replicate sets active, FOVs are pooled across all wells in each set;\n"
-        "otherwise FOVs are pooled within each well. Pairs with the SEM/SD toggle."
+        "otherwise FOVs are pooled within each well. Pairs with the SEM / SD choice."
     )
+
     def _apply_fov(btn) -> None:
         btn.setEnabled(True)
-        btn.setText(text)
         btn.setToolTip(tooltip)
-        btn.setProperty("variant", variant)
-        # Reserve room for the wider checked-state label ("FOV ✓") so the ✓ glyph
-        # never clips — the button can live inside a QMenu-backed "Display ▾"
-        # popover whose size is fixed at first show and won't re-expand when the
-        # text grows. Size for the widest label + QSS padding/border slack; the
-        # button re-measures it whenever the type size changes
-        # (``widgets.reserved_width_button``).
-        # Every bank member is one: ``register_fov_button`` refuses anything else.
-        btn.reserve(("FOV", "FOV ✓"), _FOV_BTN_SLACK_PX)
-        btn.style().unpolish(btn)
-        btn.style().polish(btn)
+        _set_quietly(btn, btn.setChecked, is_on)
 
     for btn in _live_buttons(ctx.runtime.fov.btns):
         _style_button(btn, _apply_fov)
@@ -171,19 +160,47 @@ def refresh_fov_btn_state(ctx) -> None:
 def toggle_sem(ctx) -> None:
     invalidate_threshold_results(ctx)
     is_sem = ctx.state.plot.toggle_sem()
-    text = spread_label(is_sem)
-    variant = "sem" if is_sem else "sem_warn"
 
-    def _apply_sem(btn) -> None:
-        btn.setText(text)
-        btn.setProperty("variant", variant)
-        btn.style().unpolish(btn)
-        btn.style().polish(btn)
+    def _apply_sem(control) -> None:
+        _set_quietly(control, control.setCurrentByData, bool(is_sem))
 
-    for btn in _live_buttons(ctx.runtime.sem.btns):
-        _style_button(btn, _apply_sem)
+    for control in _live_buttons(ctx.runtime.sem.btns):
+        _style_button(control, _apply_sem)
     _notify_observers(ctx.runtime.sem.observers, is_sem)
     redraw_every_scope(ctx)
+
+
+def make_spread_choice(ctx, parent):
+    """The SEM / SD choice: a segmented control of the two (§2.5), on the shared bank so every copy agrees.
+    Choosing the one not in force flips the shared state through :func:`toggle_sem`."""
+    from widgets.segmented_control import SegmentedControl
+
+    seg = SegmentedControl(parent)
+    seg.addSegment(text=spread_label(True), data=True)
+    seg.addSegment(text=spread_label(False), data=False)
+    seg.setCurrentByData(bool(ctx.state.plot.use_sem))
+    seg.setToolTip("The error band: the standard error of the mean, or the standard deviation.")
+
+    def _chosen(_i: int) -> None:
+        if seg.currentData() != bool(ctx.state.plot.use_sem):
+            toggle_sem(ctx)
+    seg.currentChanged.connect(_chosen)
+    if ctx.runtime.sem.btns is None:
+        ctx.runtime.sem.btns = []
+    ctx.runtime.sem.btns.append(seg)
+    if not ctx.runtime.sem.btn:
+        ctx.runtime.sem.btn = seg
+    return seg
+
+
+def make_fov_switch(ctx, parent, text: str = "Spread across FOVs"):
+    """The per-FOV spread switch, registered on the shared bank."""
+    from widgets.toggle_switch import ToggleSwitch
+
+    switch = ToggleSwitch(text, parent)
+    switch.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
+    register_fov_button(ctx, switch)
+    return switch
 
 
 def toggle_fov_replicates(ctx) -> None:

@@ -112,7 +112,7 @@ if __name__ == "__main__":
     title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
-    lay.addWidget(QLabel("Plot toolbar group (pan/zoom are checkable + exclusive):"))
+    lay.addWidget(QLabel("Plot toolbar group (pan/zoom are checkable + exclusive)"))
     bar = QHBoxLayout()
     bar.setSpacing(theme.Spacing.xs)
     home = IconButton("home", tooltip="Reset view")
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     bar.addWidget(coords)
     lay.addLayout(bar)
 
-    lay.addWidget(QLabel("With text:"))
+    lay.addWidget(QLabel("With text"))
     row2 = QHBoxLayout()
     row2.addWidget(IconButton("search", text="Search", tooltip="Search"))
     row2.addWidget(IconButton("plus", text="Add", tooltip="Add"))

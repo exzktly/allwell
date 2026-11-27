@@ -104,7 +104,7 @@ def test_segmentation_and_auto_threshold_method_combos_fit_and_elide(qapp):
 
 
 def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
-    """The run row has to fit theme.Metrics.rail_w *with* "+ Queue" on it.
+    """The run row has to fit theme.Metrics.rail_w *with* "Add to queue" on it.
 
     Regression: the button is hidden until the Datasets pane injects a queue
     sink, so every existing check measured the row without it and passed. With

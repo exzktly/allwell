@@ -1484,7 +1484,7 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     leaves the page in view, then puts each back at its place in the rail.
 
     Wrong implementations this rejects: a strip left at the top (out of thumb
-    reach), a sheet laid over the strip (its "Done ✕" hidden), and a give-back
+    reach), a sheet laid over the strip (its "Done" hidden), and a give-back
     that appends to the rail rather than returning each widget to its index."""
     from PySide6.QtTest import QTest
     win, shell, rail, slot, footer = _wells_window(qapp, lambda s, f: [s, f])
@@ -1503,7 +1503,7 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     sheet = shell._wells_sheet
     assert sheet.isOpen() and sheet.isVisible()
     assert slot.parentWidget() is sheet._aw_holder and footer.parentWidget() is sheet._aw_holder
-    assert shell.wells_button.text() == "Done ✕"
+    assert shell.wells_button.text() == "" and shell.wells_button.toolTip() == "Close the wells"
     strip_top = strip.mapTo(win, strip.rect().topLeft()).y()
     assert sheet.geometry().bottom() < strip_top, "the sheet covers its own Done button"
     assert sheet._backdrop._alpha == 0, "a scrim would dim the plot the wells change"
@@ -1691,7 +1691,7 @@ def test_the_text_size_buttons_follow_the_named_touch_sizes(
         qapp, app_sheet, monkeypatch):
     """The ⋯ menu's Text size buttons are TOUCH_ROW_PT × TOUCH_MIN_PT, spaced
     TOUCH_GAP_PT apart — read from the constants, not restated beside them."""
-    from PySide6.QtWidgets import QPushButton
+    from PySide6.QtWidgets import QToolButton
     monkeypatch.setattr(phone_layout, "TOUCH_MIN_PT", 50)
     monkeypatch.setattr(phone_layout, "TOUCH_ROW_PT", 61)
     monkeypatch.setattr(phone_layout, "TOUCH_GAP_PT", 11)
@@ -1699,7 +1699,7 @@ def test_the_text_size_buttons_follow_the_named_touch_sizes(
     QVBoxLayout(win)
     shell = _shell(win)
     row = shell._text_size_row().defaultWidget()
-    buttons = row.findChildren(QPushButton, "PhoneTextSizeButton")
+    buttons = row.findChildren(QToolButton, "PhoneTextSizeButton")
     assert len(buttons) == len(phone_layout.TEXT_SIZES)
     for b in buttons:
         assert (b.minimumWidth(), b.minimumHeight()) == (shell.pt(61), shell.pt(50))

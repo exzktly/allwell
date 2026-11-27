@@ -144,7 +144,7 @@ class ScatterCellViewer(QWidget):
         self._title_label = QLabel("Cell")
         self._title_label.setProperty("textRole", "sectionHeading")
         head.addWidget(self._title_label, 1)
-        close_btn = buttons.default("✕")
+        close_btn = buttons.icon_button("x", "Close the cell viewer")
         close_btn.setObjectName("Ghost")
         close_btn.setFixedWidth(theme.Metrics.icon_btn_w)
         close_btn.setToolTip("Close the cell viewer")
@@ -153,12 +153,12 @@ class ScatterCellViewer(QWidget):
         layout.addLayout(head)
 
         ctrl = QHBoxLayout()
-        ctrl.addWidget(QLabel("Channel:"))
+        ctrl.addWidget(QLabel("Channel"))
         self._channel_dropdown = QComboBox()
         self._channel_dropdown.currentIndexChanged.connect(self._display_current_image)
         ctrl.addWidget(self._channel_dropdown)
         ctrl.addSpacing(10)
-        ctrl.addWidget(QLabel("Source:"))
+        ctrl.addWidget(QLabel("Source"))
         self._source_dropdown = QComboBox()
         self._source_dropdown.addItem("Raw", "raw")
         self._source_dropdown.addItem("Corrected", "corrected")
@@ -182,12 +182,12 @@ class ScatterCellViewer(QWidget):
         layout.addWidget(self._window_note)
 
         lut = QHBoxLayout()
-        lut.addWidget(QLabel("Brightness min:"))
+        lut.addWidget(QLabel("Brightness min"))
         self._lut_min_edit = QLineEdit("")
         self._lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
         self._lut_min_edit.editingFinished.connect(self._on_lut_typed)
         lut.addWidget(self._lut_min_edit)
-        lut.addWidget(QLabel("max:"))
+        lut.addWidget(QLabel("max"))
         self._lut_max_edit = QLineEdit("")
         self._lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
         self._lut_max_edit.editingFinished.connect(self._on_lut_typed)
@@ -293,7 +293,7 @@ class ScatterCellViewer(QWidget):
         finally:
             self._channel_dropdown.blockSignals(blocked)
         if not crops.crops:
-            self._show_problem("No channel could be shown: "
+            self._show_problem("No channel could be shown — "
                                + "; ".join(crops.missing.values()) + ".")
             return
         self._display_current_image()

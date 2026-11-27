@@ -177,7 +177,7 @@ class NanowellPreviewWindow(QWidget):
         self._zoom_cb.setCurrentIndex(0)
         self._sites_cb = QCheckBox("Nanowell outlines", self)
         self._sites_cb.setChecked(True)
-        self._sites_cb.setToolTip("Draw each nanowell's coloured outline and address over the montage. Off, the "
+        self._sites_cb.setToolTip("Draw each nanowell's colored outline and address over the montage. Off, the "
                                   "montage alone, to see the edges the outlines would cover.")
         # The controls flow onto as many lines as the width allows, each caption kept with its box: one fixed row of
         # nine controls made a phone's window a column of one control per line, with the montage half a screen down.
@@ -188,7 +188,7 @@ class NanowellPreviewWindow(QWidget):
                      self._run_btn, self._sites_cb, flow_group(self, "Zoom", self._zoom_cb)):
             top.addWidget(item)
         layout.addWidget(controls)
-        self._summary = QLabel("Choose a well and a timepoint, then Run.", self)
+        self._summary = QLabel("Choose a well and a timepoint, then press “Run”.", self)
         self._summary.setWordWrap(True)
         self._summary.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self._summary)

@@ -335,7 +335,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     stage_row.layout().addWidget(source_seg)
     stage_row.layout().addStretch(1)
     app._playground_source_seg = source_seg
-    stage_note = QLabel("decides which controls below run — Raw runs none",
+    stage_note = QLabel("decides which controls below run — “Raw” runs none",
                         controls)
     stage_note.setProperty("textRole", "help")
     stage_note.setWordWrap(True)
@@ -364,7 +364,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # to be inferred: the two halves of this tab run on completely different
     # triggers.
     run_note = QLabel("Correction re-runs as you change these. Segmentation runs "
-                      "only when you press Segment.", controls)
+                      "only when you press “Segment”.", controls)
     run_note.setProperty("textRole", "help")
     run_note.setWordWrap(True)
     cl.addWidget(run_note)
@@ -410,7 +410,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     seg_btn = buttons.default("Segment", seg_btn_row)
     seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
     hint = QLabel("Tuned here, then run the plate: type the same two values into "
-                  "Analyze → Channel Tokens → Nucleus probability / Overlap.",
+                  "Analyze → Segmentation → “Nucleus probability” and “Overlap”.",
                   controls)
     hint.setProperty("textRole", "help")
     hint.setWordWrap(True)
@@ -605,15 +605,15 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     binary_cb = QCheckBox("Binary", toggles)
     binary_cb.setToolTip(
         "Fill the cells the mask found, on black, instead of showing the image.")
-    colors_cb = QCheckBox("Colour cells", toggles)
+    colors_cb = QCheckBox("Color cells", toggles)
     colors_cb.setToolTip(
-        "In Binary mode, give every label its own colour instead of painting "
+        "In Binary mode, give every label its own color instead of painting "
         "them all white — two nuclei that touch are otherwise one white shape, "
         "and whether the segmentation split them is the thing you are looking "
         "for.\n"
-        "The colour is a fixed function of the label id, so it does not change "
+        "The color is a fixed function of the label id, so it does not change "
         "between redraws. It has no effect where there is no usable mask: that "
-        "fallback thresholds pixels, and pixels have no labels to colour.")
+        "fallback thresholds pixels, and pixels have no labels to color.")
     colors_cb.setChecked(True)
     overlay_cb = QCheckBox("Outlines", toggles)
     overlay_cb.setToolTip(
@@ -658,10 +658,10 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         st = ctx.state.playground
         st.zoom = max(0.1, min(8.0, st.zoom * delta))
         render_playground_display(ctx)
-    zout = buttons.default("−", zoom_row)
+    zout = buttons.icon_button("minus", "Zoom out", zoom_row, kind=buttons.DEFAULT)
     zout.setFixedWidth(theme.Metrics.icon_btn_w)
     zout.clicked.connect(lambda _=False: _zoom(1 / 1.25))
-    zin = buttons.default("+", zoom_row)
+    zin = buttons.icon_button("plus", "Zoom in", zoom_row, kind=buttons.DEFAULT)
     zin.setFixedWidth(theme.Metrics.icon_btn_w)
     zin.clicked.connect(lambda _=False: _zoom(1.25))
     zfit = buttons.default("Fit", zoom_row)

@@ -964,7 +964,7 @@ under them **what stops the run**: every problem the form can see — no input
 folder, a schema that does not parse, a method missing the channel it needs, a
 correction missing its blank well, a number that is not one — the first in full
 and a count of the rest, with all of them in its tooltip. While you fill the
-form in the list is grey; once you press **Run** (or **+ Queue**) with problems
+form in the list is grey; once you press **Run** (or **Add to queue**) with problems
 outstanding it turns red, the section holding the first problem opens and
 scrolls into view, and clicking the line does the same. Nothing opens a dialog.
 The checks that read the input folder from disk — a packed file, a blank or
@@ -1147,7 +1147,7 @@ Any string  preserved as-is and sorted lexicographically
   array shows the [Nanowell array](#nanowell-arrays-analyze--plate-type-or-the-command-line)
   section and sets the Segmentation section to the nanowell cell count.
 - **One row per channel**, named as in the filenames, with a **Role** dropdown
-  and a ✕ to remove it. **+ Add channel** adds a row. The roles:
+  and a ✕ to remove it. **Add channel** adds a row. The roles:
   - **Quantify.** Every channel is quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
   `<token>_total_intensity`, etc.).
   - **smFISH.** Also processed for spot detection.
@@ -2497,7 +2497,7 @@ names the rule that kept it — the Slurm job and its state, the process number,
 the held nanowell wells, the run that is reading a dataset, or the file written
 recently. The log line for a folder the automatic clean-up kept says the same.
 
-- **Delete…** removes the selected folders after asking you. The confirmation
+- **Delete** removes the selected folders after asking you. The confirmation
   says how many of the run folders hold results All-Well never confirmed as
   downloaded. Deleting a run folder does not touch results already on your
   computer, but anything it had not yet sent back is lost, and a later resume of
@@ -2505,7 +2505,7 @@ recently. The log line for a folder the automatic clean-up kept says the same.
   plate uploads it again.
 - **Keep forever** protects folders from the expiry rule, the automatic cache
   clean-up, the clean-up of a plate's earlier attempts and a run's own
-  *Auto-delete* setting. **Delete…** can still remove them.
+  *Auto-delete* setting. **Delete** can still remove them.
 - **Expire in N days** removes the selected folders automatically once that time
   has passed. Starting a new run in a folder clears that date, because the folder
   holds new work. **Use host rule** drops a folder's own setting.
@@ -2519,11 +2519,11 @@ recently. The log line for a folder the automatic clean-up kept says the same.
   Automatic removal only ever takes a folder that:
 
   - carries the label All-Well writes for it, so folders from older versions are
-    only ever removed by you, with **Delete…**;
+    only ever removed by you, with **Delete**;
   - holds results that were downloaded and verified, with nothing written
     there since, if it is a run folder. A run downloaded as *CSV only* leaves
     its masks and images on the server, so it never counts as downloaded and
-    only **Delete…** removes it;
+    only **Delete** removes it;
   - is not kept and is due;
   - and, if it is a dataset, has not been used in the last seven days.
 
@@ -3697,7 +3697,7 @@ choice applies once, when the menu closes.
   line is counted in the background, so it reads *Checking each nanowell's rim
   focus across the plate…* for a moment after a dataset opens or the setting
   changes; the rest of the app is usable meanwhile. The
-  Segmentation overlay's **Why removed** outlines those cells in pink as
+  Segmentation overlay's **Show why cells were removed** outlines those cells in pink as
   *nanowell rim out of focus*, and the inclusion funnel lists them as
   *Nanowell out of focus*. The same switch is mirrored as **Rim focus** on the
   Nanowells page.
@@ -3713,7 +3713,7 @@ choice applies once, when the menu closes.
   Only a **Redo it** re-run (Run scope) records the column for the older cells — an ordinary
   re-run skips every well whose results already exist, and an incremental one
   with the same settings finds them up to date. In the Segmentation
-  view's **Why removed** overlay these cells are outlined in magenta and
+  view's **Show why cells were removed** overlay these cells are outlined in magenta and
   labelled *touches the image border*, not as debris.
 
   **Fields of view** chooses which FOV numbers count. The button reads
@@ -3739,7 +3739,7 @@ choice applies once, when the menu closes.
   and closing it changes nothing, and a field your selection names that this
   dataset does not have is kept when you edit the others. A well whose FOV labels cannot be trusted (see *Exclude fields the run
   flagged*, above) is not filtered — every field there still counts — and the
-  line names it. In the Segmentation view's **Why removed** overlay these cells
+  line names it. In the Segmentation view's **Show why cells were removed** overlay these cells
   are outlined in pale lime and labelled *field not in the FOV selection*.
 
   The counts under the checkbox are about the cells that would otherwise be in
@@ -3966,7 +3966,7 @@ is being used instead, because that is what the plots actually drew.
 
 The selection travels between **Variables** and **Well Labels**, because on both
 it means the same thing — the wells you are about to act on — and it is also
-what Cell Gating's CDFs and **Add Prefix** read. It does **not** travel into
+what Cell Gating's CDFs and **Add prefix** read. It does **not** travel into
 **Replicates**: there the plate is the current group's membership, and a drag on it
 edits that group, so carrying a selection in would hand a group wells you never
 put in it.
@@ -3976,7 +3976,7 @@ put in it.
 Name a set of wells as replicates; every plot, the Statistics tab, and Batch
 Export can then treat them as one condition. A group **is** exactly one
 condition — its wells are its replicate set (no mixed sub-sets or solo wells
-inside a group). Build one with **+ Add** (a graphical plate picker —
+inside a group). Build one with **Add** (a graphical plate picker —
 rubber-band select, row/column headers), or let **Quick Replicates** chunk the
 current selection into groups of a chosen size via the **Replicates per group**
 spinbox (default 2), walking the wells along the Rows / Columns direction. On
@@ -4008,10 +4008,10 @@ groups* to plot the new groups.
 
 **Once you have filled in Variables, new groups are named after them.** A group
 whose wells all hold `HeLa` and `10 µM` is created as `HeLa · 10 µM`, whether it
-came from **Quick Replicates** or from **+ Add**, instead of the placeholder
+came from **Quick Replicates** or from **Add**, instead of the placeholder
 each of those used to give it — `A01/A02` from Quick Replicates, `Rep 3` from
-**+ Add**. In the
-**+ Add** dialog the name box fills in as you pick the wells, and stops doing so
+**Add**. In the
+**Add** dialog the name box fills in as you pick the wells, and stops doing so
 the moment you type a name of your own. Two groups that would end up with the
 same name — four replicates of one dose split into two groups, say — each carry
 their wells after it (`1 µM (A01/A02)`), so you can tell them apart.
@@ -4021,7 +4021,7 @@ wells hold two different doses is named for what they *do* agree on plus the
 wells themselves (`HeLa (A01/A03)`), because a group spanning two doses must not
 read like one that is only ever `HeLa`; and a group on a plate with no variables
 filled in keeps the placeholder it always had — `A01/A02` from Quick
-Replicates, `Rep 3` from **+ Add**. A variable you have created
+Replicates, `Rep 3` from **Add**. A variable you have created
 but not yet filled in anywhere is not counted against a group — it is something
 you have not done to the plate, not something that makes this group ambiguous,
 and marking every group at once would say nothing.
@@ -4055,7 +4055,7 @@ by hand to plot them apart. With them you say "Cell line: HeLa, U2OS" and
 "Dose: 0, 0.1, 0.3, 1, 3, 10" once, and the plots can group, colour and split by
 either.
 
-On a plate with no variables yet, the page is a single panel where the plate will go — what a variable buys you, and a **+ Variable** button. Nothing else is drawn, because there is nothing yet to draw it about.
+On a plate with no variables yet, the page is a single panel where the plate will go — what a variable buys you, and a **Add variable** button. Nothing else is drawn, because there is nothing yet to draw it about.
 
 On **Home → Sample Map → Variables** the page is a plate with the definition beside it. The
 strip across the top always says which variable the plate is showing, and which
@@ -4066,7 +4066,7 @@ that says what just happened — what a fill changed, what an edit was refused f
 — and an **Undo** button that puts the variables back the way they were before
 your last change.
 
-**Defining one.** **+ Variable** adds one and puts the cursor in the name field.
+**Defining one.** **Add variable** adds one and puts the cursor in the name field.
 Pick its type, and type its values into the box under the list — commas work, so
 `0, 0.1, 0.3, 1, 3, 10` adds six in one go. If you type a value it already has,
 it says so rather than quietly clearing the box. Double-click a value to correct
@@ -4252,7 +4252,7 @@ it, since a label typed here is the one you asked for by hand and wins. A label 
 only, and it names wells rather than groups: a group is renamed on the Replicates
 tab by typing over its name there. A label set here is what every legend names,
 [Line Graphs](#line-graphs)' included — where the on-screen legend stops after
-twelve traces and says how many it left out. **Add Prefix** and **Add Suffix**
+twelve traces and says how many it left out. **Add prefix** and **Add suffix**
 apply to the
 wells currently selected on the plate beside the tab.
 
@@ -4475,7 +4475,7 @@ carry the same line. On the Statistics page it sits under the *Replicates*
 line, because the tests there are run on the same cells. The choice is saved with the
 dataset. It runs the same way as a Cell Gating edit, behind a progress window.
 Changing a class's range while that class is picked moves cells in or out of
-every number the same way. In the Segmentation view's **Why removed** overlay,
+every number the same way. In the Segmentation view's **Show why cells were removed** overlay,
 the cells left out are outlined in turquoise as *not in the chosen size class*.
 The Cell Gating funnel lists them as *Outside the chosen size class*.
 
@@ -5440,9 +5440,9 @@ per-cell distribution, or a **histogram** of it.
   "ON threshold not set — every cell counts as above it" instead of drawing bars
   (Line Graphs does the same). Set a threshold — even 0, on purpose — and they draw.
 - **Controls** (the **Display ▾** menu gathers the view options):
-  - **Grouping** — how bars are grouped (default *Well*; a replicate set groups
-    its members).
-  - **Pooled** — collapse each replicate set's wells into one column (off = one
+  - **Group by** (Well / Timepoint) — how bars are clustered (default *Well*;
+    a replicate set groups its members).
+  - **Pool replicates** (a switch) — collapse each replicate set's wells into one column (off = one
     column per well). For **bars** this averages the per-well means; for
     **beeswarm** / **violin** / **histogram** it pools every cell across the set
     into a single distribution. Enabled once ≥1 replicate set is active.
@@ -5463,7 +5463,7 @@ per-cell distribution, or a **histogram** of it.
     axis cannot place. A column with fewer than three cells is drawn as its
     values — every one of them — and so is a violin's column whose cells all
     hold one value. Under a fold change the bins are of the scaled values.
-  - **Significance** (On / Off) — draw pairwise significance brackets from the
+  - **Show significance** (a switch) — draw pairwise significance brackets from the
     comparisons the [Statistics](#statistics) tab has run. A bracket appears
     over the two bars its comparison was computed from, whether those bars are
     replicate sets or individual wells — a group holding a single well brackets
@@ -5509,7 +5509,7 @@ per-cell distribution, or a **histogram** of it.
     that is on, so you can see which control to move. It is on the figure rather than in the status line so that it cannot outlive the thing it describes — it is redrawn with the plot, so if the note is there the reason is true right now. The note is part of the
     figure, so a copied or exported plot carries it too: a plot with no
     asterisks never leaves you guessing whether a comparison was withheld or
-    simply never run. With **Significance** off, nothing is drawn and nothing is
+    simply never run. With **Show significance** off, nothing is drawn and nothing is
     said — that absence is the one you asked for.
 
     The brackets stack above the tallest bar, and they respect an axis limit
@@ -5527,7 +5527,7 @@ per-cell distribution, or a **histogram** of it.
     is the familiar asterisk code (`***` below 0.001, `**` below 0.01, `*` below
     0.05, `ns` otherwise) and is the default; *p-value* prints the number
     itself, to three significant figures; *Stars + p-value* prints both, as
-    `* (p = 0.0312)`. The picker is usable once **Significance** is on, since
+    `* (p = 0.0312)`. The picker is usable once **Show significance** is on, since
     that is when there is a bracket for it to change.
 
     The stars are conventional on a figure, but they are buckets: `***` covers
@@ -5554,7 +5554,7 @@ per-cell distribution, or a **histogram** of it.
     where it is not, they fall back to stars and the panel says so in its
     top-left corner. Nothing is dropped but the precision, and you are told it
     was — compare fewer groups, or make the plot taller, to read the numbers.
-  - **Reset Order** — restore the default order after you **drag bars to
+  - **Reset order** — restore the default order after you **drag bars to
     reorder** them.
   - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in
     all three view modes.
@@ -6066,7 +6066,7 @@ cells it kept.
   **Layout** (*Overlay* all wells on one axis, or *Separate axes* one panel per
   well), **Color by time** (one well → a single cloud's trajectory; several
   wells → auto-stacked one panel per well so the time-coloured clouds don't
-  overlap) and **Apply gates** (below) together under **Display ▾**. **Show
+  overlap) and **Plot only the gated cells** (below) together under **Display ▾**. **Show
   gates** is in the Properties sidebar; **draw rectangular gates** by dragging
   on the canvas.
 - **Click a point to see that cell.** The cell opens in a panel on the right:
@@ -6079,7 +6079,7 @@ cells it kept.
   one you are looking at. A cell that cannot be shown says why where the image
   would be (no segmentation mask for the field, the nucleus is not in it, or
   the plot is out of date and needs redrawing).
-- **Highlight saved cells** (under **Display ▾**, or **Highlight on Scatter** in
+- **Highlight saved cells** (under **Display ▾**, or **Highlight on the scatter plot** in
   Cell Gating → Saved cells). Draws one saved set's cells solid in cyan over the
   rest of the cloud, which fades but keeps its colours. A line under the plot
   says how many of the set are shown and why the others are not (in wells you
@@ -6089,10 +6089,10 @@ cells it kept.
   changes no number. A saved plot remembers it, and says so if the set has been
   deleted since. The per-cell export gains an `in_saved_cells[<set>]` column (1 /
   0, blank for a well segmented again since the set was saved).
-- **Apply gates** (under **Display ▾**). This plot is the one place that shows the *whole* cloud even
+- **Plot only the gated cells** (under **Display ▾**). This plot is the one place that shows the *whole* cloud even
   when your gates are filtering everything else — that is deliberate, because
   you draw the gates here and need to see what falls outside them to judge or
-  resize a box. Switch **Apply gates** on to plot only the cells inside the
+  resize a box. Switch **Plot only the gated cells** on to plot only the cells inside the
   boxes shown here; the title gains a `· gate-filtered` tag so a copied or saved
   figure says which it is — and so a filter left on inside a popover still
   announces itself. It filters against the boxes on screen, so it always
@@ -6125,7 +6125,7 @@ cells it kept.
 - **Optimal use** — draw a gate around a population of interest, then open Cell
   Gating and tick *Use scatter-plot gates* to make that gate define which cells
   count in every plot, statistic, and export. Watch the **Included for analysis**
-  count there to confirm it took effect. **Apply gates** back on the scatter is
+  count there to confirm it took effect. **Plot only the gated cells** back on the scatter is
   a separate, view-only convenience for looking at just the gated cells.
 
 ### Distribution
@@ -6247,7 +6247,7 @@ This is the first Plotting sub-tab, and the one Plotting opens on.
     has no floor at zero, so a *Fixed* limit at or below zero cannot be used
     for one: the map falls back to the log range of the data's own positive
     values and the status line says that too.
-  - **⇄ Transpose** — swap the rows and columns of the layout.
+  - **Transpose** — swap the rows and columns of the layout.
   - **Rep-set avg** — show the whole rep-set's average in a cell whose well
     belongs to one, instead of that single well.
   - **Show ± error** — print each cell's spread across its replicates under its
@@ -6374,7 +6374,7 @@ scatter gates — the cells inside the thresholding gate.
   the replicate sets defined on [Home → Sample Map → Replicates](#replicates).
 - **Controls** — the group editor is on the page itself, a strip between the
   controls band and the results: the well map on the left, and beside it the
-  group list with **+ Add group**, **Clear All** and **↻ Load from Replicates**
+  group list with **Add group**, **Clear all** and **Load from replicates**
   at its foot. Click a group to arm it — the armed one carries an accent rule
   down its left edge — then drag wells on the map to assign them to it. On a
     narrow pane — a small window with the rail open and Split View on — the map
@@ -6793,7 +6793,7 @@ A nanowell dataset also opens in every other Review tab, which read it like this
   well. NUC+SEG is not offered, because a nanowell run never writes it. The raw tiles stay available as PHASE / GFP.
   Opening the `out` folder directly finds the `in` folder beside it.
 - **Segmentation** shows the tile with each counted cell as a dot and each nanowell as a ring. A nanowell run
-  records cells as points, not outlines, so Delete Cell, Crop cells and Edit are greyed out, and the line above the
+  records cells as points, not outlines, so Delete cell, Crop cells and Edit are greyed out, and the line above the
   image says why.
 
 A build of All-Well without the Nanowells feature still opens a nanowell dataset, plots its cells and shows its
@@ -7224,13 +7224,13 @@ short press (a few pixels) is still a click and selects one nanowell; a longer d
   own band, a nanowell inside any box is a member, and the strip says how many more boxes the window holds. Low and
   High edit the newest box; *every | any timepoint* and **This panel only** apply to them all.
 - **Open in pop-out** shows the nanowells inside the window in the pop-out (see *Nanowell crops*).
-- **Use as Subset** keeps only the nanowells inside the window: they are added to the page's **Subset** as a
+- **Use as subset** keeps only the nanowells inside the window: they are added to the page's **Subset** as a
   condition, *Distribution window: inside “Window 1” (N nanowells)*, applied at once, so the Distribution — and every view
   the Subset governs — loses the others. The window is then cleared. **The Subset holds one window at a time**: drawing
   another box takes the earlier window out of the Subset first (the status bar says so), so the new box selects from
   every nanowell rather than from what the last one kept, and pressing the button again replaces it. **Hold Shift**
   while drawing that box to keep the earlier window's nanowells as well: they are carried into the new window (the
-  strip counts them as *kept from the earlier window*), so pressing **Use as Subset** again keeps both regions. Repeat
+  strip counts them as *kept from the earlier window*), so pressing **Use as subset** again keeps both regions. Repeat
   to build a Subset from as many separate regions as you need. Your other Subset conditions stay. The list of nanowells is frozen when you press the button; it does not follow
   the window afterwards. It cannot narrow a Subset that keeps nanowells meeting *any* of several conditions — the strip
   says so; set the Subset to *all* first. The Subset's editor lists each window as a row you can switch between
@@ -7902,7 +7902,7 @@ segmentation, the status line says so. Opening another dataset clears it.
 - **Needs** — a loaded well with image ZIPs; pick the FOV / timepoint / channel
   from the in-tab pickers.
 - **Navigational controls** — click a nucleus to **flag / unflag** it for
-  inclusion; **Delete Cell** turns the canvas into a delete tool, where a click
+  inclusion; **Delete cell** turns the canvas into a delete tool, where a click
   drops one cell and a dragged rectangle drops every cell inside it (see
   *Deleting a region across the plate* below); **draw a crop rectangle** to keep
   only cells whose centroid is inside it (applied across every
@@ -7919,7 +7919,7 @@ segmentation, the status line says so. Opening another dataset clears it.
   binary + mask-overlay controls; the QC debris gate. **Hover** a nucleus to
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
-- **Why removed** — a toggle on the control row that outlines every *excluded*
+- **Show why cells were removed** — a switch in the **View ▾** menu that outlines every *excluded*
   cell in the colour of the layer that removed it: you deleted it, the
   intensity gate (lavender), the debris gate, the crop, the scatter gates, the run's field verdict, the focus cut,
   the image border, a field you excluded in **Home → QC Triage** (white), or a
@@ -8491,7 +8491,7 @@ Operates on **one well at a time** (spot detection is per-frame).
   sets the spot-detection cut-off (it writes the CSV's `smFISH_Thresh`), and
   **LUT Min / LUT Max** set the display brightness. On the right: **Apply Global
   Threshold** to push one threshold across the whole dataset, **Refresh**,
-  **Hide Overlays**, and **This Frame CDF**.
+  **Hide Overlays**, and **This frame CDF**.
 - **Apply to All progress** — the run counts spots in every well, then writes
   the counts into the per-well CSVs. Both passes drive the progress bar in the
   status row at the bottom of the window — the same bar a dataset load uses —
@@ -8539,7 +8539,7 @@ on a nanowell plate a third, the subsets saved on the Nanowells page:
   deleted. Renaming a set keeps it highlighted, excluded and as the Cell
   Browser's Source under its new name; deleting one ends all three. Under the
   list, for the selected set: **View in Cell Browser** (Image Browser → Cell
-  Browser with the set as its Source), **Highlight on Scatter** and **Exclude
+  Browser with the set as its Source), **Highlight on the scatter plot** and **Exclude
   from analysis** (click again to undo; one set at a time can be highlighted and
   one excluded), a box to rename it, and **Delete**. A set saved before some of
   its wells were segmented again says how many of its cells it leaves out.
@@ -9292,7 +9292,7 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    run goes and nothing about what comes out. How many wells to convert in
    parallel (blank = auto, capped at the number of wells). Lower it if converting
    to a single spinning disk feels slower rather than faster.
-6. **Keep every Nth timepoint** — blank converts the whole timelapse. Set it
+6. **Keep every nth timepoint** — blank converts the whole timelapse. Set it
    to 3 and the run converts the first timepoint and then every third one after
    it, for taking a densely-sampled acquisition into a dataset at a coarser
    time resolution without re-exporting it. The kept timepoints keep their own
@@ -9732,7 +9732,7 @@ on the plate rather than supplying it.
    needs it only when its positions do not divide evenly by themselves. Setting
    it to something the file contradicts is refused rather than silently
    preferring one of the two.
-7. **Keep every Nth timepoint** — blank converts the whole timelapse. Set it
+7. **Keep every nth timepoint** — blank converts the whole timelapse. Set it
    to 3 and the run converts the first timepoint and then every third one
    after it, which is how you take a densely-sampled acquisition into a
    dataset at a coarser time resolution without re-exporting it from ZEN.
@@ -10042,7 +10042,7 @@ rather than having the second visit overwrite the first.
    needs it only when its positions do not divide evenly by themselves. Setting
    it to something the file contradicts is refused rather than silently
    preferring one of the two.
-6. **Keep every Nth timepoint** — blank converts the whole timelapse. Set it to
+6. **Keep every nth timepoint** — blank converts the whole timelapse. Set it to
    3 and the run converts the first timepoint and then every third one after
    it, which is how you take a densely-sampled acquisition into a dataset at a
    coarser time resolution without re-acquiring it. It behaves exactly as it
@@ -10376,7 +10376,7 @@ rewritten.
   timepoint. If the addition is still running in another window, or was started
   on another computer, it is left alone and you are told. When you know it is
   not running any more — that computer is gone, say — pick the dataset in
-  Concatenate and press **Undo the unfinished addition…**; you are asked to
+  Concatenate and press **Undo the unfinished addition**; you are asked to
   confirm, and asked again, with the reason, before anything recorded as still
   running is undone.
 - **It never undoes over a changed archive.** If something else has rewritten
@@ -10797,7 +10797,7 @@ conversion, then Analyze.
    after one quiet period.
 4. **Give up after (hours, 0 = never)** fails the watch, and holds up the jobs
    after it, if the folder has not settled in that long. 0 waits indefinitely.
-5. Press **+ Queue** (or **▶ Start watching** to watch without the queue).
+5. Press **Add to queue** (or **▶ Start watching** to watch without the queue).
 
 The status line under the buttons counts down: "Receiving files — 3 files,
 quiet for 1:20 of 5:00." The folder is looked at every few seconds by listing
@@ -10866,7 +10866,7 @@ instead of babysitting each one.
 
 **Adding a job** — three routes, all equivalent:
 
-- **+ Add job** on the Job Queue page lists Analyze and every Datasets tool. Pick one and
+- **Add job** on the Job Queue page lists Analyze and every Datasets tool. Pick one and
   All-Well takes you to that tool's page with a strip across the top saying
   you are setting up a queued job; fill the page in as usual and press **Add
   to queue**. Picking **Analyze** switches to the Analyze pane, where every
@@ -10876,9 +10876,9 @@ instead of babysitting each one.
   the queue" and why, and the full list is under **Run Pipeline**), then
   brings you back to the Job Queue.
   **Cancel** brings you back without queueing anything.
-- **+ Queue** beside any Datasets tool's own run button, which queues
+- **Add to queue** beside any Datasets tool's own run button, which queues
   whatever that page currently holds.
-- **+ Queue** beside Analyze's **Run Pipeline** button, which captures the
+- **Add to queue** beside Analyze's **Run Pipeline** button, which captures the
   whole Analyze form — every option, not just the input folder.
 
 **Queuing an Analyze run whose input does not exist yet** — for example, one
@@ -11139,7 +11139,7 @@ nothing there to run on yet — or worse, something an earlier run left behind.
   Concatenate page. Jobs that failed, were cancelled or are blocked are not
   listed, since their output is not coming; when nothing can be, the menu
   says so.
-- The page's own **+ Queue** does the same as **Add to queue** while the strip
+- The page's own **Add to queue** does the same as **Add to queue** while the strip
   is showing, so the job keeps waiting on the jobs it reads from.
 - Concatenate's gap, left untouched, is worked out from the two datasets'
   acquisition times when the job runs. Whether dataset 2 can be added in place
@@ -11287,10 +11287,10 @@ holds:
 | Control | What it does |
 |---|---|
 | **Bar Plots ▾** | Picks a page within the section you are in (Bar Plots, Line Graphs, Heat Map, …). To change section (Home, Statistics, Image Browser, …), use **☰**. A section with only one page has no such button. |
-| **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done ✕** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
-| **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Display** (Display ▾, Fold change ▾, Decorate ▾, …) and **Actions** (Save ▾, Reset Order, Properties, …), each a row of equal buttons, so they are in view as soon as the panel opens; then **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest, which you scroll on a page with many settings. A note about the data sits under the **Data** heading. **Decorate ▾** appears only where it changes the plot — Bar Plots, and the Nanowells page's Distribution view — and only once the plate has sample variables. **Done ✕** puts them away. |
+| **Wells** | Slides the well plate and its **All** / **None** up from the bottom, with the plot still in view above them: tap wells and watch them appear in the plot. A row or column label selects the whole row or column. The button shows how many wells are selected (**Wells · 4**); **Done** puts the plate away. Pages that do not pick wells (Home, Statistics) do not show it. |
+| **⚙ Controls** | Slides the page's own controls up from the bottom, with the plot still in view above them so you can watch it change. They read top to bottom in three groups, the same on every page: **Display** (Display ▾, Fold change ▾, Decorate ▾, …) and **Actions** (Save ▾, Reset order, Properties, …), each a row of equal buttons, so they are in view as soon as the panel opens; then **Data** (channel, property, timepoints, threshold, …), one per row with its name on the left and the control filling the rest, which you scroll on a page with many settings. A note about the data sits under the **Data** heading. **Decorate ▾** appears only where it changes the plot — Bar Plots, and the Nanowells page's Distribution view — and only once the plate has sample variables. **Done** puts them away. |
 
-**Wells** and **⚙ Controls** both rise from just above the bar, so **Done ✕** is
+**Wells** and **⚙ Controls** both rise from just above the bar, so **Done** is
 where you tapped to open them; opening one puts the other away. Saved
 selections, and the extra panels some pages add under the plate, stay in
 **☰**. The Heat Map's **Layout** panel is not one of those: it opens from the
@@ -11315,15 +11315,15 @@ nothing to scroll sideways for. Long folder paths and dataset names wrap.
 top and scrolls everything under it, one column at the phone's width:
 
 - **Replicates** — the plate as wide as the screen, then **Clear all groups** and
-  **+ Add**, then Quick Replicates as a short form (*Group along*, *Replicates
-  per group*, *Order*, one under another) with **Apply Quick Replicates** across
+  **Add**, then Quick Replicates as a short form (*Group along*, *Replicates
+  per group*, *Order*, one under another) with **Apply quick replicates** across
   the full width, then the active group and the group list, which shows four
   groups before it scrolls inside its own box.
 - **Variables** — the plate first (or, before you have defined a variable, the
-  **+ Variable** prompt in its place), then what to set the selected wells to,
+  **Add variable** prompt in its place), then what to set the selected wells to,
   the fill, and the group roll-up, and under all of that the list of variables
   and the selected one's name, type, unit and values.
-- **Well Labels** — the help sentence, **Add Prefix** and **Add Suffix** side
+- **Well Labels** — the help sentence, **Add prefix** and **Add suffix** side
   by side under it, then the 8 × 12 grid of label cells across the screen's
   width. Held upright the cells are narrow, so a long label shows only its start
   while you type into it; turn the phone sideways for cells several times wider.
@@ -11386,7 +11386,7 @@ switch back to the desktop layout to use them.
   two small lines above the stages and the plate beside them — and the log on
   the right, at its full width.
 
-**Run Pipeline**, **Suspend**, **+ Queue** and **Stop** sit in a bar just above
+**Run Pipeline**, **Suspend**, **Add to queue** and **Stop** sit in a bar just above
 the bottom bar in both views, so they are always in reach. Starting a run —
 from **Run Pipeline**, the queue, or a resumed job — switches to **Progress**.
 Closing the window while a run is in progress asks first in phone layout, because

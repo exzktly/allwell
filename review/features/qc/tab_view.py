@@ -194,14 +194,15 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     def _field(value, tip: str) -> QLineEdit:
         edit = QLineEdit(_fmt(value), grid)
         edit.setFixedWidth(theme.Metrics.num_field_w)
-        edit.setPlaceholderText("none")
+        edit.setPlaceholderText(text_roles.NOT_SET)
         edit.setToolTip(tip)
         return edit
 
     def _absent() -> QLabel:
-        """The column a quantity has no bound for. An em-dash, not a gap: a
-        bound that does not exist should not look like one left blank."""
-        lbl = QLabel("—", grid)
+        """The column a quantity has no bound for. Words, not a gap: a bound
+        that does not exist should not look like one left blank, nor like one
+        not set yet."""
+        lbl = QLabel("No bound", grid)
         lbl.setProperty("textRole", "help")
         return lbl
 
@@ -322,7 +323,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     # bound, which is a rule about cells rather than about the imaging.
     foc_edit = QLineEdit(_fmt(params.focus_min), foc_head)
     foc_edit.setFixedWidth(_FOCUS_EDIT_W)
-    foc_edit.setPlaceholderText("none")
+    foc_edit.setPlaceholderText(text_roles.NOT_SET)
     foc_edit.setToolTip(
         "The per-cell focus value below which a cell counts as out of focus. "
         "Seeded from this dataset's own run when it recorded one.\n"

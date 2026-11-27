@@ -86,7 +86,7 @@ def build_row(parent: QWidget, params, indent: int, text_width: int) -> tuple[QW
         high = QLineEdit(_fmt(c.max_area), grid)
         for edit in (low, high):
             edit.setMaximumWidth(theme.Metrics.num_field_w)
-            edit.setPlaceholderText("none")
+            edit.setPlaceholderText(text_roles.NOT_SET)
             edit.setToolTip(TOOLTIP)
         diameter = QLabel("", grid)
         diameter.setProperty("textRole", "help")

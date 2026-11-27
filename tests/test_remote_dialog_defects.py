@@ -209,7 +209,7 @@ def test_the_form_test_result_names_the_host_it_actually_probed(qtbot, monkeypat
 
     dlg._ssh_alias_edit.setText("new-alias")    # the user keeps typing
     release.put(None)
-    _pump(qtbot, lambda: dlg._test_result_lbl.text().startswith("✓"))
+    _pump(qtbot, lambda: "reachable" in dlg._test_result_lbl.text())
 
     assert "old-alias" in dlg._test_result_lbl.text(), (
         f"the dialog reported {dlg._test_result_lbl.text()!r} about a host it "

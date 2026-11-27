@@ -39,7 +39,7 @@ from widgets.owned_action import owned_action
 from ui import text_roles
 from ui import buttons
 
-# The order the "+ Add job" menu offers the tools in — Analyze first because
+# The order the "Add job" menu offers the tools in — Analyze first because
 # it is the run everything else exists to prepare for or tidy up after, then
 # the Datasets tools in the order their own rail lists them.
 ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import",
@@ -141,7 +141,7 @@ class JobQueuePage(QWidget):
         # bordered box carrying a layout stretch, so one sentence rendered as
         # a page-height empty panel.
         self._empty_hint = QLabel(
-            "No jobs queued yet — use “+ Add job” above, or “+ Queue” on any "
+            "No jobs queued yet — use “Add job” above, or “Add to queue” on any "
             "tool's own page. Once a job is here, its ⋯ menu can set up the "
             "next one to work on its output — “New job using this output” — "
             "before it has run.", self,
@@ -172,7 +172,7 @@ class JobQueuePage(QWidget):
 
         # Primary action at the left edge, matching every other Datasets
         # page's own Run/Check/Convert button.
-        self._start_btn = buttons.primary("▶  Start queue", self)
+        self._start_btn = buttons.primary("Start queue", self)
         self._start_btn.clicked.connect(self.startToggled)
         hl.addWidget(self._start_btn)
 
@@ -180,7 +180,7 @@ class JobQueuePage(QWidget):
         # discards whatever is in flight. Two buttons because they are two
         # different answers to "I want this to stop", and the destructive one
         # should never be the one reached for by default.
-        self._stop_btn = buttons.destructive("■  Stop job", self)
+        self._stop_btn = buttons.destructive("Stop job", self)
         self._stop_btn.setEnabled(False)
         self._stop_btn.setToolTip(
             "Cancel the running job outright, discarding whatever it has in "
@@ -191,13 +191,13 @@ class JobQueuePage(QWidget):
         # The page can now answer "how do I add one?" by itself. Previously
         # the only thing here was a button for Analyze specifically, and every
         # other kind had to be started from its own page.
-        self._add_btn = buttons.default("+  Add job", self)
+        self._add_btn = buttons.default("Add job", self)
         self._add_btn.setToolTip(
             "Open a tool's page to set up a new queued job.")
         self._add_btn.clicked.connect(self._open_add_menu)
         hl.addWidget(self._add_btn)
 
-        # A plain button that opens a transient menu, as "+ Add job" does: it
+        # A plain button that opens a transient menu, as "Add job" does: it
         # has no QMenu attached, so Qt draws no indicator and the label needs
         # no caret (CLAUDE.md §7.12).
         self._recipes_btn = buttons.default("Recipes", self)
@@ -249,7 +249,7 @@ class JobQueuePage(QWidget):
             menu, self._add_btn.mapToGlobal(self._add_btn.rect().bottomLeft()))
 
     def build_add_menu(self) -> QMenu:
-        """The "+ Add job" menu, returned rather than opened.
+        """The "Add job" menu, returned rather than opened.
 
         Same reason as ``JobRow.build_menu``: exec()ing a popup under the
         offscreen platform blocks, and pytest's signal timeout cannot
@@ -439,7 +439,7 @@ class JobQueuePage(QWidget):
         self._notes.setVisible(bool(notes))
 
     def set_started(self, started: bool) -> None:
-        self._start_btn.setText("⏸  Pause queue" if started else "▶  Start queue")
+        self._start_btn.setText("Pause queue" if started else "Start queue")
 
     def set_job_running(self, running: int) -> None:
         """Stop only means something while a job is actually in flight, and
@@ -448,4 +448,4 @@ class JobQueuePage(QWidget):
         own ⋯ ▸ Stop this job stops just that one."""
         n = int(running)
         self._stop_btn.setEnabled(n > 0)
-        self._stop_btn.setText("■  Stop both jobs" if n > 1 else "■  Stop job")
+        self._stop_btn.setText("Stop both jobs" if n > 1 else "Stop job")

@@ -547,7 +547,7 @@ def test_the_scratch_row_is_unticked_and_carries_its_warning(populated, home, qt
     assert "scratch" not in dialog.selected_keys()
     row = dialog._boxes["scratch"].parentWidget()
     warnings = [w.text() for w in row.findChildren(QLabel) if w.property("textTone") == "attention"]
-    assert warnings == ["⚠ Clearing the Analyze run scratch deletes the extracted images "
+    assert warnings == ["Clearing the Analyze run scratch deletes the extracted images "
                         "and per-field checkpoints that suspended and interrupted runs "
                         "resume from."]
     # No other row warns.

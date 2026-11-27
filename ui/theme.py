@@ -1288,63 +1288,9 @@ QPushButton#Ghost:hover, QToolButton#Ghost:hover {{
     background-color: {c.card};
 }}
 
-/* ── Toggle buttons (checkable mode/option buttons) ───────────────────── */
-/* e.g. Delete Cell / Crop Region (Segmentation), Beeswarm / Violin / Group by
-   Well (plots), Outline / Binary. The default global :checked only darkens the
-   fill a touch — too subtle to read as "armed". Give the on-state an accent
-   ring + tinted fill so a mode toggle is unmistakably engaged. The
-   ``toggle_active`` dynamic property is the non-pseudo-state equivalent some
-   call sites set explicitly (synced via unpolish/polish). */
-QPushButton[variant="toggle"]:checked,
-QPushButton[variant="toggle_active"],
-QToolButton[variant="toggle"]:checked {{
-    background-color: {c.selected};
-    border: 1px solid {c.accent};
-    color: {c.text_primary};
-}}
-QPushButton[variant="toggle"]:checked:hover,
-QToolButton[variant="toggle"]:checked:hover {{
-    background-color: {c.accent};
-    border-color: {c.accent};
-    color: {c.on_accent};
-}}
-
-/* ── `variant` values set by ui_helpers._btn and friends ──────────────── */
-/* Every value below is set somewhere in the app; before these rules existed
-   only `toggle` resolved, so `primary`, `secondary`, `danger`, `muted`,
-   `sem`/`sem_warn` and `toggle_muted`/`toggle_accent` rendered as plain
-   default buttons. `secondary` is deliberately the default control look —
-   naming it keeps the value live and stops it drifting.
-   Runtime changes to the property need unpolish()/polish() to repaint;
-   values set once at construction do not. */
-/* The four kinds of button — primary, default, quiet, destructive — from ui.buttons.qss. */
+/* The four kinds of button — primary, default, quiet, destructive — and the pressed-in tool, from
+   ui.buttons.qss. A change of kind after polish needs unpolish()/polish(), which ui.buttons.set_kind does. */
 {_buttons}
-
-/* SEM / SD toggle on the bar + batch-export panels: `sem` is the settled
-   state, `sem_warn` flags a spread that cannot be computed as SEM. */
-QPushButton[variant="sem"], QToolButton[variant="sem"] {{
-    background-color: {c.control};
-    border: 1px solid {c.button_edge};
-    color: {c.text_primary};
-}}
-QPushButton[variant="sem_warn"], QToolButton[variant="sem_warn"] {{
-    background-color: {c.control};
-    border: 1px solid {c.warn};
-    color: {c.warn};
-}}
-
-/* Bar Plots' Reset Order: `toggle_accent` while a manual order is in force,
-   `toggle_muted` when there is nothing to reset. */
-QPushButton[variant="toggle_accent"], QToolButton[variant="toggle_accent"] {{
-    background-color: {c.selected};
-    border: 1px solid {c.accent};
-    color: {c.text_primary};
-}}
-QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
-    background-color: transparent;
-    border: 1px solid {c.button_edge};
-    color: {c.text_secondary};
-}}
 
 /* Nested sub-tab bars (Plotting / Image Browser / Home). The call
    sites carried comments claiming this name "picks up the existing
@@ -1914,7 +1860,7 @@ QToolButton#PhoneWellsButton {{
     font-weight: {t.semibold};
 }}
 QToolButton#PhoneMenuButton, QToolButton#PhoneOptionsButton {{ font-size: {t.h2_size}px; }}
-QPushButton#PhoneTextSizeButton:checked {{
+QToolButton#PhoneTextSizeButton:checked {{
     background-color: {c.accent};
     color: {c.on_accent};
     border-color: {c.accent};

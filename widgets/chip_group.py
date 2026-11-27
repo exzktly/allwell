@@ -159,14 +159,14 @@ if __name__ == "__main__":
     title.setProperty("textRole", "pageTitle")
     lay.addWidget(title)
 
-    lay.addWidget(QLabel("Single-select (channel):"))
+    lay.addWidget(QLabel("Single-select (channel)"))
     chan = ChipGroup(exclusive=True)
     for name in ("DAPI", "GFP", "RFP", "Cy5"):
         chan.addChip(name, data=name.lower())
     chan.setCurrentIndex(1)
     lay.addWidget(chan)
 
-    lay.addWidget(QLabel("Multi-select (overlays):"))
+    lay.addWidget(QLabel("Multi-select (overlays)"))
     multi = ChipGroup(exclusive=False)
     for name in ("Grid", "Threshold", "Legend", "Error band"):
         multi.addChip(name)

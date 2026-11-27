@@ -117,7 +117,7 @@ def test_phone_layout_round_trip_through_the_real_controls(qapp, win):
     shell.menu_button.click()
     _pump(qapp)
     assert drawer.isOpen() and drawer.isVisible()
-    assert shell.menu_button.text() == "✕"
+    assert shell.menu_button.toolTip() == "Close the menu" and not shell.menu_button.text()
     assert drawer.width() == win._review.width() - round(56 * u)
     assert review._sidebar_root.parentWidget() is drawer.contentWidget()
     assert _visible(review._section_nav) and _visible(review._sidebar_plate_slot)
@@ -301,14 +301,14 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         assert _visible(shell._rail_status)
         shell.menu_button.click()
         _pump(qapp)
-        # The Controls sheet: 48 pt controls, and a "Done ✕" to close it —
+        # The Controls sheet: 48 pt controls, and a "Done" to close it —
         # on Plotting, whose band has controls with no dataset loaded (Home's
         # holds nothing tappable until one is).
         nav._rows["Plotting"].clicked.emit("Plotting")
         _pump(qapp)
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.text() == "Done ✕"
+        assert shell.controls_button.toolTip() == "Close the controls" and not shell.controls_button.text()
         # At most 60 % of the window (Plotting's controls fill that on this
         # small screen), and no scrim: the plot above it is what the controls
         # are judged by.
@@ -325,7 +325,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
             (type(w).__name__, w.height()) for w in ctrls if w.height() < round(48 * u) - 1]
         shell.controls_button.click()
         _pump(qapp)
-        assert shell.controls_button.text() != "Done ✕"
+        assert shell.controls_button.text() == "Controls"
         # The run view drops what repeats the headline.
         dash = win._analyze._dashboard
         assert dash.isStacked() and dash._status.isHidden()
@@ -505,7 +505,7 @@ def test_the_image_table_opens_on_its_grid_in_phone_layout(qapp, win, tmp_path):
         assert controls is not None and not _visible(controls)
         assert _visible(shell.controls_button)
         empty = ctx.runtime.image_table.empty_state
-        assert "⚙ Controls" in empty._hint.text()       # not "above"
+        assert "Controls" in empty._hint.text()       # not "above"
         C.image_table_repopulate_dropdowns(ctx)
         review._app_state.image_table.active_channels = {"DAPI", "GFP"}
         C.image_table_apply_dims_preset(ctx, ["well"], ["channel"])
@@ -699,7 +699,7 @@ def test_wells_at_the_foot_opens_the_rail_s_plate_over_the_live_plot(qapp, win, 
         review._set_selected_wells({"A01", "B02"}, commit=True)
         QTest.qWait(500)
         _pump(qapp)
-        assert shell.wells_button.text() == "Done ✕"
+        assert shell.wells_button.toolTip() == "Close the wells" and not shell.wells_button.text()
         shell.wells_button.click()
         QTest.qWait(400)
         _pump(qapp)

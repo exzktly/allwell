@@ -54,7 +54,7 @@ def make_cell_thumb(ctx, rgb, desc) -> QWidget:
     thumb.setToolTip(
         f"{desc.well}  FOV {desc.fov}  {tp}\nnucleus {desc.nucleus_id}")
     if rgb is None:
-        thumb.setText("—")
+        thumb.setText("No image")
     else:
         pm = rgb_to_pixmap(rgb).scaled(
             THUMB_PX - 2, THUMB_PX - 2, Qt.KeepAspectRatio, Qt.SmoothTransformation)
@@ -94,8 +94,7 @@ def read_sort_keys(ctx) -> list[SortKey]:
         field = combo.currentData()
         if not field:
             continue
-        # dir_btn checked = descending.
-        out.append(SortKey(field, ascending=not dir_btn.isChecked()))
+        out.append(SortKey(field, ascending=dir_btn.currentData() != "desc"))
     return out
 
 

@@ -127,8 +127,8 @@ def test_buttons_beside_a_title_are_never_clipped(qapp):
     is that the minimum it asks for is one the buttons survive, and the test
     above bounds that minimum to a word.
     """
-    clear = QPushButton("Clear All")
-    add = QPushButton("+ Add")
+    clear = QPushButton("Clear all")
+    add = QPushButton("Add")
     header = build_section_header(None, "COMPARISON GROUPS", buttons=(clear, add))
     width = max(_NARROW, header.minimumSizeHint().width())
     _host, header = _laid_out(qapp, header, width)

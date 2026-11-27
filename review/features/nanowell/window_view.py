@@ -69,9 +69,9 @@ def build_window_strip(ctx, parent) -> QWidget:
     panel_only.setToolTip(_PANEL_TIP)
     popout = buttons.default("Open in pop-out", controls_host)
     popout.setToolTip(_POPOUT_TIP)
-    use_subset = buttons.default("Use as Subset", controls_host)
+    use_subset = buttons.default("Use as subset", controls_host)
     use_subset.setToolTip(_SUBSET_TIP)
-    clear = buttons.default("✕", controls_host)
+    clear = buttons.icon_button("x", _CLEAR_TIP, controls_host)
     clear.setToolTip(_CLEAR_TIP)
     for caption, field in (("Low", low), ("High", high)):
         pair = QWidget(controls_host)
@@ -151,7 +151,7 @@ _ORDER_TIP = "Largest first (descending) or smallest first (ascending)."
 _LABEL_TIP = ("A metric written in each tile's top-left corner, at the timepoint of the panel it is in (a dash where "
               "the nanowell has no value). Zoom in to read it on a full page.")
 _COLOUR_TIP = ("What the stripe under each tile of the hex composite says, keyed under the title: the tile's source "
-               "well, its well's value of a sample variable (the same colours that variable has on every plot), or "
+               "well, its well's value of a sample variable (the same colors that variable has on every plot), or "
                "nothing.")
 
 
@@ -174,7 +174,7 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
     layout.setToolTip(_LAYOUT_TIP)
     colour = QComboBox(window)
     colour.setToolTip(_COLOUR_TIP)
-    colour_caption = QLabel("Colour", window)
+    colour_caption = QLabel("Color", window)
     sort = QComboBox(window)
     sort.setToolTip(_SORT_TIP)
     for label, key in wnc.composite_sort_choices():
@@ -190,8 +190,8 @@ def build_popout_window_controls(ctx, window) -> QHBoxLayout:
         corner.addItem(label, key)
     corner_caption = QLabel("Corner", window)
     prev, following = buttons.tool_button(window), buttons.tool_button(window)
-    prev.setText("◀")
-    following.setText("▶")
+    buttons.set_icon(prev, "chevron-left")
+    buttons.set_icon(following, "chevron-right")
     page = QLabel("", window)
     pager = (prev, page, following)
     row = QHBoxLayout()

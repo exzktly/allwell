@@ -148,7 +148,7 @@ if __name__ == "__main__":
     lay.setContentsMargins(theme.Spacing.xl, theme.Spacing.xl, theme.Spacing.xl, theme.Spacing.xl)
     lay.setSpacing(theme.Spacing.md)
 
-    lay.addWidget(QLabel("accent variant (plate-head):"))
+    lay.addWidget(QLabel("accent variant (plate-head)"))
     row1 = QHBoxLayout()
     row1.addWidget(SelectionChip("2 / 96", icon="check", variant="accent"))
     row1.addWidget(SelectionChip("12 / 96", icon="check", variant="accent"))
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     row1.addStretch(1)
     lay.addLayout(row1)
 
-    lay.addWidget(QLabel("muted variant (rail-h6 count):"))
+    lay.addWidget(QLabel("muted variant (rail-h6 count)"))
     row2 = QHBoxLayout()
     row2.addWidget(SelectionChip("3", variant="muted"))
     row2.addWidget(SelectionChip("12", variant="muted"))

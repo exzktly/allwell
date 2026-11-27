@@ -1011,7 +1011,7 @@ def stats_refresh_group_list(ctx) -> None:
         layout.setSpacing(theme.Spacing.xs)
     _clear_layout(layout)
     if not ctx.state.stats.groups:
-        lbl = QLabel("No groups.  Click + Add group to create one.")
+        lbl = QLabel("No groups yet. Add one to start.")
         lbl.setProperty("textRole", "help")
         layout.addWidget(lbl)
         # Floors reset, not left behind. They are derived from the cards a pass
@@ -1053,12 +1053,10 @@ def stats_refresh_group_list(ctx) -> None:
         # the row they act on. The row's own width is now its content's.
         hl.addSpacing(theme.Spacing.lg)
         idx = gi
-        ren_btn = buttons.default("✎")
-        ren_btn.setFlat(True)
+        ren_btn = buttons.icon_button("pencil", "Rename this group")
         ren_btn.clicked.connect(lambda _=False, i=idx: stats_grp_rename(ctx, i))
         hl.addWidget(ren_btn)
-        del_btn = buttons.default("✕")
-        del_btn.setFlat(True)
+        del_btn = buttons.icon_button("x", "Delete this group")
         del_btn.clicked.connect(lambda _=False, i=idx: stats_grp_delete(ctx, i))
         hl.addWidget(del_btn)
 

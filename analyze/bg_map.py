@@ -594,8 +594,8 @@ class AnalyzeBackgroundMapMixin:
             # indistinguishable from a dialog that is simply broken.
             self._bg_map_say(
                 "No blanks yet. Switch to <b>Choose blank wells</b> above and "
-                "click the empty well(s), or type them into the Background "
-                "well field beside the button that opened this.")
+                "click the empty well(s), or type them into the <b>Background "
+                "well</b> field beside the button that opened this.")
             return
         self._bg_map_push_undo()
         blank = blanks[min(self._bg_map_active, len(blanks) - 1)]
@@ -798,7 +798,7 @@ class AnalyzeBackgroundMapMixin:
         blanks = self._bg_map_field_blanks()
         if not blanks:
             self._bg_map_say(
-                "Name the blank well(s) in Background well first — a split "
+                "Name the blank well(s) in “Background well” first — a split "
                 "assigns the blanks you have, and will not turn a sample well "
                 "into a reference.")
             return
@@ -1017,7 +1017,7 @@ class AnalyzeBackgroundMapMixin:
         line.addWidget(pick, 1)
 
         clear = buttons.tool_button(row)
-        clear.setText("✕")
+        buttons.set_icon(clear, "x")
         clear.setToolTip(f"Take every well away from {blank}. {blank} stays a "
                          f"blank — remove it from the Background well field to "
                          f"stop it being one.")

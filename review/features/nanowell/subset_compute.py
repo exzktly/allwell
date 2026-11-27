@@ -34,7 +34,7 @@ condition here, and its presets are still one click away (:meth:`Subset.starting
   only the nanowells tracked through the whole dataset; *at any timepoint: no* on a defect keeps those it never
   touched;
 * ``window_sites`` — whether the nanowell is *inside* or *outside* the set of nanowells a Distribution window held
-  when it was turned into a subset (**Use as Subset**). The set is frozen on the condition, with the name it was
+  when it was turned into a subset (**Use as subset**). The set is frozen on the condition, with the name it was
   given (``Window 1``); a nanowell not on the list is decided against, never "no value";
 * ``gate`` — whether the nanowell lies *inside* or *outside* a gate drawn on the Scatter Plot's nanowell scatter (or
   on its "Nanowell ▸" axes), at a timepoint as a metric is. A nanowell at a timepoint is one point on that scatter,
@@ -101,7 +101,7 @@ IDENTITY_VERDICTS = {CONFIRMED: "confirmed", REFERENCE: "reference", PARTIAL: "p
                      INCONCLUSIVE: "inconclusive", CONTRADICTED: "contradicted", NOT_CHECKED: "not checked"}
 #: Whether the nanowell's point on the nanowell scatter lies in a gate drawn there, at a timepoint.
 GATE = "gate"
-#: Whether the nanowell is one of the sites a Distribution window held when *Use as Subset* froze it. The sites are
+#: Whether the nanowell is one of the sites a Distribution window held when *Use as subset* froze it. The sites are
 #: kept on the condition (:attr:`Condition.sites`), not looked up: the Subset filters the figure the window is drawn
 #: on, so a window bound to its own figure would depend on its own output.
 WINDOW = "window_sites"

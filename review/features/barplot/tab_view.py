@@ -23,7 +23,7 @@ from review.core.ui_helpers import (
 from widgets.separator import build_hline_separator
 from review.features.barplot.controller import (
     open_bar_timepoint_selector,
-    toggle_bar_group_mode,
+    set_bar_group_mode,
     toggle_bar_pool_replicates,
 )
 from review.features.barplot import _per_cell_mode as _pcm
@@ -90,7 +90,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     metric_frame = reg.register("_metric_selector_frame_bar", QWidget(bar_ctrl))
     mf_l = QHBoxLayout(metric_frame)
     mf_l.setContentsMargins(0, 0, 0, 0)
-    mf_l.addWidget(QLabel("Property:", metric_frame))
+    mf_l.addWidget(QLabel("Property", metric_frame))
     metric_cb = reg.register("_metric_cb_bar", QComboBox(metric_frame))
     metric_cb.addItems(_METRIC_ORDER)
     metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))
@@ -142,22 +142,34 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", bar_ctrl)
     _disp_btn.setToolTip("Bar/point display options: grouping, pooling, how each column is drawn (bars, beeswarm, violin, histogram), significance")
 
-    # Layout toggle: cluster bars by well or by timepoint.
-    group_mode_btn = reg.register("_bar_group_mode_btn", buttons.default("Grouping: Well", bar_ctrl))
-    group_mode_btn.setProperty("variant", "toggle")
-    group_mode_btn.setCheckable(True)
+    from widgets.segmented_control import SegmentedControl as _SegmentedControl
+    from widgets.toggle_switch import ToggleSwitch as _ToggleSwitch
+
+    def _popover_row(label: str, widget) -> QWidget:
+        row = QWidget(bar_ctrl)
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(QLabel(label, row))
+        lay.addWidget(widget)
+        lay.addStretch(1)
+        return row
+
+    # Grouping: cluster the bars by well or by timepoint. Two choices of one setting, so a segmented control
+    # labelled with the two nouns (design language §2.5), not a button that names its state.
+    group_mode_btn = reg.register("_bar_group_mode_btn", _SegmentedControl(bar_ctrl))
+    group_mode_btn.addSegment(text="Well", data="well")
+    group_mode_btn.addSegment(text="Timepoint", data="timepoint")
+    group_mode_btn.setCurrentByData(str(ctx.state.plot.bar_group_mode or "well"))
     group_mode_btn.setToolTip(
         "Cluster the bars by well/group vs by timepoint.")
-    group_mode_btn.clicked.connect(
-        lambda _=False: toggle_bar_group_mode(ctx)
+    group_mode_btn.currentChanged.connect(
+        lambda _i: set_bar_group_mode(ctx, group_mode_btn.currentData())
     )
-    _disp_lay.addWidget(group_mode_btn)
+    _disp_lay.addWidget(_popover_row("Group by", group_mode_btn))
 
-    # Replicate-pool toggle: collapse rset wells into one column or
-    # expand them. Hidden when no replicate sets are active.
-    pool_reps_btn = reg.register("_bar_pool_reps_btn", buttons.default("Pooled: Off", bar_ctrl))
-    pool_reps_btn.setProperty("variant", "toggle")
-    pool_reps_btn.setCheckable(True)
+    # Replicate pooling: collapse rset wells into one column or expand them. A switch, since it redraws at
+    # once; enabled only while replicate sets are active.
+    pool_reps_btn = reg.register("_bar_pool_reps_btn", _ToggleSwitch("Pool replicates", bar_ctrl))
     pool_reps_btn.setToolTip(
         "Collapse each replicate set's wells into one pooled column "
         "(off = one column per well).")
@@ -173,19 +185,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Show: how each column's cells are drawn — one selector rather than a toggle per mode, so the modes can never
     # both be on and the popover says which is (``_per_cell_mode``). Smooth tunes the violin, Bins the histogram;
     # each is usable only under its own mode, and ``_per_cell_mode.sync_controls`` keeps all three on the state.
-    from widgets.segmented_control import SegmentedControl as _SegmentedControl
     from widgets.spin_box import SpinBox as _SpinBox
     from widgets.styled_slider import StyledSlider as _StyledSlider
     from review.domain.column_histogram import BINS_MAX, BINS_MIN
-    def _popover_row(label: str, widget) -> QWidget:
-        row = QWidget(bar_ctrl)
-        lay = QHBoxLayout(row)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.addWidget(QLabel(label, row))
-        lay.addWidget(widget)
-        lay.addStretch(1)
-        return row
-
     show_seg = reg.register("_bar_show_seg", _SegmentedControl(bar_ctrl))
     for key, label in _pcm.MODES:
         show_seg.addSegment(text=label, data=key)
@@ -197,7 +199,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "Histogram: the column's cells binned, mirrored about the column. Every column's bars sum to 1 and all "
         "columns share one set of bins and one width scale, so widths compare across columns; Bins sets the count.")
     show_seg.currentChanged.connect(lambda idx: _pcm.set_per_cell_mode(ctx, _pcm.MODES[idx][0], redraw_bars))
-    _disp_lay.addWidget(_popover_row("Show:", show_seg))
+    _disp_lay.addWidget(_popover_row("Show", show_seg))
 
     violin_slider = reg.register("_violin_slider", _StyledSlider(Qt.Horizontal, bar_ctrl))
     violin_slider.setRange(5, 200)
@@ -209,7 +211,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     violin_slider.valueChanged.connect(
         lambda _v: (redraw_bars(ctx) if ctx.state.bar.violin else None)
     )
-    _disp_lay.addWidget(_popover_row("Smooth:", violin_slider))
+    _disp_lay.addWidget(_popover_row("Smooth", violin_slider))
 
     hist_bins_spin = reg.register("_hist_bins_spin", _SpinBox(bar_ctrl))
     hist_bins_spin.setRange(BINS_MIN, BINS_MAX)
@@ -217,23 +219,17 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         "How many bins the histogram splits the figure's range into. A count metric bins on whole numbers, one bin "
         "per value when the range fits. Active only when Show is Histogram.")
     hist_bins_spin.valueChanged.connect(lambda value: _pcm.set_hist_bins(ctx, value, redraw_bars))
-    _disp_lay.addWidget(_popover_row("Bins:", hist_bins_spin))
+    _disp_lay.addWidget(_popover_row("Bins", hist_bins_spin))
     # Seeded from the state, not left at the constructors' defaults: the tab builds lazily, routinely after a
     # restore has already chosen a mode (the reason the Significance button below is seeded too).
     _pcm.sync_controls(ctx)
 
     # Significance brackets (N7): draw the Statistics tab's pairwise results onto
     # the Mean panel. Toggle stages PlotState.show_significance and redraws.
-    sig_btn = reg.register("_bar_significance_btn", buttons.default("Significance: Off", bar_ctrl))
-    sig_btn.setProperty("variant", "toggle")
-    sig_btn.setCheckable(True)
+    # A switch named for what is true when it is on (§2.5), seeded from the state: the tab body builds lazily,
+    # routinely after a restore has already turned the brackets on.
+    sig_btn = reg.register("_bar_significance_btn", _ToggleSwitch("Show significance", bar_ctrl))
     sig_btn.setChecked(bool(ctx.state.plot.show_significance))
-    # The caption is seeded from the same state as the check, not left at the
-    # constructor's "Off". A tab body builds lazily, so it is routinely built
-    # after a restore has already turned the brackets on, and a button reading
-    # "Off" over a figure carrying brackets says the opposite of what is true.
-    sig_btn.setText(
-        f"Significance: {'On' if ctx.state.plot.show_significance else 'Off'}")
     sig_btn.setToolTip(
         "Draw significance brackets between group bars from the Statistics tab's "
         "pairwise tests. Run a test in Statistics first; brackets appear for the "
@@ -278,7 +274,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
         _sig = ctx.widgets.get_or_none("_bar_significance_btn")
         on = bool(_sig.isChecked())
         ctx.state.plot.show_significance = on
-        _sig.setText(f"Significance: {'On' if on else 'Off'}")
         _lbl = ctx.widgets.get_or_none("_bar_significance_label_cb")
         if _lbl is not None:
             _lbl.setEnabled(on)
@@ -295,8 +290,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # ── the band's action zone, flush right ─────────────────────────────────
     bar_ctrl.add_action(_disp_btn)
 
-    reset_order_btn = reg.register("_bar_reset_order_btn", buttons.default("Reset Order", bar_ctrl))
-    reset_order_btn.setProperty("variant", "toggle_muted")
+    # A command, enabled while there is a dragged order to reset (``_drag_reorder``).
+    reset_order_btn = reg.register("_bar_reset_order_btn", buttons.quiet("Reset order", bar_ctrl))
+    reset_order_btn.setEnabled(ctx.state.plot.bar_order is not None)
     reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
     bar_ctrl.add_action(reset_order_btn)
 

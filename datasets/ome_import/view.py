@@ -163,7 +163,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
         blurb = QLabel(
             "De-interleave a single packed OME-TIFF (every well, channel, "
-            "Z-plane and timepoint in one file) into a normal dataset folder of "
+            "z-plane and timepoint in one file) into a normal dataset folder of "
             "per-well images. Enter the imaged well grid so each serpentine stage "
             "position gets its well label, then open the result in Analyze to "
             "process it.",
@@ -200,11 +200,11 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("▶  Convert", self)
+        self._run_btn = buttons.primary("Convert", self)
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("+ Queue", self)
+        self._queue_btn = buttons.default("Add to queue", self)
         self._queue_btn.setToolTip("Add this conversion to the Job Queue instead of running it now.")
         self._queue_btn.setEnabled(False)
         self._queue_btn.clicked.connect(self.queueRequested)
@@ -212,7 +212,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # Workers belongs beside the action, not among the settings that
         # describe the plate: it changes how fast the conversion runs and
         # nothing about what comes out of it.
-        run_row_l.addWidget(QLabel("Workers:", run_row))
+        run_row_l.addWidget(QLabel("Workers", run_row))
         self._workers_edit = self._small("", placeholder="auto")
         self._workers_edit.setToolTip(
             "Parallel conversion threads (blank = auto). Wells are converted in "
@@ -280,13 +280,13 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         hl = QHBoxLayout(block_row)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.md)
-        hl.addWidget(QLabel("Grid (rows × cols):", block_row))
+        hl.addWidget(QLabel("Grid (rows × cols)", block_row))
         self._rows_edit = self._small("1")
         hl.addWidget(self._rows_edit)
         hl.addWidget(QLabel("×", block_row))
         self._cols_edit = self._small("1")
         hl.addWidget(self._cols_edit)
-        hl.addWidget(QLabel("Origin:", block_row))
+        hl.addWidget(QLabel("Origin", block_row))
         self._origin_edit = self._small("A01", width=_ORIGIN_W, placeholder="A01")
         hl.addWidget(self._origin_edit)
         hl.addStretch(1)
@@ -296,7 +296,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         ol = QHBoxLayout(order_row)
         ol.setContentsMargins(0, 0, 0, 0)
         ol.setSpacing(theme.Spacing.md)
-        ol.addWidget(QLabel("Sweep:", order_row))
+        ol.addWidget(QLabel("Sweep", order_row))
         self._direction_cb = QComboBox(order_row)
         self._direction_cb.addItem("By row", userData="row")
         self._direction_cb.addItem("By column", userData="col")
@@ -346,14 +346,14 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # above are disabled and would otherwise look merely broken.
         self._grid_note = QLabel(
             "Ignored while the acquisition path is hand-drawn — press "
-            "Clear path to go back to the grid.", self)
+            "“Clear path” to go back to the grid.", self)
         self._grid_note.setProperty("textRole", "help")
         self._grid_note.setWordWrap(True)
         self._grid_note.setVisible(False)
         outer.addWidget(self._grid_note)
 
         self._file_order_note = QLabel(
-            "This order came from the file. Change Origin to move it to another "
+            "This order came from the file. Change the origin to move it to another "
             "well, or click the plate to draw your own.", self)
         self._file_order_note.setProperty("textRole", "help")
         self._file_order_note.setWordWrap(True)
@@ -366,14 +366,14 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         hl2 = QHBoxLayout(row2)
         hl2.setContentsMargins(0, 0, 0, 0)
         hl2.setSpacing(theme.Spacing.md)
-        hl2.addWidget(QLabel("FOVs/well:", row2))
+        hl2.addWidget(QLabel("FOVs/well", row2))
         self._fovs_edit = self._small("", placeholder="auto")
         self._fovs_edit.setToolTip(
             "Fields of view per well (blank = derive it from the file's position "
             "count and the wells above)."
         )
         hl2.addWidget(self._fovs_edit)
-        hl2.addWidget(QLabel("Keep every Nth timepoint:", row2))
+        hl2.addWidget(QLabel("Keep every nth timepoint", row2))
         self._stride_edit = self._small("", placeholder="all")
         self._stride_edit.setToolTip(
             "Leave blank to convert every timepoint. Set 3 to convert the "
@@ -382,14 +382,14 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             "without re-exporting it. The kept timepoints keep their own "
             "names, so a four-hourly run gives 0h, 12h, 24h.")
         hl2.addWidget(self._stride_edit)
-        hl2.addWidget(QLabel("Timepoints:", row2))
+        hl2.addWidget(QLabel("Timepoints", row2))
         # Lists the source's own tokens once a plan resolves; until then it
         # holds whatever selection was restored, which the plan then checks.
         self._timepoint_pick = TimepointPicker(row2)
         self._timepoint_pick.changed.connect(
             lambda: self.refresh_readout())
         hl2.addWidget(self._timepoint_pick)
-        self._order_label = QLabel("Frame order:", row2)
+        self._order_label = QLabel("Frame order", row2)
         hl2.addWidget(self._order_label)
         self._frame_order_cb = QComboBox(row2)
         self._frame_order_cb.addItem("Single timepoint", userData="single")
@@ -462,7 +462,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         ml = QHBoxLayout(self._mirror_row)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(theme.Spacing.sm)
-        mirror_label = QLabel("Mirror the stage coordinates:", self)
+        mirror_label = QLabel("Mirror the stage coordinates", self)
         mirror_label.setProperty("textRole", "help")
         ml.addWidget(mirror_label)
         self._flip_x_cb = QCheckBox("Left ↔ right (reflect X about the Y axis)",
@@ -582,7 +582,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Convert Output")
+        self.build_log_header(outer, "Convert output")
 
         self._progress = QProgressBar(self)
         self._progress.setRange(0, 100)
@@ -777,7 +777,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
 
     def set_running(self, running: bool) -> None:
         self._running = bool(running)
-        self._run_btn.setText("Converting…" if running else "▶  Convert")
+        self._run_btn.setText("Converting…" if running else "Convert")
         self._run_btn.setEnabled(not running and self._can_convert())
         self._queue_btn.setEnabled(not running and self._can_convert())
         # The bar appears with the run and stays afterwards to show the result;
@@ -865,12 +865,12 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             if src and self._dest_field.path() else None
         )
         if src and layout is None:
-            verdict, tone = "⚠ Could not read this file as an OME-TIFF.", text_roles.FAILURE
+            verdict, tone = "Could not read this file as an OME-TIFF.", text_roles.FAILURE
         elif problems:
             # Malformed boxes are answered before the file is consulted: a plan
             # built on values the page had to guess at describes a run nobody
             # asked for.
-            verdict, tone = "⚠ " + "  ".join(problems), text_roles.ATTENTION
+            verdict, tone = "  ".join(problems), text_roles.ATTENTION
         elif src and layout is not None:
             single = layout.single_image
             params = fields.to_params()
@@ -892,7 +892,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
                 # for the run log: a plate whose timepoints lost their elapsed
                 # hours is a dataset with no time axis in Review, and the
                 # moment to find that out is while it can still be re-exported.
-                verdict = "✓ " + "  ".join(
+                verdict = "  ".join(
                     part for part in (plan.summary(), plan.timepoint_warning)
                     if part)
                 tone = None
@@ -900,7 +900,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
             except OmeImportError as exc:
                 if exc.source_timepoint_tokens:      # a ticked timepoint the source lacks is then marked missing
                     self._timepoint_pick.set_source_tokens(exc.source_timepoint_tokens)
-                verdict, tone = f"⚠ {exc}", text_roles.FAILURE
+                verdict, tone = str(exc), text_roles.FAILURE
         self._order_label.setVisible(single)
         self._frame_order_cb.setVisible(single)
         self._readout.setText(head)

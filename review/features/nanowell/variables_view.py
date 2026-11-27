@@ -34,7 +34,7 @@ DECORATION_WIDGETS = {
 _GROUP_BY_TIP = ("Pool the page's wells by a sample variable (Home → Sample Map → Variables) instead of by your "
                  "replicate sets: one group per value.\nThe same setting as Group by on the Plotting tabs — changing "
                  "it here changes every plot.")
-_DECORATE_TIP = "Colour and split the Distribution view by a sample variable"
+_DECORATE_TIP = "Color and split the Distribution view by a sample variable"
 
 #: What the page's *Colour by* calls "do not colour by a variable": its dots go back to the occupancy colours, not to
 #: the plate colours the band's combo names.

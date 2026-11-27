@@ -78,7 +78,7 @@ def scatter_points_gated(ctx) -> bool:
 
     Two conditions:
 
-    * the tab's **Apply gates** toggle is on;
+    * the tab's **Plot only the gated cells** toggle is on;
     * no gate is being drawn or edge-dragged right now.
 
     That second clause is not a nicety. Releasing a freshly drawn gate fans out
@@ -122,7 +122,7 @@ def gates_for_axes(ctx, col_x: str, col_y: str) -> list:
 def gate_filter_title_suffix(ctx) -> str:
     """Axes-title tags for what the plot does beyond its axes, else ``""``.
 
-    ``· gate-filtered`` when *Apply gates* changes which cells are plotted, and
+    ``· gate-filtered`` when *Plot only the gated cells* changes which cells are plotted, and
     ``· highlighting <set>`` when a saved set is highlighted — or that a saved
     plot's highlighted set no longer exists. A figure copied or saved out of
     this tab has to carry those facts: the on-screen controls do not travel

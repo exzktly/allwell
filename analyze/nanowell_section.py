@@ -296,7 +296,7 @@ class AnalyzeNanowellSectionMixin:
             "A nanowell run does not run the per-image segmentation the methods above choose between: it counts the "
             "cells in each nanowell with its own Cellpose call, on the channel marked 'Phase', with the settings "
             "below."))
-        heading = QLabel("Nanowell cell count (Cellpose, on the Phase channel)", row)
+        heading = QLabel("Nanowell cell count (Cellpose, on the “Phase” channel)", row)
         heading.setWordWrap(True)
         row.layout().addWidget(heading, 1)
         row = self._row(box, "Cellpose model", tooltip=(

@@ -225,14 +225,14 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit(""))
     lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
     lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    ctrl.add_scope("LUT Min", lut_min_edit)
+    ctrl.add_scope("LUT min", lut_min_edit)
 
     lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit(""))
     lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    ctrl.add_scope("LUT Max", lut_max_edit)
+    ctrl.add_scope("LUT max", lut_max_edit)
 
-    apply_btn = buttons.default("Apply Global Threshold", ctrl)
+    apply_btn = buttons.default("Apply global threshold", ctrl)
     apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx))
     ctrl.add_action(apply_btn)
 
@@ -240,12 +240,14 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx))
     ctrl.add_action(refresh_btn)
 
-    overlay_btn = reg.register("_smfish_overlay_btn", buttons.default("Hide Overlays", ctrl))
-    overlay_btn.setProperty("variant", "default")
+    # A setting that acts at once: a switch named for what is true when on (§2.5).
+    from widgets.toggle_switch import ToggleSwitch
+    overlay_btn = reg.register("_smfish_overlay_btn",
+                               ToggleSwitch("Show overlays", ctrl, checked=bool(ctx.state.smfish.show_overlays)))
     overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx))
     ctrl.add_action(overlay_btn)
 
-    cdf_btn = buttons.default("This Frame CDF", ctrl)
+    cdf_btn = buttons.default("This frame CDF", ctrl)
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     ctrl.add_action(cdf_btn)
 
@@ -516,9 +518,7 @@ def _smfish_hide_progress(ctx) -> None:
 def _smfish_toggle_overlays(ctx) -> None:
     sm = ctx.state.smfish
     sm.show_overlays = not sm.show_overlays
-    ctx.runtime.smfish.overlay_btn.setText(
-        "Hide Overlays" if sm.show_overlays else "Show Overlays"
-    )
+    ctx.runtime.smfish.overlay_btn.setChecked(bool(sm.show_overlays))
     _smfish_redraw(ctx)
 
 
@@ -757,7 +757,7 @@ def _smfish_get_threshold(ctx) -> float:
 
     An unparseable box used to read as ``0.0``, which is not a neutral value
     here: it is the *lowest possible* threshold, so a stray keystroke silently
-    counted every spot in every well, and "Apply Global Threshold" would then
+    counted every spot in every well, and "Apply global threshold" would then
     write those counts across the plate. Falling back to the last value that
     parsed keeps the preview honest while the user is mid-edit, and the status
     line says the box is not a number.
@@ -922,7 +922,7 @@ def _smfish_apply_to_all(ctx) -> None:
     # ``cancel_event.clear()`` discarded a cancel meant for the first. Reject a
     # second concurrent run; the flag is cleared in ``_done`` on any exit.
     if ctx.runtime.smfish.apply_running:
-        _smfish_set_status(ctx, "Apply to All is already running.")
+        _smfish_set_status(ctx, "“Apply global threshold” is already running.")
         return
     channel = ctx.runtime.smfish.channel_cb.currentText().strip().lower()
     thr = _smfish_get_threshold(ctx)

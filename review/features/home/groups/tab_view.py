@@ -82,10 +82,10 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     hdr_l.setContentsMargins(0, _theme.Spacing.sm, 0, _theme.Spacing.xs)
     layout.addWidget(hdr)
     hdr_l.addStretch(1)
-    # Named for its scope: an unqualified "Clear All" on a page that also holds
+    # Named for its scope: an unqualified "Clear all" on a page that also holds
     # well labels, ratios and gating reads as if it clears those too.
     hdr_l.addWidget(btn_secondary(hdr, "Clear all groups", lambda: rep_clear_all(ctx)))
-    hdr_l.addWidget(btn_secondary(hdr, "+ Add", lambda: rep_add(ctx)))
+    hdr_l.addWidget(btn_secondary(hdr, "Add", lambda: rep_add(ctx)))
 
     # Quick Replicates: three labelled fields and the button that applies them.
     # Each label sits with its field in a pair of its own, so the phone form
@@ -100,7 +100,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     pair_cb = QComboBox(hdr2r)
     pair_cb.addItems(["Rows (A01+A02)", "Columns (A01+B01)"])
     pair_cb.setCurrentText("Rows (A01+A02)")
-    hdr2r_l.addWidget(_field_pair(hdr2r, "Group along:", pair_cb))
+    hdr2r_l.addWidget(_field_pair(hdr2r, "Group along", pair_cb))
     ctx.widgets.register("_rep_quick_pair_dir_var", pair_cb)
 
     size_sb = SpinBox(hdr2r)
@@ -110,18 +110,18 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
         "How many consecutive wells form one replicate group "
         "(2 = pairs, 3 = triplicates, …). A partial trailing run becomes a "
         "smaller group.")
-    hdr2r_l.addWidget(_field_pair(hdr2r, "Replicates per group:", size_sb))
+    hdr2r_l.addWidget(_field_pair(hdr2r, "Replicates per group", size_sb))
     ctx.widgets.register("_rep_quick_size_var", size_sb)
 
     iter_cb = QComboBox(hdr2r)
     iter_cb.addItems(["Across rows", "Down columns"])
     iter_cb.setCurrentText("Across rows")
-    hdr2r_l.addWidget(_field_pair(hdr2r, "Order:", iter_cb))
+    hdr2r_l.addWidget(_field_pair(hdr2r, "Order", iter_cb))
     ctx.widgets.register("_rep_quick_iter_order_var", iter_cb)
     hdr2r_l.addStretch(1)
     hdr2r_l.addWidget(ctx.widgets.register(
         "_rep_quick_apply",
-        btn_primary(hdr2r, "Apply Quick Replicates",
+        btn_primary(hdr2r, "Apply quick replicates",
                     lambda: rep_quick_pairs_from_dropdowns(ctx))))
 
     _build_from_variables_row(ctx, parent, layout)
@@ -210,7 +210,7 @@ def set_replicates_phone_form(ctx, on: bool) -> None:
       is operated on, and at the editor role's caps a well was under 30 px;
     - **Quick Replicates is a form**: each field a row, its label in a column
       ``SHEET_LABEL_PT`` wide (the Controls sheet's), the field stretched over
-      the rest, rows ``TOUCH_GAP_PT`` apart, and *Apply Quick Replicates* the
+      the rest, rows ``TOUCH_GAP_PT`` apart, and *Apply quick replicates* the
       full width under them;
     - **the active-group banner** puts its caption above the group's name, which
       wraps;
@@ -283,7 +283,7 @@ _FROM_VARIABLES_TIP = (
     "Replace the groups with one replicate group per condition: wells whose "
     "values are identical for every variable on the Variables tab become "
     "replicates of one group. The groups are ordinary groups afterwards — "
-    "rename them, recolour them, add or remove wells. Wells with no values "
+    "rename them, recolor them, add or remove wells. Wells with no values "
     "join no group.")
 
 

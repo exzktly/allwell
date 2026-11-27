@@ -28,7 +28,7 @@ from typing import Any
 from collections.abc import Callable
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QPushButton, QRubberBand, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QRubberBand, QToolButton, QWidget
 
 try:
     import numpy as _np
@@ -103,7 +103,7 @@ class CropTool:
         self._mode: bool = False
         self._drag: dict[str, Any] | None = None
 
-        self._button: QPushButton | None = None
+        self._button: QToolButton | None = None
         self._reset_button: QPushButton | None = None
         self._status_label: QLabel | None = None
         self._status_target = None
@@ -145,10 +145,9 @@ class CropTool:
 
     # ── UI builders ─────────────────────────────────────────────────────────
 
-    def make_button(self, parent: QWidget) -> QPushButton:
-        btn = buttons.default(self._button_label, parent)
-        btn.setProperty("variant", "toggle")
-        btn.setCheckable(True)
+    def make_button(self, parent: QWidget) -> QToolButton:
+        """The crop tool: pressed in while the next drag on the picture draws a crop (``ui.buttons.mode_tool``)."""
+        btn = buttons.mode_tool(self._button_label, parent)
         btn.setToolTip(self._tooltip_for(False))
         btn.clicked.connect(lambda _=False: self.toggle_mode())
         self._button = btn
@@ -375,11 +374,7 @@ class CropTool:
         btn = self._button
         if btn is not None:
             on = self._mode
-            btn.setChecked(on)
-            btn.setText(f"{self._button_label} ✓" if on else self._button_label)
-            btn.setProperty("variant", "toggle")
-            btn.style().unpolish(btn)
-            btn.style().polish(btn)
+            btn.setChecked(on)    # pressed in while armed: its look says so, its label stays the tool's name
             btn.setToolTip(self._tooltip_for(on))
         lbl = self._status_label
         if lbl is not None:

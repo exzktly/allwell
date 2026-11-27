@@ -6154,6 +6154,30 @@ DESIGN_GUARD_CASES = {
     "unset": ("tests.test_unset_reads_not_set", "test_an_unset_value_reads_not_set_through_one_constant",
               'def build(edit):\n    edit.setPlaceholderText("(not set)")\n',
               'def build(lbl):\n    text_roles.show_value(lbl, None)\n'),
+    # A dash handed to a table cell is that cell's unset value; a dash in a figure's text is not a control's.
+    "unset_dash_in_a_cell": ("tests.test_unset_reads_not_set", "test_an_unset_value_reads_not_set_through_one_constant",
+                             'def build(t):\n    t.setItem(0, 1, QTableWidgetItem("—"))\n',
+                             'def draw(ax):\n    ax.text(0, 0, "—")\n'),
+    # An f-string's words are unknown until it runs, but its marks are not.
+    "sentence_case_fstring_glyph": ("tests.test_labels_are_sentence_case",
+                                    "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                                    'def build(lbl, n):\n    lbl.setText(f"✓ {n} saved")\n',
+                                    'def build(lbl, n):\n    lbl.setText(f"{n} saved")\n'),
+    # A label handed through the module's own helper is still a label.
+    "sentence_case_through_a_helper": ("tests.test_labels_are_sentence_case",
+                                       "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                                       'def _add_label(row, text):\n    row.addWidget(QLabel(text))\n\n'
+                                       'def build(row):\n    _add_label(row, "Folder:")\n',
+                                       'def _add_label(row, text):\n    row.addWidget(QLabel(text))\n\n'
+                                       'def build(row):\n    _add_label(row, "Folder")\n'),
+    "color_spelling": ("tests.test_color_is_the_one_spelling", "test_the_interface_spells_it_color",
+                       'def build(b):\n    b.setToolTip("Pick the colour of the outline")\n',
+                       'def build(b, s):\n    b.setToolTip("Pick the color of the outline")\n    s["colour_by"] = 1\n'),
+    # A page named in prose keeps its name's capitals; any other capital mid-sentence is Title Case.
+    "sentence_case_page_name": ("tests.test_labels_are_sentence_case",
+                                "test_labels_are_written_in_sentence_case_without_colons_or_glyphs",
+                                'def build(lbl):\n    lbl.setText("Draw one on the Scatter Plot Panel")\n',
+                                'def build(lbl):\n    lbl.setText("Draw one on the Scatter Plot tab")\n'),
     "button_by_hand": ("tests.test_buttons_have_one_of_four_kinds",
                        "test_a_pane_builds_its_buttons_through_ui_buttons",
                        'def build(p):\n    return QPushButton("Run", p)\n',

@@ -6,7 +6,7 @@ buttons under a list act on its selected row:
 
 * **Saved cell sets** — a line naming every set in force and where (excluded
   from analysis, highlighted on Scatter, shown in Cell Browser), then
-  *View in Cell Browser*, *Highlight on Scatter*,
+  *View in Cell Browser*, *Highlight on the scatter plot*,
   *Exclude from analysis* (each a toggle; one set at a time can be highlighted
   and one excluded), rename and delete.
 * **Gates** — *View in Cell Browser* (the cells inside that gate alone) and
@@ -170,7 +170,7 @@ class SavedCellsPage(QWidget):
         self.in_force.setWordWrap(True)
         lay.addWidget(self.in_force)
         self.sets_empty = QLabel(
-            "No saved cells yet. Draw round cells with Lasso cells on a Spatial map or a "
+            "No saved cells yet. Draw round cells with “Lasso cells” on a Spatial map or a "
             "Multivariate projection to save them here.", self)
         self.sets_empty.setProperty("textRole", "help")
         self.sets_empty.setWordWrap(True)
@@ -187,7 +187,7 @@ class SavedCellsPage(QWidget):
                                 "Open Image Browser → Cell Browser showing this set's cells.")
         self.view_set.clicked.connect(lambda: self._on_set(ctl.view_set))
         self.highlight = _button(
-            self, "Highlight on Scatter",
+            self, "Highlight on the scatter plot",
             "Draw this set's cells solid over a faded cloud on the per-cell Scatter. "
             "Changes no number. Click again to stop.", checkable=True)
         self.highlight.clicked.connect(lambda: self._on_set(ctl.toggle_highlight, refresh=True))
@@ -256,7 +256,7 @@ class SavedCellsPage(QWidget):
                  "only where Cell Gating applies it. Cells inside: at every timepoint in the "
                  "wells it was drawn on, of the cells every other layer keeps."))
         self.gates_empty = QLabel(
-            "No gates yet. Draw one on the Scatter Plot's per-cell view with Draw gate.", self)
+            "No gates yet. Draw one on the Scatter Plot's per-cell view with “Draw gate”.", self)
         self.gates_empty.setProperty("textRole", "help")
         self.gates_empty.setWordWrap(True)
         lay.addWidget(self.gates_empty)
@@ -296,7 +296,7 @@ class SavedCellsPage(QWidget):
                  "page's Subset decides which nanowells its views and the Scatter Plot's nanowell scatter draw.")
         lay.addWidget(self.subsets_header)
         self.subsets_empty = QLabel(
-            "No saved subsets yet. Build one with Subset on the Nanowells page and save it there.", self)
+            "No saved subsets yet. Build one with “Subset” on the Nanowells page and save it there.", self)
         self.subsets_empty.setProperty("textRole", "help")
         self.subsets_empty.setWordWrap(True)
         lay.addWidget(self.subsets_empty)

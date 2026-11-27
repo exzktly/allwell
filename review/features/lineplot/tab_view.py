@@ -71,7 +71,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     metric_frame = reg.register("_metric_selector_frame", QWidget(line_ctrl))
     mfl = QHBoxLayout(metric_frame)
     mfl.setContentsMargins(0, 0, 0, 0)
-    mfl.addWidget(QLabel("Property:", metric_frame))
+    mfl.addWidget(QLabel("Property", metric_frame))
     metric_cb = reg.register("_metric_cb", QComboBox(metric_frame))
     metric_cb.addItems(_METRIC_ORDER)
     metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))

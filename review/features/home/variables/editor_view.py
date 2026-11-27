@@ -80,7 +80,7 @@ def build_editor_column(ctx, parent: QWidget, reg) -> QWidget:
     listing.setMaximumHeight(_RAIL_H)
     column.addWidget(listing)
 
-    add = reg.register("_var_add", ui_buttons.default("+ Variable", host))
+    add = reg.register("_var_add", ui_buttons.default("Add variable", host))
     add.setObjectName("HomeAction")
     column.addWidget(add)
 
@@ -273,7 +273,7 @@ def variable_row(name: str, variable_id: str, annotated: int,
     label = QLabel(item.text(), row)
     layout.addWidget(label, 1)
 
-    close = ui_buttons.default("✕", row)
+    close = ui_buttons.icon_button("x", "Delete this variable", row)
     close.setObjectName("VariableRowDelete")
     close.setFixedSize(QSize(_ROW_X, _ROW_X))
     close.setCursor(Qt.PointingHandCursor)

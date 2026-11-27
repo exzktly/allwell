@@ -129,7 +129,7 @@ class SampleMapScroll(QScrollArea):
     the vertical scroll bar appearing once a layer is taller than the screen,
     which narrows the viewport by the bar's width without resizing the area —
     and when the body has grown wider than the viewport at the same width. A
-    layer repaints rows the fit never saw (*+ Variable* swaps the empty state
+    layer repaints rows the fit never saw (*Add variable* swaps the empty state
     for the plate, the chips and the fill sentence, measured 590 px of a 414 px
     viewport), and the horizontal scroll bar that then appears resizes the
     viewport, which is the moment to fit again.

@@ -94,7 +94,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     A mode on a shared instrument is invisible, and in Split View it was also
     unreachable. The slot showed whichever plate belonged to the focused pane,
     so with Plots beside Statistics the plate on screen selected wells to plot
-    while the ``+ Add`` button below it created comparison groups those wells
+    while the ``Add`` button below it created comparison groups those wells
     never reached: the group came out empty, and nothing on screen said why.
     The only way to reach the plate that fills a group was to click into the
     Statistics pane first — a gesture unrelated to the task, and one the user
@@ -218,7 +218,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     ctx.widgets.register("_stats_grp_inner", inner)
 
     # The actions sit at the foot of the list they act on. On the rail they were
-    # in the section header, which put "+ Add" at the far end of the panel from
+    # in the section header, which put "Add" at the far end of the panel from
     # the cards it appends to — and in a split pane the title then wrapped to
     # two lines underneath them.
     # A wrapping row, not a QHBoxLayout: a box layout's minimum width is the
@@ -230,12 +230,12 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # thing that looks like a control row.
     from widgets.button_row import ButtonRow
     actions = ButtonRow(side)
-    actions.add(btn_secondary(actions, "+ Add group", partial(stats_grp_add, ctx)))
-    actions.add(btn_secondary(actions, "Clear All",
+    actions.add(btn_secondary(actions, "Add group", partial(stats_grp_add, ctx)))
+    actions.add(btn_secondary(actions, "Clear all",
                               partial(stats_grp_clear_all, ctx)))
     # Pull the comparison groups straight from the shared Sample-Definition
     # sets (S1).
-    actions.add(btn_secondary(actions, "↻ Load from Replicates",
+    actions.add(btn_secondary(actions, "Load from replicates",
                               partial(stats_resync_from_sample_defs, ctx)))
     col.addWidget(actions)
     ctx.widgets.register("_stats_group_actions", actions)

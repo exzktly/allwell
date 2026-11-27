@@ -222,6 +222,12 @@ class SegmentedControl(QWidget):
             return self._buttons[index].text()
         return ""
 
+    def setSegmentToolTip(self, index: int, tip: str) -> None:
+        """Name segment *index* in its tooltip — the words for a segment drawn as an icon alone."""
+        if 0 <= index < len(self._buttons):
+            self._buttons[index].setToolTip(tip)
+            self._buttons[index].setAccessibleName(tip)
+
     def setSegmentEnabled(self, index: int, enabled: bool) -> None:
         if 0 <= index < len(self._buttons):
             self._buttons[index].setEnabled(enabled)

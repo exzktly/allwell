@@ -308,6 +308,27 @@ def _adjust(fig, **params) -> None:
     fig.subplots_adjust(**params)
 
 
+#: The room, in points, kept between a y label and the figure's left edge.
+_LEFT_PAD_PT = 4.0
+
+
+def _left_clear_of_y_labels(fig, axes, floor: float) -> float:
+    """The left margin, as a share of the figure's width, that puts the leftmost of the tick labels and y labels of
+    *axes* (as drawn now) :data:`_LEFT_PAD_PT` inside the figure's edge — never less than *floor*. A fixed share of
+    the width holds them on a wide figure only: the labels keep their size in points as the figure narrows.
+
+    A canvas that cannot measure text keeps the margin it has."""
+    left = fig.subplotpars.left
+    get_renderer = getattr(fig.canvas, "get_renderer", None)
+    if get_renderer is None:
+        return left
+    boxes = [box for box in (ax.yaxis.get_tightbbox(get_renderer()) for ax in axes) if box is not None]
+    if not boxes:
+        return left
+    hang = _LEFT_PAD_PT * fig.dpi / 72.0 - min(box.x0 for box in boxes)
+    return max(floor, left + hang / max(fig.bbox.width, 1.0))
+
+
 def _fit_text(text: str, width_pt: float, size_pt: float, *, em: float = _GLYPH_EM) -> str:
     """*text* broken into lines that fit *width_pt* at *size_pt*; every word kept."""
     import textwrap
@@ -2442,6 +2463,19 @@ def _draw_selected_trajectories(ax, panel, selected) -> None:
                 gid=TRAJECTORY_SELECTED_GID)
 
 
+#: The Position view's left margin on a figure wide enough for its y labels, as a share of the width.
+_POSITION_LEFT = 0.08
+
+
+def _refit_position_left(fig, _ax) -> None:
+    """The Position view's left margin measured again against the labels as styled (``_aw_fit_to_panel``)."""
+    if fig.get_layout_engine() is not None:
+        return
+    left = _left_clear_of_y_labels(fig, fig.axes, _POSITION_LEFT)
+    if abs(left - fig.subplotpars.left) > 1e-4:
+        fig.subplots_adjust(left=left)
+
+
 def render_position(fig, series, *, label: str, timepoint: str, note: str = "") -> None:
     """Metric against ring, per well (median and interquartile band), with each ring's excluded share below.
 
@@ -2462,12 +2496,8 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     lines, _first = _wrapped_to_figure(fig, lines, left=0.08)
     lines = _footer_that_fits(fig, lines)
     step = _line_step(fig)
-    # The ring label is broken to the width of the axes it sits under, and the second line is room the axes give up.
-    ring_label = _fit_text("Ring (lattice steps from the central nanowell)", _figure_pt(fig)[0] * (0.88 - 0.08),
-                           _PREF_PT * SINGLE_TYPE_SCALE)
-    extra = (ring_label.count("\n") * 1.2 * _PREF_PT * SINGLE_TYPE_SCALE) / max(_figure_pt(fig)[1], 1.0)
-    _adjust(fig, left=0.08, right=0.88, top=0.90,
-                        bottom=0.10 + extra + _FOOTER_BASE + step * max(1, len(lines)))
+    bottom = 0.10 + _FOOTER_BASE + step * max(1, len(lines))
+    _adjust(fig, left=_POSITION_LEFT, right=0.88, top=0.90, bottom=bottom)
     for panel in (ax, share):
         _prepare_axes(panel, SINGLE_TYPE_SCALE)
     _bg, ink, muted = _inks(ax)
@@ -2496,9 +2526,20 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     share.yaxis.set_major_locator(MaxNLocator(nbins=2))
     share.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
     share.xaxis.set_major_locator(MaxNLocator(integer=True))
-    share.set_xlabel(ring_label, color=ink)
     share.grid(alpha=0.3)
     fig.align_ylabels([ax, share])
+    # The y labels stand left of the widest tick label of either panel ("100%" under the metric's own), which a fixed
+    # 8 % of a figure under about 10 in wide cannot hold: "Cell count" was drawn past a 6.8 in figure's left edge.
+    left = _left_clear_of_y_labels(fig, (ax, share), _POSITION_LEFT)
+    # The ring label is broken to the width of the axes it sits under, and the second line is room the axes give up.
+    ring_label = _fit_text("Ring (lattice steps from the central nanowell)", _figure_pt(fig)[0] * (0.88 - left),
+                           _PREF_PT * SINGLE_TYPE_SCALE)
+    extra = (ring_label.count("\n") * 1.2 * _PREF_PT * SINGLE_TYPE_SCALE) / max(_figure_pt(fig)[1], 1.0)
+    _adjust(fig, left=left, bottom=bottom + extra)
+    share.set_xlabel(ring_label, color=ink)
+    # Measured again once the Properties pass has set the labels' final type and ticks (``plot_style`` calls this
+    # once the figure is laid out); a layout engine (phone layout's) sizes the margins itself and is left to.
+    share._aw_fit_to_panel = _refit_position_left
     for i, text in enumerate(reversed(lines)):
         _ink(fig.text(0.08, _FOOTER_BASE + i * step, text, fontsize=FOOTER_PT, color=muted, gid="nw-position-footer"),
              muted=True)

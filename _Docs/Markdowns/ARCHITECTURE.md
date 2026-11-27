@@ -14719,7 +14719,12 @@ one y range over the panels, ticked in hours when every time is recorded (`Traje
 with one value per nanowell is greyed in the Metric list there, and a saved one is drawn as cell count with a
 footer line saying so. **Position** (`position_series`) is the metric's median and interquartile range by ring, each well in its
 plate-position colour (`selections_model.color_for_well`, as the plate selector and every plot tab colour it),
-with the share of each ring's nanowells without a value below it on the same ring axis (the two panels share x, the wells' key outside on the right); it makes no test. The ring comes from the address
+with the share of each ring's nanowells without a value below it on the same ring axis (the two panels share x, the wells' key outside on the right); it makes no test. Its left
+margin is 8 % of the figure's width or, when that is too little for the two panels' aligned y labels and widest
+tick label ("100%"), as much as puts them 4 pt inside the edge (`renderer._left_clear_of_y_labels`, measured as
+drawn) — measured again through `_aw_fit_to_panel` once the Properties pass has set the labels' final type, and
+left to the layout engine in phone layout. At the default type the labels need about 0.8 in, so a fixed 8 % held them only on a figure about 10 in wide or
+more ("Cell count" was drawn past the edge of a 6.8 in one). The ring comes from the address
 (`lattice_ring`, the pipeline's: `(|q| + |r| + |q + r|) / 2` on a hexagonal lattice, `max(|q|, |r|)` on a square
 one, each well's kind at the timepoint passed by `controller.draw_view`), not from a row's `nw_ring`, because the rows Review adds
 for a roster nanowell not seen at a timepoint carry the address and no ring — reading the column dropped them,
@@ -14785,7 +14790,10 @@ one that draws the pictures largest. Room the pictures cannot use goes between t
 `MAX_EXTRA_GAP`) and the rest above the footer. On a figure too small for all of that, the reference text gives way
 before the pictures: when no arrangement reaches `MIN_SIDE` even without the notes, the footer is left out, and when
 that is still not enough the per-check lines fold into one `summary_check` line (`SUMMARY_KEY`), which counts them by
-state and says to enlarge the card; the verdict and the three pictures are always drawn. Each panel takes the card's ground (an axes added after the card was themed is matplotlib's white, which showed
+state and says to enlarge the card; when even the folded figure has no picture edge that fits (a low window's card,
+about 5 × 2.8 in, where each panel's axis label broke over two or three rows under its narrow picture), the panels'
+axis labels are left out as well and the folded line ends by saying their unit (`UNITS_SENTENCE`, "Axes in µm.").
+The verdict and the three pictures are always drawn. Each panel takes the card's ground (an axes added after the card was themed is matplotlib's white, which showed
 round the surface's searched disc), and each panel and its colour bar carry `_aw_type_scale`, so the
 Properties pass that ends every redraw sizes their ticks and labels at `TICK_PT` / `BAR_PT` rather than its 18 pt
 default, and the tick locators thin with the panel's edge. The drawing records the size it was laid out for

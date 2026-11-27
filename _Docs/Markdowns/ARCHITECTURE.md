@@ -18470,10 +18470,26 @@ The Datasets pane (`datasets/tab.py`) is the third top-level mode. Structurally
 it mirrors `AnalyzeTab`: a self-contained `QWidget` whose left `_left_sidebar` is
 a `RailNav` page navigator (no well picker) over a `NamedPageStack`, with one
 page per feature. Features are declared in one local tuple (`_FEATURES`) — a
-`_Feature(name, icon, build)` per entry — so adding a Datasets feature is a
-one-line change, without pulling in Review's well/selection-scoped
-`FeatureRegistry`/`ViewerContext` machinery. The rail's `currentChanged` drives
-`NamedPageStack.setCurrentByName`.
+`_Feature(name, icon, build, kind, group)` per entry — so adding a Datasets
+feature is a one-line change, without pulling in Review's well/selection-scoped
+`FeatureRegistry`/`ViewerContext` machinery. Each names the eyebrow it is listed
+under (`group`: Combine, Convert or Maintain), and the rail draws a caption
+(`RailNav.addCaption`) wherever the group changes. The rail's `currentChanged`
+drives `NamedPageStack.setCurrentByName`; the pages sit under no band, since a
+tool page carries its controls in cards and its actions in a foot row.
+
+**Every tool page is built from one skeleton**, `datasets/core/tool_page.py`
+(the design language's tool page, §6): `tool_page(page, title, help_line)` lays
+the page out as a scroll area holding a column capped at `Metrics.tool_page_w`
+(720), opening with the tool's title (`text_roles.page_title`) and one line of
+help; `foot_row` builds the foot (`ui.page_chrome.ActionRow`: the reason the
+primary action cannot run, any setting of how the run goes, "Add to queue", the
+tool's follow-ups, and the primary action last) and sets `page._run_btn` /
+`page._queue_btn`; `cards(outer, (title, first, last), …)` moves runs of the
+column's rows into titled `widgets.card.Card`s — *Folders*, then what the tool
+does — keeping each row's stretch, alignment and hidden state, and hides a card
+while every row in it is hidden. `tests/test_datasets_tool_pages.py` reads all
+three off the real pages.
 
 Each feature is one `_Feature` entry in `datasets/tab.py::_FEATURES` and a
 `datasets/<name>/` package on the standard view/controller/worker + Qt-free

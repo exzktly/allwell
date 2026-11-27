@@ -9224,7 +9224,14 @@ Every copy is recorded in the dataset's history (`provenance.jsonl`).
 
 Switch to **Datasets** with the title-bar segmented control (the third segment,
 beside Review and Analyze). Unlike Review there is no plate/well picker — the left
-sidebar is just a list of dataset-level tools.
+sidebar is just a list of dataset-level tools, grouped under **Combine**
+(Concatenate, Merge Plates, Subset / Split), **Convert** (OME-TIFF, CZI, ND2, Zip
+Loose Folder) and **Maintain** (Validate & Repair, Watch Folder, Automation).
+
+Every tool's page reads the same way: its title and a line saying what it does,
+then cards — **Folders** first, then what the tool does with them — and at the
+foot the reason it cannot run yet (when it cannot), **Add to queue** and the
+tool's own action, last.
 
 **Your exclusions travel with the data.** Subset, Merge Plates and Concatenate
 carry what decides which cells count: cells you excluded by hand, your QC limits

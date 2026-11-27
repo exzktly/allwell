@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 from PySide6.QtGui import QPalette
-from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import QApplication, QCheckBox, QComboBox, QLabel, QLineEdit, QPushButton
 
 from ui import theme
 from widgets.form_grid import FormGrid

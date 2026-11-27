@@ -49,7 +49,7 @@ def test_every_mode_is_a_title_two_cards_and_no_band(loaded_app):
         assert isinstance(groups, Card) and groups.title() == "Groups", mode
         heading = [w for w in _layout_widgets(groups.heading()) if w is not groups._title]
         assert [(b.text(), b.property("variant")) for b in heading] == [
-            ("Clear all", "quiet"), ("Quick setup ▾", "quiet"), ("Add group", "default")], mode
+            ("Clear all", "quiet"), ("Quick setup", "quiet"), ("Add group", "default")], mode
         assert isinstance(output, Card) and output.title() == "Output", mode
         forms = output.findChildren(FormGrid)
         assert len(forms) == 2, mode

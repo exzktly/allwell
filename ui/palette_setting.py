@@ -1,7 +1,7 @@
 """The palette this user chose, remembered between sessions, and the one the application starts in.
 
 Two palettes are offered, grey and blue (``ui/palettes.py``); grey is the default. The choice is the user's,
-made in the application (the rail head's menu, :func:`palette_menu`), and stored in the application's settings
+made in the application (the rail head's menu, :func:`add_palette_entries`), and stored in the application's settings
 file (``core.app_settings``), reached through that module's ``app_settings`` at each call — the one door
 onto the store, which the test suite redirects per test.
 
@@ -67,30 +67,27 @@ def build_palette() -> str | None:
     return name if name in theme.available_themes() else None
 
 
-def palette_menu(parent):
-    """A ``Palette`` submenu: one checkable entry per palette and a line saying when a change takes effect.
+def add_palette_entries(menu) -> list:
+    """The palettes as plain commands in *menu* — *Palette: Grey*, *Palette: Blue* — the one the next start will use
+    marked (``widgets.menu_marks``), then a line saying when a change takes effect. Plain commands, not a submenu of
+    checkable entries: a menu holds commands, and a setting's current value is marked rather than ticked (the
+    application's menu conventions). Returns the palette entries.
 
-    The checked entry is the palette the next start will use when nothing overrides it — the stored choice, or
-    the default — which is what choosing an entry changes."""
-    from PySide6.QtGui import QActionGroup
-    from PySide6.QtWidgets import QMenu
-
+    The marked entry is the palette the next start will use when nothing overrides it — the stored choice, or the
+    default — which is what choosing an entry changes."""
+    from widgets.menu_marks import mark_current
     from widgets.owned_action import owned_action
 
-    menu = QMenu("Palette", parent)
-    group = QActionGroup(menu)
-    group.setExclusive(True)
     current = stored_palette() or theme.DEFAULT_THEME
     names = [n for n in LABELS if n in theme.available_themes()]
     names += [n for n in theme.available_themes() if n not in names]
+    entries = []
     for name in names:
-        action = owned_action(menu, LABELS.get(name, name.capitalize()))
-        action.setCheckable(True)
-        action.setChecked(name == current)
+        action = mark_current(owned_action(menu, ""), f"Palette: {LABELS.get(name, name.capitalize())}",
+                              name == current)
         action.setData(name)
-        group.addAction(action)
         action.triggered.connect(lambda _checked=False, _name=name: store_palette(_name))
-    menu.addSeparator()
+        entries.append(action)
     note = owned_action(menu, APPLIES_NEXT_START)
     note.setEnabled(False)
-    return menu
+    return entries

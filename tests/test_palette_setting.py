@@ -95,30 +95,30 @@ def test_storing_a_name_that_is_no_palette_is_refused():
         palette_setting.store_palette("purple")
 
 
-def test_the_menu_offers_grey_first_checks_the_next_starts_palette_and_says_when_it_applies(qapp):
-    from PySide6.QtWidgets import QWidget
+def test_the_menu_offers_grey_first_marks_the_next_starts_palette_and_says_when_it_applies(qapp):
+    from PySide6.QtWidgets import QMenu
 
-    host = QWidget()
-    menu = palette_setting.palette_menu(host)
+    from widgets.menu_marks import is_current
+    menu = QMenu()
+    entries = palette_setting.add_palette_entries(menu)
     texts = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert texts == ["Grey", "Blue", "Applies the next time All-Well starts"]
-    checked = [a.text() for a in menu.actions() if a.isChecked()]
-    assert checked == ["Grey"]
-    note = menu.actions()[-1]
-    assert not note.isEnabled()
+    assert texts == ["Palette: Grey", "Palette: Blue", "Applies the next time All-Well starts"]
+    assert not any(a.isCheckable() for a in entries)          # commands, the current one marked
+    assert [a.text() for a in entries if is_current(a)] == ["Palette: Grey"]
+    assert not menu.actions()[-1].isEnabled()
 
 
-def test_choosing_blue_in_the_menu_stores_blue_and_checks_it(qapp):
-    from PySide6.QtWidgets import QWidget
+def test_choosing_blue_in_the_menu_stores_blue_and_marks_it(qapp):
+    from PySide6.QtWidgets import QMenu
 
-    host = QWidget()
-    menu = palette_setting.palette_menu(host)
-    blue = next(a for a in menu.actions() if a.text() == "Blue")
+    from widgets.menu_marks import is_current
+    menu = QMenu()
+    blue = next(a for a in palette_setting.add_palette_entries(menu) if a.text() == "Palette: Blue")
     blue.trigger()
     assert palette_setting.stored_palette() == "blue"
-    assert [a.text() for a in menu.actions() if a.isChecked()] == ["Blue"]
-    again = palette_setting.palette_menu(host)
-    assert [a.text() for a in again.actions() if a.isChecked()] == ["Blue"]
+    other = QMenu()
+    again = palette_setting.add_palette_entries(other)
+    assert [a.text() for a in again if is_current(a)] == ["Palette: Blue"]
 
 
 def test_the_rail_heads_menu_offers_the_palette_and_choosing_there_stores_it(qapp):
@@ -128,15 +128,15 @@ def test_the_rail_heads_menu_offers_the_palette_and_choosing_there_stores_it(qap
     from PySide6.QtWidgets import QMenu, QWidget
 
     from review.core.app_shell_view import _fill_dataset_menu
+    from widgets.menu_marks import is_current
 
     host = QWidget()
     menu = QMenu(host)
     _fill_dataset_menu(SimpleNamespace(_browse=lambda: None), menu)
-    sub = next(a.menu() for a in menu.actions() if a.text() == "Palette")
-    next(a for a in sub.actions() if a.text() == "Blue").trigger()
+    next(a for a in menu.actions() if a.text() == "Palette: Blue").trigger()
     assert palette_setting.stored_palette() == "blue"
-    # Opening the menu again rebuilds it, with the new choice checked and one Palette entry, not two.
+    # Opening the menu again rebuilds it, with the new choice marked and one entry per palette, not two.
     _fill_dataset_menu(SimpleNamespace(_browse=lambda: None), menu)
-    entries = [a for a in menu.actions() if a.text() == "Palette"]
-    assert len(entries) == 1
-    assert [a.text() for a in entries[0].menu().actions() if a.isChecked()] == ["Blue"]
+    entries = [a for a in menu.actions() if a.text().startswith("Palette: ")]
+    assert [a.text() for a in entries] == ["Palette: Grey", "Palette: Blue"]
+    assert [a.text() for a in entries if is_current(a)] == ["Palette: Blue"]

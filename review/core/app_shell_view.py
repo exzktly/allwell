@@ -108,7 +108,7 @@ RECENTS_IN_MENU = 6
 
 
 def _fill_dataset_menu(win, menu) -> None:
-    """``Open…``, the datasets this user opened recently, the dataset tools, then the ``Palette`` choice.
+    """``Open…``, the datasets this user opened recently, the ``Palette`` choice, then the dataset tools.
 
     Rows come from ``core.recent_view.entry_rows``, the same function Home's
     card and its placeholder draw from, so a folder that has gone missing reads
@@ -126,22 +126,17 @@ def _fill_dataset_menu(win, menu) -> None:
     menu.setToolTipsVisible(True)
     owned_action(menu, "Open…").triggered.connect(lambda _=False: win._browse())
     _add_recent_datasets(win, menu)
-    _add_dataset_tools(win, menu)
     _add_palette(menu)
+    _add_dataset_tools(win, menu)
 
 
 def _add_palette(menu) -> None:
-    """The ``Palette`` choice, last and set apart: it is the application's setting, not the dataset's, and this
-    menu is the one place the window offers settings. Rebuilt with the rest, so its check mark follows a choice
-    made since; the previous copy is deleted, because ``clear`` drops the action and not the submenu it opened."""
-    from ui.palette_setting import palette_menu
+    """The ``Palette`` choice: the application's setting, not the dataset's, set apart by a separator, and before the
+    dataset tools so the menu still ends in them. The one place the window offers settings."""
+    from ui.palette_setting import add_palette_entries
 
-    old = getattr(menu, "_aw_palette_menu", None)
-    if old is not None:
-        old.deleteLater()
     menu.addSeparator()
-    menu._aw_palette_menu = palette_menu(menu)
-    menu.addMenu(menu._aw_palette_menu)
+    add_palette_entries(menu)
 
 
 #: The widget-registry key of the callable that lists the window's dataset

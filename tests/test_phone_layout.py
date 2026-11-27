@@ -2128,7 +2128,7 @@ def test_the_unfolded_duo_docks_the_page_s_controls_left_of_the_page(qapp, app_s
             shell.refresh()
             _pump(qapp)
             assert shell._sheet.isOpen() and shell.controls_button.isVisibleTo(win)
-            assert shell.controls_button.text() == "⚙ Controls" and shell.controls_button.isChecked()
+            assert shell.controls_button.text() == "Controls" and shell.controls_button.isChecked()
             # ⚙ Controls hides it, and a refresh (a page change) does not bring it back.
             shell.toggle_controls()
             _pump(qapp)

@@ -126,10 +126,12 @@ def test_bar_display_s_grouping_toggle_inside_the_inspector_changes_the_bar_stat
     insp = svc.inspector(ctx)
     grouping = ctx.widgets.get("_bar_group_mode_btn")
     assert insp.isAncestorOf(grouping) and grouping.isVisibleTo(window)
-    before = grouping.text()
-    grouping.click()
+    # A choice of two, so a segmented control (design language D13): choosing the other segment changes the state.
+    before = ctx.state.plot.bar_group_mode or "well"
+    other = "timepoint" if before == "well" else "well"
+    grouping.setCurrentByData(other)
     QApplication.processEvents()
-    assert grouping.text() != before and grouping.text().startswith("Grouping: ")
+    assert ctx.state.plot.bar_group_mode == other
     assert surf.depth(window) == 0, "the desk inspector is a column, not a surface over the page"
 
 

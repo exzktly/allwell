@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QMenu,
+    QToolButton,
     QMessageBox,
     QProgressBar,
     QScrollArea,
@@ -578,11 +580,14 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         """The Groups card's heading: a quiet Clear all, a quiet Quick setup menu, and Add group. Clear all is kept
         apart from Add group by the menu between them, so it is not pressed for its neighbour. Groups autosave to
         the dataset's persistence.json, so there is no Save or Load."""
-        from review.core.ui_helpers import make_action_menu_button
-
         clear = buttons.quiet("Clear all", on_click=self._grp_clear_all)
-        qs_btn, qs_menu = make_action_menu_button("Quick setup", self)
-        buttons.set_kind(qs_btn, buttons.QUIET)
+        # A menu button draws one arrow: the theme's shared chevron, through ``hasMenu`` (CLAUDE.md §7.12).
+        qs_btn = buttons.tool_button(self, buttons.QUIET)
+        qs_btn.setText("Quick setup")
+        qs_btn.setPopupMode(QToolButton.InstantPopup)
+        qs_btn.setProperty("hasMenu", True)
+        qs_menu = QMenu(qs_btn)
+        qs_btn.setMenu(qs_menu)
         qs_menu.addAction("One group per row  (row A = all A wells, \u2026)", self._quick_by_row)
         qs_menu.addAction("One group per column  (column 01 = all column-01 wells, \u2026)", self._quick_by_col)
         self._vsel_add_quick_setup_menu(qs_menu)

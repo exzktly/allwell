@@ -23,9 +23,6 @@ RETIRED = ("Done ✕", "Hide controls")
 
 #: ``(file, literal)`` kept, with why.
 KEPT: dict[tuple[str, str], str] = {
-    ("ui/phone_window.py", "Close ✕"):
-        "kept: the foot of a window of its own in phone layout — a window, not a panel; "
-        "it does what the title bar's ✕ does",
     ("review/features/nanowell/window_view.py", "Hide controls ▾"):
         "kept: a disclosure toggle inside the crops pop-out (it folds the pop-out's own "
         "rows), not the close of a panel",

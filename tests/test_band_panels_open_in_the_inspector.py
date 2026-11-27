@@ -28,6 +28,7 @@ PANELS = {
     "Response Curves": [("Fit", "data", False), ("Fold change", "data", False),
                         ("Display", "display", True)],
     "Heat Map": [("Layout", "data", False), ("Display", "display", True)],
+    "Distribution": [("Display", "display", True)],
     "Multivariate": [("Features", "data", False), ("Display", "display", True)],
     "Spatial": [("Display", "display", True)],
     "smFISH": [("Display", "display", True)],

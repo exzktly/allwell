@@ -96,7 +96,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     metric_cb = reg.register("_heatmap_metric_cb", QComboBox())
     metric_cb.addItems(METRIC_OPTIONS)
     metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx))
-    band.add_scope("Aggregation", metric_cb)
 
     # The timepoint picker — a LabeledComboBox like every other Timepoint
     # control in Review, painting its own "Timepoint: 4.0h" prefix. Was a
@@ -116,7 +115,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # labels are appearance by the same test and live here too.
     display_btn, disp, disp_l = make_popover_button("Display", band, ctx=ctx, root=True)
     display_btn.setToolTip(
-        "Color map, scale, layout, per-cell error and tick labels")
+        "Aggregation, color map, scale, layout, per-cell error and tick labels")
+    # Aggregation heads the Display page rather than sitting on the band (the user's decision, tracker §9.1
+    # step 20): the band keeps what is plotted on one row.
+    _agg_lbl = QLabel("Aggregation", disp)
+    _agg_lbl.setProperty("textRole", "label")
+    disp_l.addWidget(_agg_lbl)
+    metric_cb.setParent(disp)
+    disp_l.addWidget(metric_cb)
 
     disp_l.addWidget(QLabel("Color map", disp))
     # v2: LutSelector (gradient strip + name + searchable popover + reverse-LUT

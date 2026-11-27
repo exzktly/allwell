@@ -1363,8 +1363,6 @@ allwell/
 │   ├── validate/               ← Validate & Repair an existing dataset
 │   ├── watch_folder/           ← Watch a folder until it stops receiving files, as the
 │   │                              first step of a queued chain
-│   ├── open_in_review/         ← Open in Review: show an analysed dataset in Review, as
-│   │                              the last step of a queued chain or recipe
 │   ├── job_queue/              ← the queue the ten tools (and Analyze) submit runs to;
 │   │                              projection.py: what a queued job will write, for
 │   │                              the next step set up before it runs; recipe_actions.py:
@@ -1559,8 +1557,8 @@ allwell/
 │   │                              reaches for (util/aw_safe.py is its pipeline-side twin, which
 │   │                              exists because util/ may not import Qt)
 │   ├── user_activity.py        ← when the person last used the app (an application event
-│   │                              filter), and review_hand_off: whether a queued Open in
-│   │                              Review step may move the window
+│   │                              filter), and review_hand_off: whether a recipe run's
+│   │                              result may move the window to Review
 │   ├── app_settings.py         ← the one QSettings wrapper
 │   ├── profile.py              ← reads ALLWELL_PROFILE and resolves profiles/<name>.toml
 │   ├── debug_flags.py          ← the per-tab debug toggles, all shipping off
@@ -20577,30 +20575,6 @@ through the well map before the `seg_fp` restamp (from the destination
 `<well>_out.zip`, as the last write to that archive) — Concatenate's own
 precedent, not reinvented.
 
-**Open in Review** (`datasets/open_in_review/`) is a queueable step that hands
-an analysed dataset to Review — the end of a chain such as Watch → Convert →
-Analyze → Open in Review. `open_in_review_compute.reviewable_root` accepts a
-dataset root holding `out/pipeline_info.json` (or that `out/` folder itself)
-and nothing else: a conversion's output has nothing for Review to show, and the
-step fails saying so rather than loading an empty plate. The controller has no
-worker; it calls the `on_show_in_review` hook `DatasetsTab` receives from the
-shell (`AllWellApp._show_result_in_review`) and emits `jobFinished` at once,
-reporting what the hand-off did. A queued step passes `when_idle=True`, the
-page's own button `False`. The shell asks `core.user_activity.review_hand_off`:
-`switched` (asked by a person, or nobody is using the app — no input for
-`IDLE_AFTER_SECONDS`, or another application in front), `loaded` (someone is
-working in another pane: the dataset loads behind them and the window stays),
-or `held` (someone is reading Review itself: nothing is loaded, since that
-would replace what they are reading; the step succeeds with a message saying
-the result is ready, and a toast says it too). The load itself is the shell's
-deferred `_load_in_review_later`, so a dataset that then fails to load is
-reported by Review, not by the step. `core/user_activity.py`'s
-`UserActivity` filter is installed by the shell at start-up so the idle clock
-runs from launch. The kind is in the dataset tables (`INPUT_TARGETS` `dataset`,
-so it is offered as a next step after anything that writes a dataset), reads
-its folder and writes nothing (`job_lanes._READ_ONLY_KINDS`), and passes the
-folder on as its output.
-
 **Watch Folder** (`datasets/watch_folder/`) is the one Datasets tool that
 changes no data: a queueable job that succeeds once a folder has stopped
 receiving files, so the jobs chained after it run when an acquisition is
@@ -21386,6 +21360,30 @@ Qt event loop. Four layers:
   run's log are deliberately not offered in the queue as well: a plan and its
   history have their own tabs, and the same action in two places is two things
   to keep in step.
+
+- **`datasets/job_queue/review_handoff.py`** + `QueueBridge._open_result` — a
+  recipe's **Open the result in Review when the last Analyze step finishes**
+  (`Recipe.open_result`, a checkbox on the Recipes tab, saved and exported with
+  the recipe). `RecipeActions.apply` marks the job of `Recipe.result_step()` —
+  the last Analyze step — with `recipe["open_result"]`; when that job succeeds,
+  the bridge takes the dataset root it reported, checks it holds an analysed
+  dataset (`reviewable_root`: `out/pipeline_info.json`, which Analyze writes
+  last), and calls `review_hook(root, when_idle=True)`, which `DatasetsTab`
+  sets from the shell (`AllWellApp._show_result_in_review`). The shell asks
+  `core.user_activity.review_hand_off`: `switched` (nobody is using the app —
+  no input for `IDLE_AFTER_SECONDS`, or another application in front),
+  `loaded` (someone is working in another pane: the dataset loads behind them
+  and the window stays), or `held` (someone is reading Review itself: nothing
+  is loaded, since that would replace what they are reading). The outcome, in
+  `OUTCOME_MESSAGES`' words, is appended to the job's message, journalled as a
+  `status` event, and for `held` also toasted (`on_review_held`). A root with
+  nothing analysed is said, not opened. `core/user_activity.py`'s
+  `UserActivity` filter is installed by the shell at start-up so the idle clock
+  runs from launch. The load itself is the shell's deferred
+  `_load_in_review_later`, so a dataset that then fails to load is reported by
+  Review. The option is a property of the recipe rather than a job of its own:
+  it has no settings beyond on and off, and a queue step for it would have
+  needed a page.
 
 - **`datasets/job_queue/automation_view.py`** — `AutomationPage`, the
   **Automation** sidebar entry: a `QTabWidget` (tab bar `AutomationSubTabs`,

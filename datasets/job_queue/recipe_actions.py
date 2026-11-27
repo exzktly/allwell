@@ -98,9 +98,13 @@ class RecipeActions:
             self._notify(str(exc), "warn")
             return []
         run_id = uuid.uuid4().hex[:12]
+        result_step = recipe.result_step() if recipe.open_result else None
         for step, (job, _links) in enumerate(planned):
             job.recipe = {"run": run_id, "name": recipe.name, "input": source,
                           "step": step, "steps": len(planned)}
+            if step == result_step:
+                # QueueBridge hands this job's result to Review when it succeeds.
+                job.recipe["open_result"] = True
         # Journalled before the jobs are added: a running queue starts the
         # first of them inside add_job, and its "started" must come after this.
         recipe_journal.append(run_id, "applied", state_dir=self._state_dir,
@@ -161,6 +165,16 @@ class RecipeActions:
         self._changed()
         self._notify(f"Renamed “{old}” to “{new}”. Its earlier runs keep the old name "
                      "in their logs.", "success")
+        return True
+
+    def set_open_result(self, name: str, on: bool) -> bool:
+        """Turn the recipe's "open the result in Review" on or off. Applies to
+        runs applied afterwards; a run already queued keeps what it had."""
+        recipe = self.get(name)
+        if recipe is None or recipe.open_result == bool(on):
+            return False
+        recipe.open_result = bool(on)
+        self._changed()
         return True
 
     def duplicate(self, name: str) -> Recipe | None:

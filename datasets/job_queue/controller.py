@@ -46,6 +46,7 @@ from services.job_queue import (
     save_queue,
 )
 from datasets.job_queue.recipe_actions import RecipeActions
+from datasets.job_queue.review_handoff import NOT_REVIEWABLE, OUTCOME_MESSAGES, reviewable_root
 from datasets.job_queue.session import QueueSession
 from datasets.job_queue.view import JobQueuePage
 
@@ -104,6 +105,11 @@ class QueueBridge(QObject):
         # job_id -> the leading phrase of the last status journalled for it,
         # so a countdown ticking every few seconds is journalled once a phase.
         self._journalled_phase: dict[str, str] = {}
+        #: ``(root, *, when_idle) -> outcome`` — puts a finished result in
+        #: Review (``_open_result``). ``None`` without a shell.
+        self.review_hook: Callable[..., str] | None = None
+        #: Told when Review was left alone; the page's toast.
+        self.on_review_held: Callable[[str], None] | None = None
         self._journal_restart()
 
     # ── recipe journals ──────────────────────────────────────────────────
@@ -643,11 +649,37 @@ class QueueBridge(QObject):
         )
         self._journal(finished, "finished", ok=ok, cancelled=cancelled, message=message,
                       wrote=produced.get("dataset_root") or produced.get("out_dir"))
+        if ok and finished is not None and (finished.recipe or {}).get("open_result"):
+            self._open_result(finished, produced.get("dataset_root") or "")
         self._save()
         self.queueChanged.emit()
         if cancelled:
             self.pause()
         self._advance()
+
+    def _open_result(self, job: JobSpec, root_path: str) -> None:
+        """Hand a recipe run's analysed result to Review, as its recipe asked.
+
+        The shell decides whether the window moves (``review_hook``, installed
+        by ``DatasetsTab`` from ``AllWellApp._show_result_in_review``). What
+        happened is said on the job's row and in the run's journal; when Review
+        was left alone because someone was reading it, a toast says the result
+        is ready too (``on_review_held``)."""
+        root = reviewable_root(root_path)
+        if root is None:
+            text = NOT_REVIEWABLE.format(path=root_path or "(nothing reported)")
+            outcome = ""
+        elif self.review_hook is None:
+            text, outcome = "Not opened in Review: Review isn't available here.", ""
+        else:
+            outcome = self.review_hook(root, when_idle=True)
+            text = OUTCOME_MESSAGES.get(
+                outcome, "Not opened in Review: Review isn't available right now.").format(
+                    root=root)
+        job.message = f"{job.message} · {text}" if job.message else text
+        self._journal(job, "status", message=text)
+        if outcome == "held" and self.on_review_held is not None:
+            self.on_review_held(text)
 
     def _input_layouts(self, job: JobSpec) -> list[dict | None]:
         """What each of *job*'s inputs' source jobs recorded about its files.
@@ -745,6 +777,7 @@ class JobQueueController(QObject):
             self.bridge, state_dir=state_dir,
             notify=lambda text, kind="warn": self._notify(text, kind),
             parent_widget=lambda: self.page.window())
+        self.bridge.on_review_held = lambda text: self._notify(text, "warn")
         self.page.saveRecipeRequested.connect(self._on_save_recipe)
         self.page.applyRecipeRequested.connect(self._on_apply_recipe)
         self.page.manageRecipesRequested.connect(lambda: self._show_recipe_run(""))

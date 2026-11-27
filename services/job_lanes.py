@@ -53,12 +53,11 @@ _READ_KEYS = {
     "nd2_import": ("source",),
     "import_loose": ("source",),
     "watch_folder": ("folder",),
-    "open_in_review": ("dataset",),
 }
 
 #: Kinds that read and never write. A watch only lists its folder; counting
 #: the folder as written would hold every job that merely reads it back.
-_READ_ONLY_KINDS = frozenset({"watch_folder", "open_in_review"})
+_READ_ONLY_KINDS = frozenset({"watch_folder"})
 
 
 def run_lane(kind: str, spec: dict | None) -> str:

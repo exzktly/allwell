@@ -1,10 +1,10 @@
-"""The Recipes page, recipe sharing, run summaries, and the Open in Review step.
+"""The Recipes and Runs tabs, recipe sharing, run summaries, and a recipe's
+"open the result in Review".
 
-The page tests build the real ``DatasetsTab`` and drive the page the way a
-user would, answering its questions through the controller's seams. The
-review-step tests use the real controller with a stand-in for the shell's
-hand-off, and drive it through a real ``QueueBridge`` after a job that reports
-an analysed dataset — the chain the step exists for.
+The page tests build the real ``DatasetsTab`` and drive the tabs the way a
+user would, answering their questions through the controller's seams. The
+review tests drive a real ``QueueBridge`` through a recipe run whose Analyze
+step reports an analysed dataset, with a stand-in for the shell's hand-off.
 """
 
 from __future__ import annotations
@@ -19,11 +19,10 @@ from PySide6.QtCore import QObject, Signal
 
 from core.user_activity import review_hand_off
 from datasets.job_queue.controller import QueueBridge
-from datasets.open_in_review.controller import OpenInReviewController
-from datasets.open_in_review.open_in_review_compute import reviewable_root
+from datasets.job_queue.review_handoff import reviewable_root
 from services import recipe_journal
 from services.job_kinds import CHAIN_KIND
-from services.job_queue import ChainLink, JobQueue, JobSpec, JobState
+from services.job_queue import JobQueue, JobSpec, JobState
 from services.job_recipes import (
     RecipeError,
     export_json,
@@ -39,10 +38,10 @@ def _chain(root: str) -> list[JobSpec]:
     q.add(JobSpec(id="w", kind="watch_folder", label="w", spec={"folder": root}))
     q.add(JobSpec(id="c", kind="nd2_import", label="c", spec={
         "source": f"{root}/run7.nd2", "destination": f"{root}_dataset"}))
-    q.add(JobSpec(id="r", kind="open_in_review", label="r",
-                  spec={"dataset": f"{root}_dataset"}))
+    q.add(JobSpec(id="a", kind="analyze", label="a",
+                  spec={"opts": {"raw": f"{root}_dataset"}}))
     q.set_link("c", "source", "w", kind=CHAIN_KIND)
-    q.set_link("r", "dataset", "c", kind=CHAIN_KIND)
+    q.set_link("a", "opts.raw", "c", kind=CHAIN_KIND)
     return q.jobs
 
 
@@ -143,7 +142,7 @@ def test_the_page_shows_a_recipe_s_steps_in_words(tab, tmp_path, monkeypatch):
     assert steps[0].startswith("1. Watch folder — ‹input› · settled after")
     assert steps[1] == ("2. Convert ND2 — ‹input›/run7.nd2 → ‹input's folder›/‹input name›_dataset"
                         " — source from step 1")
-    assert steps[2].startswith("3. Open in Review — ") and steps[2].endswith("dataset from step 2")
+    assert steps[2].startswith("3. Analyze — ") and steps[2].endswith("input from step 2")
 
 
 def test_applying_from_the_page_lists_the_run_and_its_log(tab, tmp_path, monkeypatch):
@@ -154,7 +153,7 @@ def test_applying_from_the_page_lists_the_run_and_its_log(tab, tmp_path, monkeyp
     monkeypatch.setattr(queue.recipes, "_ask_input", lambda recipe: str(run8))
     recipes.page.button("apply").click()
     jobs = queue.bridge.queue.jobs
-    assert [j.kind for j in jobs] == ["watch_folder", "nd2_import", "open_in_review"]
+    assert [j.kind for j in jobs] == ["watch_folder", "nd2_import", "analyze"]
     # The jobs it added are what to look at next.
     assert tab._automation.current_tab() == "Queue"
     run = jobs[0].recipe["run"]
@@ -217,7 +216,7 @@ def test_a_rename_to_a_taken_name_is_refused(tab, tmp_path, monkeypatch):
     assert recipes is not None
 
 
-# ── Open in Review ────────────────────────────────────────────────────────────
+# ── "open the result in Review" ───────────────────────────────────────────────
 
 def test_only_an_analysed_dataset_is_reviewable(tmp_path):
     (tmp_path / "done" / "out").mkdir(parents=True)
@@ -229,7 +228,7 @@ def test_only_an_analysed_dataset_is_reviewable(tmp_path):
 
 
 @pytest.mark.parametrize("when_idle, idle, on_review, outcome", [
-    (False, False, True, "switched"),     # pressed by a person
+    (False, False, True, "switched"),     # asked by a person
     (True, True, True, "switched"),       # nobody is using the app
     (True, False, False, "loaded"),       # busy in Analyze or Datasets
     (True, False, True, "held"),          # reading Review itself
@@ -239,57 +238,51 @@ def test_the_hand_off_moves_the_window_only_when_nobody_is_using_it(
     assert review_hand_off(when_idle=when_idle, idle=idle, on_review=on_review) == outcome
 
 
+def test_apply_marks_only_the_last_analyze_step_and_only_when_asked(tab, tmp_path, monkeypatch):
+    _quiet(tab, monkeypatch)
+    _with_recipe(tab, tmp_path)
+    queue = tab._controllers["job_queue"]
+    monkeypatch.setattr(queue.recipes, "_ask_input", lambda recipe: str(tmp_path / "run8"))
+    queue.recipes.apply("Nightly")
+    assert [bool(j.recipe.get("open_result")) for j in queue.bridge.queue.jobs] == [
+        False, False, False]
+    assert queue.recipes.set_open_result("Nightly", True)
+    queue.recipes.apply("Nightly")
+    assert [bool(j.recipe.get("open_result")) for j in queue.bridge.queue.jobs[3:]] == [
+        False, False, True]
+
+
+def test_the_checkbox_is_saved_with_the_recipe(tab, tmp_path, monkeypatch):
+    from services.job_recipes import load_recipes
+
+    _quiet(tab, monkeypatch)
+    recipes = _with_recipe(tab, tmp_path)
+    box = recipes.page.open_result_box()
+    assert box.isEnabled() and not box.isChecked()
+    box.setChecked(True)
+    assert load_recipes(tmp_path / "state")[0].open_result is True
+    # And it travels with an export.
+    data = export_json(load_recipes(tmp_path / "state")[0])
+    assert import_json(json.loads(json.dumps(data))).open_result is True
+
+
+def test_without_an_analyze_step_there_is_nothing_to_open(tab, tmp_path, monkeypatch):
+    _quiet(tab, monkeypatch)
+    q = JobQueue()
+    q.add(JobSpec(id="w", kind="watch_folder", label="w", spec={"folder": str(tmp_path / "r7")}))
+    save_recipes([recipe_from_chain("Watch only", q.jobs, "w")], tmp_path / "state")
+    actions = tab._controllers["job_queue"].recipes
+    actions._recipes = __import__("services.job_recipes", fromlist=["x"]).load_recipes(
+        tmp_path / "state")
+    actions._changed()
+    assert not tab._controllers["recipes"].page.open_result_box().isEnabled()
+
+
 def _analysed(tmp_path, name="run8_dataset"):
     root = tmp_path / name
     (root / "out").mkdir(parents=True)
     (root / "out" / "pipeline_info.json").write_text("{}")
     return root
-
-
-def test_a_queued_step_asks_politely_and_reports_what_happened(qtbot, tmp_path):
-    root = _analysed(tmp_path)
-    calls: list = []
-    controller = OpenInReviewController(
-        show_in_review=lambda path, when_idle: calls.append((path, when_idle)) or "loaded")
-    with qtbot.waitSignal(controller.jobFinished) as blocker:
-        controller.start_from_queue({"dataset": str(root)})
-    assert calls == [(root, True)]
-    ok, message, path = blocker.args
-    assert ok and path == str(root)
-    assert message.startswith(f"Loaded {root} in Review. You were using the app")
-
-
-def test_the_page_button_always_switches(qtbot, tmp_path):
-    root = _analysed(tmp_path)
-    calls: list = []
-    controller = OpenInReviewController(
-        show_in_review=lambda path, when_idle: calls.append(when_idle) or "switched")
-    controller.show_job({"dataset": str(root)})
-    controller.page._run_btn.click()
-    assert calls == [False]
-
-
-def test_a_conversion_s_output_is_refused_not_shown(qtbot, tmp_path):
-    (tmp_path / "converted" / "in").mkdir(parents=True)
-    calls: list = []
-    controller = OpenInReviewController(show_in_review=lambda *a, **k: calls.append(a))
-    with qtbot.waitSignal(controller.jobFinished) as blocker:
-        controller.start_from_queue({"dataset": str(tmp_path / "converted")})
-    ok, message, _path = blocker.args
-    assert not ok and calls == []
-    assert "has no analysed results" in message
-
-
-def test_review_left_alone_says_so_and_still_succeeds(qtbot, tmp_path, monkeypatch):
-    root = _analysed(tmp_path)
-    controller = OpenInReviewController(show_in_review=lambda *a, **k: "held")
-    toasts: list = []
-    monkeypatch.setattr(controller, "_toast", toasts.append)
-    with qtbot.waitSignal(controller.jobFinished) as blocker:
-        controller.start_from_queue({"dataset": str(root)})
-    ok, message, _path = blocker.args
-    assert ok and message.startswith("Review was in use")
-    assert toasts == [message]
 
 
 class _Analyze(QObject):
@@ -308,24 +301,60 @@ class _Analyze(QObject):
         return False
 
 
-def test_in_a_chain_it_opens_what_analyze_wrote(qtbot, tmp_path):
-    root = _analysed(tmp_path)
+def _run_analyze(tmp_path, *, open_result: bool, outcome: str = "loaded", report=None):
     bridge = QueueBridge(state_dir=tmp_path / "state")
     analyze = _Analyze()
     calls: list = []
-    review = OpenInReviewController(
-        show_in_review=lambda path, when_idle: calls.append((path, when_idle)) or "switched")
+    held: list = []
+    bridge.review_hook = lambda root, when_idle: calls.append((root, when_idle)) or outcome
+    bridge.on_review_held = held.append
     bridge.register("analyze", analyze)
-    bridge.register("open_in_review", review)
+    recipe = {"run": "r9", "name": "N", "input": "/x", "step": 0, "steps": 1}
+    if open_result:
+        recipe["open_result"] = True
     bridge.add_job(JobSpec(id="a", kind="analyze", label="a",
-                           spec={"opts": {"raw": "/planned/in"}}))
-    bridge.add_job(JobSpec(id="r", kind="open_in_review", label="r",
-                           spec={"dataset": "/planned"}),
-                   [ChainLink("a", "dataset", CHAIN_KIND)])
+                           spec={"opts": {"raw": "/planned/in"}}, recipe=recipe))
     bridge.start()
-    analyze.jobFinished.emit(True, "", str(root / "out"))
-    qtbot.waitUntil(lambda: bridge.queue.get("r").state == JobState.SUCCEEDED, timeout=2000)
+    analyze.jobFinished.emit(True, "done", report)
+    return bridge, calls, held
+
+
+def test_a_finished_analysis_is_opened_when_the_recipe_asks(tmp_path, qtbot):
+    root = _analysed(tmp_path)
+    bridge, calls, held = _run_analyze(tmp_path, open_result=True, report=str(root / "out"))
     assert calls == [(root, True)]
+    job = bridge.queue.get("a")
+    assert job.state == JobState.SUCCEEDED
+    assert job.message == f"done · Loaded {root} in Review. You were using the app, so " \
+                          "the window stayed where it was — switch to Review to see it."
+    statuses = [e["message"] for e in recipe_journal.read_events("r9", tmp_path / "state")
+                if e["event"] == "status"]
+    assert statuses == [f"Loaded {root} in Review. You were using the app, so the window "
+                        "stayed where it was — switch to Review to see it."]
+    assert held == []
+
+
+def test_review_left_alone_says_the_result_is_ready(tmp_path, qtbot):
+    root = _analysed(tmp_path)
+    _bridge, _calls, held = _run_analyze(tmp_path, open_result=True, outcome="held",
+                                         report=str(root / "out"))
+    assert held == [f"Review was in use, so it was left as it was. The result is ready "
+                    f"to open: {root}"]
+
+
+def test_nothing_is_opened_unless_the_recipe_asked(tmp_path, qtbot):
+    root = _analysed(tmp_path)
+    _bridge, calls, _held = _run_analyze(tmp_path, open_result=False, report=str(root / "out"))
+    assert calls == []
+
+
+def test_a_result_with_nothing_analysed_is_said_not_opened(tmp_path, qtbot):
+    (tmp_path / "half" / "out").mkdir(parents=True)
+    bridge, calls, _held = _run_analyze(tmp_path, open_result=True,
+                                        report=str(tmp_path / "half" / "out"))
+    assert calls == []
+    assert "Not opened in Review" in bridge.queue.get("a").message
+    assert "holds no analysed results" in bridge.queue.get("a").message
 
 
 def test_a_retried_step_no_longer_offers_what_it_wrote_before(tmp_path):

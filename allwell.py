@@ -626,7 +626,7 @@ class AllWellApp(QMainWindow):
         )
         self._review.mountDatasetsPane(self._datasets)
         self._install_mode_bar_sync()
-        # Noted from launch, so a queued Open in Review step can tell whether
+        # Noted from launch, so a recipe opening its result in Review can tell whether
         # someone is using the app before it moves the window.
         _user_activity.install()
 
@@ -2059,9 +2059,9 @@ class AllWellApp(QMainWindow):
         QTimer.singleShot(delay_ms, lambda: _gui_busy.after_busy("review_dataset_load", _load))
 
     def _show_result_in_review(self, dataset_path: Path, *, when_idle: bool) -> str:
-        """Load a finished result into Review for an **Open in Review** step.
+        """Load a recipe run's finished result into Review, as its recipe asked.
 
-        *when_idle* is the queued step's manners: the window moves to Review
+        *when_idle* is the unattended hand-off's manners: the window moves to Review
         only if nobody is using the app (``core.user_activity``). Someone
         working in Analyze or Datasets keeps their pane and the result loads
         behind them; someone looking at another dataset in Review is left

@@ -74,7 +74,6 @@ ROOT_INPUT = {
     "subset": "source",
     "concatenate": "dataset1",
     "merge_plates": "dataset1",
-    "open_in_review": "dataset",
 }
 
 #: The kinds whose input is one file rather than a folder, so applying a
@@ -142,6 +141,15 @@ class Recipe:
     notes: list[str] = field(default_factory=list)
     #: The input the recipe was saved from, kept to describe it.
     saved_from: str = ""
+    #: Open the result in Review when the last Analyze step finishes
+    #: (``datasets.job_queue.review_handoff``). Set on the Recipes tab.
+    open_result: bool = False
+
+    def result_step(self) -> int | None:
+        """The step whose result :attr:`open_result` opens: the last Analyze
+        step, or ``None`` for a recipe with none."""
+        steps = [i for i, step in enumerate(self.steps) if step.kind == "analyze"]
+        return steps[-1] if steps else None
 
     @property
     def root_kind(self) -> str:
@@ -161,14 +169,16 @@ class Recipe:
 
     def to_json(self) -> dict:
         return {"name": self.name, "steps": [s.to_json() for s in self.steps],
-                "notes": list(self.notes), "saved_from": self.saved_from}
+                "notes": list(self.notes), "saved_from": self.saved_from,
+                "open_result": self.open_result}
 
     @classmethod
     def from_json(cls, data: dict) -> Recipe:
         return cls(name=str(data["name"]),
                    steps=[RecipeStep.from_json(d) for d in data.get("steps") or []],
                    notes=[str(n) for n in data.get("notes") or []],
-                   saved_from=str(data.get("saved_from") or ""))
+                   saved_from=str(data.get("saved_from") or ""),
+                   open_result=bool(data.get("open_result", False)))
 
 
 # ── templating ───────────────────────────────────────────────────────────────

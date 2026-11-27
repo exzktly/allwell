@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QLabel,
     QListWidget,
@@ -49,6 +50,8 @@ class RecipesPage(QWidget):
 
     recipeSelected = Signal(str)
     showRunsRequested = Signal(str)
+    #: (recipe name, on) — "open the result in Review" toggled.
+    openResultToggled = Signal(str, bool)
     applyRequested = Signal(str)
     renameRequested = Signal(str)
     duplicateRequested = Signal(str)
@@ -155,6 +158,23 @@ class RecipesPage(QWidget):
         self._notes.setWordWrap(True)
         dl.addWidget(self._notes)
 
+        self._open_result = QCheckBox(
+            "Open the result in Review when the last Analyze step finishes", self._detail)
+        self._open_result.setObjectName("RecipeOpenResult")
+        self._open_result.setToolTip(
+            "Switches to Review only if nobody is using the app at that moment. "
+            "If you are working in another pane, the result loads in Review behind "
+            "you; if you are reading another dataset in Review, it is left alone and "
+            "the run says the result is ready. Applies to runs applied from now on.")
+        self._open_result.toggled.connect(
+            lambda on: self.openResultToggled.emit(self._current, on))
+        dl.addWidget(self._open_result)
+        self._open_result_note = QLabel(
+            "This recipe has no Analyze step, so there is no result to open.", self._detail)
+        self._open_result_note.setObjectName("Muted")
+        self._open_result_note.setWordWrap(True)
+        dl.addWidget(self._open_result_note)
+
         dl.addWidget(_hrule(self._detail))
         self._runs_line = QLabel("", self._detail)
         self._runs_line.setObjectName("Muted")
@@ -201,6 +221,18 @@ class RecipesPage(QWidget):
         self._steps.setText("\n".join(f"{i + 1}. {line}" for i, line in enumerate(steps)))
         self._notes.setText(" ".join(notes))
         self._notes.setVisible(bool(notes))
+
+    def set_open_result(self, on: bool, available: bool) -> None:
+        """The checkbox's state for the selected recipe, without echoing it
+        back as a toggle; *available* is whether it has an Analyze step."""
+        self._open_result.blockSignals(True)
+        self._open_result.setChecked(bool(on) and available)
+        self._open_result.blockSignals(False)
+        self._open_result.setEnabled(available)
+        self._open_result_note.setVisible(not available)
+
+    def open_result_box(self) -> QCheckBox:
+        return self._open_result
 
     def set_runs_line(self, text: str, has_runs: bool) -> None:
         """One line about the selected recipe's runs, and whether to offer them."""

@@ -59,7 +59,6 @@ to add features, how to debug, and build / environment troubleshooting), see
      [Zip Loose Folder](#zip-loose-folder) ·
      [Merge Plates](#merge-plates) ·
      [Watch Folder](#watch-folder) ·
-     [Open in Review](#open-in-review) ·
      [Automation](#automation): [Job Queue](#job-queue) · [Recipes](#recipes)
 7. [Using All-Well from a phone](#using-all-well-from-a-phone)
 7. [Statistics primer: Rare responders](#statistics-primer-rare-responders) — the reasoning behind the
@@ -10835,30 +10834,6 @@ as one plate, as it does when you pick a folder on its page. **Zip Loose
 Folder** can take the watched folder as its source in the same way, for loose
 TIFs.
 
-### Open in Review
-
-Shows an analysed dataset in Review. On its own it is a shortcut — choose the
-folder and press **▶ Open in Review**. Its real use is as the **last step of a
-chain or a recipe**: queue it after Analyze (from Analyze's row, **New job
-using this output ▸ Open in Review…**) and the finished result is put in front
-of you without your having to go and find it.
-
-Because it runs unattended, a queued step is careful about your window:
-
-- **Nobody is using the app** (no key or mouse input for two minutes, or
-  another application is in front): it loads the result and switches to
-  Review.
-- **You are working in Analyze or Datasets**: it loads the result in Review
-  behind you and leaves the window where it is; the title bar shows the new
-  dataset, and the step's row says so.
-- **You are reading another dataset in Review**: it leaves Review alone, since
-  loading would replace what you are looking at, and says the result is ready
-  — on screen and on the step's row — so you can open it here when you are done.
-
-The folder must hold an analysed dataset (`out/pipeline_info.json`, which
-Analyze writes last). Pointed at a conversion's output, the step fails and
-says there is nothing to show yet, rather than opening an empty plate.
-
 ### Automation
 
 Everything about running work unattended is on one page, **Automation**, in
@@ -11040,6 +11015,20 @@ holds the jobs a plan becomes, and the Runs tab what each use of one did.
   name as yours is imported as "*name* (2)" rather than replacing it, and a
   file from a newer version of All-Well, or one that is damaged, is refused
   with the reason.
+- **Open the result in Review when the last Analyze step finishes** — tick
+  it, and every run applied from then on puts its analysed result in front of
+  you when it is ready, carefully, since nobody may be expecting it:
+  - **nobody is using the app** (no key or mouse input for two minutes, or
+    another application is in front): it loads the result and switches to
+    Review;
+  - **you are working in Analyze or Datasets**: it loads the result in Review
+    behind you and leaves the window where it is;
+  - **you are reading another dataset in Review**: it leaves Review alone,
+    since loading would replace what you are reading, and says the result is
+    ready — on screen, on the Analyze job's row and in the run's log.
+
+  What it did is written on the Analyze job's row and in the run's log. A
+  recipe with no Analyze step has nothing to open, and the box is greyed out.
 - Under the steps, how often the recipe was applied and how its last run
   stands; **Show runs** opens the Runs tab filtered to it.
 

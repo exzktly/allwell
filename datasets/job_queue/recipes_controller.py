@@ -59,6 +59,7 @@ class RecipesController(QObject):
         self.page.deleteRequested.connect(self._actions.delete)
         self.page.importRequested.connect(self._on_import)
         self.page.showRunsRequested.connect(self.show_runs_of)
+        self.page.openResultToggled.connect(self._actions.set_open_result)
 
         self.runs_page = RunsPage()
         self.runs_page.filterChanged.connect(lambda _name: self._refresh_runs())
@@ -100,6 +101,7 @@ class RecipesController(QObject):
         origin = (f"{recipe.summary()} · saved from {recipe.saved_from}"
                   if recipe.saved_from else recipe.summary())
         self.page.show_recipe(recipe.name, origin, lines, recipe.notes)
+        self.page.set_open_result(recipe.open_result, recipe.result_step() is not None)
         self._show_runs_line(name)
 
     def _show_runs_line(self, name: str) -> None:

@@ -124,6 +124,5 @@ DATASETS_PAGE_HELP: dict[str, str] = {
     "Zip Loose Folder": "Zip Loose Folder",
     "Merge Plates": "Merge Plates",
     "Watch Folder": "Watch Folder",
-    "Open in Review": "Open in Review",
     "Automation": "Automation",
 }

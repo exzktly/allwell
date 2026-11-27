@@ -43,7 +43,7 @@ from widgets.owned_action import owned_action
 # the Datasets tools in the order their own rail lists them.
 ADD_KINDS = ("analyze", "concatenate", "ome_import", "czi_import",
              "nd2_import", "validate",
-             "subset", "import_loose", "merge_plates", "watch_folder", "open_in_review")
+             "subset", "import_loose", "merge_plates", "watch_folder")
 
 _STATE_WORD = {
     JobState.PENDING: "pending",

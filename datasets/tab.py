@@ -45,14 +45,13 @@ from datasets.ome_import.controller import OmeImportController
 from datasets.subset.controller import SubsetController
 from datasets.validate.controller import ValidateController
 from datasets.watch_folder.controller import WatchFolderController
-from datasets.open_in_review.controller import OpenInReviewController
 
 # Kinds a Datasets controller can queue itself under — registered against the
 # Job Queue page once every controller (including Analyze, injected from
 # outside) has been built.
 _QUEUEABLE_KINDS = ("concatenate", "ome_import", "czi_import", "nd2_import",
                     "validate", "subset", "import_loose", "merge_plates",
-                    "watch_folder", "open_in_review")
+                    "watch_folder")
 
 
 @dataclass(frozen=True)
@@ -134,13 +133,6 @@ def _build_watch_folder(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None]
     return controller.page, controller.shutdown
 
 
-def _build_open_in_review(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
-    controller = OpenInReviewController(
-        show_in_review=tab._on_show_in_review, on_add_to_queue=tab._add_to_queue)
-    tab._controllers["open_in_review"] = controller
-    return controller.page, controller.shutdown
-
-
 def _build_automation(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
     """Automation: the Job Queue, Recipes and Runs as tabs of one page.
 
@@ -167,6 +159,9 @@ def _build_automation(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] |
         return True
 
     queue.set_recipes_page_hook(show_run)
+    # A recipe's "open the result in Review": the shell's hand-off, which moves
+    # the window only when nobody is using the app.
+    queue.bridge.review_hook = tab._on_show_in_review
     tab._controllers["recipes"] = recipes
     tab._automation = page
     return page, queue_teardown
@@ -260,8 +255,6 @@ _FEATURES: tuple[_Feature, ...] = (
              kind="merge_plates"),
     _Feature(name="Watch Folder", icon="eye", build=_build_watch_folder,
              kind="watch_folder"),
-    _Feature(name="Open in Review", icon="bar-chart-3", build=_build_open_in_review,
-             kind="open_in_review"),
     _Feature(name="Automation", icon="waypoints", build=_build_automation),
 )
 
@@ -285,7 +278,7 @@ class DatasetsTab(QWidget):
         self._on_open_in_review = on_open_in_review
         self._on_open_in_analyze = on_open_in_analyze
         # "Load this finished result in Review, moving the window only if
-        # nobody is using the app" — the queued Open in Review step's hand-off
+        # nobody is using the app" — a recipe's open-the-result hand-off
         # (AllWellApp._show_result_in_review). None without a shell.
         self._on_show_in_review = on_show_in_review
         # "Switch to the Analyze pane, change nothing on it." Analyze is the one

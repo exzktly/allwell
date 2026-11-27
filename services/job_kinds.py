@@ -40,7 +40,6 @@ KIND_LABEL = {
     "import_loose": "Zip loose",
     "merge_plates": "Merge plates",
     "watch_folder": "Watch folder",
-    "open_in_review": "Open in Review",
 }
 
 # What a chained successor is always handed. Every tool here — Analyze
@@ -146,7 +145,6 @@ CHAIN_TARGET = {
     "validate": "dataset",
     "subset": "source",
     "merge_plates": "dataset1",
-    "open_in_review": "dataset",
 }
 
 # Every input an earlier job's output can fill, in the order a user reads them,
@@ -160,7 +158,6 @@ INPUT_TARGETS = {
     "validate": (("dataset", "Dataset"),),
     "subset": (("source", "Source"),),
     "merge_plates": (("dataset1", "Dataset 1"), ("dataset2", "Dataset 2")),
-    "open_in_review": (("dataset", "Dataset"),),
 }
 
 
@@ -251,8 +248,6 @@ def planned_output(kind: str, spec: dict) -> str | None:
         value = _get("dataset")
     elif kind == "watch_folder":
         value = _get("folder")
-    elif kind == "open_in_review":
-        value = _get("dataset")
     elif kind in (*CONVERTER_KINDS, "merge_plates"):
         value = _get("destination")
     else:
@@ -273,7 +268,6 @@ _DESCRIBE_KEYS = {
     "import_loose": (("source",), "destination"),
     "merge_plates": (("dataset1", "dataset2"), "destination"),
     "watch_folder": (("folder",), None),
-    "open_in_review": (("dataset",), None),
 }
 
 

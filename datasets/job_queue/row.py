@@ -71,7 +71,6 @@ KIND_ICON = {
     "import_loose": "download",
     "merge_plates": "layout-grid",
     "watch_folder": "eye",
-    "open_in_review": "bar-chart-3",
 }
 
 #: The tools a dataset can be handed to next, derived from what each kind

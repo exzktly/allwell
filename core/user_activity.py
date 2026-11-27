@@ -1,7 +1,7 @@
 """When did the person at the computer last use the app?
 
 Unattended work sometimes wants to put something in front of the user — a
-queued **Open in Review** step showing a finished analysis — and doing it
+recipe run opening its finished analysis in Review — and doing it
 while they are typing in another pane takes the window out from under them.
 :class:`UserActivity` is an application-wide event filter that notes the time
 of the last key press, mouse press or wheel turn in any of the app's windows,

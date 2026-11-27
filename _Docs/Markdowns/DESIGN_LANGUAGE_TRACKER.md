@@ -556,7 +556,20 @@ Step log (newest last):
 16. D15 (part) Statistics band one row: the "Replicates: …" readout (`_stats_fov_indicator`) is a help line at the top
     of the page body. New `tests/test_review_bands_are_one_row.py` (fast lane, through `tests/_minimal_shell`) measures
     the band at 1400 and 1284 px and finds the readout under it; putting it back on the band fails it (`{1400: ['needs
-    …']}`). `DESIGN_PENDING` entry removed. 580 Statistics tests green.
+    …']}`). `DESIGN_PENDING` entry removed. 580 Statistics tests green. Commit `d7c4234`.
+17. D15 Spatial and Multivariate bands one row (1400 and 1284 px): Lasso cells is a tool under each figure
+    (`card.toolbar.add_group`); Spatial's Recompute and Multivariate's Standardize are on a new Display page each
+    (`make_popover_button("Display", root=True)`, which `finish_band` now finds instead of a disabled placeholder).
+    Their bands were still 49 px high after that: a `SegmentedControl` (Level, Mode) is 33 px at a form's height,
+    against the band's 28 px row. **Shared change:** `ControlBand.add_scope` now makes every segmented control it
+    holds compact (`SegmentedControl.setCompact`: 2 px padding, 1 px track), so a band is one height on every page —
+    this touches every segmented control in any band (Nanowells' Along x, Positions, …). Tests:
+    `tests/test_review_bands_are_one_row.py` (one row, Lasso under the figure and not on the band, the segmented
+    control at the row height) and `tests/test_band_panels_open_in_the_inspector.py` (Spatial and Multivariate in
+    its roster; the moved control is in the inspector after pressing Display). Mutations: Lasso back on Spatial's
+    band fails the one-row case. Found on the way: `band_is_one_row(window)` walks every widget of the window and
+    in the fast lane leaves wrappers the reaper deletes twice — a segfault in the next test — so the fast-lane test
+    measures the bands `build_page` returns. `DESIGN_PENDING` entries removed. Next: fast lane (shared widget).
 
 ## 10. Rows
 

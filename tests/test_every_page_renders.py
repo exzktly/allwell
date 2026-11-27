@@ -52,7 +52,6 @@ KNOWN: dict[tuple[str, str, str, str], str] = {}
 #: fails on an entry no case finds any more.
 DESIGN_PENDING: dict[tuple[str, str], str] = {
     ("Image Browser/Segmentation", "band rows"): "D18",
-    ("Multivariate", "band rows"): "D15",
     ("Nanowells/Array", "band rows"): "D16",
     ("Nanowells/Distribution", "band rows"): "D16",
     ("Nanowells/Extremes", "band rows"): "D16",
@@ -67,7 +66,6 @@ DESIGN_PENDING: dict[tuple[str, str], str] = {
     ("Plotting/Line Graphs", "band rows"): "D14",
     ("Plotting/Response Curves", "band rows"): "D14",
     ("Plotting/Scatter Plot", "band rows"): "D14",
-    ("Spatial", "band rows"): "D15",
 }
 
 def _design_key(page: str, check: str) -> tuple[str, str]:

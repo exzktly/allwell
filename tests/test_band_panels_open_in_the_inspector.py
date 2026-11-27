@@ -28,7 +28,8 @@ PANELS = {
     "Response Curves": [("Fit", "data", False), ("Fold change", "data", False),
                         ("Display", "display", True)],
     "Heat Map": [("Layout", "data", False), ("Display", "display", True)],
-    "Multivariate": [("Features", "data", False)],
+    "Multivariate": [("Features", "data", False), ("Display", "display", True)],
+    "Spatial": [("Display", "display", True)],
     "smFISH": [("Display", "display", True)],
 }
 
@@ -79,7 +80,7 @@ def test_each_panel_button_opens_its_panel_in_the_inspector(name, qtbot, mini_da
 
 def test_a_row_reads_its_value_and_ends_in_a_chevron(qtbot, mini_dataset):
     ctx, window, _frame, _bands = build_page(qtbot, "Multivariate", mini_dataset)
-    (features,) = _buttons(ctx, window)
+    (features,) = [b for b in _buttons(ctx, window) if panels.panel_of(b).title == "Features"]
     assert features.text().endswith("›") and "▾" not in features.text()
     assert features.menu() is None
 
@@ -92,7 +93,7 @@ def test_multivariate_features_is_the_one_multi_select_and_a_tick_reaches_the_ma
     from widgets.multi_select import MultiSelect
 
     ctx, window, _frame, _bands = build_page(qtbot, "Multivariate", mini_dataset)
-    (features,) = _buttons(ctx, window)
+    (features,) = [b for b in _buttons(ctx, window) if panels.panel_of(b).title == "Features"]
     st = ctx.state.feature_slice("multivariate")
     features.click()
     picker = ctx.widgets.get("_mv_feature_list")
@@ -314,3 +315,18 @@ def test_smfish_display_holds_the_frame_s_drawing_controls_and_the_overlay_switc
     switch.click()
     QApplication.processEvents()
     assert bool(ctx.state.smfish.show_overlays) is (not before)
+
+
+@pytest.mark.parametrize("name, moved", [("Spatial", "_sp_recompute_btn"), ("Multivariate", "_mv_standardize_cb")])
+def test_a_map_page_s_display_page_holds_what_left_its_band(qtbot, mini_dataset, name, moved):
+    """Spatial's Recompute and Multivariate's Standardize left the band for the Display page (the user's decision,
+    tracker §9.1 step 15); pressed where the user now finds them."""
+    ctx, window, _frame, _bands = build_page(qtbot, name, mini_dataset)
+    (display,) = [b for b in _buttons(ctx, window) if panels.panel_of(b).root]
+    display.click()
+    QApplication.processEvents()
+    widget = ctx.widgets.get(moved)
+    assert svc.inspector(ctx).isAncestorOf(widget) and widget.isVisibleTo(window), f"{moved} is not on Display"
+    display.click()
+    QApplication.processEvents()
+    svc.close(ctx)

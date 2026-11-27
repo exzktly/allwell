@@ -86,7 +86,9 @@ class _Segment(QToolButton):
         iw = self.iconSize().width() if self.icon() is not None and not self.icon().isNull() else 0
         spacing = 6 if (iw and tw) else 0
         pad_h = 22   # 10 left + 10 right + 2 border slack (matches QSS padding 5x10).
-        pad_v = 14
+        # Compact (a control band's row): QSS padding 2 px top and bottom, plus the border.
+        group = self.parentWidget()
+        pad_v = 6 if group is not None and bool(group.property("compact")) else 14
         return QSize(tw + iw + spacing + pad_h,
                      fm.height() + pad_v)
 
@@ -171,6 +173,21 @@ class SegmentedControl(QWidget):
         self._group.idClicked.connect(self._on_clicked)
 
     # ── API ──────────────────────────────────────────────────────────────
+    def setCompact(self, compact: bool) -> None:  # noqa: N802 — Qt naming
+        """Draw at a control band's row height (``ControlBand.ROW_H``) rather than a form's: thinner padding and a
+        one-pixel track. A band makes every segmented control it holds compact, so a band is one height on every
+        page whatever it holds."""
+        compact = bool(compact)
+        self.setProperty("compact", compact)
+        pad = 1 if compact else max(2, round(theme.Spacing.xs / 2))
+        self._layout.setContentsMargins(pad, pad, pad, pad)
+        self._layout.setSpacing(pad)
+        for seg in self._buttons:
+            seg.style().unpolish(seg)
+            seg.style().polish(seg)
+            seg.updateGeometry()
+        self.updateGeometry()
+
     def addSegment(self, text: str = "", icon: QIcon | None = None,
                    data: object | None = None) -> int:
         idx = len(self._buttons)
@@ -307,6 +324,9 @@ def qss() -> str:
         font-weight: {t.medium};
         text-align: center;
         qproperty-toolButtonStyle: ToolButtonTextBesideIcon;
+    }}
+    #SegmentedControl[compact="true"] QToolButton#Segment {{
+        padding: 2px 10px;
     }}
     #SegmentedControl QToolButton#Segment:hover {{
         color: {c.text_primary};

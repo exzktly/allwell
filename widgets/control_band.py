@@ -56,6 +56,16 @@ from widgets.flow_layout import FlowLayout, flow_break, flow_group, sync_flow_he
 _NO_SLOT = object()
 
 
+def _compact_segments(widgets) -> None:
+    """Draw every segmented control among *widgets* at the band's row height (``SegmentedControl.setCompact``): at
+    a form's height one made its band taller than a band is on every other page."""
+    from widgets.segmented_control import SegmentedControl
+
+    for widget in widgets:
+        for seg in ([widget] if isinstance(widget, SegmentedControl) else []) + widget.findChildren(SegmentedControl):
+            seg.setCompact(True)
+
+
 def _fit_checkboxes(widgets) -> None:
     """Floor every checkbox's width to what its own style needs for its label.
 
@@ -232,6 +242,7 @@ class ControlBand(QWidget):
         if not widgets:
             raise ValueError("add_scope needs at least one widget")
         _fit_checkboxes(widgets)
+        _compact_segments(widgets)
         if label:
             cap = QLabel(label, self._scope_host)
             cap.setProperty("textRole", "help")

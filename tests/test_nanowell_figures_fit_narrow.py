@@ -15,6 +15,7 @@ matplotlib.use("agg")
 from matplotlib.backends.backend_agg import FigureCanvasAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
 
+from review.core import figure_fit  # noqa: E402
 from review.features.nanowell import renderer  # noqa: E402
 
 #: A sentence as long as the Identity view's, with a path that has no spaces in it.
@@ -71,17 +72,17 @@ def test_crowded_tick_labels_are_thinned_and_ones_hidden_on_purpose_are_left_alo
     fig.canvas.draw()
     hidden = right.xaxis.get_major_ticks()[1].label1
     hidden.set_visible(False)                      # a renderer's own choice: not the thinning's to undo
-    assert renderer.thin_crowded_ticks(fig, fig.canvas.get_renderer())
+    assert figure_fit.thin_crowded_ticks(fig, fig.canvas.get_renderer())
     renderer_ = fig.canvas.get_renderer()
     shown = [lb.get_window_extent(renderer_) for lb in left.xaxis.get_majorticklabels() if lb.get_visible()]
     assert 1 < len(shown) < 21
     assert all(a.x1 <= b.x0 + 1.0 for a, b in zip(shown, shown[1:]))
     assert not hidden.get_visible()
-    assert not renderer.thin_crowded_ticks(fig, renderer_), "a second pass changed what the first settled"
+    assert not figure_fit.thin_crowded_ticks(fig, renderer_), "a second pass changed what the first settled"
     # Wider, the labels thinned come back.
     fig.set_size_inches(14.0, 2.0)
     fig.canvas.draw()
-    renderer.thin_crowded_ticks(fig, fig.canvas.get_renderer())
+    figure_fit.thin_crowded_ticks(fig, fig.canvas.get_renderer())
     assert all(t.label1.get_visible() for t in left.xaxis.get_major_ticks() if 0 <= t.get_loc() <= 20)
 
 
@@ -140,7 +141,7 @@ def test_crowded_labels_on_the_right_are_thinned_too():
     bar.set_ylim(0, 30)
     bar.set_yticks(range(31))
     fig.canvas.draw()
-    renderer.thin_crowded_ticks(fig, fig.canvas.get_renderer())
+    figure_fit.thin_crowded_ticks(fig, fig.canvas.get_renderer())
     r = fig.canvas.get_renderer()
     shown = sorted((t.label2.get_window_extent(r) for t in bar.yaxis.get_major_ticks() if t.label2.get_visible()),
                    key=lambda b: b.y0)
@@ -154,10 +155,10 @@ def test_a_y_label_left_of_the_figure_moves_the_margin_until_it_is_on():
     fig.subplots_adjust(left=0.01)
     ax.set_ylabel("Cell count", fontsize=14)
     fig.canvas.draw()
-    assert renderer.keep_labels_on_figure(fig, fig.canvas.get_renderer())
+    assert figure_fit.keep_labels_on_figure(fig, fig.canvas.get_renderer())
     fig.canvas.draw()
     assert ax.yaxis.label.get_window_extent(fig.canvas.get_renderer()).x0 >= -0.5
-    assert not renderer.keep_labels_on_figure(fig, fig.canvas.get_renderer()), "it did not settle"
+    assert not figure_fit.keep_labels_on_figure(fig, fig.canvas.get_renderer()), "it did not settle"
 
 
 def test_a_short_figure_keeps_room_for_its_plot_above_the_footer():

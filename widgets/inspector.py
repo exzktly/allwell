@@ -42,7 +42,7 @@ from dataclasses import dataclass, field
 import shiboken6
 from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QLayout, QPushButton, QScrollArea, QSizePolicy,
+    QHBoxLayout, QLabel, QLayout, QScrollArea, QSizePolicy,
     QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
@@ -58,6 +58,10 @@ FORM_KIND = "inspector"
 
 #: What the breadcrumb's parts are joined with.
 CRUMB_SEPARATOR = " › "
+
+
+#: What the ✕ at a panel's top right says in its tooltip and accessible name.
+CLOSE_NAME = "Close"
 
 
 @dataclass
@@ -192,9 +196,11 @@ class Inspector(QWidget):
             lab.setTextFormat(Qt.PlainText)
             titles.addWidget(lab)
         row.addLayout(titles, 1)
-        self.close_button = QPushButton("Close", head)
+        # Close is the ✕ symbol at the top right (design language §3.6), named in its tooltip and accessible name.
+        from widgets.icon_button import IconButton
+        self.close_button = IconButton("x", head, tooltip=CLOSE_NAME)
         self.close_button.setObjectName("InspectorClose")
-        self.close_button.setProperty("variant", "default")
+        self.close_button.setAccessibleName(CLOSE_NAME)
         self.close_button.clicked.connect(lambda _=False: self.closeRequested.emit())
         row.addWidget(self.close_button)
         outer.addWidget(head)

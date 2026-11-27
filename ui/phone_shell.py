@@ -2337,8 +2337,11 @@ class PhoneShell(QObject):
         title = QLabel("", head)
         title.setProperty("role", "heading")
         head_lay.addWidget(title, 1)
-        close = buttons.default("Close", head)
+        # Close is the ✕ symbol at the sheet's top right (design language §3.6), at the touch size.
+        close = buttons.icon_button("x", "Close", head)
         close.setObjectName("PhoneSheetClose")
+        side = self.pt(phone_layout.TOUCH_MIN_PT)
+        close.setMinimumSize(side, side)
         close.clicked.connect(lambda _=False: sheet.close())
         head_lay.addWidget(close)
         body_lay.addWidget(head)

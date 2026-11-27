@@ -1,11 +1,12 @@
-"""A panel closes one way: a button reading **Close**, at its top right.
+"""A panel closes one way: the ✕ symbol at its top right, named Close in its tooltip and accessible name (design
+language §3.6, the user's decision when the menu-and-organisation pull request had made it the word).
 
 The app had four spellings of "close this panel" — the phone strip's buttons
 renaming themselves ``Done ✕`` while their sheet was open and ``Hide
 controls`` while it was docked, a bare ✕ in a panel's own header, and ``Close
 ✕`` at a window's foot. The inspector's header and the Wells sheet's carry the
-one Close now, and the strip's buttons keep their names and show they are open
-by being checked.
+one ✕ now, and the strip's buttons keep their names and show they are open by
+being checked.
 
 Held as text, over every string literal in the application: the retired
 spellings may not come back, and the one that survives — a *window's* close in

@@ -313,7 +313,7 @@ def test_touch_details_in_the_real_window(qapp, win, monkeypatch):
         shell.controls_button.click()
         _pump(qapp)
         assert shell.controls_button.accessibleName() == "Controls" and shell.controls_button.isChecked()
-        assert shell._inspector().close_button.text() == "Close"
+        assert shell._inspector().close_button.accessibleName() == "Close"
         # At most 60 % of the window (Plotting's controls fill that on this
         # small screen), and no scrim: the plot above it is what the controls
         # are judged by.
@@ -707,7 +707,7 @@ def test_wells_at_the_foot_opens_the_rail_s_plate_over_the_live_plot(qapp, win, 
         review._set_selected_wells({"A01", "B02"}, commit=True)
         QTest.qWait(500)
         _pump(qapp)
-        assert shell.wells_button.isChecked() and shell._wells_sheet._aw_close.text() == "Close"
+        assert shell.wells_button.isChecked() and shell._wells_sheet._aw_close.accessibleName() == "Close"
         shell.wells_button.click()
         QTest.qWait(400)
         _pump(qapp)

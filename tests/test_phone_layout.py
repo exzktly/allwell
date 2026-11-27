@@ -1510,7 +1510,7 @@ def test_the_wells_sheet_lends_the_picker_above_the_foot_strip_and_gives_it_back
     # The button keeps its name and shows it is open by being checked; the
     # sheet closes by a button reading Close at its top right, like every panel.
     assert shell.wells_button.text() == "Wells · 3" and shell.wells_button.isChecked()
-    assert sheet._aw_close.text() == "Close" and sheet._aw_close.isVisibleTo(win)
+    assert sheet._aw_close.accessibleName() == "Close" and sheet._aw_close.isVisibleTo(win)
     strip_top = strip.mapTo(win, strip.rect().topLeft()).y()
     assert sheet.geometry().bottom() < strip_top, "the sheet covers the button that opened it"
     assert sheet._backdrop._alpha == 0, "a scrim would dim the plot the wells change"
@@ -2237,7 +2237,7 @@ def test_the_controls_sheet_holds_the_inspector_with_the_band_as_its_data_tab(qa
     assert insp.tabWidget("data") is band and insp.currentTab() == "data"
     assert [t for _k, t in insp.tabs()] == ["Data", "Display", "Style", "Detail"]
     assert not insp.isTabEnabled("display"), "a tab the page has nothing for is disabled, not gone"
-    assert insp.close_button.isVisibleTo(win) and insp.close_button.text() == "Close"
+    assert insp.close_button.isVisibleTo(win) and insp.close_button.accessibleName() == "Close"
     insp.close_button.click()
     QTest.qWait(300)
     assert not sheet.isOpen()

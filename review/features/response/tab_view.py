@@ -98,6 +98,8 @@ def build_response_tab(ctx, parent: QWidget) -> None:
     ch_combo.setToolTip("The channel this tab measures — its own, not the band's")
     ch_combo.currentIndexChanged.connect(
         lambda *_: on_response_channel_changed(ctx))
+    # A ceiling, as on Property: a long channel name ("ratio: GFP / RFP") elides rather than widening the band.
+    ch_combo.setMaximumWidth(theme.Metrics.form_label_w)
     band.add_scope("Channel", ch_combo)
 
     metric_combo = reg.register("_response_metric_cb", unlabelled("Property"))

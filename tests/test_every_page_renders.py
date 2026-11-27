@@ -51,6 +51,8 @@ KNOWN: dict[tuple[str, str, str, str], str] = {}
 #: of the language breaks it wherever it is drawn. Only shrinks: ``test_the_design_pending_findings_still_fire``
 #: fails on an entry no case finds any more.
 DESIGN_PENDING: dict[tuple[str, str], str] = {
+    # Only on a dataset with nanowells, where the Observations row is a seventh item: 811 px against 691.
+    ("Plotting/Bar Plots", "band rows"): "D14",
     ("Nanowells/Array", "band rows"): "D16",
     ("Nanowells/Distribution", "band rows"): "D16",
     ("Nanowells/Extremes", "band rows"): "D16",

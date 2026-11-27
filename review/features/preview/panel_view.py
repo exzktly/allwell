@@ -147,15 +147,15 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     zoom_fit_btn.setToolTip("Fit the whole image in the view (100%) and recentre")
     # The zoom and the editing tools below are a tool row under the image, not band items: the band keeps what is
     # shown on one row (the user's decision, tracker §9.1 step 15). Still on screen and grouped, never in a popover.
-    # A flow, so on a phone the tools wrap onto a second line rather than squeezing their labels.
-    from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
+    # A ``ButtonRow`` — buttons that act on the image around them, wrapping onto a second line on a phone rather
+    # than squeezing their labels. Not a control row: what the page shows stays in the band.
+    from widgets.button_row import ButtonRow
+    from widgets.flow_layout import flow_group
 
-    tools_row = QWidget()
-    tools_lay = FlowLayout(tools_row)
-    tools_lay.setContentsMargins(0, theme.Spacing.xs, 0, 0)
-    tools_lay.setSpacing(theme.Spacing.sm)
-    tools_lay.addWidget(flow_group(tools_row, zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn))
-    sync_flow_height(tools_row)
+    tools_row = ButtonRow()
+    tools_row.setContentsMargins(0, theme.Spacing.xs, 0, 0)
+    tools_lay = tools_row.layout()
+    tools_row.add(flow_group(tools_row, zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn))
     reg.register("_review_image_tools_row", tools_row)
 
     # A tool: pressed in while the next click or drag deletes (``ui.buttons.mode_tool``).

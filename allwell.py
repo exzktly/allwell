@@ -49,7 +49,7 @@ _boot_diag.boot("PySide6 imported OK")
 from ui import help_topics
 from ui import theme as theme_v2
 from core.log_view import append_entry, entries_text, log_formatter
-from core.panes import pane_index, pane_mode
+from core.panes import pane_index
 from core import gui_busy as _gui_busy
 from core import user_activity as _user_activity
 from version import __version__ as _APP_VERSION
@@ -427,7 +427,6 @@ class AllWellApp(QMainWindow):
         # The rail's width is only the starting value, for the first paint
         # before any panel has been laid out.
         self._mode_seg.setFixedWidth(theme_v2.Metrics.rail_w)
-        self._mode_seg.setFillHeight(True)
         hl.addWidget(self._mode_seg)
 
         hl.addStretch(1)
@@ -684,6 +683,14 @@ class AllWellApp(QMainWindow):
         self._attach_log_ring_buffer()
         self._build_page_history(review_topbar)
         self._build_phone_shell(review_topbar)
+        # One top bar at the desk (window style W1): the mode switch and the ‹ › arrows beside the name, the
+        # band they sit in for phone layout hidden. After the phone shell, which counts its own insertions into
+        # the band from where these sit in it.
+        from ui import shell_frame
+        shell_frame.lend_to_header(
+            self._header_layout, self._header_layout.indexOf(self._version_pill) + 2, review_topbar,
+            [self._mode_seg, getattr(self, "_history_back_btn", None),
+             getattr(self, "_history_forward_btn", None)])
 
     # ── phone layout ─────────────────────────────────────────────────────
     def _build_phone_shell(self, band) -> None:
@@ -1503,37 +1510,13 @@ class AllWellApp(QMainWindow):
             return cur.parent
         return cur
 
-    # ── mode bar / left panel width ──────────────────────────────────────
-    def _mode_left_panel(self):
-        """The left panel of the mode currently on screen, or ``None``.
-
-        Each mode owns its own: Review's well-picker rail, and the scrolling
-        form both Analyze and Datasets put down their left edge.
-        """
-        idx = self._mode_seg.currentIndex()
-        mode = pane_mode(idx)
-        if mode == "review":
-            return getattr(self._review, "_sidebar_root", None)
-        pane = getattr(self, f"_{mode}", None)
-        return getattr(pane, "_left_sidebar", None)
-
+    # ── mode bar ─────────────────────────────────────────────────────────
     def _sync_mode_bar(self) -> None:
-        """Keep the mode bar in step with the left panel below it.
+        """Size the mode bar for where it is.
 
-        The bar and that panel are one column, so they collapse together. When
-        the rail is collapsed the bar goes with it and the page tabs run to the
-        window's left edge; leaving it behind stranded a rail-width band of
-        chrome above an empty column — the rail was gone but its header was
-        still there, squeezed down to a width its three labels do not fit.
-        Bringing the rail back brings the bar back with it, which is also the
-        only route back to Analyze and Datasets while collapsed.
-
-        Width is `theme.Metrics.rail_w` in every mode, whatever the panel below:
-        Review's rail and Datasets' tool list are that wide, and Analyze's form
-        column is wider (`Metrics.form_column_w` — the design language gives
-        Analyze no rail), so a bar that followed the panel moved under the
-        pointer on every switch to and from Analyze. Floored at the bar's
-        natural width so three segments that need more elide nothing.
+        At the desk it is the header's pill beside the application's name (window style W1, design language
+        §3.1): always shown, whatever the rail does, at the width its three segments need. In phone layout it is
+        one control on the phone's own bar, unpinned.
         """
         bar = getattr(self, "_mode_seg", None)
         if bar is None:
@@ -1550,14 +1533,10 @@ class AllWellApp(QMainWindow):
             bar.setMinimumWidth(0)
             bar.setMaximumWidth(16_777_215)   # Qt's QWIDGETSIZE_MAX
             return
-        collapsed = bool(getattr(getattr(self, "_review", None),
-                                 "_sidebar_collapsed", False))
-        if bar.isVisibleTo(bar.parentWidget() or self) == collapsed:
-            bar.setVisible(not collapsed)
-        panel = self._mode_left_panel()
-        natural = bar.sizeHint().width()
-        width = max(theme_v2.Metrics.rail_w, natural) if (
-            panel is not None and panel.isVisible()) else natural
+        # At the desk the bar is the header's pill beside the application's name (window style W1), not the head
+        # of the left column, so it stays when the rail collapses and is as wide as its three segments need.
+        bar.setVisible(True)
+        width = bar.sizeHint().width()
         if bar.width() != width:
             bar.setFixedWidth(width)
 

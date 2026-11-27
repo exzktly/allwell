@@ -466,3 +466,19 @@ def test_the_image_table_controller_writes_the_hint_the_phone_module_returns(qap
         assert said["hint"] == empty_hint() == "Open “Controls” to choose channels, then press “Generate”."
     finally:
         phone_layout.set_on(False)
+
+
+def test_a_widget_registered_with_its_own_method_is_still_freed(qapp):
+    """``FormGrid`` registers its own ``_arrange``. Stored as a plain bound method, the value held its own key in
+    the registry's weak dictionary, and every form grid — with its labels and fields — outlived its window (the
+    slow lane's ``test_a_closed_review_app_is_freed`` found Batch Export's two)."""
+    import gc
+    import weakref
+
+    from widgets.form_grid import FormGrid
+
+    grid = FormGrid()
+    ref = weakref.ref(grid)
+    del grid
+    gc.collect()
+    assert ref() is None

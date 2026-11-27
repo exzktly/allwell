@@ -555,7 +555,10 @@ def build_ui(win) -> None:
     top_layout.setContentsMargins(0, 0, theme.Spacing.md, 0)
     top_layout.setSpacing(theme.Spacing.sm)
     win._top_bar = top
-    top_layout.addWidget(build_page_tabs_host(win, top), 1)
+    # The page tabs are the first row of the page panel (window style W1), not a strip of chrome beside the mode
+    # switch: built here, placed at the head of Review's centre pane below.
+    tabs_host = build_page_tabs_host(win, top)
+    top_layout.addStretch(1)
     win._dir_label = QLabel("No data loaded")
     win._dir_label.setProperty("textRole", "help")
     win._dir_label.hide()
@@ -691,7 +694,10 @@ def build_ui(win) -> None:
     win._central_pane_stack = _QStackedWidget()
     win._central_pane_stack.setObjectName("ShellPage")
     centre = QWidget()
-    QVBoxLayout(centre).setContentsMargins(0, 0, 0, 0)
+    centre_layout = QVBoxLayout(centre)
+    centre_layout.setContentsMargins(0, 0, 0, 0)
+    centre_layout.setSpacing(0)
+    centre_layout.addWidget(tabs_host)
     win._central_pane_stack.addWidget(centre)
     win._central_pane_stack.currentChanged.connect(win._on_central_pane_changed)
     win._h_pane.addWidget(win._central_pane_stack)

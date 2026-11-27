@@ -73,7 +73,8 @@ class _ModeSegment(QWidget):
         self._active = False
 
         row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
+        # Room each side of the label, so a pill sized to its natural width does not run its segments together.
+        row.setContentsMargins(theme.Spacing.md, 0, theme.Spacing.md, 0)
         row.setSpacing(theme.Spacing.xs + 2)
         row.addStretch(1)
 

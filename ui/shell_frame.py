@@ -51,6 +51,56 @@ class _RoundedMask(QObject):
         return False
 
 
+class _HeaderLender:
+    """Puts the mode switch and the ‹ › history arrows in the header at the desk, and back in Review's band in
+    phone layout.
+
+    Window style W1 has one top bar: the application's name, the mode switch beside it, the commands at the
+    right; the page tabs are the page panel's first row. Phone layout has no header — it hides it — and builds its
+    own bar out of the band (☰, the arrows, the mode switch, the page menu, Controls), so there the band is shown
+    and the borrowed widgets go home. Each leaves a hidden placeholder in the band, so it goes back to exactly
+    the place phone layout's own insertions were counted from.
+    """
+
+    def __init__(self, header_layout, at: int, band: QWidget, widgets: list) -> None:
+        self._header_layout, self._at, self._band = header_layout, at, band
+        self._widgets = [w for w in widgets if w is not None]
+        self._holders: list[tuple[QWidget, QWidget]] = []
+
+    def arrange(self, phone: bool) -> None:
+        band_layout = self._band.layout()
+        if phone:
+            for w, holder in self._holders:
+                index = band_layout.indexOf(holder)
+                band_layout.insertWidget(index, w)
+                band_layout.removeWidget(holder)
+                holder.deleteLater()
+                w.show()
+            self._holders = []
+            self._band.show()
+            return
+        if not self._holders:
+            for i, w in enumerate(self._widgets):
+                holder = QWidget(self._band)
+                holder.hide()
+                index = band_layout.indexOf(w)
+                band_layout.insertWidget(index, holder)
+                self._header_layout.insertWidget(self._at + i, w)
+                self._holders.append((w, holder))
+        self._band.hide()
+
+
+def lend_to_header(header_layout, at: int, band: QWidget, widgets: list) -> None:
+    """At the desk, move *widgets* (the mode switch, the history arrows) from *band* into *header_layout* at
+    index *at*, and hide the band; in phone layout put them back and show it. Follows phone layout for as long
+    as *band* lives."""
+    from core import phone_layout
+
+    lender = _HeaderLender(header_layout, at, band, widgets)
+    lender.arrange(phone_layout.is_on())
+    phone_layout.follow(band, lender.arrange)
+
+
 def install(review) -> None:
     """Give *review* (``ReviewApp``) its W1 gaps and its rounded page."""
     from core import phone_layout

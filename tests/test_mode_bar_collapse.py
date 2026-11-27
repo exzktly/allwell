@@ -1,18 +1,9 @@
-"""The mode bar is the top of the left column, so it collapses with the rail.
+"""The mode bar is the header's pill (window style W1, design language §3.1), so it no longer follows the rail.
 
-Review / Analyze / Datasets sits directly above whichever panel runs down the
-window's left edge, pinned to that panel's width so the two read as one column.
-Collapsing the rail (``Ctrl+B``, or the button floating on its edge) used to
-leave the bar behind: a rail-width band of chrome hanging above an empty column,
-shrunk to a natural width its three labels do not fit inside, with the page tab
-strip stranded to the right of it.
-
-``AllWellApp._sync_mode_bar`` owns both halves of that — visibility and width —
-and runs off the panels' own show/hide events, so it follows every route into
-``tab_controller.apply_sidebar_visibility`` without either side knowing about
-the other. Exercised here against a stub rather than a live ``AllWellApp``:
-building the real window is a slow-lane affair, and the behaviour under test is
-this one method's reading of the collapse flag.
+Review / Analyze / Datasets sat at the head of the left column, pinned to that column's width and hidden when the
+rail collapsed. In W1 it is a pill beside the application's name in the one top bar: shown whatever the rail does,
+in every mode, at the width its three segments need. ``AllWellApp._sync_mode_bar`` owns that, exercised here
+against a stub rather than a live window (building the real one is a slow-lane affair).
 """
 
 from __future__ import annotations
@@ -38,83 +29,20 @@ def _shell(qapp, *, collapsed: bool, mode_index: int = 0):
                        ("Datasets", "datasets")):
         bar.addSegment(text, data=data)
     bar.setCurrentIndex(mode_index)
-
-    review_rail = QWidget(host)
-    review_rail.setFixedWidth(329)
-    analyze_rail = QWidget(host)
-    analyze_rail.setFixedWidth(430)          # Analyze's form column (Metrics.form_column_w): wider than a rail
+    bar.setFixedWidth(600)                       # a width left over from somewhere else
     host.show()
-
-    review = types.SimpleNamespace(
-        _sidebar_root=review_rail, _sidebar_collapsed=collapsed)
-    review_rail.setVisible(not collapsed and mode_index == 0)
-    analyze_rail.setVisible(not collapsed and mode_index == 1)
     shell = types.SimpleNamespace(
-        _mode_seg=bar,
-        _review=review,
-        _analyze=types.SimpleNamespace(_left_sidebar=analyze_rail),
-        _datasets=types.SimpleNamespace(_left_sidebar=QWidget(host)),
-    )
-    # The real method — it is what resolves "the current mode's left panel".
-    shell._mode_left_panel = types.MethodType(AllWellApp._mode_left_panel, shell)
+        _mode_seg=bar, _review=types.SimpleNamespace(_sidebar_collapsed=collapsed))
     return shell, host, bar
 
 
-def test_expanded_rail_shows_the_bar(qapp):
-    shell, host, bar = _shell(qapp, collapsed=False)
+@pytest.mark.parametrize("collapsed", [False, True])
+@pytest.mark.parametrize("mode_index", [0, 1, 2])
+def test_the_pill_is_shown_at_its_own_width_whatever_the_rail_does(qapp, collapsed, mode_index):
+    shell, host, bar = _shell(qapp, collapsed=collapsed, mode_index=mode_index)
     AllWellApp._sync_mode_bar(shell)
-    assert bar.isVisibleTo(host) is True
-
-
-def test_collapsed_rail_hides_the_bar(qapp):
-    shell, host, bar = _shell(qapp, collapsed=True)
-    AllWellApp._sync_mode_bar(shell)
-    assert bar.isVisibleTo(host) is False
-
-
-def test_collapse_round_trips(qapp):
-    """Re-expanding brings the bar back — it is the only mode switch there is."""
-    shell, host, bar = _shell(qapp, collapsed=False)
-    AllWellApp._sync_mode_bar(shell)
-    shell._review._sidebar_collapsed = True
-    shell._review._sidebar_root.setVisible(False)
-    AllWellApp._sync_mode_bar(shell)
-    assert bar.isVisibleTo(host) is False
-    shell._review._sidebar_collapsed = False
-    shell._review._sidebar_root.setVisible(True)
-    AllWellApp._sync_mode_bar(shell)
-    assert bar.isVisibleTo(host) is True
-
-
-def test_collapsed_in_analyze_mode_hides_the_bar_too(qapp):
-    """The column collapses the same way whichever mode owns the panel."""
-    shell, host, bar = _shell(qapp, collapsed=True, mode_index=1)
-    AllWellApp._sync_mode_bar(shell)
-    assert bar.isVisibleTo(host) is False
-
-
-def test_expanded_bar_matches_the_panel_width(qapp):
-    shell, _host, bar = _shell(qapp, collapsed=False)
-    AllWellApp._sync_mode_bar(shell)
-    assert bar.width() == 329
-
-
-def test_the_bar_stays_at_the_rail_width_over_analyze_s_wider_column(qapp):
-    """Switching to Analyze, whose form column is wider than a rail, must not move the control the switch is made
-    with: the bar keeps the rail's width rather than following the panel to 430."""
-    from ui import theme
-    shell, _host, bar = _shell(qapp, collapsed=False, mode_index=1)
-    AllWellApp._sync_mode_bar(shell)
-    assert bar.width() == theme.Metrics.rail_w
-
-
-def test_width_never_drops_below_the_bar_s_own_natural_width(qapp):
-    """The bar is the rail's width whatever the panel, and never narrower than its own three segments need."""
-    from ui import theme
-    shell, _host, bar = _shell(qapp, collapsed=False)
-    shell._review._sidebar_root.setFixedWidth(40)
-    AllWellApp._sync_mode_bar(shell)
-    assert bar.width() == max(theme.Metrics.rail_w, bar.sizeHint().width())
+    assert bar.isVisibleTo(host)
+    assert bar.width() == bar.sizeHint().width() < 600
 
 
 def test_missing_bar_is_safe(qapp):

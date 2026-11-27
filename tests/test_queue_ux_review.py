@@ -229,7 +229,7 @@ def test_p9_the_banner_says_that_job_for_one_source(qtbot, tmp_path):
 def test_p9_the_banner_buttons_have_no_box_of_their_own():
     from ui import theme
 
-    assert "QWidget#ContextBannerButtons" in theme.qss()
+    assert 'QWidget[noticePart="true"] { background: transparent; }' in theme.qss()
 
 
 # ── P2 / P3 / P4 / P6: the menus and the row ─────────────────────────────────

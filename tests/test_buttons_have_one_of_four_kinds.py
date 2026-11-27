@@ -42,7 +42,7 @@ PENDING: dict[tuple[str, str], tuple[int, str]] = {
     ("review/features/preview/panel_view.py", "toggle"): (5, _STATE),
     ("review/features/scatter/cells_tab_view.py", "toggle"): (2, _STATE),
     ("widgets/selection_chip.py", "accent"): (1, "SelectionChip's own variant parameter: a chip, not a button. "
-                                                  "The status chip of row D07 takes its place"),
+                                                  "It is the rail's count, which only reports: row D21 makes it plain text"),
 }
 
 _SETTERS = {"set_variant", "set_kind", "_set_variant"}

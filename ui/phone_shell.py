@@ -2068,8 +2068,7 @@ class PhoneShell(QObject):
                 if to_phone else
                 "This screen looks like a desktop. Switch back to the desktop layout?")
         if self._banner is None:
-            self._banner = ContextBanner(text, "Switch", None, icon="smartphone",
-                                         cancel_text="Not now")
+            self._banner = ContextBanner(text, "Switch", None, cancel_text="Not now")
             self._banner.setObjectName("PhoneLayoutOffer")
             self._banner.confirmed.connect(self._on_banner_confirmed)
             self._banner.cancelled.connect(self._on_banner_cancelled)

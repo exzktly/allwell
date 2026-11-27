@@ -432,10 +432,9 @@ def test_clearing_keeps_a_failed_job_that_others_wait_on_and_says_so(qapp, tmp_p
         tab.shutdown()
 
 
-def test_the_session_banner_uses_a_real_glyph(qapp, tmp_path):
-    """make_pixmap substitutes alert-triangle for an unknown name, so the edit
-    banner shipped with a warning triangle on it."""
-    from widgets.icons import has_glyph
+def test_the_session_banner_reads_as_information_not_a_warning(qapp, tmp_path):
+    """The edit banner once shipped with a warning triangle on it (an unknown glyph name fell back to one), so
+    editing a queued job read as an alarm. It is an information notice: the neutral rule and dot."""
 
     tab, _ = _make_tab(tmp_path)
     try:
@@ -443,12 +442,8 @@ def test_the_session_banner_uses_a_real_glyph(qapp, tmp_path):
         jq = tab._controllers["job_queue"]
         jq.begin_edit(jq.bridge.queue.jobs[0].id)
         assert tab._session_banner is not None
-        import inspect
-
-        from widgets.context_banner import ContextBanner
-
-        default = inspect.signature(ContextBanner.__init__).parameters["icon"].default
-        assert has_glyph(default), f"banner glyph {default!r} falls back to a warning triangle"
+        # The banner is an information notice: its rule and dot say so, never a warning triangle or amber.
+        assert tab._session_banner.severity() == "information"
     finally:
         tab.shutdown()
 

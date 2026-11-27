@@ -740,6 +740,10 @@ def qss() -> str:
     from ui import text_roles as _text_roles
     _roles = _text_roles.qss(c, t)
     _buttons = _button_kinds.qss(c, t)
+    from widgets import notice as _notice
+    from widgets import status_chip as _status_chip
+    _notices = _notice.qss(c, r)
+    _chips = _status_chip.qss(c, t, r)
     return f"""
 * {{
     font-family: {t.family};
@@ -1789,21 +1793,11 @@ QWidget#JobQueueList {{
     border-radius: {r.sm}px;
 }}
 
-/* ── Context banner ──────────────────────────────────────────────────── */
-/* A page borrowed for something other than its own job — see
-   widgets/context_banner.py. Accent-tinted so it reads as a mode the page is
-   in, not as one more row of its chrome. */
-QWidget#ContextBanner {{
-    background-color: {c.selected};
-    border: 1px solid {c.accent};
-    border-radius: {r.sm}px;
-}}
-QWidget#ContextBanner QLabel {{
-    color: {c.text_primary};
-}}
-QWidget#ContextBannerBody, QWidget#ContextBannerButtons {{
-    background: transparent;
-}}
+/* ── Notices and status chips ────────────────────────────────────────── */
+/* The one notice (widgets/notice.py; the context banner is one) and the status
+   chip (widgets/status_chip.py), keyed on their severity and tone. */
+{_notices}
+{_chips}
 
 /* ── The Analyze pane's folder banners ───────────────────────────────── */
 /* Two strips at the head of the Analyze sidebar, reporting what the folder in
@@ -1817,13 +1811,10 @@ QWidget#ContextBannerBody, QWidget#ContextBannerButtons {{
    family. Both call sites set WA_StyledBackground, without which a plain
    QWidget subclass ignores its own background rule entirely.
 
-   `card`, not ContextBanner's `selected` fill, and the reason is measured
-   rather than a preference. ContextBanner carries one sentence at
-   text_primary. These two carry three tiers — identity, prose, tally — and a
-   tinted fill takes contrast from the quietest of them first, so the tier
-   whose whole job is to be quiet becomes the tier that cannot be read. On
-   `card` every tier clears 4.5 : 1 in every palette
-   (``tests/test_theme_contrast.py`` holds secondary text there). */
+   `card`, the fill every notice takes, and the reason is measured rather than
+   a preference: these carry three tiers — identity, prose, tally — and a
+   tinted fill takes contrast from the quietest of them first. On `card` every
+   tier clears 4.5 : 1 in every palette (``tests/test_theme_contrast.py``). */
 QWidget#ResumeBanner {{
     background-color: {c.card};
     border: {m.hairline}px solid {c.accent};

@@ -3414,8 +3414,8 @@ does not come here: it takes you to the tab that plot came from.
 
 The rest of Home's tabs are where you *declare* things, rather than read them:
 which cells count, which wells are replicates of each other, what you varied
-across the plate, what to call them, and what ratios to derive. **Import**, at
-the right end of the page's controls row, brings in groups from a JSON file —
+across the plate, what to call them, and what ratios to derive. **Import…**, on
+Sample Map beside its layer switch, brings in groups from a JSON file —
 one saved with a group's **Export**, a `pipeline_info.json`, or an older
 group-definitions file. When the dataset already has groups it asks whether to
 **Add to current groups** (a name already in use gets a suffix) or **Replace
@@ -3431,7 +3431,7 @@ import that brings in no group at all — every one left out by Skip, or none
 readable: a warning says so and the current groups are untouched. Each imported
 group keeps its colour, whether it was hidden, and (unless a group here already
 uses it) its identity, so plots saved
-with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on Overview and on
+with that group hidden keep it hidden. It is the app's only groups import, and it is hidden on
 the Variables layer, where there are no groups to import into. Everything on these tabs autosaves to the dataset folder as you
 edit, so there is no Save button to look for; to discard definitions, use
 **Reset analysis** under Dataset tools ([Starting over](#starting-over)), which
@@ -4361,12 +4361,12 @@ offered yet.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ All-Well v…            ◫  ↻  ⛶  ⌂  ⛁  ≡●  ▯  i                  │  ← title bar
-├──────────────┬──────────────────────────────────────────────────┤
-│ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …    │  ← one band
-├──────────────┼──────────────────────────────────────────────────┤
-│ 📁 my_run  ▾ │  Channel [GFP ▾] Property [Mean ▾]  Display Style │  ← controls
-│  ⊙ Plotting  │  ┌────────────────────────────────────────────┐  │
+│ All-Well v…  [Review|Analyze|Datasets] ‹ ›   ◫ ↻ ⛶ ⌂ ⛁ ≡● ▯ i  │  ← title bar
+├──────────────┬╭─────────────────────────────────────────────────╮
+│ 📁 my_run  ▾ ││ Bar Plots  Line Graphs  Scatter  …               │  ← page tabs
+│   12 wells   ││ Channel  Property                                │
+│  ⊙ Plotting  ││ [GFP ▾]  [Mean ▾]   Display · Style · Share      │  ← controls
+│   …          ││  ┌────────────────────────────────────────────┐  │
 │   …          │  │                                            │  │
 │   …          │  │            (plot canvas)                   │  │
 │   …          │  └────────────────────────────────────────────┘  │
@@ -4386,10 +4386,9 @@ offered yet.
 ```
 **Getting around the window.**
 
-- **Title bar** — the app name and the version.
-- **Top band** — one row carrying everything that steers the window. On the
-  left, the `[Review | Analyze | Datasets]` selector switches modes; beside it
-  are the current page's sub-tabs; and at the far right Refresh (re-read the
+- **Title bar** — one row carrying everything that steers the window: the app
+  name and the version; the `[Review | Analyze | Datasets]` switch and the
+  **‹ ›** history arrows beside it; and at the far right Refresh (re-read the
   folder) and the presentation toggle (flip every plot Screen ↔ Publication),
   which act on the loaded dataset and so appear in Review only. The commands
   about the dataset itself — copy analysis, reveal its folder, storage, and the
@@ -4397,7 +4396,7 @@ offered yet.
   head of the left panel (the button that names the open dataset); the resets
   are described under [Starting over](#starting-over) and storage under
   [Freeing disk space](#freeing-disk-space). The **`i`** Help drawer button sits
-  at the band's right end in all three modes. Help stays in that
+  at the title bar's right end in all three modes. Help stays in that
   same spot in every mode, because the manual it
   opens documents all three; `Ctrl+/` opens it too. Opening it from a Datasets
   tool lands on that tool's section of the manual, and from Analyze on the form
@@ -4411,16 +4410,15 @@ offered yet.
   on any plate), **Assays** (Nanowells, smFISH: pages that need that kind of
   input data, and say so when a dataset has none), **Inspect** (Image Browser,
   Review CSV: the images and per-cell rows behind a number) and **Output**
-  (Saved Plots, Batch Export). Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
-  beside the mode selector. `Ctrl+B` collapses the rail, as does the small
-  button floating on the rail's right edge — it stays put when the rail hides,
-  so it is also how you bring the rail back. The mode selector is the top of
-  that same column and collapses with it, so while the rail is hidden the
-  sub-tabs run to the window's left edge; bring the rail back to switch between
-  Review, Analyze, and Datasets.
+  (Saved Plots, Batch Export). Tabs that own sub-tabs (e.g. Plotting) show them
+  as the first row of the page itself. `Ctrl+B` collapses the rail, as does the
+  small button floating on the rail's right edge — it stays put when the rail
+  hides, so it is also how you bring the rail back. The dataset button at the
+  rail's head names the open dataset on its first line and says how many wells
+  it holds on the second.
 - **Plate map, selection footer and Saved selections** — directly under the
   section list, in that order: the plate, a line with the selection count and
-  **All** / **None**, then the Saved selections drawer. The well selection they
+  **All** / **None** (quiet buttons), then the Saved selections drawer. The well selection they
   drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on
   the left (channel, property, timepoint, threshold, and buttons such as
@@ -4432,8 +4430,8 @@ offered yet.
   [The inspector](#the-inspector) below.
 - **Status bar** — a live status dot on the left, keyboard-shortcut chips on
   the right.
-- **Back and Forward** — **‹** and **›** just right of the Review · Analyze ·
-  Datasets switch (or `Ctrl+←` / `Ctrl+→`) step back and forward through the
+- **Back and Forward** — **‹** and **›** in the title bar, just right of the
+  Review · Analyze · Datasets switch (or `Ctrl+←` / `Ctrl+→`) step back and forward through the
   places you have been, like a browser's: each section, each page tab within it
   (Bar Plots, Line Graphs, …), and each switch between Review, Analyze and
   Datasets is a step. Going somewhere new after stepping back forgets the way
@@ -4616,31 +4614,30 @@ the next.
   groups beside a picker that was quietly doing something else. Each
   pane keeps its own row of page tabs at its top, so a page's sub-tabs stay
   where its content is and either side can be switched without focusing it
-  first; the shared row across the top of the window is empty while you are
-  split. It needs a second tab to show something; a tab can't be split against
+  first. It needs a second tab to show something; a tab can't be split against
   itself.
   A Review-only control — it's hidden while Analyze or Datasets is active,
   and switching to either exits an active split automatically.
 
-#### One band across the top
+#### The title bar and the page
 
-The window's top row is one band: **Review / Analyze / Datasets** on the left,
-spanning the width of the panel below it, and the current page's tabs — *Bar
-Plots · Line Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell
-Browser · Playground* — immediately to their right on the same line. Batch
-Export's modes — *Line · Bar · Scatter (cells) · Scatter (aggregate) ·
-Response* — sit there too.
-Pages without sub-tabs (Statistics, Spatial, smFISH, Review CSV, Saved Plots)
-leave that side empty; the band keeps its height so nothing below it shifts when
-you switch pages. In Split View the band is empty too — each pane draws its own
-page's tabs at the top of that pane instead, since one row cannot name two
-pages.
+The window is drawn as one dark frame with the page set into it as a rounded
+panel. The frame's top row, the title bar, carries the name and version, the
+**Review / Analyze / Datasets** switch with the **‹ ›** history arrows beside
+it, and the window's commands at the right. The rail and the status bar sit on
+the same frame, with no dividing lines between them.
 
-The mode selector stays the width of whatever panel sits under it, so the two
-read as one column: Review's well-picker rail, the Analyze form (which you can
-drag wider in its splitter), and the Datasets rail are three different widths,
-and the bar follows each. Analyze and Datasets leave the tab side of the band
-empty — those tabs name Review's pages.
+The page's own tabs — *Bar Plots · Line Graphs · Scatter Plot · …*, *Image
+Table · Segmentation · Cell Browser · Playground*, or Batch Export's modes
+*Line · Bar · Scatter (cells) · Scatter (aggregate) · Response* — are the first
+row inside the page panel, above its controls. Pages without sub-tabs
+(Statistics, Spatial, smFISH, Review CSV, Saved Plots) start with their
+controls. In Split View each pane carries its own row of tabs at its top
+instead, since one row cannot name two pages.
+
+In phone layout the frame's gaps and rounded corners go, and the switch and the
+arrows move back into a row of their own under the title bar, where there is
+room for them.
 
 #### One controls row on every tab
 
@@ -8826,9 +8823,14 @@ points. The bar and line batch panels also expose the same
 panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
-Pick the mode from the tab strip in the window's top band — *Line · Bar ·
-Scatter (cells) · Scatter (aggregate) · Response · Nanowells*, beside the Review / Analyze /
-Datasets selector, where every other page's tabs are. The groups you build are
+Pick the mode from the tabs at the top of the page — *Line · Bar ·
+Scatter (cells) · Scatter (aggregate) · Response · Nanowells*, where every other page's tabs are.
+The page is titled with the mode (*Batch Export · Bar*); **Sync from app** beside
+the title replaces the export groups with the app's replicate sets, and
+**Export** starts the run. Below it, the **Groups** card (with **Clear all**,
+**Quick setup** and **Add group** in its header) sits beside the **Output** card,
+which holds the output and plot settings and, at its foot, what each group will
+produce and the run's progress. The groups you build are
 **shared by every mode** — define them once and they are there whichever you
 export. They describe your plate's conditions, not the shape of
 the plot. (Datasets analysed before this carried a separate set per mode; those
@@ -9050,7 +9052,7 @@ produce nothing.
 **The summary CSVs follow the image files**, because they are files in that
 same folder. A deck-only or gallery-only run therefore saves no numbers, only
 pictures. That is a real trade and it is stated in as many words in the block
-above the Run button before you start, because afterwards it is an absence, and
+above the progress line before you start, because afterwards it is an absence, and
 an absence is the thing nobody notices. If you want both the deck and the
 numbers, tick *Image files* as well.
 
@@ -9090,7 +9092,7 @@ this is the one leftover you cannot spot from a file name.
 
 #### Reading what a run will produce, before running it
 
-Above the Run button, **Each export group produces:** lists what one group's
+At the foot of the Output card, **Each export group produces:** lists what one group's
 share of the run will be. It is written from the controls as they stand, not
 from a fixed description of the mode, so it changes as you work: untick two
 panels and it says "3 of 4 panels" and names them; tick **Raw per-cell CSV** and

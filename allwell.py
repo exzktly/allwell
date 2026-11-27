@@ -670,7 +670,7 @@ class AllWellApp(QMainWindow):
         for label, hint in (("Open", "⌘O"), ("Help", "⌘/"), ("Export", "⌘E")):
             l = QLabel(label)
             l.setStyleSheet(
-                f"color: {theme_v2.Colors.text_muted}; "
+                f"color: {theme_v2.Colors.text_secondary}; "
                 f"font-size: {theme_v2.Typography.caption_size}px;"
             )
             sb_layout.addWidget(l)
@@ -1237,7 +1237,7 @@ class AllWellApp(QMainWindow):
             # QTextBrowser, so the whole drawer is a single scrollable pane rather
             # than a fixed header band above a separately-scrolling document.
             _credit_style = (
-                f"color:{theme_v2.Colors.text_muted};font-style:italic;"
+                f"color:{theme_v2.Colors.text_secondary};font-style:italic;"
                 f"font-size:{theme_v2.Typography.caption_size}px;"
             )
             quick_help_html = (
@@ -1837,7 +1837,7 @@ class AllWellApp(QMainWindow):
             where.setWordWrap(True)
             where.setTextInteractionFlags(Qt.TextSelectableByMouse)
             where.setStyleSheet(
-                f"color: {theme_v2.Colors.text_muted}; "
+                f"color: {theme_v2.Colors.text_secondary}; "
                 f"font-size: {theme_v2.Typography.caption_size}px;"
             )
             bl.addWidget(where)
@@ -1845,7 +1845,7 @@ class AllWellApp(QMainWindow):
             self._log_view = _QTextEdit(body)
             self._log_view.setReadOnly(True)
             self._log_view.setStyleSheet(
-                f"QTextEdit {{ background-color: {theme_v2.Colors.panel}; "
+                f"QTextEdit {{ background-color: {theme_v2.Colors.card}; "
                 f"color: {theme_v2.Colors.text_secondary}; "
                 f"font-family: {theme_v2.Typography.family_mono}; "
                 f"font-size: {theme_v2.Typography.caption_size}px; "

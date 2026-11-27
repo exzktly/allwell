@@ -50,7 +50,7 @@ def metric_map_background_rgb() -> tuple[int, int, int]:
     montage keeps black: there it is the absence of light, and a stretch puts nothing below it."""
     from ui import theme
 
-    return _rgb(theme.Colors.panel_elevated)
+    return _rgb(theme.Colors.control)
 
 
 def centred_window(ctx, pooled: list, centre: bool = False) -> tuple[float, float]:
@@ -143,7 +143,7 @@ def key_rgb(keys, *, width_px: int, font, scale: float = 1.0, on_screen: bool = 
     if not keys:
         return None
     if on_screen:
-        bg, ink = _rgb(theme.Colors.surface), _rgb(theme.Colors.text_primary)
+        bg, ink = _rgb(theme.Colors.canvas), _rgb(theme.Colors.text_primary)
     else:
         bg, ink = _rgb(theme.CPub.bg), _rgb(theme.CPub.text)
     undefined_ink = _rgb(theme.Colors.plot_undefined_ink)

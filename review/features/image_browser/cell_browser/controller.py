@@ -43,7 +43,7 @@ class _CellThumb(QLabel):
         self.setObjectName("CellThumb")
         self.setStyleSheet(
             f"#CellThumb {{ background: {theme.Colors.rail}; "
-            f"border: 1px solid {theme.Colors.border}; }}"
+            f"border: 1px solid {theme.Colors.hairline}; }}"
             f"#CellThumb:hover {{ border: 1px solid {theme.Colors.border_strong}; }}"
         )
 

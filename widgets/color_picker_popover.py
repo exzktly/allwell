@@ -131,7 +131,7 @@ class SvSquare(QWidget):
         p.fillRect(rect, vg)
         # 1px border
         p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor(theme.Colors.border), 1.0))
+        p.setPen(QPen(QColor(theme.Colors.hairline), 1.0))
         p.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
         # picker ring
         cx = self._s * rect.width()
@@ -200,7 +200,7 @@ class HueStrip(QWidget):
             g.setColorAt(i / n, QColor.fromHsvF(i / n if i < n else 0.999, 1.0, 1.0))
         p.fillRect(rect, g)
         p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor(theme.Colors.border), 1.0))
+        p.setPen(QPen(QColor(theme.Colors.hairline), 1.0))
         p.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
         y = self._hue * rect.height()
         p.setPen(QPen(QColor(theme.Colors.ink_light), 2.0))
@@ -460,7 +460,7 @@ if __name__ == "__main__":
     swatch.setFixedSize(_SWATCH_W, _SWATCH_H)
     def _show(c):
         swatch.setStyleSheet(f"background-color: {c.name(QColor.HexArgb)}; "
-                             f"border: 1px solid {theme.Colors.border}; border-radius: 4px;")
+                             f"border: 1px solid {theme.Colors.hairline}; border-radius: 4px;")
     _show(QColor("#6B8AFD"))
     lay.addWidget(swatch)
 

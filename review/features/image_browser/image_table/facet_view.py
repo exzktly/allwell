@@ -67,12 +67,12 @@ def _inner_qss(pt: int) -> str:
 
 def _group_qss(pt: int) -> str:
     return (f"color:{theme.Colors.text_primary}; font-size:{_on_screen(pt)}px;"
-            f" font-weight:600; background:{theme.Colors.panel_elevated};"
+            f" font-weight:600; background:{theme.Colors.control};"
             " border-radius:5px; padding:2px 6px;")
 
 
 def _corner_qss(pt: int) -> str:
-    return f"color:{theme.Colors.text_muted}; font-size:{_on_screen(max(8, pt - 1))}px;"
+    return f"color:{theme.Colors.text_secondary}; font-size:{_on_screen(max(8, pt - 1))}px;"
 
 
 def _cv(cell, dim: str) -> str:

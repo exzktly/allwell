@@ -702,7 +702,7 @@ def test_the_marker_ink_is_chosen_by_the_fill_it_sits_on():
         return (lb + 0.05) / (la + 0.05)
 
     fills = (theme.Colors.success, theme.Colors.warn, theme.Colors.danger,
-             theme.Colors.accent, theme.Colors.stale, theme.Colors.text_muted)
+             theme.Colors.accent, theme.Colors.stale, theme.Colors.text_secondary)
     dark, light = theme.Colors.ink_dark, theme.Colors.text_primary
     for fill in fills:
         got = marker_ink(fill)
@@ -712,19 +712,19 @@ def test_the_marker_ink_is_chosen_by_the_fill_it_sits_on():
         assert _ratio(got, fill) == max(_ratio(dark, fill),
                                         _ratio(light, fill)), (
             f"marker ink on {fill} is not the better of the two")
-        # The glyph is drawn bold, where WCAG's threshold is 3.0 rather than
-        # 4.5. Measured, ``text_muted`` (#5F6B7C) is the one fill in the
-        # palette where no available ink reaches 4.5 at all — the best is
-        # 4.45 — so holding every fill to 4.5 would be asserting something
-        # this palette cannot satisfy, which is worse than asserting nothing.
+        # The glyph is drawn bold, where WCAG's threshold is 3.0 rather than 4.5.
         assert _ratio(got, fill) >= 3.0, f"marker ink on {fill} fails even AA-large"
-    assert sum(_ratio(marker_ink(f), f) >= 4.5 for f in fills) == 5
+    # Every state fill the plate paints now reaches 4.5 with the better ink: the
+    # neutral state is the secondary ink, not the mid grey it once was.
+    assert sum(_ratio(marker_ink(f), f) >= 4.5 for f in fills) == len(fills)
 
-    # And the defect this exists for, named: the old proxy chose a dark ink on
-    # the muted fill, which is the worst of the two.
-    assert _ratio(dark, theme.Colors.text_muted) < _ratio(
-        light, theme.Colors.text_muted)
-    assert marker_ink(theme.Colors.text_muted) == light
+    # And the defect this exists for, named, on the mid grey the plate once painted
+    # its neutral wells (#5F6B7C): the old proxy chose the dark ink there, which is
+    # the worse of the two (3.88 against 4.45). The rule must still choose by
+    # measuring, whatever the palette paints.
+    mid_grey = "#5F6B7C"
+    assert _ratio(dark, mid_grey) < _ratio(light, mid_grey)
+    assert marker_ink(mid_grey) == light
 
 
 def test_the_legend_key_carries_the_weight_of_a_swatch():

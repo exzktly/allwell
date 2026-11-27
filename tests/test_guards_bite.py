@@ -652,7 +652,7 @@ HEALTH_ROSTER_CLEAN = {
     "colour_map": ('COLORS = {"complete": theme.Colors.success,\n'
                    '          "partial": theme.Colors.warn,\n'
                    '          "missing": theme.Colors.danger,\n'
-                   '          "no_output": theme.Colors.text_muted}\n'),
+                   '          "no_output": theme.Colors.text_secondary}\n'),
     # A single state named in passing.
     "one_state": 'if state == "no_output":\n    pass\n',
 }

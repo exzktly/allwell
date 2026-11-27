@@ -103,7 +103,7 @@ class StagePathView(QWidget):
         # catch. Same tokens, so the two still read as one drawing.
         self.setStyleSheet(f"""
         #StagePathView {{
-            background-color: {theme.Colors.panel};
+            background-color: {theme.Colors.card};
             border: 1px solid {theme.Colors.border_subtle};
             border-radius: {theme.Radii.md}px;
         }}
@@ -266,7 +266,7 @@ class StagePathView(QWidget):
     def _paint_cells(self, painter: QPainter, cell: float,
                      ox: float, oy: float) -> None:
         """The 8x12 lattice, faint — it is a reference frame, not the subject."""
-        pen = QPen(QColor(theme.Colors.border))
+        pen = QPen(QColor(theme.Colors.hairline))
         pen.setWidthF(max(1.0, cell * _GRID_LINE_FRACTION))
         painter.setPen(pen)
         for row in range(_N_ROWS + 1):
@@ -385,7 +385,7 @@ class StagePathView(QWidget):
         # "white scribbling" is.
         painter.setRenderHint(QPainter.TextAntialiasing, True)
         text_pen = QPen(QColor(theme.Colors.ink_light))
-        backdrop = QColor(theme.Colors.panel)
+        backdrop = QColor(theme.Colors.card)
         backdrop.setAlpha(_LABEL_BACKDROP_ALPHA)
         metrics = QFontMetricsF(font)
         offset = dot / 2.0 + 2.0

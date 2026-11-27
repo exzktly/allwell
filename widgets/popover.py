@@ -201,8 +201,8 @@ class Popover(QWidget):
         return f"""
         #Popover {{ background: transparent; }}
         #PopoverFrame {{
-            background-color: {c.panel};
-            border: 1px solid {c.border};
+            background-color: {c.card};
+            border: 1px solid {c.button_edge};
             border-radius: {r.lg}px;
         }}
         """

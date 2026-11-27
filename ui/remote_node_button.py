@@ -7,7 +7,7 @@ The dot says what this process last heard about the granted nodes (``services.re
 
 * **green** (``success``) — a node is granted, idle or in use by a run;
 * **yellow** (``warn``) — a node is asked for and not ready yet: queued, starting, or the scheduler did not answer;
-* **grey** (``text_muted``) — no node.
+* **grey** (``text_secondary``, the status dot's neutral tone) — no node.
 
 Drawing it never reaches a host: the summary is read from the in-process registry every :data:`SUMMARY_MS`. What
 keeps that registry current is whoever is already talking to the host — the Manage Remotes panel, a request's own

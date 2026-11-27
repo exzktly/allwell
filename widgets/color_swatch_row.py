@@ -246,7 +246,7 @@ class ColorSwatchRow(QWidget):
             grad.setColorAt(min(0.999, t), QColor.fromHsvF((i % 6) / 6.0, 0.75, 0.95))
         p.fillRect(rect, grad)
         p.restore()
-        p.setPen(QPen(QColor(c.border), 1.0))
+        p.setPen(QPen(QColor(c.hairline), 1.0))
         p.setBrush(Qt.NoBrush)
         p.drawRoundedRect(rect, radius, radius)
         # a small white "+" on a dark disc in the centre
@@ -271,7 +271,7 @@ class ColorSwatchRow(QWidget):
             if kind == "custom":
                 self._paint_custom_tile(p, rect)
             else:
-                p.setPen(QPen(QColor(c.border), 1.0))
+                p.setPen(QPen(QColor(c.hairline), 1.0))
                 p.setBrush(QColor(payload))
                 p.drawRoundedRect(rect, radius, radius)
             is_current = payload is not None and payload.rgb() == self._current.rgb()

@@ -274,7 +274,7 @@ def make_pixmap(name: str, color, size_px: int, dpr: float = 1.0) -> QPixmap:
 
 def make_icon(name: str, size_px: int = 16, *,
               normal="text_secondary", active="text_primary",
-              checked="accent", disabled="text_faint", dpr: float = 1.0) -> QIcon:
+              checked="accent", disabled="text_disabled", dpr: float = 1.0) -> QIcon:
     """A ``QIcon`` with state-dependent token colors:
 
     Normal/Off → *normal*, Active (hover) → *active*, On (checked) → *checked*,

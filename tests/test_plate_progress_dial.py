@@ -358,7 +358,7 @@ def test_the_plate_still_paints_with_a_dial_on_it(qapp):
 # Nothing in the suite noticed, because the dial had only ever been asserted on
 # its fractions, never on the tones it draws them in. These assert the tones.
 
-_DIAL_STATES = ("accent", "success", "warn", "accent2", "text_muted", "danger")
+_DIAL_STATES = ("accent", "success", "warn", "accent2", "text_secondary", "danger")
 
 
 def _luma(c) -> float:

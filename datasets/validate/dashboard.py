@@ -94,7 +94,7 @@ class ValidateDashboard(PlateProgress):
         if state == "missing":
             return theme.Colors.danger
         if state == "no_output":
-            return theme.Colors.text_muted
+            return theme.Colors.text_secondary
         return None
 
     def _well_tooltip(self, well_id: str) -> str:
@@ -147,7 +147,7 @@ class ValidateDashboard(PlateProgress):
             "complete": theme.Colors.success,
             "partial": theme.Colors.warn,
             "missing": theme.Colors.danger,
-            "no_output": theme.Colors.text_muted,
+            "no_output": theme.Colors.text_secondary,
         }[state]
 
     def _legend_items(self):

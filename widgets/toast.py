@@ -214,8 +214,8 @@ class Toast(QWidget):
         return f"""
         #Toast {{ background: transparent; }}
         #ToastCard {{
-            background-color: {c.panel};
-            border: 1px solid {c.border};
+            background-color: {c.card};
+            border: 1px solid {c.button_edge};
             border-radius: {r.lg}px;
         }}
         QLabel#ToastLabel {{

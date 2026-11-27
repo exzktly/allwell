@@ -58,7 +58,7 @@ class SearchInput(QLineEdit):
     # ── internals ────────────────────────────────────────────────────────
     def _refresh_icon(self, *, active: bool) -> None:
         dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
-        color = "text_secondary" if active else "text_muted"
+        color = "text_secondary" if active else "text_secondary"
         self._search_action.setIcon(
             icons.make_icon("search", self._icon_px,
                             normal=color, active="text_secondary", dpr=dpr or 1.0)
@@ -111,20 +111,20 @@ class SearchInput(QLineEdit):
         c, t, r = theme.Colors, theme.Typography, theme.Radii
         return f"""
         QLineEdit#SearchInput {{
-            background-color: {c.panel_elevated};
-            border: 1px solid {c.border};
+            background-color: {c.control};
+            border: 1px solid {c.field_edge};
             border-radius: {r.sm}px;
             color: {c.text_primary};
             padding: 5px 8px;
             font-size: {t.body_size}px;
             selection-background-color: {c.accent};
-            selection-color: {c.accent_fg};
+            selection-color: {c.on_accent};
         }}
         QLineEdit#SearchInput:hover {{ border-color: {c.border_strong}; }}
         QLineEdit#SearchInput:focus {{ border-color: {c.accent}; }}
         QLabel#SearchInputHint {{
-            color: {c.text_muted};
-            background-color: {c.panel};
+            color: {c.text_secondary};
+            background-color: {c.card};
             border: 1px solid {c.border_subtle};
             border-radius: {r.xs}px;
             padding: 0 4px;

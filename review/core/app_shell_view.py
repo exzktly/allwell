@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QSizePolicy,
     QSplitter,
     QVBoxLayout,
@@ -516,7 +515,10 @@ def build_ui(win) -> None:
     # (section headers word-wrap, the plate scales to the rail). ``sidebar_layout``
     # stays the content's layout, so every ``sidebar_layout.addWidget(...)`` below
     # is unchanged.
-    _sidebar_scroll = QScrollArea(sidebar)
+    # A settling scroll area, because the rail plate is height-for-width: a plain one re-sizes it each time its
+    # scroll bar comes and goes, synchronously, and at some sizes never stops (``widgets/settling_scroll_area``).
+    from widgets.settling_scroll_area import SettlingScrollArea
+    _sidebar_scroll = SettlingScrollArea(sidebar)
     _sidebar_scroll.setWidgetResizable(True)
     _sidebar_scroll.setFrameShape(QFrame.NoFrame)
     _sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

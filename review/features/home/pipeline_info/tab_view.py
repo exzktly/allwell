@@ -114,8 +114,8 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     _c = _theme.Colors
     tree.setAlternatingRowColors(True)
     tree.setStyleSheet(
-        f"QTreeWidget#PipelineInfoTree {{ background:{_c.panel}; "
-        f"alternate-background-color:{_c.surface}; color:{_c.text_primary}; }}"
+        f"QTreeWidget#PipelineInfoTree {{ background:{_c.card}; "
+        f"alternate-background-color:{_c.canvas}; color:{_c.text_primary}; }}"
         f"QTreeWidget#PipelineInfoTree::item {{ color:{_c.text_primary}; "
         f"padding:3px 6px; }}"
         f"QTreeWidget#PipelineInfoTree::item:selected {{ "

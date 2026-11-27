@@ -136,7 +136,7 @@ class GradientStrip(QWidget):
         radius = theme.Radii.xs
 
         if not self._stops:
-            p.setBrush(QColor(c.panel_elevated))
+            p.setBrush(QColor(c.control))
             p.setPen(QPen(QColor(c.border_subtle), 1.0))
             p.drawRoundedRect(rect, radius, radius)
             return
@@ -145,7 +145,7 @@ class GradientStrip(QWidget):
         for pos, col in self._stops:
             grad.setColorAt(1.0 - pos if self._reversed else pos, col)
         p.setBrush(grad)
-        p.setPen(QPen(QColor(c.border), 1.0))
+        p.setPen(QPen(QColor(c.hairline), 1.0))
         p.drawRoundedRect(rect, radius, radius)
         p.end()
 

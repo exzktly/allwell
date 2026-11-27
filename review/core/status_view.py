@@ -65,7 +65,7 @@ class _GUILogHandler(logging.Handler):
                 "ERROR":   theme.Colors.danger,
                 "WARNING": theme.Colors.warn,
                 "INFO":    theme.Colors.text_secondary,
-                "DEBUG":   theme.Colors.text_muted,
+                "DEBUG":   theme.Colors.text_secondary,
             }
             color = color_map.get(level, theme.Colors.text_secondary)
             # Escaped, so a message holding ``<`` (a path, a repr, ``<well>``) is shown rather than parsed, and

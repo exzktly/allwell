@@ -811,7 +811,7 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
     if kind == "health":
         dot = QLabel("●", host)
         dot.setStyleSheet(
-            f"color:{_SEVERITY_COLORS.get(row.get('severity'), theme.Colors.text_muted)};")
+            f"color:{_SEVERITY_COLORS.get(row.get('severity'), theme.Colors.text_secondary)};")
         line.addWidget(dot)
         label = QLabel(str(row.get("label") or ""), host)
         line.addWidget(label)
@@ -840,7 +840,7 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str, on_anchor=None) -> QWi
         # ordinary text unless it is coloured like the warning it is.
         if row.get("severity"):
             value.setStyleSheet(
-                f"color:{_SEVERITY_COLORS.get(row['severity'], theme.Colors.text_muted)};")
+                f"color:{_SEVERITY_COLORS.get(row['severity'], theme.Colors.text_secondary)};")
         line.addWidget(value, 1)
         if row.get("is_default"):
             chip = QLabel("default", host)

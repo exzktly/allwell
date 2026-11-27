@@ -7,7 +7,7 @@ showed a palette no user sees — and the first design audit was drawn from thos
 redone (``_Docs/Markdowns/DESIGN_LANGUAGE_TRACKER.md``, row D01).
 
 This builds the window through the harness's own entry point (``start_window``) and reads the colour the
-window's background is actually painted, from a grab — not ``Colors.surface``, which is the token the bug
+window's background is actually painted, from a grab — not ``Colors.canvas``, which is the token the bug
 left untouched, and not the stylesheet text. Full-app test (one window per case), so ``slow``.
 """
 
@@ -63,8 +63,8 @@ def harness_window(qapp, monkeypatch):
 def test_the_harness_window_is_painted_in_the_default_theme(harness_window):
     from ui import theme
 
-    grey_surface = theme.THEMES[theme.DEFAULT_THEME]["Colors"]["surface"].upper()
-    blue_surface = theme._THEME_DEFAULTS["Colors"]["surface"].upper()
+    grey_surface = theme.THEMES[theme.DEFAULT_THEME]["Colors"]["canvas"].upper()
+    blue_surface = theme._THEME_DEFAULTS["Colors"]["canvas"].upper()
     assert grey_surface != blue_surface, "the fixture cannot tell the two palettes apart"
     win = harness_window(None)
     painted = _dominant_colour(win)
@@ -76,6 +76,6 @@ def test_the_harness_window_is_painted_in_the_default_theme(harness_window):
 def test_the_harness_honours_allwell_theme_so_both_palettes_can_be_rendered(harness_window):
     from ui import theme
 
-    blue_surface = theme._THEME_DEFAULTS["Colors"]["surface"].upper()
+    blue_surface = theme._THEME_DEFAULTS["Colors"]["canvas"].upper()
     win = harness_window("blue")
     assert _dominant_colour(win) == blue_surface

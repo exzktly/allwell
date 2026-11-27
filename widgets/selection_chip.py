@@ -86,7 +86,7 @@ class SelectionChip(QFrame):
 
     # ── internals ────────────────────────────────────────────────────────
     def _icon_color_token(self) -> str:
-        return "accent" if self._variant == "accent" else "text_faint"
+        return "accent" if self._variant == "accent" else "text_secondary"
 
     def _refresh_icon(self) -> None:
         if not self._icon_name:
@@ -108,7 +108,7 @@ class SelectionChip(QFrame):
     def _build_qss(self) -> str:
         c, t, r = theme.Colors, theme.Typography, theme.Radii
         if self._variant == "accent":
-            bg = c.accent_dim
+            bg = c.selected
             border = QColor(c.accent)
             border.setAlphaF(0.30)
             border_css = f"1px solid rgba({border.red()},{border.green()},{border.blue()},{border.alphaF():.2f})"
@@ -116,7 +116,7 @@ class SelectionChip(QFrame):
         else:
             bg = "transparent"
             border_css = "0"
-            fg = c.text_faint
+            fg = c.text_secondary
         return f"""
         QFrame#SelectionChip {{
             background-color: {bg};

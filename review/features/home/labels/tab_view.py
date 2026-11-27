@@ -375,12 +375,12 @@ class LabelGrid(QWidget):
         c, r, t = theme.Colors, theme.Radii, theme.Typography
         return f"""
         #LabelGridHost {{
-            background-color: {c.panel};
+            background-color: {c.card};
             border: 1px solid {c.border_subtle};
             border-radius: {r.md}px;
         }}
         QLabel#LabelGridHeader {{
-            color: {c.text_muted};
+            color: {c.text_secondary};
             font-family: {t.family_mono};
             font-size: {t.caption_size}px;
             font-weight: 600;
@@ -389,14 +389,14 @@ class LabelGrid(QWidget):
         }}
         QLabel#LabelGridHeader:hover {{
             color: {c.accent};
-            background-color: {c.panel_elevated};
+            background-color: {c.control};
         }}
         QLabel#LabelGridHeader[active="true"] {{
             color: {c.accent};
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
         }}
         QLineEdit#LabelCell {{
-            background-color: {c.panel_elevated};
+            background-color: {c.control};
             border: 1px solid {c.border_subtle};
             border-radius: {r.xs}px;
             color: {c.text_primary};
@@ -408,10 +408,10 @@ class LabelGrid(QWidget):
         }}
         QLineEdit#LabelCell[selected="true"] {{
             border-color: {c.accent};
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
         }}
         QLineEdit#LabelCell:disabled {{
-            color: {c.text_faint};
+            color: {c.text_disabled};
             background-color: {c.rail};
         }}
         """

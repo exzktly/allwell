@@ -187,7 +187,7 @@ class _RailNavRow(QFrame):
         if not self._icon_name:
             return
         active = bool(self.property("active"))
-        token = "accent" if active else "text_muted"
+        token = "accent" if active else "text_secondary"
         dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
         self._glyph.setPixmap(
             icons.make_pixmap(self._icon_name, token, self._glyph_px, dpr or 1.0)
@@ -438,7 +438,7 @@ class RailNav(QFrame):
         QFrame#RailNavRow {{
             background: transparent;
         }}
-        QFrame#RailNavRow:disabled {{ color: {c.text_faint}; }}
+        QFrame#RailNavRow:disabled {{ color: {c.text_disabled}; }}
         QFrame#RailNavRowStrip {{
             background: transparent;
             border: 0;
@@ -454,13 +454,13 @@ class RailNav(QFrame):
             margin: 0 4px 0 6px;
         }}
         QFrame#RailNavRowBody:hover {{
-            background-color: {c.panel};
+            background-color: {c.card};
         }}
         QFrame#RailNavRowBody[active="true"] {{
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
         }}
         QFrame#RailNavRowBody[active="true"]:hover {{
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
         }}
         QLabel#RailNavRowLabel {{
             color: {c.text_secondary};
@@ -492,7 +492,7 @@ class RailNav(QFrame):
            the accent strip and the body's own md padding), muted caption type,
            a gap above it that separates the group from the one before. */
         QLabel#RailNavCaption {{
-            color: {c.text_muted};
+            color: {c.text_secondary};
             font-family: {t.family};
             font-size: {t.caption_size}px;
             font-weight: 600;
@@ -521,7 +521,7 @@ if __name__ == "__main__":
 
     head = QLabel("SECTION", host)
     head.setStyleSheet(
-        f"color: {theme.Colors.text_muted}; font-size: {theme.Typography.caption_size}px; "
+        f"color: {theme.Colors.text_secondary}; font-size: {theme.Typography.caption_size}px; "
         f"letter-spacing: 0.08em; font-weight: 600;"
     )
     head.setContentsMargins(9, 0, 0, 0)
@@ -540,7 +540,7 @@ if __name__ == "__main__":
     lay.addStretch(1)
 
     out = QLabel("Active: Plotting", host)
-    out.setStyleSheet(f"color: {theme.Colors.text_muted}; padding: 0 9px;")
+    out.setStyleSheet(f"color: {theme.Colors.text_secondary}; padding: 0 9px;")
     nav.currentChanged.connect(lambda k: out.setText(f"Active: {k}"))
     lay.addWidget(out)
 

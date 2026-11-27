@@ -80,7 +80,7 @@ def plot_tokens(mode: str):
         p = theme.CPub
         return (p.bg, p.text, getattr(p, "text_muted", p.text), p.grid, p.spine)
     c = theme.Colors
-    return (c.plot_bg, c.text_primary, c.text_muted, c.plot_grid, c.plot_spine)
+    return (c.plot_bg, c.text_primary, c.text_secondary, c.plot_grid, c.plot_spine)
 
 
 #: Marks an artist as drawn in the plot's *ink* rather than in a data colour,
@@ -1045,7 +1045,7 @@ if _HAVE_MPL:
             c, t, r = theme.Colors, theme.Typography, theme.Radii
             return f"""
             QFrame#Panel {{
-                background-color: {c.panel};
+                background-color: {c.card};
                 border: 1px solid {c.border_subtle};
                 border-radius: {r.md}px;
             }}
@@ -1058,8 +1058,8 @@ if _HAVE_MPL:
                 background: transparent;
             }}
             QLabel#PlotCardPreviewChip {{
-                color: {c.text_muted};
-                background-color: {c.panel_elevated};
+                color: {c.text_secondary};
+                background-color: {c.control};
                 border: 1px solid {c.border_subtle};
                 border-radius: {r.pill}px;
                 padding: 1px 8px;
@@ -1067,7 +1067,7 @@ if _HAVE_MPL:
             }}
             QPushButton#PlotCardStatsChip {{
                 color: {c.text_secondary};
-                background-color: {c.panel_elevated};
+                background-color: {c.control};
                 border: 1px solid {c.border_subtle};
                 border-radius: {r.pill}px;
                 padding: 2px 10px;
@@ -1075,7 +1075,7 @@ if _HAVE_MPL:
             }}
             QPushButton#PlotCardStatsChip:hover {{
                 color: {c.text_primary};
-                border-color: {c.border};
+                border-color: {c.field_edge};
             }}
             """
 

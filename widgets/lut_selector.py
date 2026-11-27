@@ -73,7 +73,7 @@ _FALLBACK_STOPS: dict[str, list[str]] = {
     "hsv":      ["#ff0000", "#00ff00", "#0000ff"],
     "tab10":    ["#1f77b4", "#ff7f0e", "#2ca02c"],
 }
-_GENERIC_FALLBACK = [theme.Colors.surface, theme.Colors.accent, theme.Colors.accent_fg]
+_GENERIC_FALLBACK = [theme.Colors.canvas, theme.Colors.accent, theme.Colors.on_accent]
 
 
 def _cmap_stops(name: str, n: int = 24) -> list[QColor]:
@@ -307,8 +307,8 @@ class LutSelector(QWidget):
         return f"""
         #LutSelector {{ background: transparent; }}
         QPushButton#LutTrigger {{
-            background-color: {c.panel_elevated};
-            border: 1px solid {c.border};
+            background-color: {c.control};
+            border: 1px solid {c.field_edge};
             border-radius: {r.sm}px;
             padding: 2px 4px;
             text-align: left;
@@ -320,8 +320,8 @@ class LutSelector(QWidget):
             font-size: {t.small_size}px;
         }}
         QToolButton#LutReverse, QToolButton#LutReset {{
-            background-color: {c.panel_elevated};
-            border: 1px solid {c.border};
+            background-color: {c.control};
+            border: 1px solid {c.button_edge};
             border-radius: {r.sm}px;
             color: {c.text_secondary};
             padding: 3px 8px;
@@ -331,12 +331,12 @@ class LutSelector(QWidget):
             background-color: {c.hover}; color: {c.text_primary};
         }}
         QToolButton#LutReverse:checked {{
-            background-color: {c.accent_dim}; border-color: {c.accent}; color: {c.text_primary};
+            background-color: {c.selected}; border-color: {c.accent}; color: {c.text_primary};
         }}
         #LutRow {{ background: transparent; border-radius: {r.xs}px; }}
         #LutRow:hover {{ background-color: {c.hover}; }}
         #LutRow QLabel#Mono {{ color: {c.text_secondary}; font-family: {t.family_mono}; font-size: {t.small_size}px; }}
-        QLabel#Caption[lutCategory="true"] {{ color: {c.text_muted}; padding-top: {theme.Spacing.xs}px; }}
+        QLabel#Caption[lutCategory="true"] {{ color: {c.text_secondary}; padding-top: {theme.Spacing.xs}px; }}
         """
 
 

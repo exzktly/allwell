@@ -716,7 +716,7 @@ class RunDashboard(PlateProgress):
             bar.setVisible(not self.isRailBeside())
             row.addWidget(bar)
             cnt = QLabel("0/0", row_w); cnt.setFixedWidth(scaled_px(_CNT_W))
-            cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
+            cnt.setStyleSheet(f"color:{theme.Colors.text_secondary};")
             row.addWidget(cnt)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)

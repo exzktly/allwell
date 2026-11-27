@@ -77,7 +77,7 @@ def _button(qtbot, summary, nodes=lambda: []):
     return btn
 
 
-@pytest.mark.parametrize("level, token", [("ready", "success"), ("pending", "warn"), ("none", "text_muted")])
+@pytest.mark.parametrize("level, token", [("ready", "success"), ("pending", "warn"), ("none", "text_secondary")])
 def test_the_dot_paints_the_levels_colour(qtbot, level, token):
     btn = _button(qtbot, lambda: (level, []))
     assert btn._dot.color() == QColor(getattr(theme.Colors, token))
@@ -88,7 +88,7 @@ def test_the_dot_follows_the_node_without_being_clicked(qtbot):
     """A dot computed once at construction and never again would pass the test above."""
     said = {"level": "none"}
     btn = _button(qtbot, lambda: (said["level"], []))
-    for level, token in (("pending", "warn"), ("ready", "success"), ("none", "text_muted")):
+    for level, token in (("pending", "warn"), ("ready", "success"), ("none", "text_secondary")):
         said["level"] = level
         btn.update_status()
         assert btn._dot.color() == QColor(getattr(theme.Colors, token))

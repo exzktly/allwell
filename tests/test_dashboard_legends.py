@@ -69,7 +69,7 @@ def test_concatenate_legend(qapp):
     from datasets.concatenate.dashboard import ConcatDashboard
 
     assert _legend(ConcatDashboard()) == ("Wells", [
-        (C.text_muted, "pending"),
+        (C.text_secondary, "pending"),
         (C.warn, "merging"),
         (C.success, "merged"),
         (C.accent, "merged — no CSV on one side"),
@@ -80,7 +80,7 @@ def test_import_loose_legend(qapp):
     from datasets.import_loose.dashboard import ImportLooseDashboard
 
     assert _legend(ImportLooseDashboard()) == ("Legend", [
-        (C.text_muted, "pending"),
+        (C.text_secondary, "pending"),
         (C.warn, "zipping"),
         (C.success, "zipped"),
     ])
@@ -90,7 +90,7 @@ def test_merge_plates_legend(qapp):
     from datasets.merge_plates.dashboard import MergePlatesDashboard
 
     assert _legend(MergePlatesDashboard()) == ("Wells", [
-        (C.text_muted, "pending"),
+        (C.text_secondary, "pending"),
         (C.warn, "merging"),
         (C.success, "merged — dataset 1"),
         (C.accent2, "merged — dataset 2 (marked “2”)"),
@@ -104,7 +104,7 @@ def test_validate_legend(qapp):
         (C.success, "complete"),
         (C.warn, "partial"),
         (C.danger, "no measurements"),
-        (C.text_muted, "no output"),
+        (C.text_secondary, "no output"),
     ])
 
 

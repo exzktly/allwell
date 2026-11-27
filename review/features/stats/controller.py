@@ -1530,7 +1530,7 @@ def stats_refresh_colors(ctx) -> None:
     app = ctx.window  # transitional: figure handles still on app._stats_*
 
     if hasattr(app, "_stats_fig"):
-        app._stats_fig.set_facecolor(theme.Colors.surface)
+        app._stats_fig.set_facecolor(theme.Colors.canvas)
     if hasattr(app, "_stats_canvas_widget"):
         app._stats_canvas_widget.draw()
 

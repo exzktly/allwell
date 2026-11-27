@@ -100,7 +100,7 @@ class MergePlatesDashboard(PlateProgress):
             # not one (see theme.Colors.accent2's own docstring).
             return theme.Colors.success if self._well_origin.get(w) == "ds1" else theme.Colors.accent2
         if stage == "pending":
-            return theme.Colors.text_muted
+            return theme.Colors.text_secondary
         return None
 
     def _well_tooltip(self, well_id: str) -> str:
@@ -136,7 +136,7 @@ class MergePlatesDashboard(PlateProgress):
 
     def _legend_items(self):
         return "Wells", [
-            (theme.Colors.text_muted, "pending"),
+            (theme.Colors.text_secondary, "pending"),
             (theme.Colors.warn, "merging"),
             (theme.Colors.success, "merged — dataset 1"),
             (theme.Colors.accent2, "merged — dataset 2 (marked “2”)"),

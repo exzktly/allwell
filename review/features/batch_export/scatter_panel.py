@@ -743,7 +743,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         separate = self._sc_layout_cb.currentText().startswith("Separate")
         prefs = self._batch_style()
         marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
-        ink = theme.Colors.text_muted
+        ink = theme.Colors.text_secondary
 
         items = list(scatter_data.items())
         faceted = (separate or color_by_tp) and len(items) > 1

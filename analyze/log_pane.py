@@ -282,7 +282,7 @@ class AnalyzeLogPaneMixin:
             "WARNING": theme.Colors.warn,
             "ERROR":   theme.Colors.danger,
             "DONE":    theme.Colors.success,
-            "CMD":     theme.Colors.text_muted,
+            "CMD":     theme.Colors.text_secondary,
         }.get(tag, theme.Colors.text_primary)
 
     def _log_line(self, text: str, tag: str = "INFO") -> None:

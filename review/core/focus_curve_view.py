@@ -86,9 +86,9 @@ def draw_focus_distribution(fig, dist) -> None:
     which is why they are drawn rather than classified.
     """
     fig.clear()
-    bg = theme.Colors.panel
+    bg = theme.Colors.card
     txt_pri = theme.Colors.text_primary
-    txt_mut = theme.Colors.text_muted
+    txt_mut = theme.Colors.text_secondary
     fig.patch.set_facecolor(bg)
     ax = fig.add_subplot(111)
     ax.set_facecolor(bg)
@@ -166,7 +166,7 @@ def draw_focus_distribution(fig, dist) -> None:
             transform=ax.transAxes, ha="center", va="top", fontsize=8.5,
             color=txt_mut)
     leg = ax.legend(loc="best", framealpha=0.85,
-                    facecolor=theme.Colors.panel, edgecolor=txt_mut,
+                    facecolor=theme.Colors.card, edgecolor=txt_mut,
                     fontsize=9)
     if leg is not None:
         for t in leg.get_texts():

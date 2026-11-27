@@ -34,7 +34,7 @@ def well_color(stage: str) -> str | None:
     if stage == "copying":
         return theme.Colors.warn
     if stage == "pending":
-        return theme.Colors.text_muted
+        return theme.Colors.text_secondary
     return None
 
 
@@ -98,7 +98,7 @@ class SubsetDashboard(PlateProgress):
             row = QHBoxLayout(row_w)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(7)
-            row.addWidget(status_dot(well_color(state) or theme.Colors.text_muted))
+            row.addWidget(status_dot(well_color(state) or theme.Colors.text_secondary))
             nm = QLabel(f"{label}: {n}", row_w)
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)

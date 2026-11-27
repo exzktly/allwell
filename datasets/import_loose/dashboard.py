@@ -83,7 +83,7 @@ class ImportLooseDashboard(PlateProgress):
         if stage == "writing":
             return theme.Colors.warn
         if stage == "pending":
-            return theme.Colors.text_muted
+            return theme.Colors.text_secondary
         return None
 
     def _well_tooltip(self, well_id: str) -> str:
@@ -118,7 +118,7 @@ class ImportLooseDashboard(PlateProgress):
 
     def _state_color(self, state: str) -> str:
         return {
-            "pending": theme.Colors.text_muted,
+            "pending": theme.Colors.text_secondary,
             "writing": theme.Colors.warn,
             "done": theme.Colors.success,
         }[state]

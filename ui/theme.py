@@ -39,56 +39,62 @@ from domain.well_palette import WELL_COLORS_TUPLE
 class Colors:
     """Color tokens (DESIGN_TOKENS.md §1)."""
 
-    # ── Surfaces (in increasing elevation) ───────────────────────────────
-    titlebar        = "#0A0E15"   # --bg-titlebar  : top window chrome
-    surface         = "#0B0F17"   # --bg-app       : app canvas / deepest backdrop
-    rail            = "#0E131C"   # --bg-rail      : left rail + properties rail base
-    panel           = "#131A24"   # --bg-panel     : cards / sub-panels
-    panel_elevated  = "#1A2230"   # --bg-elevated  : default button/input fill
-    hover           = "#212B3B"   # --bg-hover     : hover state for controls/rows
-    active          = "#2A3548"   # --bg-active    : pressed / selected state
+    # ── Surfaces ─────────────────────────────────────────────────────────
+    # Three surface roles (``ui/palettes.py`` names every role): the page, a
+    # card on it, and a control's fill. ``hover`` / ``active`` are the states a
+    # control passes through; ``titlebar`` / ``rail`` are the shell's regions.
+    titlebar        = "#0A0E15"   # top window chrome
+    canvas          = "#0B0F17"   # the page: app canvas and a field's fill
+    rail            = "#0E131C"   # left rail + properties rail base
+    card            = "#131A24"   # a card on the canvas
+    control         = "#1D2633"   # a button's fill
+    hover           = "#212B3B"   # hover state for controls/rows
+    active          = "#2A3548"   # pressed / selected state
     well_unavailable = "#1F2937"  # fill for a batch-export plate button not in the dataset
 
-    # ── Borders / dividers ───────────────────────────────────────────────
-    border_subtle   = "#1B2331"   # --border-subtle : hairlines within a panel
-    border          = "#2A3343"   # --border        : default control border
-    border_strong   = "#3B475C"   # --border-strong : hover/focus ring on inputs
-    # Resting border on push/tool buttons. Defaults to the same subtle hairline
-    # buttons used before it was split out; a theme can make buttons read as
-    # crisp "toolbar" controls (e.g. the grey theme) without also thickening
-    # every panel/divider that reads ``border_subtle``.
-    control_border  = "#1B2331"   # --control-border : QPushButton / QToolButton edge
+    # ── Edges ────────────────────────────────────────────────────────────
+    # Three edges, in increasing contrast. A field's edge is at least 3 : 1 on
+    # a card so a field can be found without reading its label
+    # (``tests/test_theme_contrast.py``); a button's is quieter; a hairline
+    # outlines a card and divides inside one.
+    hairline        = "#2A3343"   # a card's outline, dividers inside a card, painted outlines
+    button_edge     = "#3B475C"   # a button's, a menu's and a popover's resting edge
+    field_edge      = "#5E6B82"   # a field's edge; also a button's edge under the pointer
+    # Seams between the shell's regions (the top bar's rule, the splitter
+    # handle) and the structural dividers that funnel through ``#Separator``.
+    border_subtle   = "#1B2331"
+    border_strong   = "#3B475C"   # an input's hover / focus-adjacent edge
 
     # ── Text ─────────────────────────────────────────────────────────────
-    text_primary    = "#E6E9EF"   # --text-primary   : body, headings, primary labels
-    text_secondary  = "#98A2B3"   # --text-secondary : labels-on-controls, metadata
-    text_muted      = "#5F6B7C"   # --text-muted     : hints, inactive labels, ticks
-    text_faint      = "#404B5C"   # --text-faint     : decorative separators
+    # Three inks: primary for text and values, secondary for labels, help and
+    # anything quieter, disabled for a disabled control's label, a placeholder
+    # and a value that reads *not set*.
+    text_primary    = "#E6E9EF"
+    text_secondary  = "#98A2B3"
+    text_disabled   = "#717D90"
     #: Ink for a plot element that stands for something **undefined** — today
     #: the dashed edge of the bar plots' "could not be computed" placeholder
-    #: and their disabled-well outline. It was called ``text_disabled`` and
-    #: documented as "disabled control label text", which it has never been:
-    #: no ``:disabled`` rule in ``qss()`` reads it, both consumers are
-    #: matplotlib painters, and the name invited exactly the wrong fix —
-    #: re-pointing it at the muted grey the stylesheet's ``:disabled`` rules
-    #: use took the placeholder's contrast against ``plot_bg`` from 7.75:1 to
+    #: and their disabled-well outline. It was called ``text_disabled`` once and
+    #: documented as "disabled control label text", which it never was: both
+    #: consumers are matplotlib painters, and re-pointing it at a quieter grey
+    #: took the placeholder's contrast against ``plot_bg`` from 7.75:1 to
     #: 3.23:1, on the one marker whose whole job is to be noticed.
     plot_undefined_ink = "#A0AEC0"
-    placeholder     = "#64748B"   # --placeholder    : empty-field placeholder text
 
-    # ── Accent (interactive / brand) ─────────────────────────────────────
-    accent          = "#6B8AFD"   # --accent
-    accent_hover    = "#84A0FF"   # --accent-hover
-    accent_pressed  = "#5772E6"   # darkened --accent for :pressed (not a token)
-    accent_dim      = "#2C3A66"   # --accent-dim : low-emphasis selected backgrounds
-    accent_fg       = "#F0F4FF"   # --accent-fg  : text/icon on accent-filled buttons
+    # ── Accent (interactive / selected) ──────────────────────────────────
+    accent          = "#6B8AFD"
+    accent_hover    = "#84A0FF"
+    accent_pressed  = "#5772E6"   # darkened accent for :pressed
+    on_accent       = "#0B0F17"   # the label drawn on an accent fill
+    selected        = "#24315C"   # a selected item's fill
+    selected_fg     = "#C9D4FF"   # a selected item's text
     # A second, distinct hue for "this belongs to the other of two normal
     # groups" (e.g. Merge Plates' dataset-2 wells) — never used for an anomaly
     # or a warning. Deliberately not ``accent``: several plate-map dashboards
     # already use ``accent`` to flag an anomalous well (Concatenate's
     # merged-with-no-CSV, Subset's no-rows-matched), so a well merely
     # belonging to "the other source" must not read as suspect.
-    accent2         = "#B98CF7"   # --accent2 : second-group tint, never an anomaly colour
+    accent2         = "#B98CF7"   # second-group tint, never an anomaly colour
 
     # ── Brand cue (version pill) ─────────────────────────────────────────
     # A small, theme-swappable brand chip. The default (blue) palette keeps it a
@@ -440,10 +446,10 @@ class Typography:
     family_mono = "monospace"
 
     # font sizes (px) — §2.2
-    caption_size = 11   # --fs-caption : section eyebrows, tick labels
+    caption_size = 12   # eyebrows, tick labels — the design language has four sizes: 12, 13, 15, 17
     small_size   = 12   # --fs-small   : buttons, segmented text, status bar
     body_size    = 13   # --fs-body    : default body, list rows, property labels
-    emph_size    = 14   # --fs-emph    : emphasized inline labels, control values
+    emph_size    = 13   # emphasized inline labels, control values (the body size; weight carries the emphasis)
     h3_size      = 15   # --fs-h3      : panel sub-titles
     h2_size      = 17   # --fs-h2      : plot card titles, dialog titles
 
@@ -470,20 +476,18 @@ class Spacing:
     md  = 12   # --s-3 : field-row gap, padding inside cards
     lg  = 16   # --s-4 : padding inside panels, gap between blocks
     xl  = 24   # --s-6 : outer gutter between major panels
-    xxl = 32   # --s-8 : rare large empty-state padding
 
 
 class Radii:
-    """Border-radius tokens (DESIGN_TOKENS.md §4).
+    """Border-radius tokens: three radii — a control 4, a card 6, an overlay 10.
 
-    Tightened to a flat, near-rectangular "instrument-panel" feel — the shared
-    default for both bundled themes (``blue`` and ``grey``).
+    Shared by every palette (``ui/palettes.py`` overrides colours only).
     """
 
-    xs   = 3     # --r-xs   : file chip, logo tile, tiny inline indicators
-    sm   = 3     # --r-sm   : buttons, inputs, chips — dominant radius
-    md   = 4     # --r-md   : cards (plot card, plate card, panel sections)
-    lg   = 6     # --r-lg   : floating overlays (toasts, drawers, dialogs)
+    xs   = 4     # file chip, logo tile, tiny inline indicators: a control's radius
+    sm   = 4     # buttons, inputs, chips — a control
+    md   = 6     # cards (plot card, plate card, panel sections)
+    lg   = 10    # floating overlays (toasts, drawers, menus, dialogs)
     pill = 999   # --r-pill : status dot rings, count badges
 
 
@@ -640,7 +644,7 @@ QPushButton#{object_name} {{
     background: transparent;
     border: none;
     border-radius: {r.sm}px;
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.small_size}px;
     padding: 0px;
 }}
@@ -683,13 +687,13 @@ QPushButton#{object_name} {{
 }}
 QPushButton#{object_name}:hover {{
     background-color: {c.hover};
-    border-color: {c.border};
+    border-color: {c.field_edge};
 }}
 QPushButton#{object_name}:pressed {{
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
 }}
 QPushButton#{object_name}:disabled {{
-    color: {c.text_muted};
+    color: {c.text_disabled};
 }}
 """
 
@@ -732,25 +736,25 @@ def qss() -> str:
     font-size: {t.body_size}px;
     color: {c.text_primary};
     selection-background-color: {c.accent};
-    selection-color: {c.accent_fg};
+    selection-color: {c.on_accent};
     outline: 0;
 }}
 
 QWidget {{
-    background-color: {c.surface};
+    background-color: {c.canvas};
     color: {c.text_primary};
 }}
 QMainWindow, QDialog {{
-    background-color: {c.surface};
+    background-color: {c.canvas};
 }}
 QScrollArea {{
-    background-color: {c.surface};
+    background-color: {c.canvas};
     border: 0;
 }}
 
 /* ── Structural frames (opt-in via objectName / dynamic property) ─────── */
 QFrame#Panel, QFrame[panel="true"] {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
 }}
@@ -758,7 +762,7 @@ QFrame#Panel, QFrame[panel="true"] {{
    carries the figure and its title as child labels, so the chrome here is the
    frame around them and the hover state that says it can be pressed. */
 QPushButton#HomeThumbTile {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
     padding: 0;
@@ -783,8 +787,8 @@ QPushButton#HomeThumbTile:pressed {{
    only to be overridden, and every value chip in the app renders with the
    override in force. */
 QPushButton#VariableValueChip {{
-    background-color: {c.panel_elevated};
-    border: 1px solid {c.border};
+    background-color: {c.control};
+    border: 1px solid {c.button_edge};
     border-radius: {r.sm}px;
     color: {c.text_primary};
     font-size: {t.small_size}px;
@@ -798,7 +802,7 @@ QPushButton#VariableRowDelete {{
     background: transparent;
     border: none;
     border-radius: {r.sm}px;
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.small_size}px;
     padding: 0px;
 }}
@@ -817,13 +821,13 @@ QPushButton#VariableValueChip:hover {{
    a muted hint precisely so it is not mistaken for the standing captions
    around it, which is how the fill's confirmation used to go unread. */
 QWidget#VariablesHeader {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border-radius: {r.sm}px;
 }}
 QLabel#VariablesCaption {{
     font-size: {t.caption_size}px;
     font-weight: {t.semibold};
-    color: {c.text_muted};
+    color: {c.text_secondary};
     letter-spacing: 0.08em;
 }}
 QLabel#VariablesHeaderValue {{
@@ -855,10 +859,10 @@ QPushButton#VariablesLink {{
 }}
 QPushButton#VariablesLink:hover {{
     background-color: {c.hover};
-    border-color: {c.border};
+    border-color: {c.field_edge};
 }}
 QPushButton#VariablesLink:disabled {{
-    color: {c.text_muted};
+    color: {c.text_disabled};
 }}
 /* Home's recent-dataset rows, and the × that takes one off the list — one
    definition each, shared with EmptyState's entries; see ``link_row_qss`` and
@@ -889,8 +893,8 @@ QFrame#Titlebar {{
    needs its own fill and edge — without them it is a glyph hanging in mid-air
    over whichever pane happens to be underneath. */
 QToolButton#RailToggle {{
-    background-color: {c.panel_elevated};
-    border: 1px solid {c.border};
+    background-color: {c.control};
+    border: 1px solid {c.button_edge};
     border-radius: {r.sm}px;
 }}
 QToolButton#RailToggle:hover {{
@@ -951,7 +955,7 @@ QFrame#HRule, QFrame#VRule {{
 /* The rule under an Analyze form section title: the default control border,
    because border_subtle is near-invisible against the grey theme's canvas. */
 QFrame#Separator[section="true"] {{
-    background-color: {c.border};
+    background-color: {c.hairline};
 }}
 QFrame#HRule {{
     min-height: 1px;
@@ -992,7 +996,7 @@ QLabel[role="section"] {{
 QLabel#Caption, QLabel[caption="true"] {{
     font-size: {t.caption_size}px;
     font-weight: {t.medium};
-    color: {c.text_muted};
+    color: {c.text_secondary};
 }}
 QLabel#Secondary, QLabel[secondary="true"] {{
     color: {c.text_secondary};
@@ -1002,7 +1006,7 @@ QLabel#Mono, QLabel[mono="true"] {{
     font-size: {t.small_size}px;
 }}
 QLabel#Muted, QLabel[muted="true"] {{
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.caption_size}px;
 }}
 QLabel#Accent, QLabel[accent="true"] {{
@@ -1012,12 +1016,12 @@ QLabel#Accent, QLabel[accent="true"] {{
    affordance beside a control rather than as content of its own, and slightly
    larger than caption text so the glyph stays legible at that weight. */
 QLabel#InfoHint {{
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.small_size}px;
 }}
 /* Text roles that were named at their call sites but styled nowhere. */
 QLabel#MutedCaption {{
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.caption_size}px;
     font-weight: {t.medium};
 }}
@@ -1056,10 +1060,10 @@ QLabel#NanowellComputing {{
    heading size, tile values large enough to read across a desk, and
    everything explanatory muted. */
 QScrollArea#HomeScroll, QScrollArea#HomeScroll > QWidget > QWidget {{
-    background: {c.surface};
+    background: {c.canvas};
 }}
 QFrame#HomeCard, QWidget#HomeTile {{
-    background: {c.panel};
+    background: {c.card};
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
 }}
@@ -1080,7 +1084,7 @@ QFrame#StatsGroupCard:hover {{
     background: {c.hover};
 }}
 QFrame#StatsGroupCard[state="selected"] {{
-    background: {c.panel_elevated};
+    background: {c.control};
     border: 1px solid {c.border_subtle};
     border-left: 3px solid {c.accent};
 }}
@@ -1099,7 +1103,7 @@ QLabel#HomeCardTitle {{
    the plate beneath it, and a tinted panel at this width reads as an alert
    banner even when it is saying that nothing is wrong. */
 QFrame#HomeNextStep {{
-    background: {c.panel};
+    background: {c.card};
     border: 1px solid {c.border_subtle};
     border-left: 3px solid {c.border_strong};
     border-radius: {r.md}px;
@@ -1128,8 +1132,8 @@ QLabel#HomeTileValue {{
 }}
 /* Channel chips and the "default" marker beside a threshold nobody chose. */
 QLabel#HomeChip, QLabel#HomeChipSeg {{
-    background: {c.panel_elevated};
-    border: 1px solid {c.border};
+    background: {c.control};
+    border: 1px solid {c.hairline};
     border-radius: {r.xs}px;
     padding: 1px 6px;
     font-family: {t.family_mono};
@@ -1154,8 +1158,8 @@ QPushButton#HomeWellChip {{
     padding: 0px;
 }}
 QPushButton#HomeAction {{
-    background: {c.panel_elevated};
-    border: 1px solid {c.border};
+    background: {c.control};
+    border: 1px solid {c.button_edge};
     border-radius: {r.sm}px;
     color: {c.text_primary};
 }}
@@ -1175,15 +1179,15 @@ QPlainTextEdit#HomeNotes {{
     color: {c.text_primary};
 }}
 QPlainTextEdit#HomeNotes:hover {{
-    background: {c.panel_elevated};
+    background: {c.control};
     border-color: {c.border_subtle};
 }}
 QPlainTextEdit#HomeNotes:focus {{
-    background: {c.panel_elevated};
-    border-color: {c.border};
+    background: {c.control};
+    border-color: {c.field_edge};
 }}
 QWidget#ActiveGroupBanner {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border-radius: {r.sm}px;
 }}
 QLabel#Danger  {{ color: {c.danger}; }}
@@ -1222,9 +1226,9 @@ QLabel#Warn    {{ color: {c.warn}; }}
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 QPushButton, QToolButton {{
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
     color: {c.text_primary};
-    border: 1px solid {c.control_border};
+    border: 1px solid {c.button_edge};
     border-radius: {r.sm}px;
     padding: {m.btn_pad_v}px {m.btn_pad_h}px;
     font-size: {t.small_size}px;
@@ -1239,16 +1243,16 @@ QToolButton {{
 }}
 QPushButton:hover, QToolButton:hover {{
     background-color: {c.hover};
-    border-color: {c.border};
+    border-color: {c.field_edge};
 }}
 QPushButton:pressed, QToolButton:pressed,
 QPushButton:checked, QToolButton:checked {{
     background-color: {c.active};
 }}
 QPushButton:disabled, QToolButton:disabled {{
-    color: {c.text_muted};
-    background-color: {c.panel};
-    border-color: {c.border_subtle};
+    color: {c.text_disabled};
+    background-color: {c.control};
+    border-color: {c.hairline};
 }}
 
 /* Dropdown-caret tool buttons (those marked ``hasMenu``). Every one of these is
@@ -1297,7 +1301,7 @@ QToolButton[popupMode="1"]::menu-arrow {{
 QPushButton#Primary {{
     background-color: {c.accent};
     border-color: {c.accent};
-    color: {c.accent_fg};
+    color: {c.on_accent};
     font-weight: {t.semibold};
 }}
 QPushButton#Primary:hover {{
@@ -1309,9 +1313,9 @@ QPushButton#Primary:pressed {{
     border-color: {c.accent_pressed};
 }}
 QPushButton#Primary:disabled {{
-    background-color: {c.accent_dim};
-    border-color: {c.accent_dim};
-    color: {c.text_muted};
+    background-color: {c.selected};
+    border-color: {c.selected};
+    color: {c.text_disabled};
 }}
 
 QPushButton#Danger {{
@@ -1320,7 +1324,7 @@ QPushButton#Danger {{
     color: {c.danger};
 }}
 QPushButton#Danger:hover {{
-    background-color: {c.panel};
+    background-color: {c.card};
 }}
 
 QPushButton#Ghost, QToolButton#Ghost {{
@@ -1332,7 +1336,7 @@ QPushButton#Ghost, QToolButton#Ghost {{
     padding: {s.xs}px {s.xs}px;
 }}
 QPushButton#Ghost:hover, QToolButton#Ghost:hover {{
-    background-color: {c.panel};
+    background-color: {c.card};
 }}
 
 /* ── Toggle buttons (checkable mode/option buttons) ───────────────────── */
@@ -1345,7 +1349,7 @@ QPushButton#Ghost:hover, QToolButton#Ghost:hover {{
 QPushButton[variant="toggle"]:checked,
 QPushButton[variant="toggle_active"],
 QToolButton[variant="toggle"]:checked {{
-    background-color: {c.accent_dim};
+    background-color: {c.selected};
     border: 1px solid {c.accent};
     color: {c.text_primary};
 }}
@@ -1353,7 +1357,7 @@ QPushButton[variant="toggle"]:checked:hover,
 QToolButton[variant="toggle"]:checked:hover {{
     background-color: {c.accent};
     border-color: {c.accent};
-    color: {c.accent_fg};
+    color: {c.on_accent};
 }}
 
 /* ── `variant` values set by ui_helpers._btn and friends ──────────────── */
@@ -1367,7 +1371,7 @@ QToolButton[variant="toggle"]:checked:hover {{
 QPushButton[variant="primary"], QToolButton[variant="primary"] {{
     background-color: {c.accent};
     border-color: {c.accent};
-    color: {c.accent_fg};
+    color: {c.on_accent};
     font-weight: {t.semibold};
 }}
 QPushButton[variant="primary"]:hover, QToolButton[variant="primary"]:hover {{
@@ -1379,21 +1383,21 @@ QPushButton[variant="primary"]:pressed, QToolButton[variant="primary"]:pressed {
     border-color: {c.accent_pressed};
 }}
 QPushButton[variant="primary"]:disabled, QToolButton[variant="primary"]:disabled {{
-    background-color: {c.accent_dim};
-    border-color: {c.accent_dim};
-    color: {c.text_muted};
+    background-color: {c.selected};
+    border-color: {c.selected};
+    color: {c.text_disabled};
 }}
 
 QPushButton[variant="secondary"], QToolButton[variant="secondary"] {{
-    background-color: {c.panel_elevated};
-    border: 1px solid {c.control_border};
+    background-color: {c.control};
+    border: 1px solid {c.button_edge};
     color: {c.text_primary};
 }}
 /* The rule above outranks the plain `:disabled` one (an attribute selector is more specific than a
    pseudo-state alone), so without this a greyed secondary button painted exactly as an enabled one. */
 QPushButton[variant="secondary"]:disabled, QToolButton[variant="secondary"]:disabled {{
-    color: {c.text_muted};
-    background-color: {c.panel};
+    color: {c.text_disabled};
+    background-color: {c.card};
     border-color: {c.border_subtle};
 }}
 /* Same specificity trap as `:disabled` above: the variant rule's own background beats the plain
@@ -1401,7 +1405,7 @@ QPushButton[variant="secondary"]:disabled, QToolButton[variant="secondary"]:disa
    pressed. */
 QPushButton[variant="secondary"]:hover, QToolButton[variant="secondary"]:hover {{
     background-color: {c.hover};
-    border-color: {c.border};
+    border-color: {c.field_edge};
 }}
 QPushButton[variant="secondary"]:pressed, QToolButton[variant="secondary"]:pressed {{
     background-color: {c.active};
@@ -1413,7 +1417,7 @@ QPushButton[variant="danger"], QToolButton[variant="danger"] {{
     color: {c.danger};
 }}
 QPushButton[variant="danger"]:hover, QToolButton[variant="danger"]:hover {{
-    background-color: {c.panel};
+    background-color: {c.card};
 }}
 QPushButton[variant="danger"]:pressed, QToolButton[variant="danger"]:pressed {{
     background-color: {c.active};
@@ -1422,18 +1426,18 @@ QPushButton[variant="danger"]:pressed, QToolButton[variant="danger"]:pressed {{
 QPushButton[variant="muted"], QToolButton[variant="muted"], QLabel[variant="muted"] {{
     background-color: transparent;
     border-color: transparent;
-    color: {c.text_muted};
+    color: {c.text_secondary};
 }}
 
 /* SEM / SD toggle on the bar + batch-export panels: `sem` is the settled
    state, `sem_warn` flags a spread that cannot be computed as SEM. */
 QPushButton[variant="sem"], QToolButton[variant="sem"] {{
-    background-color: {c.panel_elevated};
-    border: 1px solid {c.control_border};
+    background-color: {c.control};
+    border: 1px solid {c.button_edge};
     color: {c.text_primary};
 }}
 QPushButton[variant="sem_warn"], QToolButton[variant="sem_warn"] {{
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
     border: 1px solid {c.warn};
     color: {c.warn};
 }}
@@ -1441,14 +1445,14 @@ QPushButton[variant="sem_warn"], QToolButton[variant="sem_warn"] {{
 /* Bar Plots' Reset Order: `toggle_accent` while a manual order is in force,
    `toggle_muted` when there is nothing to reset. */
 QPushButton[variant="toggle_accent"], QToolButton[variant="toggle_accent"] {{
-    background-color: {c.accent_dim};
+    background-color: {c.selected};
     border: 1px solid {c.accent};
     color: {c.text_primary};
 }}
 QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
     background-color: transparent;
-    border: 1px solid {c.control_border};
-    color: {c.text_muted};
+    border: 1px solid {c.button_edge};
+    color: {c.text_secondary};
 }}
 
 /* Nested sub-tab bars (Plotting / Image Browser / Home). The call
@@ -1488,40 +1492,40 @@ QPushButton#WellButton {{
     padding: 0;
     border-radius: 9px;
     border: 1px solid transparent;
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
 }}
-QPushButton#WellButton[state="empty"]      {{ background-color: {c.panel};         border: 1px solid transparent; }}
-QPushButton#WellButton[state="available"]  {{ background-color: {c.panel_elevated}; border: 1px solid {c.border}; }}
+QPushButton#WellButton[state="empty"]      {{ background-color: {c.card};         border: 1px solid transparent; }}
+QPushButton#WellButton[state="available"]  {{ background-color: {c.control}; border: 1px solid {c.hairline}; }}
 QPushButton#WellButton[state="selected"]   {{ background-color: {c.accent};         border: 1px solid {c.accent_pressed}; }}
 QPushButton#WellButton[state="active"]     {{ background-color: {c.accent};         border: 1px solid {c.accent_pressed}; }}
-QPushButton#WellButton[state="rep_hidden"] {{ background-color: {c.panel};          border: 1px solid {c.border_subtle}; }}
+QPushButton#WellButton[state="rep_hidden"] {{ background-color: {c.card};          border: 1px solid {c.border_subtle}; }}
 QPushButton#WellButton[state="group"]      {{ background-color: {c.success};        border: 1px solid {c.success}; }}
 QPushButton#WellButton[state="warn"]       {{ background-color: {c.warn};           border: 1px solid {c.warn}; }}
 QPushButton#WellButton[state="danger"]     {{ background-color: {c.danger};         border: 1px solid {c.danger}; }}
 QPushButton#WellButton:hover               {{ background-color: {c.hover}; }}
-QPushButton#WellButton:disabled            {{ background-color: {c.panel};          border: 1px solid transparent; }}
+QPushButton#WellButton:disabled            {{ background-color: {c.card};          border: 1px solid transparent; }}
 
 /* ── Text inputs / steppers ──────────────────────────────────────────── */
 QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox {{
-    background-color: {c.panel_elevated};
+    background-color: {c.canvas};
     color: {c.text_primary};
-    border: 1px solid {c.border};
+    border: 1px solid {c.field_edge};
     border-radius: {r.sm}px;
     padding: {m.input_pad_v}px {m.input_pad_h}px;
     selection-background-color: {c.accent};
-    selection-color: {c.accent_fg};
+    selection-color: {c.on_accent};
 }}
 QLineEdit:hover, QPlainTextEdit:hover, QTextEdit:hover,
 QSpinBox:hover, QDoubleSpinBox:hover {{
-    border-color: {c.border_strong};
+    border-color: {c.text_secondary};
 }}
 QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
 QSpinBox:focus, QDoubleSpinBox:focus {{
     border-color: {c.accent};
 }}
 QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
-    color: {c.text_muted};
-    background-color: {c.panel};
+    color: {c.text_disabled};
+    background-color: {c.card};
 }}
 /* See ``Metrics.spin_min_w``: Qt gives a spin box's text area the width of its
    widest value plus 5–6 px (the figure depends on the font), however wide the
@@ -1532,7 +1536,7 @@ QSpinBox, QDoubleSpinBox {{
 }}
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {{
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
     border: none;
     width: 14px;
 }}
@@ -1556,14 +1560,14 @@ QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
 
 /* ── Combo box ───────────────────────────────────────────────────────── */
 QComboBox {{
-    background-color: {c.panel_elevated};
+    background-color: {c.canvas};
     color: {c.text_primary};
-    border: 1px solid {c.border};
+    border: 1px solid {c.field_edge};
     border-radius: {r.sm}px;
     padding: {m.input_pad_v}px {m.input_pad_h}px;
 }}
 QComboBox:hover {{
-    border-color: {c.border_strong};
+    border-color: {c.text_secondary};
 }}
 QComboBox:focus, QComboBox:on {{
     border-color: {c.accent};
@@ -1581,8 +1585,8 @@ QComboBox[filterActive="true"] {{
    every state, so the palette's disabled group never gets a look in. Matches
    the ``QLineEdit`` family, whose base rule this one mirrors token for token. */
 QComboBox:disabled {{
-    color: {c.text_muted};
-    background-color: {c.panel};
+    color: {c.text_disabled};
+    background-color: {c.card};
 }}
 QComboBox::drop-down {{
     border: none;
@@ -1594,11 +1598,11 @@ QComboBox::down-arrow {{
     height: 10px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: {c.panel};
+    background-color: {c.card};
     color: {c.text_primary};
-    border: 1px solid {c.border};
+    border: 1px solid {c.button_edge};
     border-radius: {r.sm}px;
-    selection-background-color: {c.accent_dim};
+    selection-background-color: {c.selected};
     selection-color: {c.text_primary};
     outline: 0;
 }}
@@ -1619,8 +1623,8 @@ QCheckBox, QRadioButton {{
 QCheckBox::indicator, QRadioButton::indicator {{
     width: 16px;
     height: 16px;
-    background-color: {c.panel_elevated};
-    border: 1px solid {c.border};
+    background-color: {c.control};
+    border: 1px solid {c.field_edge};
     /* No margin here. ``spacing`` above is the single source of the
        indicator↔label gap; a margin on top of it stacks, so the gap became
        spacing + margin everywhere — visible as over-padded rows, and as dead
@@ -1649,7 +1653,7 @@ QCheckBox::indicator:checked {{
     image: url({_check});
 }}
 QCheckBox:disabled, QRadioButton:disabled {{
-    color: {c.text_muted};
+    color: {c.text_disabled};
 }}
 
 /* ── Slider ──────────────────────────────────────────────────────────── */
@@ -1666,7 +1670,7 @@ QSlider::handle:horizontal {{
     width: 14px;
     height: 14px;
     margin: -5px 0;
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
     border: 2px solid {c.rail};
     border-radius: 7px;
 }}
@@ -1676,7 +1680,7 @@ QSlider::handle:horizontal:hover {{
 
 /* ── Tabs ────────────────────────────────────────────────────────────── */
 QTabWidget::pane {{
-    background-color: {c.surface};
+    background-color: {c.canvas};
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
 }}
@@ -1710,9 +1714,9 @@ QTabBar::tab:selected {{
 
 /* ── Menus ───────────────────────────────────────────────────────────── */
 QMenu {{
-    background-color: {c.panel};
+    background-color: {c.card};
     color: {c.text_primary};
-    border: 1px solid {c.border};
+    border: 1px solid {c.button_edge};
     border-radius: {r.sm}px;
     padding: 4px;
 }}
@@ -1721,7 +1725,7 @@ QMenu::item {{
     border-radius: {r.xs}px;
 }}
 QMenu::item:selected {{
-    background-color: {c.accent_dim};
+    background-color: {c.selected};
 }}
 QMenu::separator {{
     height: 1px;
@@ -1731,16 +1735,16 @@ QMenu::separator {{
 
 /* ── Tooltip ─────────────────────────────────────────────────────────── */
 QToolTip {{
-    background-color: {c.panel};
+    background-color: {c.card};
     color: {c.text_primary};
-    border: 1px solid {c.border};
+    border: 1px solid {c.hairline};
     border-radius: {r.xs}px;
     padding: 4px 6px;
 }}
 
 /* ── Group box ───────────────────────────────────────────────────────── */
 QGroupBox {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
     margin-top: {s.md}px;
@@ -1757,12 +1761,12 @@ QGroupBox::title {{
 
 /* ── Lists / trees / tables ──────────────────────────────────────────── */
 QListView, QListWidget, QTreeView, QTreeWidget, QTableView, QTableWidget {{
-    background-color: {c.panel};
+    background-color: {c.card};
     color: {c.text_primary};
     border: 1px solid {c.border_subtle};
     border-radius: {r.sm}px;
     outline: 0;
-    selection-background-color: {c.accent_dim};
+    selection-background-color: {c.selected};
     selection-color: {c.text_primary};
 }}
 QListView::item, QListWidget::item, QTreeView::item, QTreeWidget::item {{
@@ -1775,10 +1779,10 @@ QTreeView::item:hover, QTreeWidget::item:hover {{
 }}
 QListView::item:selected, QListWidget::item:selected,
 QTreeView::item:selected, QTreeWidget::item:selected {{
-    background-color: {c.accent_dim};
+    background-color: {c.selected};
 }}
 QHeaderView::section {{
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
     color: {c.text_secondary};
     border: none;
     border-bottom: 1px solid {c.border_subtle};
@@ -1787,7 +1791,7 @@ QHeaderView::section {{
 }}
 QTableView, QTableWidget {{
     gridline-color: {c.border_subtle};
-    alternate-background-color: {c.panel_elevated};
+    alternate-background-color: {c.control};
 }}
 QTableView::item, QTableWidget::item {{
     padding: 4px 8px;
@@ -1828,7 +1832,7 @@ QWidget#JobRow:hover {{
     background-color: {c.hover};
 }}
 QWidget#JobQueueList {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border: 1px solid {c.border_subtle};
     border-radius: {r.sm}px;
 }}
@@ -1838,7 +1842,7 @@ QWidget#JobQueueList {{
    widgets/context_banner.py. Accent-tinted so it reads as a mode the page is
    in, not as one more row of its chrome. */
 QWidget#ContextBanner {{
-    background-color: {c.accent_dim};
+    background-color: {c.selected};
     border: 1px solid {c.accent};
     border-radius: {r.sm}px;
 }}
@@ -1861,27 +1865,27 @@ QWidget#ContextBannerBody, QWidget#ContextBannerButtons {{
    family. Both call sites set WA_StyledBackground, without which a plain
    QWidget subclass ignores its own background rule entirely.
 
-   `panel`, not ContextBanner's `accent_dim` fill, and the reason is measured
+   `card`, not ContextBanner's `selected` fill, and the reason is measured
    rather than a preference. ContextBanner carries one sentence at
-   text_primary, which reads 9.07:1 on accent_dim. These two carry three tiers
-   — identity, prose, tally — and on accent_dim the muted tier measures 2.04:1
-   in the blue theme and 3.16:1 in grey, so the tier whose whole job is to be
-   quiet becomes the tier that cannot be read. On `panel` the same three
-   measure 14.38 / 6.79 / 3.23 (blue) and 12.65 / 7.93 / 4.48 (grey). */
+   text_primary. These two carry three tiers — identity, prose, tally — and a
+   tinted fill takes contrast from the quietest of them first, so the tier
+   whose whole job is to be quiet becomes the tier that cannot be read. On
+   `card` every tier clears 4.5 : 1 in every palette
+   (``tests/test_theme_contrast.py`` holds secondary text there). */
 QWidget#ResumeBanner {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border: {m.hairline}px solid {c.accent};
     border-radius: {r.md}px;
 }}
 QWidget#PreflightBanner {{
-    background-color: {c.panel};
-    border: {m.hairline}px solid {c.border};
+    background-color: {c.card};
+    border: {m.hairline}px solid {c.hairline};
     border-radius: {r.md}px;
 }}
 /* The four text tiers inside them. Scoped to the banners rather than reusing
    the global QLabel[muted="true"] / [secondary="true"] roles, because those
    are colour-only and these need their own size and weight ramp — one that
-   has to stay legible against `panel` rather than against the app canvas. */
+   has to stay legible against `card` rather than against the app canvas. */
 QLabel#AnalyzeBannerKicker {{
     color: {c.accent};
     font-size: {t.caption_size}px;
@@ -1897,9 +1901,8 @@ QLabel#AnalyzeBannerBody {{
     font-size: {t.small_size}px;
 }}
 /* Ranked below the prose by size, not by colour. It is the one line in the
-   strip carrying numbers the user is meant to read, and `text_muted` measures
-   3.23:1 on `panel` — the right weight for a hint that restates a control's
-   own label, and the wrong one for the only report of what the run did. */
+   strip carrying numbers the user is meant to read, so it keeps the secondary
+   ink rather than anything quieter. */
 QLabel#AnalyzeBannerTally {{
     color: {c.text_secondary};
     font-size: {t.caption_size}px;
@@ -1908,11 +1911,11 @@ QLabel#AnalyzeBannerTally {{
 /* ── Nanowells: the Resolve walk's guide card ────────────────────────── */
 /* review/features/nanowell/resolve_view.py: what is wrong with the timepoint
    shown, what to do and where, and what happens next. The resume banner's
-   family (`panel` fill, accent edge) for the same measured reason — three text
+   family (`card` fill, accent edge) for the same measured reason — three text
    tiers that must all stay legible — and an accent edge because it carries
    the action the reader is in the middle of. */
 QWidget#NanowellResolveGuide {{
-    background-color: {c.panel};
+    background-color: {c.card};
     border: {m.hairline}px solid {c.accent};
     border-radius: {r.md}px;
 }}
@@ -1964,7 +1967,7 @@ QScrollBar:horizontal {{
     margin: 0;
 }}
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {{
-    background-color: {c.border};
+    background-color: {c.button_edge};
     border-radius: 5px;
     min-height: 24px;
     min-width: 24px;
@@ -1983,7 +1986,7 @@ QScrollBar::add-page, QScrollBar::sub-page {{
 
 /* ── Progress bar ────────────────────────────────────────────────────── */
 QProgressBar {{
-    background-color: {c.panel_elevated};
+    background-color: {c.control};
     border: 1px solid {c.border_subtle};
     border-radius: {r.sm}px;
     text-align: center;
@@ -2021,8 +2024,8 @@ QWidget#PhoneRunBar {{
    control border as its top edge: the subtle hairline is near-invisible on the
    grey theme, and the footer has to read as "not part of what scrolls". */
 QWidget#AnalyzeRunFooter {{
-    background-color: {c.panel};
-    border-top: 1px solid {c.border};
+    background-color: {c.card};
+    border-top: 1px solid {c.hairline};
 }}
 /* Its two rows are plain QWidgets, which the app-wide QWidget rule fills with
    the canvas colour; left to it they paint over the footer's own fill and edge. */
@@ -2033,7 +2036,7 @@ QToolButton#PhoneMenuButton, QToolButton#PhonePageButton,
 QToolButton#PhoneOptionsButton, QToolButton#PhoneControlsButton,
 QToolButton#PhoneWellsButton {{
     background-color: transparent;
-    border: 1px solid {c.control_border};
+    border: 1px solid {c.button_edge};
     border-radius: {r.sm}px;
     padding: {m.btn_pad_v}px {m.btn_pad_h}px;
     font-weight: {t.semibold};
@@ -2041,12 +2044,12 @@ QToolButton#PhoneWellsButton {{
 QToolButton#PhoneMenuButton, QToolButton#PhoneOptionsButton {{ font-size: {t.h2_size}px; }}
 QPushButton#PhoneTextSizeButton:checked {{
     background-color: {c.accent};
-    color: {c.accent_fg};
+    color: {c.on_accent};
     border-color: {c.accent};
 }}
 QToolButton#PhoneMenuButton:checked {{
     background-color: {c.accent};
-    color: {c.accent_fg};
+    color: {c.on_accent};
     border-color: {c.accent};
 }}
 QToolButton#PhoneMenuButton:hover, QToolButton#PhonePageButton:hover,
@@ -2064,7 +2067,7 @@ QLabel#PlateHeadline[phone="true"] {{
     font-weight: {t.semibold};
 }}
 QLabel#PhoneMenuCaption {{
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.caption_size}px;
     font-weight: {t.semibold};
     padding: {s.md}px {s.lg}px {s.xs}px {s.lg}px;
@@ -2114,44 +2117,7 @@ DEFAULT_THEME = "grey"
 # Classes a theme bundle may override, by name.
 _THEMEABLE_CLASSES = {"Colors": Colors, "Metrics": Metrics, "Radii": Radii}
 
-# Grey: a neutral charcoal-grey chrome variant (colour-only) — restrained azure
-# accent and a near-black image canvas.
-# Shares the flat, tight control feel (``Radii`` / ``Metrics``) with
-# the default ``blue`` theme, so this bundle overrides *only* colours. (The look
-# was designed against real Nikon NIS-Elements AR screenshots; the
-# ``control_border`` split lets its buttons read as crisp toolbar controls
-# without thickening panel dividers.)
-_GREY = {
-    "Colors": {
-        "titlebar": "#191B1E", "surface": "#141618", "rail": "#1F2226",
-        "panel": "#24272C", "panel_elevated": "#2D3137", "hover": "#373C43",
-        "active": "#3E444D",
-        # Structural dividers (top-bar border, splitter handle, separators,
-        # panel edges) read this. Kept a touch darker than the surfaces so the
-        # region seams are subtle dark grooves rather than light lines. Control
-        # borders use ``border`` / ``control_border`` and stay crisp.
-        "border_subtle": "#101214", "border": "#3F444B", "border_strong": "#50565E",
-        "control_border": "#3F444B",
-        "text_primary": "#EAECEE", "text_secondary": "#B8BDC4",
-        "text_muted": "#878D95", "text_faint": "#5E646C",
-        "accent": "#2D8CEB", "accent_hover": "#43A0FF", "accent_pressed": "#1668B8",
-        "accent_dim": "#22415E", "accent_fg": "#FFFFFF",
-        # ``accent2`` has to move with ``accent``. It is the *neighbouring*
-        # hue — the second series colour, the dial's other half — and the
-        # relationship, not the absolute value, is what makes the pair read as
-        # one family. Left at the default while the five tokens above were
-        # overridden, the gap went from 38° to 55° and the saturations diverged
-        # (206 against 110), so on every remote-run plate the two stopped
-        # looking related. Derived by carrying the default theme's own hue
-        # offset (+38°) and saturation/value ratios onto this accent.
-        "accent2": "#6D5BE5",
-        # The brand tokens (version-pill fill + text) are not overridden here:
-        # the pill stays the default transparent-with-white-text in every theme.
-        "success": "#3FB950", "warn": "#FFB300", "danger": "#F04747",
-        "plot_bg": "#0A0C10", "plot_grid": "#1D2128", "plot_spine": "#50565E",
-        "focus_ring": "rgba(45, 140, 235, 0.35)",
-    },
-}
+from ui.palettes import GREY as _GREY  # noqa: E402 — the palettes are data; see ui/palettes.py
 
 # name → override bundle. ``blue`` is the *baseline* palette — no overrides,
 # because the class values above are it. ``grey`` is a colour-only variant
@@ -2315,7 +2281,7 @@ QScrollBar::handle:pressed {{ background-color: {c.accent}; }}
    the rail's caption style, labels in a column, hints as captions, and a
    value-only button reading left like the combos above and below it. */
 QWidget#ControlBandForm QLabel#ControlSheetSectionTitle {{
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.caption_size}px;
     font-weight: {t.semibold};
     padding-top: {pt(8)}px;
@@ -2326,7 +2292,7 @@ QWidget#ControlBandForm QLabel[sheetLabel="true"] {{
     font-size: {t.body_size}px;
 }}
 QWidget#ControlBandForm QLabel[sheetHint="true"] {{
-    color: {c.text_muted};
+    color: {c.text_secondary};
     font-size: {t.caption_size}px;
 }}
 QWidget#ControlBandForm QPushButton[sheetValue="true"] {{

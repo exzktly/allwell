@@ -431,8 +431,8 @@ class Stepper(QFrame):
         c, t, r = theme.Colors, theme.Typography, theme.Radii
         return f"""
         #Stepper {{
-            background-color: {c.panel_elevated};
-            border: 1px solid {c.border};
+            background-color: {c.control};
+            border: 1px solid {c.field_edge};
             border-radius: {r.sm}px;
         }}
         #Stepper:hover {{ border-color: {c.border_strong}; }}
@@ -444,7 +444,7 @@ class Stepper(QFrame):
             padding: 4px 8px;
             font-size: {t.body_size}px;
             selection-background-color: {c.accent};
-            selection-color: {c.accent_fg};
+            selection-color: {c.on_accent};
         }}
         #Stepper QToolButton#StepperUp, #Stepper QToolButton#StepperDown {{
             background-color: transparent;
@@ -456,7 +456,7 @@ class Stepper(QFrame):
         }}
         #Stepper QToolButton#StepperUp {{ border-bottom: 1px solid {c.border_subtle}; }}
         #Stepper QToolButton#StepperMinus, #Stepper QToolButton#StepperPlus {{
-            background-color: {c.panel_elevated};
+            background-color: {c.control};
             border: none;
             color: {c.text_primary};
             font-size: {t.h2_size}px;
@@ -468,7 +468,7 @@ class Stepper(QFrame):
             background-color: {c.hover};
         }}
         #Stepper QToolButton#StepperMinus:disabled, #Stepper QToolButton#StepperPlus:disabled {{
-            color: {c.text_faint};
+            color: {c.text_disabled};
         }}
         #Stepper QToolButton#StepperUp:hover, #Stepper QToolButton#StepperDown:hover {{
             background-color: {c.hover};
@@ -478,10 +478,10 @@ class Stepper(QFrame):
            one: the arrows keep their full-strength secondary tone and the
            value keeps its primary tone, so the only cue that the control is
            inert is that clicking it does nothing. */
-        #Stepper QLineEdit#StepperEdit:disabled {{ color: {c.text_faint}; }}
+        #Stepper QLineEdit#StepperEdit:disabled {{ color: {c.text_disabled}; }}
         #Stepper QToolButton#StepperUp:disabled,
         #Stepper QToolButton#StepperDown:disabled {{
-            color: {c.text_faint};
+            color: {c.text_disabled};
             background-color: transparent;
         }}
         """

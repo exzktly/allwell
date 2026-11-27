@@ -233,7 +233,7 @@ def test_the_band_paints_one_continuous_fill(styled_app):
         f"{img.pixelColor(inside, y).name()} at x={inside}, over the scope "
         "host — a container is painting its own background"
     )
-    assert img.pixelColor(margin, y).name().lower() != theme.Colors.surface.lower(), (
+    assert img.pixelColor(margin, y).name().lower() != theme.Colors.canvas.lower(), (
         "the band is painted in the canvas colour; it has no fill of its own"
     )
 
@@ -288,7 +288,7 @@ def test_mode_segments_carry_full_strength_text(styled_app):
     bar = _mode_bar(styled_app)
     bar.show()
     styled_app.processEvents()
-    muted = theme.Colors.text_muted.lower()
+    muted = theme.Colors.text_secondary.lower()
     for i in range(bar.count()):
         seg = bar.layout().itemAt(i).widget()
         for lbl in seg.findChildren(QLabel):

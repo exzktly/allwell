@@ -548,7 +548,7 @@ class SubsetPage(LogPanelMixin, QWidget):
         self._plate.clearWellColors()
         self._plate.clearWellFractions()
         for w in wells:
-            self._plate.setWellColor(w, theme.Colors.accent_dim)
+            self._plate.setWellColor(w, theme.Colors.selected)
         self._refresh_run_enabled()
         self._update_status_preview()
 

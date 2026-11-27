@@ -272,7 +272,7 @@ class _SelectionRow(QFrame):
         QFrame#SelectionRow {{ background: transparent; border-radius: {r.sm}px;
             border-left: 3px solid transparent; }}
         QFrame#SelectionRow[current="true"] {{
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
             border-left: 3px solid {c.accent};
         }}
         QFrame#SelectionRow[current="true"] QLabel#RowName {{
@@ -282,20 +282,20 @@ class _SelectionRow(QFrame):
         QToolButton#RowGhost {{ border: none; background: transparent; color: {c.text_secondary};
             padding: 0 2px; }}
         QToolButton#RowGhost:hover {{ color: {c.text_primary}; }}
-        QToolButton#RowDot {{ border: 1px solid {c.border}; border-radius: 7px;
+        QToolButton#RowDot {{ border: 1px solid {c.hairline}; border-radius: 7px;
             min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; }}
-        QLabel#RowHandle {{ color: {c.text_faint}; }}
+        QLabel#RowHandle {{ color: {c.text_disabled}; }}
         QLabel#RowName {{ color: {c.text_primary}; }}
-        QLabel#RowName[hiddenRow="true"] {{ color: {c.text_muted}; }}
-        QLabel#RowCount {{ color: {c.text_secondary}; background-color: {c.panel_elevated};
+        QLabel#RowName[hiddenRow="true"] {{ color: {c.text_secondary}; }}
+        QLabel#RowCount {{ color: {c.text_secondary}; background-color: {c.control};
             border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 0 6px; }}
-        QLabel#RepLabel {{ color: {c.text_faint}; font-size: {theme.Typography.caption_size}px; }}
-        QToolButton#RowChip {{ color: {c.text_primary}; background-color: {c.panel_elevated};
+        QLabel#RepLabel {{ color: {c.text_secondary}; font-size: {theme.Typography.caption_size}px; }}
+        QToolButton#RowChip {{ color: {c.text_primary}; background-color: {c.control};
             border: 1px solid {c.border_subtle}; border-radius: {r.xs}px; padding: 1px 6px; }}
         QToolButton#RowChip:hover {{ border-color: {c.accent}; }}
         QToolButton#RepBtn {{ border: 1px solid {c.border_subtle}; border-radius: {r.xs}px;
             background: transparent; color: {c.text_secondary}; padding: 0 4px; }}
-        QToolButton#RepBtn:hover {{ color: {c.text_primary}; border-color: {c.border}; }}
+        QToolButton#RepBtn:hover {{ color: {c.text_primary}; border-color: {c.field_edge}; }}
         """
 
     # ── populate / refresh ───────────────────────────────────────────────
@@ -314,7 +314,7 @@ class _SelectionRow(QFrame):
         self._chip.setText(str(len(self._wells)))
         col = _hex6(sel.get("color"))
         self._dot.setStyleSheet(
-            f"QToolButton#RowDot {{ background-color: {col}; border: 1px solid {theme.Colors.border};"
+            f"QToolButton#RowDot {{ background-color: {col}; border: 1px solid {theme.Colors.hairline};"
             f" border-radius: 7px; min-width:14px; max-width:14px; min-height:14px; max-height:14px; }}")
         self._eye.blockSignals(True)
         self._eye.setChecked(hidden)
@@ -655,7 +655,7 @@ class SavedSelectionsList(QWidget):
         c, r = theme.Colors, theme.Radii
         return f"""
         QScrollArea#SavedSelScroll {{ background: transparent; }}
-        QWidget#SavedSelBody {{ background-color: {c.panel}; border: 1px solid {c.border_subtle};
+        QWidget#SavedSelBody {{ background-color: {c.card}; border: 1px solid {c.border_subtle};
             border-radius: {r.sm}px; }}
         """
 
@@ -1061,7 +1061,7 @@ if __name__ == "__main__":
          "wells": ["C01", "C02", "C03"], "replicates": [["C01", "C02", "C03"]], "source": "rep_set"},
         {"id": "cccc3333", "name": "Drug A — 10µM", "color": tr[2], "hidden": False,
          "wells": ["D01", "D02", "D03"], "replicates": None, "source": "user"},
-        {"id": "dddd4444", "name": "Untreated", "color": theme.Colors.text_muted, "hidden": True,
+        {"id": "dddd4444", "name": "Untreated", "color": theme.Colors.text_secondary, "hidden": True,
          "wells": ["E01", "E02"], "replicates": None, "source": "import"},
     ])
     lst.setCurrentId("bbbb2222")

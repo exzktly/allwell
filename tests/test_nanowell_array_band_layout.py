@@ -246,5 +246,5 @@ def test_a_greyed_secondary_button_is_painted_greyed(themed, qtbot):
     off.setEnabled(False)
     qtbot.waitExposed(off)
     middle = QPoint(4, 15)
-    assert off.grab().toImage().pixelColor(middle).name() == theme.Colors.panel.lower()
-    assert on.grab().toImage().pixelColor(middle).name() == theme.Colors.panel_elevated.lower()
+    assert off.grab().toImage().pixelColor(middle).name() == theme.Colors.card.lower()
+    assert on.grab().toImage().pixelColor(middle).name() == theme.Colors.control.lower()

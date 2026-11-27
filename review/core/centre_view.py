@@ -274,7 +274,7 @@ def build_centre(win, parent: QWidget) -> None:
         # itself to exactly the painted "Channel: …" text, and a floor here
         # would just re-introduce the wasted space that sizing exists to cut.
         win._plotting_channel_cb.setStyleSheet(
-            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"QComboBox {{ background-color: {_C.control}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
@@ -310,7 +310,7 @@ def build_centre(win, parent: QWidget) -> None:
             "_plotting_metric_cb", _QComboBox("Property"))
         # No min-width / setMinimumContentsLength — see the Channel combo above.
         win._plotting_metric_cb.setStyleSheet(
-            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"QComboBox {{ background-color: {_C.control}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
@@ -345,7 +345,7 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_groupby_cb = win._ctx.widgets.register(
             "_plotting_groupby_cb", _QComboBox("Group by"))
         win._plotting_groupby_cb.setStyleSheet(
-            f"QComboBox {{ background-color: {_C.panel_elevated}; "
+            f"QComboBox {{ background-color: {_C.control}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
@@ -383,7 +383,7 @@ def build_centre(win, parent: QWidget) -> None:
             "_plotting_grouping_note", _QLabel(""))
         win._plotting_grouping_note.setObjectName("Muted")
         win._plotting_grouping_note.setStyleSheet(
-            f"color: {_C.text_muted}; font-size: {_T.caption_size}px;")
+            f"color: {_C.text_secondary}; font-size: {_T.caption_size}px;")
         win._plotting_grouping_grp = band.add_scope(
             "", win._plotting_grouping_note)
         win._plotting_grouping_grp.setVisible(False)

@@ -105,25 +105,25 @@ QLabel#ITBShape { color: $text_secondary; font-size: ${fs_caption}px; }
 QLabel#ITBShape b { color: $text_primary; }
 
 QFrame#ITBZone {
-    border: 1px dashed $border; border-radius: 9px; background: $panel;
+    border: 1px dashed $hairline; border-radius: 9px; background: $card;
 }
-QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: $accent_dim; }
-QFrame#ITBFixed { border: 1px solid $border; border-radius: 9px; background: $panel; }
+QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: $selected; }
+QFrame#ITBFixed { border: 1px solid $hairline; border-radius: 9px; background: $card; }
 QFrame#ITBTray { border: 1px solid $border_subtle; border-radius: 9px; background: $rail; }
 
 QLabel#ITBHead { color: $text_primary; font-weight: 620; font-size: ${fs_small}px; }
-QLabel#ITBSub  { color: $text_muted; font-size: ${fs_xs}px; }
-QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: ${fs_caption}px; }
+QLabel#ITBSub  { color: $text_secondary; font-size: ${fs_xs}px; }
+QLabel#ITBHint { color: $text_secondary; font-style: italic; font-size: ${fs_caption}px; }
 
 QFrame#ITBRoot {
-    background: $accent_dim; border: 1px solid $accent; border-radius: 7px;
+    background: $selected; border: 1px solid $accent; border-radius: 7px;
 }
 QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: ${fs_small}px; }
 
-QWidget#ITBNest { border-left: 2px solid $accent_dim; background: transparent; }
+QWidget#ITBNest { border-left: 2px solid $selected; background: transparent; }
 
 QFrame#ITBChan, QFrame#ITBChip {
-    background: $panel_elevated; border: 1px solid $border; border-radius: 7px;
+    background: $control; border: 1px solid $button_edge; border-radius: 7px;
 }
 QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: $accent; }
 /* Reorder cue: the edge a dragged channel would be inserted at. The rule is
@@ -134,55 +134,55 @@ QFrame#ITBChan[dropEdge="above"] { border-top: 2px solid $accent; }
 QFrame#ITBChan[dropEdge="below"] { border-bottom: 2px solid $accent; }
 QLabel#ITBChanLbl { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
 QLabel#ITBVar { color: $text_secondary; font-size: ${fs_var}px; }
-QLabel#ITBGrip { color: $text_muted; font-size: ${fs_caption}px; }
-QLabel#ITBNote { color: $text_muted; font-size: ${fs_xs}px; }
+QLabel#ITBGrip { color: $text_secondary; font-size: ${fs_caption}px; }
+QLabel#ITBNote { color: $text_secondary; font-size: ${fs_xs}px; }
 
 QToolButton#ITBOpt {
-    color: $text_secondary; background: $panel; border: 1px solid $border;
+    color: $text_secondary; background: $card; border: 1px solid $button_edge;
     border-radius: 5px; padding: 3px 8px; font-size: ${fs_small}px;
 }
 QToolButton#ITBOpt:hover { color: $text_primary; border-color: $accent; }
 QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }
 
 QToolButton#ITBX {
-    color: $text_muted; background: transparent; border: none;
+    color: $text_secondary; background: transparent; border: none;
     font-size: ${fs_h3}px; padding: 0px 4px;
 }
 QToolButton#ITBX:hover { color: $danger; }
 
 QToolButton#ITBSeg {
-    background: $panel; color: $text_secondary; border: 1px solid $border;
+    background: $card; color: $text_secondary; border: 1px solid $button_edge;
     padding: 3px 11px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBSeg:hover { color: $text_primary; }
-QToolButton#ITBSeg[on="true"] { background: $accent_dim; color: $accent_fg; }
+QToolButton#ITBSeg[on="true"] { background: $selected; color: $selected_fg; }
 QToolButton#ITBSeg[on="true"][ov="true"] { background: $threshold_dim; color: $threshold; }
 
 QComboBox#ITBCombo {
-    background: $panel_elevated; color: $text_primary; border: 1px solid $border;
+    background: $canvas; color: $text_primary; border: 1px solid $field_edge;
     border-radius: 6px; padding: 2px 6px; min-height: 20px;
 }
-QComboBox#ITBCombo:hover { border-color: $border_strong; }
+QComboBox#ITBCombo:hover { border-color: $text_secondary; }
 QLabel#ITBFixLbl { color: $text_primary; font-size: ${fs_small}px; }
-QLabel#ITBEq { color: $text_muted; font-size: ${fs_small}px; }
+QLabel#ITBEq { color: $text_secondary; font-size: ${fs_small}px; }
 
-QFrame#ITBLut { border: 1px solid $border; border-radius: 9px; background: $panel; }
+QFrame#ITBLut { border: 1px solid $hairline; border-radius: 9px; background: $card; }
 QFrame#ITBLutRow { background: transparent; border: none; }
 QLabel#ITBLutChan { color: $text_primary; font-size: ${fs_small}px; font-weight: 560; }
-QLabel#ITBLutTag { color: $text_muted; font-size: ${fs_caption}px; }
+QLabel#ITBLutTag { color: $text_secondary; font-size: ${fs_caption}px; }
 QLineEdit#ITBLutEdit {
-    background: $panel_elevated; color: $text_primary; border: 1px solid $border;
+    background: $canvas; color: $text_primary; border: 1px solid $field_edge;
     border-radius: 6px; padding: 2px 6px; min-height: 18px; max-width: 66px;
 }
 QLineEdit#ITBLutEdit:focus { border-color: $accent; }
 QToolButton#ITBLutFit {
-    color: $text_secondary; background: $panel; border: 1px solid $border;
+    color: $text_secondary; background: $card; border: 1px solid $button_edge;
     border-radius: 5px; padding: 2px 9px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBLutFit:hover { color: $text_primary; border-color: $accent; }
 
 QToolButton#ITBClear {
-    color: $text_secondary; background: $panel; border: 1px solid $border;
+    color: $text_secondary; background: $card; border: 1px solid $button_edge;
     border-radius: 6px; padding: 3px 10px; font-size: ${fs_caption}px;
 }
 QToolButton#ITBClear:hover { color: $danger; border-color: $danger; }
@@ -1288,7 +1288,7 @@ def _overlay_toggle(ctx, ax) -> QWidget:
     hl.setSpacing(0)
     seg = QFrame(wrap)
     seg.setStyleSheet(
-        f"QFrame{{border:1px solid {theme.Colors.border};border-radius:7px;}}")
+        f"QFrame{{border:1px solid {theme.Colors.hairline};border-radius:7px;}}")
     sl = QHBoxLayout(seg)
     sl.setContentsMargins(0, 0, 0, 0)
     sl.setSpacing(0)

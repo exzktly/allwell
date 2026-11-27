@@ -138,7 +138,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     active_l.setSpacing(6)
     active_caption = QLabel("ACTIVE GROUP", active_row)
     active_caption.setStyleSheet(
-        f"color: {_theme.Colors.text_muted}; "
+        f"color: {_theme.Colors.text_secondary}; "
         f"font-size: {_theme.Typography.caption_size}px; "
         f"letter-spacing: 0.08em; font-weight: 600;"
     )

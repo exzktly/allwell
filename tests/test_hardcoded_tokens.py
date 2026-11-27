@@ -130,13 +130,14 @@ EXPRESSION_ALLOWLIST = {
     "widgets/styled_slider.py:44",
 }
 
-#: The modules that *define* the tokens, and so may write the literals. Same
+#: The modules that *define* the tokens, and so may write the literals: the token classes and the palettes
+#: applied onto them. Same
 #: shape as the well-token guard exempting ``util/well_token.py``.
 #:
 #: Matched on the repository-relative path, not the basename: `theme.py` as a
 #: basename exempts any file of that name anywhere in the tree, which is a
 #: standing invitation to add a second one and inherit the exemption for free.
-_TOKEN_HOMES = {"ui/theme.py"}
+_TOKEN_HOMES = {"ui/theme.py", "ui/palettes.py"}
 
 
 def _bare_ints(node: ast.AST) -> list[int]:

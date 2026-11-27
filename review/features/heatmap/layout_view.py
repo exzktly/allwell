@@ -170,7 +170,7 @@ class _TokenDelegate(QStyledItemDelegate):
                 radius = min(theme.Radii.sm, tile.height() / 3)
                 painter.setRenderHint(painter.RenderHint.Antialiasing, True)
                 painter.setPen(Qt.NoPen)
-                painter.setBrush(QColor(theme.Colors.accent_dim))
+                painter.setBrush(QColor(theme.Colors.selected))
                 painter.drawRoundedRect(tile, radius, radius)
             painter.setFont(opt.font)
             if selected:

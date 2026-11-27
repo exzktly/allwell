@@ -91,7 +91,7 @@ def test_selected_wells_get_a_uniform_pre_run_tint(qapp, tmp_path):
     from widgets.well_plate_selector import _parse_well_id
     a01 = _parse_well_id("A01")
     b02 = _parse_well_id("B02")
-    assert colors.get(a01) == QColor(theme.Colors.accent_dim)
+    assert colors.get(a01) == QColor(theme.Colors.selected)
     assert colors.get(b02) is None
     ctrl.shutdown()
 
@@ -521,7 +521,7 @@ def test_a_second_run_does_not_inherit_the_first_run_s_dials(qapp, tmp_path):
 
 def test_changing_the_selection_after_a_run_clears_the_dials(qapp, tmp_path):
     """The plate goes interactive again when the run ends, and every copied
-    well is a full circle. Without clearing them, the pre-run ``accent_dim``
+    well is a full circle. Without clearing them, the pre-run ``selected``
     tint would be painted underneath a plate still wearing the last run's
     progress."""
     from datasets.subset.controller import SubsetController

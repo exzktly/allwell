@@ -1317,12 +1317,12 @@ def safe_int_or_none(value: object) -> int | None:
 
 
 def mute_color(hex_color: str, factor: float = 0.5) -> str:
-    """Blend *hex_color* 50% toward ``theme.Colors.text_muted``.
+    """Blend *hex_color* 50% toward ``theme.Colors.text_secondary``.
 
     Used to dim hidden rep-sets on the plate map so they are visually
     distinct from visible ones while still showing their hue.
     """
-    mh = theme.Colors.text_muted.lstrip("#")
+    mh = theme.Colors.text_secondary.lstrip("#")
     grey = (int(mh[0:2], 16), int(mh[2:4], 16), int(mh[4:6], 16))
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)

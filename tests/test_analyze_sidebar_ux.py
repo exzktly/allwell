@@ -207,8 +207,8 @@ def test_the_footer_is_drawn_apart_from_the_form(tab, qtbot, qapp):
         footer = tab._left_sidebar.footer()
         img = footer.grab().toImage()
         x = footer.width() - 4                    # right of every control in both rows
-        assert img.pixelColor(x, 0).name().lower() == theme.Colors.border.lower()
-        assert img.pixelColor(x, footer.height() // 2).name().lower() == theme.Colors.panel.lower()
+        assert img.pixelColor(x, 0).name().lower() == theme.Colors.hairline.lower()
+        assert img.pixelColor(x, footer.height() // 2).name().lower() == theme.Colors.card.lower()
     finally:
         qapp.setStyleSheet(before)
 

@@ -195,7 +195,7 @@ def swatch_icon(colour: str) -> QIcon:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.Antialiasing, True)
     painter.setBrush(QColor(colour))
-    painter.setPen(QColor(theme.Colors.border))
+    painter.setPen(QColor(theme.Colors.hairline))
     painter.drawRoundedRect(0, 0, _SWATCH - 1, _SWATCH - 1, 2, 2)
     painter.end()
     return QIcon(pixmap)

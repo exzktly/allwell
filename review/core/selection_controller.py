@@ -649,7 +649,7 @@ def _mark_hidden_wells(ctx, plate, rep_mode: bool, plotted_wells: set) -> None:
     for well in marked - hidden:
         plate.setWellMarker(well, None)
     for well in hidden - marked:
-        plate.setWellMarker(well, HIDDEN_GLYPH, theme.Colors.text_muted)
+        plate.setWellMarker(well, HIDDEN_GLYPH, theme.Colors.text_secondary)
     plate._aw_hidden_marked = hidden
 
 

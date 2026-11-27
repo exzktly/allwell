@@ -80,7 +80,7 @@ class _HoverChip(QLabel):
         c, t = theme.Colors, theme.Typography
         self.setStyleSheet(
             f"QLabel {{"
-            f" background-color: {c.panel_elevated};"
+            f" background-color: {c.control};"
             f" color: {c.text_secondary};"
             f" border: 1px solid {c.border_subtle};"
             f" border-radius: 3px;"
@@ -339,7 +339,7 @@ if _HAVE_MPL:
             QWidget#MplToolbar {{ background: transparent; }}
             QFrame#MplToolbarSep {{ background-color: {c.border_subtle}; border: none; }}
             QLabel#MplToolbarCoords {{
-                color: {c.text_muted};
+                color: {c.text_secondary};
                 font-family: {t.family_mono};
                 font-size: {t.small_size}px;
                 background: transparent;

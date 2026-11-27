@@ -5,7 +5,7 @@ sharing a window, and switching between them replaces the entire interface. The
 control has to say so at rest, not only once a mode is active.
 
 That is why **every segment is a filled control at all times**: the active one
-accent-filled, the inactive ones raised on ``panel_elevated`` with full-strength
+accent-filled, the inactive ones raised on ``control`` with full-strength
 primary text and full-opacity icons. Nothing here is muted. Muting is how the
 rail's section list and the centre pane's tab bar express "not currently
 selected"; borrowing it here would demote a switch between applications to a
@@ -87,8 +87,8 @@ class _ModeSegment(QWidget):
     def setActive(self, active: bool) -> None:
         self._active = bool(active)
         c, t = theme.Colors, theme.Typography
-        fill = c.accent if self._active else c.panel_elevated
-        fg = c.accent_fg if self._active else c.text_primary
+        fill = c.accent if self._active else c.control
+        fg = c.on_accent if self._active else c.text_primary
         self.setStyleSheet(f"background-color: {fill};")
         # Full weight in both states: an inactive mode is still a destination.
         self._text_lbl.setStyleSheet(
@@ -132,8 +132,8 @@ class ModeBar(QWidget):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self.setStyleSheet(
-            f"#ModeBar {{ background-color: {theme.Colors.panel_elevated};"
-            f" border-bottom: 1px solid {theme.Colors.border}; }}"
+            f"#ModeBar {{ background-color: {theme.Colors.control};"
+            f" border-bottom: 1px solid {theme.Colors.hairline}; }}"
         )
         self._row = QHBoxLayout(self)
         self._row.setContentsMargins(0, 0, 0, 0)

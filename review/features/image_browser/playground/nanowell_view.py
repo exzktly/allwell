@@ -29,7 +29,7 @@ from ui.theme import Colors
 
 #: Mark kind -> colour token. Found and dark sites are told apart at a glance; the origin and the square are the
 #: two marks addressing hangs on.
-MARK_COLOURS = {"found": Colors.success, "dark": Colors.warn, "outline": Colors.text_muted,
+MARK_COLOURS = {"found": Colors.success, "dark": Colors.warn, "outline": Colors.text_secondary,
                 "square": Colors.accent2, "origin": Colors.accent}
 #: The longest side the image is drawn at in the window.
 DRAW_SIDE = 640
@@ -126,7 +126,7 @@ def _fill_table(table: QTableWidget, suggestion) -> None:
     for row, f in enumerate(suggestion.fields):
         value = QTableWidgetItem(f.value or "(blank)")
         if not f.value:
-            value.setForeground(QColor(Colors.text_muted))
+            value.setForeground(QColor(Colors.text_secondary))
         for col, item in enumerate((QTableWidgetItem(f.label), value, QTableWidgetItem(f.note))):
             item.setToolTip(f.note)
             table.setItem(row, col, item)

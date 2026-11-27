@@ -145,8 +145,8 @@ class ChipGroup(QWidget):
         return f"""
         #ChipGroup {{ background: transparent; }}
         #ChipGroup QToolButton#Chip {{
-            background-color: {c.panel_elevated};
-            border: 1px solid {c.border};
+            background-color: {c.control};
+            border: 1px solid {c.button_edge};
             border-radius: {r.pill}px;
             color: {c.text_secondary};
             padding: 3px 10px;
@@ -159,11 +159,11 @@ class ChipGroup(QWidget):
             color: {c.text_primary};
         }}
         #ChipGroup QToolButton#Chip:checked {{
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
             border-color: {c.accent};
             color: {c.text_primary};
         }}
-        #ChipGroup QToolButton#Chip:disabled {{ color: {c.text_faint}; }}
+        #ChipGroup QToolButton#Chip:disabled {{ color: {c.text_disabled}; }}
         """
 
 

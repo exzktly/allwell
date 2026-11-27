@@ -210,7 +210,7 @@ class CollapsibleSection(QWidget):
         c, t, r = theme.Colors, theme.Typography, theme.Radii
         return f"""
         #CollapsibleSection {{
-            background-color: {c.panel};
+            background-color: {c.card};
             border: 1px solid {c.border_subtle};
             border-radius: {r.md}px;
         }}

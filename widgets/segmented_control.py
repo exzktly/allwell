@@ -53,7 +53,7 @@ def segment_text_color(seg) -> str:
     """
     c = theme.Colors
     if not seg.isEnabled():
-        return c.text_faint
+        return c.text_disabled
     if seg.isChecked() or seg.underMouse():
         return c.text_primary
     return c.text_secondary
@@ -237,7 +237,7 @@ class SegmentedControl(QWidget):
         c, t, r = theme.Colors, theme.Typography, theme.Radii
         return f"""
         #SegmentedControl {{
-            background-color: {c.panel};
+            background-color: {c.card};
             border: 1px solid {c.border_subtle};
             border-radius: {r.sm}px;
         }}
@@ -256,12 +256,12 @@ class SegmentedControl(QWidget):
             color: {c.text_primary};
         }}
         #SegmentedControl QToolButton#Segment:checked {{
-            background-color: {c.panel_elevated};
+            background-color: {c.control};
             border-color: {c.border_subtle};
             color: {c.text_primary};
         }}
         #SegmentedControl QToolButton#Segment:disabled {{
-            color: {c.text_faint};
+            color: {c.text_disabled};
         }}
         """
 

@@ -205,7 +205,7 @@ class ConverterDashboard(PlateProgress):
         self._bar.setValue(0)
         self._plate.clearWellMarkers()
         for well in self._wells:
-            self._plate.setWellColor(well, theme.Colors.text_muted)
+            self._plate.setWellColor(well, theme.Colors.text_secondary)
         self.set_overall_range(len(self._wells))
         self.set_overall(0)
         self._refresh_rail()
@@ -247,7 +247,7 @@ class ConverterDashboard(PlateProgress):
         self.clear_well_fractions()
         self._plate.clearWellMarkers()
         for well in wells:
-            self._plate.setWellColor(well, theme.Colors.text_muted)
+            self._plate.setWellColor(well, theme.Colors.text_secondary)
         self.set_overall_range(len(wells))
         self.set_overall(0)
         # The note quotes the well count, which has just changed.
@@ -291,7 +291,7 @@ class ConverterDashboard(PlateProgress):
             return theme.Colors.success
         if fraction > _STARTED:
             return theme.Colors.warn
-        return theme.Colors.text_muted
+        return theme.Colors.text_secondary
 
     def _well_tooltip(self, well_id: str) -> str:
         well = canon_well(well_id)
@@ -339,7 +339,7 @@ class ConverterDashboard(PlateProgress):
     @staticmethod
     def _state_color(state: str) -> str:
         return {
-            "pending": theme.Colors.text_muted,
+            "pending": theme.Colors.text_secondary,
             "converting": theme.Colors.warn,
             "converted": theme.Colors.success,
         }[state]

@@ -188,7 +188,7 @@ def key_entries(sites, *, colour: str, styles: dict, why: dict | None = None, di
     if fused.any():
         entries.append(KeyEntry(_count("fused: on a tile seam", int(fused.sum())), FUSED_COLOUR, "dashed"))
     if dimmed:
-        entries.append(KeyEntry(_count("outside the Subset (veiled)", int(dimmed)), Colors.text_muted, alpha=0.35))
+        entries.append(KeyEntry(_count("outside the Subset (veiled)", int(dimmed)), Colors.text_secondary, alpha=0.35))
     return entries
 
 

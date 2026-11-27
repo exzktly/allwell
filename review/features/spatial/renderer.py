@@ -524,7 +524,7 @@ def _render_boundary_interior(ax, payload) -> None:
             ax.annotate(f"no {name} cells", xy=(i, 0.5),
                         xycoords=("data", "axes fraction"),
                         ha="center", va="center", fontsize=8,
-                        color=theme.Colors.text_muted, rotation=90)
+                        color=theme.Colors.text_secondary, rotation=90)
     parts = ax.violinplot(data, positions=positions, showmeans=True,
                            showextrema=False)
     for body, colour in zip(parts["bodies"], colours):

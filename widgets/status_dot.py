@@ -36,8 +36,8 @@ _STATUS_TOKENS = {
     "danger": "danger",
     "error": "danger",
     "accent": "accent",
-    "neutral": "text_muted",
-    "muted": "text_muted",
+    "neutral": "text_secondary",
+    "muted": "text_secondary",
 }
 
 
@@ -118,7 +118,7 @@ class StatusDot(QWidget):
             if token is not None:
                 return QColor(getattr(theme.Colors, token))
         c = QColor(status)
-        return c if c.isValid() else QColor(theme.Colors.text_muted)
+        return c if c.isValid() else QColor(theme.Colors.text_secondary)
 
 
 # ── standalone visual test ──────────────────────────────────────────────────

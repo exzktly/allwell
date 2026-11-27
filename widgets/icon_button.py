@@ -109,11 +109,11 @@ class IconButton(QToolButton):
         }}
         QToolButton#IconButton:pressed {{ background-color: {c.active}; }}
         QToolButton#IconButton:checked {{
-            background-color: {c.accent_dim};
+            background-color: {c.selected};
             border-color: {c.accent};
             color: {c.text_primary};
         }}
-        QToolButton#IconButton:disabled {{ color: {c.text_faint}; }}
+        QToolButton#IconButton:disabled {{ color: {c.text_disabled}; }}
         """
 
 

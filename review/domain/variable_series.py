@@ -32,7 +32,7 @@ UNASSIGNED_LABEL = "no value"
 
 #: The inks the two non-values take. Both neutral, so neither joins the real
 #: values; and far enough apart to be two inks rather than one, which is the
-#: half this got wrong. ``plot_mono`` against ``text_muted`` measured **23**
+#: half this got wrong. ``plot_mono`` against the then muted text ink (#5F6B7C) measured **23**
 #: apart in RGB — this file's own floor for six real values is 100, and the
 #: workplan records 30 as "one colour to any reader" — while the comment here
 #: claimed they were "deliberately different from each other". They now measure

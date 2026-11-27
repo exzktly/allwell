@@ -49,23 +49,22 @@ def test_label_roles_differ_from_plain_body_text(styled_app, object_name):
     )
 
 
-def test_muted_is_dimmer_than_secondary(styled_app):
-    """The three text tiers must actually be three tiers."""
+def test_muted_reads_as_the_one_secondary_ink(styled_app):
+    """Two text tiers on a label: primary, and one quieter ink. ``Muted`` once drew a third, dimmer tier that
+    measured 2.5 : 1 and below on a card; the design language has one secondary ink
+    (``tests/test_theme_contrast.py``), and ``Muted`` draws it until its sites take a text role."""
     from PySide6.QtWidgets import QLabel
 
-    def lum(name):
+    from ui import theme
+
+    def ink(name):
         lbl = QLabel("x")
         lbl.setObjectName(name)
-        c = lbl.palette().color(lbl.foregroundRole()) if not name else None
         lbl.ensurePolished()
-        col = lbl.palette().color(lbl.foregroundRole())
-        return 0.2126 * col.redF() + 0.7152 * col.greenF() + 0.0722 * col.blueF()
+        return lbl.palette().color(lbl.foregroundRole()).name().upper()
 
-    primary, secondary, muted = lum(""), lum("Secondary"), lum("Muted")
-    assert primary > secondary > muted, (
-        f"text tiers are not ordered: primary={primary:.3f} "
-        f"secondary={secondary:.3f} muted={muted:.3f}"
-    )
+    assert ink("") == theme.Colors.text_primary.upper()
+    assert ink("Secondary") == ink("Muted") == theme.Colors.text_secondary.upper()
 
 
 @pytest.mark.parametrize("variant", ["primary", "danger", "toggle_accent"])

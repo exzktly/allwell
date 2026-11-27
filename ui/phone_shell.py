@@ -1004,7 +1004,7 @@ class _BusyOverlay(QWidget):
         self.setObjectName("PhoneBusyOverlay")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(
-            f"#PhoneBusyOverlay {{ background-color: {theme.Colors.surface}; }}"
+            f"#PhoneBusyOverlay {{ background-color: {theme.Colors.canvas}; }}"
             f"#PhoneBusyOverlay QLabel {{ color: {theme.Colors.text_primary};"
             f" font-size: {theme.Typography.h2_size}px; }}")
         lay = QVBoxLayout(self)

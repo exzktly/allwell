@@ -2490,7 +2490,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         card.setFrameShape(QFrame.StyledPanel)
         if is_sel:
             card.setStyleSheet(
-                f"QFrame {{ border: 2px solid {color}; background: {theme.Colors.panel_elevated}; }}"
+                f"QFrame {{ border: 2px solid {color}; background: {theme.Colors.control}; }}"
             )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(6, 4, 6, 4)

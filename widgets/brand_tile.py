@@ -66,8 +66,8 @@ class BrandTile(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         # rounded backplate
-        p.setPen(QColor(c.border))
-        p.setBrush(QColor(c.panel_elevated))
+        p.setPen(QColor(c.hairline))
+        p.setBrush(QColor(c.control))
         radius = s * (theme.Radii.xs / 12.0) + s * 0.12
         p.drawRoundedRect(rect, radius, radius)
 

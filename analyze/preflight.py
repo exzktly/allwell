@@ -142,7 +142,7 @@ class AnalyzePreflightMixin:
         It is the quieter of the two by design. The resume strip carries an
         action the user can take right now and is bordered in ``accent``; this
         one states what is already true of the folder and is bordered in
-        ``border``. Their fills are the same, so they read as one family of
+        ``hairline``. Their fills are the same, so they read as one family of
         report rather than as two unrelated pieces of chrome.
         """
         banner = QWidget(parent)

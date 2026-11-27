@@ -137,9 +137,9 @@ def _cell_gating_show_opt_curve_popup(
 
     fig = popup._fig
     fig.clear()
-    bg_panel = theme.Colors.panel
+    bg_panel = theme.Colors.card
     txt_pri = theme.Colors.text_primary
-    txt_mut = theme.Colors.text_muted
+    txt_mut = theme.Colors.text_secondary
     accent = theme.Colors.accent
     fig.patch.set_facecolor(bg_panel)
     ax = fig.add_subplot(111)

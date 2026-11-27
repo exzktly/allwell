@@ -557,9 +557,9 @@ def _smfish_update_cdf_plot(ctx) -> None:
     if ctx.runtime.smfish.cdf_ax is None:
         return
 
-    bg_panel = theme.Colors.panel
+    bg_panel = theme.Colors.card
     txt_pri = theme.Colors.text_primary
-    txt_mut = theme.Colors.text_muted
+    txt_mut = theme.Colors.text_secondary
     accent = theme.Colors.accent
 
     log_img = ctx.runtime.smfish.current_log_img
@@ -637,8 +637,8 @@ def _smfish_paint_empty(ctx, message: str) -> None:
     if ctx.runtime.smfish.ax_img is None:
         return
     try:
-        bg_panel = theme.Colors.panel
-        txt_mut = theme.Colors.text_muted
+        bg_panel = theme.Colors.card
+        txt_mut = theme.Colors.text_secondary
         ctx.runtime.smfish.ax_img.clear()
         ctx.runtime.smfish.ax_img.set_facecolor(bg_panel)
         if ctx.runtime.smfish.fig_img is not None:

@@ -52,6 +52,7 @@ UI_LANE_FILES: dict[str, str] = {
     "test_bar_relative_to_popover_fit.py": "the Fold change popover grows with the Then relative to row",
     # ── reusable widgets (widgets/), no app knowledge ──────────────────────
     "test_a_plate_keeps_its_size.py": "plate height-for-width beside a growing sibling",
+    "test_segment_draws_its_text.py": "a segmented control's text is painted under the app's style sheet (pixels)",
     "test_button_row.py": "a button row wraps instead of widening its host",
     "test_chip_group.py": "ChipGroup press/selection behaviour of a bare widget",
     "test_color_picker_popover.py": "the colour picker's SV square and hue strip",

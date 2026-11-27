@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import weakref
 
+import shiboken6
 from PySide6.QtWidgets import QWidget
 
 from core.safe import swallowed
@@ -25,16 +26,23 @@ from review.core import inspector_panels, inspector_service
 
 TAB = "style"
 
-#: Style button -> ``(ctx, figure key)``.
-_buttons: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+#: Every live Style button, weakly; what each styles is on the button itself
+#: (``_aw_style``), not in a module-level mapping, which would hold the
+#: context — and through it the window — for the life of the process.
+_buttons: weakref.WeakSet = weakref.WeakSet()
 
 
 def register(button: QWidget, ctx, figure_key: str) -> None:
-    _buttons[button] = (ctx, figure_key)
+    button._aw_style = (ctx, figure_key)
+    _buttons.add(button)
+
+
+def _entry(button: QWidget) -> tuple | None:
+    return getattr(button, "_aw_style", None)
 
 
 def figure_key_of(button: QWidget) -> str | None:
-    entry = _buttons.get(button)
+    entry = _entry(button)
     return entry[1] if entry else None
 
 
@@ -51,7 +59,7 @@ def panel_for(ctx, figure_key: str) -> QWidget | None:
 def press(button: QWidget) -> bool:
     """The Style button: open the inspector on this figure's panel, or close
     it when that is what it already shows. Returns whether it is open."""
-    entry = _buttons.get(button)
+    entry = _entry(button)
     if entry is None:
         return False
     ctx, key = entry
@@ -66,7 +74,11 @@ def press(button: QWidget) -> bool:
 
 def find_roots(ctx, _leaf: str) -> dict:
     """``{"style": panel}`` for the page on screen, when it has a figure to style."""
-    for button, (owner, key) in list(_buttons.items()):
+    for button in list(_buttons):
+        entry = _entry(button)
+        if entry is None or not shiboken6.isValid(button):
+            continue
+        owner, key = entry
         if owner is not ctx or not button.isEnabled():
             continue
         if inspector_panels._is_current(ctx, button):

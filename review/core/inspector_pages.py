@@ -9,7 +9,6 @@ ticked, and the button that opened it goes on reading the choice.
 
 from __future__ import annotations
 
-import weakref
 from collections.abc import Callable, Iterable
 
 import shiboken6
@@ -18,25 +17,35 @@ from PySide6.QtWidgets import QWidget
 from review.core import inspector_service
 from widgets.multi_select import MultiSelect
 
-#: picker -> the callable its ``changed`` reaches. The picker is built once per
-#: anchor and refilled on every open, so the handler is swapped, not stacked.
-_handlers: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+#: What a picker and its button carry, as attributes on the widgets
+#: themselves: the button its pickers by key, the picker the callable its
+#: ``changed`` reaches (swapped on every open, not stacked) and its settle
+#: timer. Nothing here is a module-level mapping: a handler closes over the
+#: context, the context reaches the button through the widget registry, and a
+#: mapping from picker to handler would then hold every window ever opened.
+_PICKERS, _HANDLER, _SETTLE = "_aw_pickers", "_aw_picker_handler", "_aw_picker_settle"
 
 
-#: anchor -> {key: picker}. Not ``anchor.findChild``: while its page is on
-#: show the picker is the inspector's child, not the anchor's, and a second
-#: press would then build a second picker and stack a second page.
-_pickers: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+def pickers_of(anchor: QWidget) -> dict:
+    """``{key: picker}`` for the multi-select pages *anchor* has opened."""
+    mine = getattr(anchor, _PICKERS, None)
+    if mine is None:
+        mine = {}
+        setattr(anchor, _PICKERS, mine)
+    return mine
 
 
 def _picker_for(anchor: QWidget, key: str, empty_text: str) -> MultiSelect:
-    mine = _pickers.setdefault(anchor, {})
+    # Not ``anchor.findChild``: while its page is on show the picker is the
+    # inspector's child, not the anchor's, and a second press would then build
+    # a second picker and stack a second page.
+    mine = pickers_of(anchor)
     picker = mine.get(key)
     if picker is None or not shiboken6.isValid(picker):
         picker = MultiSelect(anchor, empty_text=empty_text)
         picker.setObjectName(f"MultiSelect:{key}")
         picker.hide()
-        picker.changed.connect(lambda keys, p=picker: _handlers[p](keys))
+        picker.changed.connect(lambda keys, p=picker: getattr(p, _HANDLER)(keys))
         mine[key] = picker
     return picker
 
@@ -65,7 +74,8 @@ def open_multi_select(ctx, anchor: QWidget, *, key: str, title: str, items: Iter
         inspector_service.pop(ctx)
         return None
     _flush(picker)
-    _handlers[picker] = _settled(ctx, picker, on_change, settle_ms) if settle_ms > 0 else on_change
+    setattr(picker, _HANDLER,
+            _settled(ctx, picker, on_change, settle_ms) if settle_ms > 0 else on_change)
     if inspector_service.inspector(ctx).holds(picker):
         inspector_service.inspector(ctx).popToRoot()       # refilled below, then shown again
     picker.setItems(items, checked)
@@ -73,13 +83,9 @@ def open_multi_select(ctx, anchor: QWidget, *, key: str, title: str, items: Iter
     return picker
 
 
-#: picker -> ``(timer, pending keys holder)`` while its changes are settled.
-_settling: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-
-
 def _flush(picker: MultiSelect) -> None:
     """Apply a pending settled change now."""
-    entry = _settling.get(picker)
+    entry = getattr(picker, _SETTLE, None)
     if entry is None:
         return
     timer, pending, apply = entry
@@ -93,7 +99,7 @@ def _flush(picker: MultiSelect) -> None:
 def _settled(ctx, picker: MultiSelect, on_change: Callable[[list], None], settle_ms: int):
     from PySide6.QtCore import QTimer
 
-    old = _settling.pop(picker, None)
+    old = getattr(picker, _SETTLE, None)
     if old is not None:
         old[0].stop()
         old[0].deleteLater()
@@ -101,7 +107,7 @@ def _settled(ctx, picker: MultiSelect, on_change: Callable[[list], None], settle
     timer.setSingleShot(True)
     timer.setInterval(int(settle_ms))
     pending: list = []
-    _settling[picker] = (timer, pending, on_change)
+    setattr(picker, _SETTLE, (timer, pending, on_change))
     timer.timeout.connect(lambda p=picker: _flush(p))
 
     def _left(_key: str, p=picker) -> None:

@@ -25,12 +25,10 @@ reaches through its ``bandRole="display"`` (``core/ui_helpers.make_popover_butto
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QApplication,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QMenu,
     QVBoxLayout,
     QWidget,
 )
@@ -60,30 +58,6 @@ def set_relative_to(ctx, variable_id: str, value_id: str, within) -> None:
     slice_.rel_value_id = str(value_id or "") if variable_id else ""
     slice_.rel_within = [str(v) for v in (within or [])] if variable_id else []
     redraw_bars(ctx)
-
-
-def refit_popover(widget: QWidget) -> None:
-    """Resize the popover holding *widget* to what its contents now need.
-
-    A ``QMenu`` sizes its ``QWidgetAction`` panel once, when it opens. This row
-    grows after that — the "within each" line appears once a variable is
-    chosen — and the menu kept its opening height, so the layout squeezed every
-    row into it: the two combos went from 23 px to 12 px and their text was cut
-    off top and bottom. Re-measured from the panel outwards on each change.
-    """
-    node = widget
-    while node is not None and not isinstance(node, QMenu):
-        node.updateGeometry()
-        node.adjustSize()
-        node = node.parentWidget()
-    if node is not None:
-        # The menu caches each action's size; an ActionChanged event is what
-        # marks them stale, so the next adjustSize measures the grown panel.
-        from PySide6.QtCore import QEvent
-        from PySide6.QtGui import QActionEvent
-        for action in node.actions():
-            QApplication.sendEvent(node, QActionEvent(QEvent.ActionChanged, action))
-        node.adjustSize()
 
 
 def build_relative_to_row(ctx, parent: QWidget, layout) -> QWidget:
@@ -154,8 +128,9 @@ def build_relative_to_row(ctx, parent: QWidget, layout) -> QWidget:
             check.toggled.connect(lambda _on: _write())
             checks_row.addWidget(check)
             checks[variable.id] = check
+        # The page lays itself out again as the line appears: it is in the
+        # inspector's scrolling slot, at the height it asks for.
         within_line.setVisible(bool(variable_id))
-        refit_popover(box)
 
     def _fill_values(selected: str) -> None:
         value_cb.blockSignals(True)

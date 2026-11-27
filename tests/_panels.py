@@ -41,7 +41,7 @@ def picker(button, key: str | None = None):
     """The ``MultiSelect`` *button* opens (``inspector_pages.open_multi_select``)
     — the one page it has, or the page named *key*."""
     from review.core import inspector_pages
-    mine = inspector_pages._pickers.get(button, {})
+    mine = inspector_pages.pickers_of(button)
     if key is None:
         assert len(mine) == 1, f"the button has {len(mine)} multi-select pages: {sorted(mine)}"
         return next(iter(mine.values()))

@@ -74,9 +74,30 @@ class Panel:
     shown: bool = False
 
 
-_panels: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+#: Every live panel button. A set of weak references and nothing else: a
+#: panel's record names its context, and the context reaches its buttons
+#: through the widget registry, so a module-level *mapping* from button to
+#: record is a chain from this module to the window that no closed window ever
+#: breaks (measured: three ``test_a_closed_review_app_is_freed`` failures,
+#: about 31 MB a window). The record lives on the button instead, where it is
+#: an ordinary cycle the collector frees with the window.
+_buttons: weakref.WeakSet = weakref.WeakSet()
 #: Windows whose inspector already re-reads the panels' values on a page change.
 _watched: weakref.WeakSet = weakref.WeakSet()
+
+#: The attribute a button carries its :class:`Panel` in.
+_RECORD = "_aw_inspector_panel"
+
+
+def _items() -> list:
+    """``(button, panel)`` for every live panel button."""
+    out = []
+    for button in list(_buttons):
+        if shiboken6.isValid(button):
+            panel = getattr(button, _RECORD, None)
+            if panel is not None:
+                out.append((button, panel))
+    return out
 
 
 def clean_title(text: str) -> str:
@@ -106,26 +127,27 @@ def make_popover_button(text: str, parent: QWidget, *, ctx=None, tab: str = "dis
     content_layout = QVBoxLayout(content)
     content_layout.setContentsMargins(0, 0, 0, 0)
     content_layout.setSpacing(6)
-    _panels[btn] = Panel(content, tab, bool(root), title, summary, bool(large), ctx)
+    setattr(btn, _RECORD, Panel(content, tab, bool(root), title, summary, bool(large), ctx))
+    _buttons.add(btn)
     refresh(btn)
     btn.clicked.connect(lambda _=False, b=btn: press(b))
     return btn, content, content_layout
 
 
 def panel_of(button: QWidget) -> Panel | None:
-    return _panels.get(button)
+    return getattr(button, _RECORD, None)
 
 
 def on_open(button: QWidget, fn: Callable[[], None]) -> None:
     """Call *fn* each time *button*'s panel is about to be shown."""
-    panel = _panels.get(button)
+    panel = panel_of(button)
     if panel is not None:
         panel.on_open.append(fn)
 
 
 def on_close(button: QWidget, fn: Callable[[], None]) -> None:
     """Call *fn* each time *button*'s panel stops being shown."""
-    panel = _panels.get(button)
+    panel = panel_of(button)
     if panel is not None:
         panel.on_close.append(fn)
 
@@ -133,7 +155,7 @@ def on_close(button: QWidget, fn: Callable[[], None]) -> None:
 def set_summary(button: QWidget, summary: Callable[[], str] | None) -> None:
     """Give *button* the callable its value is read from, after it was built
     (the state it reads often does not exist until the panel is filled)."""
-    panel = _panels.get(button)
+    panel = panel_of(button)
     if panel is not None:
         panel.summary = summary
         refresh(button)
@@ -163,7 +185,7 @@ def button_text(panel: Panel) -> str:
 
 def refresh(button: QWidget) -> None:
     """Re-read *button*'s value into its text."""
-    panel = _panels.get(button)
+    panel = panel_of(button)
     if panel is None or not shiboken6.isValid(button):
         return
     text = button_text(panel)
@@ -173,7 +195,7 @@ def refresh(button: QWidget) -> None:
 
 def refresh_all(ctx=None) -> None:
     """Re-read every live panel button's value (those of *ctx* when given)."""
-    for button, panel in list(_panels.items()):
+    for button, panel in _items():
         if ctx is None or _ctx_of(button, panel) is ctx:
             refresh(button)
 
@@ -205,7 +227,7 @@ def _watch(ctx) -> None:
 
 def _on_page_changed(ctx) -> None:
     insp = inspector_service.inspector(ctx)
-    for button, panel in list(_panels.items()):
+    for button, panel in _items():
         if panel.shown and not insp.holds(panel.content):
             panel.shown = False
             for fn in list(panel.on_close):
@@ -219,7 +241,7 @@ def _on_page_changed(ctx) -> None:
 def press(button: QWidget) -> bool:
     """What pressing a panel's button does. Returns whether its panel is on
     show afterwards."""
-    panel = _panels.get(button)
+    panel = panel_of(button)
     if panel is None:
         return False
     ctx = _ctx_of(button, panel)
@@ -280,7 +302,7 @@ def _is_current(ctx, button: QWidget) -> bool:
 def find_roots(ctx, _leaf: str) -> dict:
     """``{tab: content}`` for the root panels of the page on screen."""
     found: dict = {}
-    for button, panel in list(_panels.items()):
+    for button, panel in _items():
         if not panel.root or panel.tab in found:
             continue
         if _ctx_of(button, panel) is not ctx or not _is_current(ctx, button):

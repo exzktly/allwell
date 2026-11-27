@@ -549,6 +549,14 @@ Step log (newest last):
     home"), so it was not moved. What would fit: the editing tools — Delete cell and Crop cells with their scope
     controls, and Edit — as a tool row under the image beside the zoom. That is a layout decision the plan and the
     prototype do not settle (no Segmentation mock-up), so it is the user's.
+15. **The user's decisions (asked with measurements):** Segmentation — the editing tools (Delete cell, Crop cells,
+    each with its scope control, and Edit) go in a tool row under the image beside the zoom group. Statistics — the
+    "Replicates: …" readout becomes a help line under the band. Spatial and Multivariate — Lasso cells moves under
+    the figure as a canvas tool, and Spatial's Recompute and Multivariate's Standardize go onto the Display page.
+16. D15 (part) Statistics band one row: the "Replicates: …" readout (`_stats_fov_indicator`) is a help line at the top
+    of the page body. New `tests/test_review_bands_are_one_row.py` (fast lane, through `tests/_minimal_shell`) measures
+    the band at 1400 and 1284 px and finds the readout under it; putting it back on the band fails it (`{1400: ['needs
+    …']}`). `DESIGN_PENDING` entry removed. 580 Statistics tests green.
 
 ## 10. Rows
 

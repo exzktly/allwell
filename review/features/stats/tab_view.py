@@ -390,13 +390,12 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
 
     # Acknowledge the replicate mode the test will use (driven by the shared
     # per-FOV toggle) so the tab is explicit about the unit of replication.
-    # No word-wrap: inside a flow a wrapped label reports its longest-word width
-    # as its minimum, so the row allocates it narrow and the single-line
-    # "Replicates: …" caption wraps into a tall stack even with the whole row
-    # free. Left un-wrapped it keeps one line and the flow places it whole.
+    # A help line under the band, not one of its items: it states the unit of replication rather than choosing
+    # anything, and on the band it took a third of the row (the user's decision, tracker §9.1 step 15).
     fov_indicator = reg.register("_stats_fov_indicator", QLabel(""))
-    fov_indicator.setProperty("textRole", "label")
-    stats_ctrl.add_scope("", fov_indicator)
+    fov_indicator.setProperty("textRole", "help")
+    fov_indicator.setContentsMargins(0, 0, 0, theme.Spacing.sm)
+    body_layout.insertWidget(0, fov_indicator)
 
     stats_ctrl.add_action(btn_primary(stats_ctrl, "Run test", ctx.runtime.stats.run))
     stats_refresh_fov_indicator(ctx)

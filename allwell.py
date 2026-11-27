@@ -2081,7 +2081,7 @@ class AllWellApp(QMainWindow):
     def _reveal_datasets_pane(self) -> bool:
         """Switch to the Datasets pane and change nothing on it.
 
-        The return leg of an Analyze queue session: "+ Add job → Analyze" and
+        The return leg of an Analyze queue session: "Add job → Analyze" and
         a queued Analyze row's Edit… take the user to the Analyze pane, and
         saving or cancelling brings them back to the Job Queue they started
         from rather than leaving them on a form that no longer stands for a job.

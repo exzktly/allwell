@@ -231,7 +231,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         layout.addWidget(build_hline_separator(None))
 
         self._build_summary_label(layout)
-        self._build_run_row(layout, button_text="\u25b6  Run Scatter Batch Export")
+        self._build_run_row(layout, button_text="Run batch export")
 
     # \u2500\u2500 the run summary \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     _SUMMARY_FIGURE_NOTE = ""

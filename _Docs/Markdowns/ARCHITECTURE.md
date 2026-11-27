@@ -938,7 +938,7 @@ scrolls by a drag like every other and is narrowed with `ui/phone_fit`
 (`fit_content`); and a foot outside what scrolls (`QWidget#PhoneWindowFoot`,
 its buttons at the 48 pt row floor) holds the window's last row when that row
 is only buttons — a `QDialogButtonBox` or a row of push buttons — so OK and
-Cancel stay in view, plus **Close ✕**, which calls `close()` exactly as the
+Cancel stay in view, plus **Close**, which calls `close()` exactly as the
 title bar's ✕ does (a dialog answers it with `reject`). The Close is left out
 when the row brought down holds the window's own Close or Cancel (a button box's
 reject role, or the text), and when the window has no ✕ of its own
@@ -1655,7 +1655,7 @@ allwell/
 │   │                              by allwell.py, so it imports no pane
 │   └── phone_window.py         ← phone layout's form for a window of its own (a dialog, a
 │                                  pop-out): the screen covered, the content in a drag-scrolled
-│                                  body, the window's buttons and a Close ✕ at its foot, and the
+│                                  body, the window's buttons and a Close at its foot, and the
 │                                  desk form given back (§2). Qt-only and pane-free; phone_shell
 │                                  finds the windows and calls in
 ├── widgets/                     ← reusable Qt widgets (no app coupling) — including

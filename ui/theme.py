@@ -560,6 +560,9 @@ class Metrics:
     # is the page's left column, its sections cards holding a label column and
     # a field column, about 430 wide in the mock-up.
     form_column_w = 430
+    # A Datasets tool page's column: title, help, cards and the foot row stop
+    # here, on the canvas, rather than stretching across a wide window (§6).
+    tool_page_w = 720
     # Vertical and horizontal padding the item delegate takes inside a list or
     # tree row. Tokens rather than literals in the QSS because a caller sizing a
     # row's **index widget** has to add them back: Qt gives that widget the
@@ -1830,7 +1833,7 @@ QWidget#PhoneStrip {{
     border-top: 1px solid {c.border_subtle};
 }}
 /* The foot of a window phone layout gives its phone form (ui/phone_window.py):
-   the window's own row of buttons and Close ✕, outside what scrolls. */
+   the window's own row of buttons and Close, outside what scrolls. */
 QWidget#PhoneWindowFoot {{
     background-color: {c.rail};
     border-top: 1px solid {c.border_subtle};

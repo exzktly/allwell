@@ -133,7 +133,45 @@ HELPERS: dict[str, tuple[int, str]] = {}
 _TEXT_TAKERS = {"QLabel", "field_label", "help_text", "body", "number"}
 
 
+def _constants(tree: ast.Module) -> dict[str, ast.Constant]:
+    """The module's and its classes' string constants by name — ``_RUN_LABEL = "Subset"`` — so a label handed over
+    by name is read like one written in place."""
+    found: dict[str, ast.Constant] = {}
+    bodies = [tree.body] + [n.body for n in tree.body if isinstance(n, ast.ClassDef)]
+    for body in bodies:
+        for node in body:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+                found[node.targets[0].id] = node.value
+    return found
+
+
+def _defaults(tree: ast.Module) -> list[ast.Constant]:
+    """A parameter's default string where the parameter is handed on as a label in the same function:
+    ``def _build_run_button(self, layout, *, button_text="Run"):`` … ``buttons.primary(button_text)``."""
+    out = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        args = fn.args.args[len(fn.args.args) - len(fn.args.defaults):] + fn.args.kwonlyargs
+        defaults = list(fn.args.defaults) + list(fn.args.kw_defaults)
+        named = {a.arg: d for a, d in zip(args, defaults)
+                 if isinstance(d, ast.Constant) and isinstance(d.value, str)}
+        if not named:
+            continue
+        for call in ast.walk(fn):
+            at = TEXT_ARG.get(call_name(call)) if isinstance(call, ast.Call) else None
+            if at is not None and len(call.args) > at and isinstance(call.args[at], ast.Name):
+                if call.args[at].id in named:
+                    out.append(named[call.args[at].id])
+    return out
+
+
 def find(_path: str, tree: ast.Module):
+    constants = _constants(tree)
+    for d in _defaults(tree):
+        if breaches(d.value):
+            yield d
     for call in ast.walk(tree):
         if not isinstance(call, ast.Call):
             continue
@@ -141,7 +179,8 @@ def find(_path: str, tree: ast.Module):
         at, taker = (TEXT_ARG[name], name) if name in TEXT_ARG else HELPERS.get(name, (None, ""))
         if at is None or len(call.args) <= at:
             continue
-        for s in strings_in(call.args[at]):
+        named = [constants[n.id] for n in ast.walk(call.args[at]) if isinstance(n, ast.Name) and n.id in constants]
+        for s in strings_in(call.args[at]) + named:
             found = breaches(s.value)
             if found and not (taker in _TEXT_TAKERS and not any(ch.isalpha() for ch in s.value)):
                 yield s

@@ -806,7 +806,7 @@ class JobQueueController(QObject):
         can build an Analyze job without importing ``analyze.tab``.
 
         It goes into the same collector registry every other kind uses, so
-        "+ Add job → Analyze" and an Analyze edit session both reach it by the
+        "Add job → Analyze" and an Analyze edit session both reach it by the
         one path rather than Analyze keeping a second, special one.
 
         *validate* is ``AnalyzeTab.validate_for_queue`` — the same gate its

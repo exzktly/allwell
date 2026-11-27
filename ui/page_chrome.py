@@ -76,6 +76,7 @@ class ActionRow(QWidget):
         row.setSpacing(theme.Spacing.sm)
         self._reason = text_roles.help_text("", self)
         row.addWidget(self._reason, 1)
+        row.addStretch(1)        # holds the buttons at the right while the reason is hidden
         for other in others:
             other.setParent(self)
             row.addWidget(other)

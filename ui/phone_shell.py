@@ -1977,7 +1977,7 @@ class PhoneShell(QObject):
     def fit_popup_window(self, w: QWidget) -> None:
         """Fit a window the app opened — a dialog, a pop-out — to the phone:
         the phone form :mod:`ui.phone_window` gives it (the screen covered, the
-        content scrolling by a drag, its buttons and a Close ✕ at its foot), or
+        content scrolling by a drag, its buttons and a Close at its foot), or
         for Qt's own small dialogs only a place inside the screen."""
         if not phone_window.kind(w):
             return

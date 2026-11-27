@@ -27,17 +27,16 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from util.timepoint import sort_key as tp_sort_key
 from widgets._support import set_variant
 from widgets.flow_layout import FlowLayout
@@ -96,9 +95,9 @@ _IN_PLACE_WARNING = (
     "Edit in place removes every unticked well, timepoint, FOV and channel from this dataset's own "
     "archives. Nothing removed is kept anywhere, and it cannot be undone. Each well is rewritten on its "
     "own, so it needs only that well's room on disk.")
-_RUN_LABEL = "▶  Subset"
-_RUN_IN_PLACE_LABEL = "▶  Remove from dataset"
-_RUN_FINISH_LABEL = "▶  Finish the interrupted edit"
+_RUN_LABEL = "Subset"
+_RUN_IN_PLACE_LABEL = "Remove from dataset"
+_RUN_FINISH_LABEL = "Finish the interrupted edit"
 
 
 class SubsetPage(LogPanelMixin, QWidget):
@@ -149,34 +148,11 @@ class SubsetPage(LogPanelMixin, QWidget):
         # squeezed cell size regardless of how much width is available. Wrap
         # everything in a scroll area instead, mirroring the pattern
         # analyze/tab.py already uses for its own form panel.
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Subset / Split", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Subset / Split",
             "Copy a filtered slice of a dataset — chosen wells, timepoints "
             "and/or FOVs — into a new folder, leaving the source untouched. "
-            "Timepoints keep their original hours; nothing is relabelled.",
-            self,
-        )
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "Timepoints keep their original hours; nothing is relabelled.")
 
         self._src_field = PathField(
             "Source dataset", pick=folder_picker("Select source dataset folder"),
@@ -239,21 +215,12 @@ class SubsetPage(LogPanelMixin, QWidget):
         for widget in (self._ch_heading, self._ch_hint, self._ch_host):
             widget.setVisible(False)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary(_RUN_LABEL, self)
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("Add to queue", self)
-        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(self, _RUN_LABEL, on_run=self.runRequested,
+                                    on_queue=self.queueRequested, queue_tip="Add this run to the Job Queue instead of running it now.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folders", 1, 3), ("What to copy", 4, 15))
 
         self._build_status_section(outer)
 

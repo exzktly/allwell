@@ -13,19 +13,16 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
-    QScrollArea,
-    QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import tool_page
 from ui import theme
-from datasets.core.log_panel import hrule as _hrule
 
 #: The filter entry that shows every recipe's runs.
 ALL_RECIPES = "All recipes"
@@ -45,33 +42,12 @@ class RunsPage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Runs", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Runs",
             "Every time a recipe was applied: when, to what, how far it got, and "
             "its log — which step started on which folder, which file a "
             "conversion chose, what each step wrote, and any pause, retry or "
-            "restart. A run stays here after its jobs are cleared from the queue.",
-            self)
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "restart. A run stays here after its jobs are cleared from the queue.")
 
         row = QWidget(self)
         rl = QHBoxLayout(row)

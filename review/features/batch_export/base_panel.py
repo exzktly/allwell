@@ -2112,7 +2112,7 @@ class BatchExportPanel(VariableSelectMixin, QWidget):
         self._wire_run_summary()
 
     def _build_run_row(
-        self, layout: QVBoxLayout, *, button_text: str = "▶  Run Batch Export",
+        self, layout: QVBoxLayout, *, button_text: str = "Run batch export",
     ) -> None:
         run_row = QHBoxLayout()
         run_row.setContentsMargins(theme.Spacing.md, theme.Spacing.sm, theme.Spacing.md, theme.Spacing.sm)

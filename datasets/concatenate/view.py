@@ -22,22 +22,21 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QButtonGroup,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QRadioButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
 from widgets._support import set_variant
 from datasets.core.dataset_paths import preview_wells
 from datasets.core.equation_row import build_equation_row
 from datasets.core.pending_inputs import RUN_WAITS, any_pending, apply_pending
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from datasets.concatenate.concatenate_compute import (
     GapPreview,
     destination_has_unrecognized_content,
@@ -121,26 +120,8 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         # since its cell size derives from its actual allotted width/height
         # (well_plate_selector's _metrics()). Mirrors the pattern
         # analyze/tab.py already uses for its own form panel.
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Concatenate Datasets", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Concatenate Datasets",
             "Append dataset 2 onto dataset 1. The two datasets should be the "
             "same plate imaged in separate sessions; dataset 2's timepoints are "
             "relabelled to continue after dataset 1's last timepoint. Both can be "
@@ -148,32 +129,18 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             "yet — merge those first, then analyse the plate once). Create a new "
             "dataset to write the merged result to a destination folder, leaving "
             "both originals untouched; or, when dataset 2 is raw, add it to "
-            "dataset 1 in place, which copies nothing.",
-            self,
-        )
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "dataset 1 in place, which copies nothing.")
 
         self._build_equation_row(outer)
         self._build_mode_row(outer)
         self._build_gap_row(outer)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("Concatenate", self)
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("Add to queue", self)
-        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(self, "Concatenate", on_run=self.runRequested,
+                                    on_queue=self.queueRequested, queue_tip="Add this run to the Job Queue instead of running it now.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folders", 1, 2), ("How to combine", 3, 5))
 
         self._build_status_section(outer)
 

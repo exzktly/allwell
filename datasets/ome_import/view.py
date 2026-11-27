@@ -30,18 +30,17 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QProgressBar,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from util.plate_grid import block_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
@@ -142,36 +141,13 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # both). Qt's layout.addWidget() reparents regardless of any
         # constructor-passed parent, so the widgets below can keep passing
         # ``self`` without needing a bulk rewrite.
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Convert OME-TIFF", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Convert OME-TIFF",
             "De-interleave a single packed OME-TIFF (every well, channel, "
             "z-plane and timepoint in one file) into a normal dataset folder of "
             "per-well images. Enter the imaged well grid so each serpentine stage "
             "position gets its well label, then open the result in Analyze to "
-            "process it.",
-            self,
-        )
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "process it.")
 
         self._src_field = PathField("OME-TIFF source", pick=self._pick_source)
         self._src_field.changed.connect(self._on_source_changed)
@@ -196,32 +172,23 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._verdict.setVisible(False)
         outer.addWidget(self._verdict)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("Convert", self)
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("Add to queue", self)
-        self._queue_btn.setToolTip("Add this conversion to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
         # Workers belongs beside the action, not among the settings that
         # describe the plate: it changes how fast the conversion runs and
         # nothing about what comes out of it.
-        run_row_l.addWidget(QLabel("Workers", run_row))
+        workers_lbl = QLabel("Workers", self)
         self._workers_edit = self._small("", placeholder="auto")
         self._workers_edit.setToolTip(
             "Parallel conversion threads (blank = auto). Wells are converted in "
             "parallel, so this is capped at the number of wells; lower it if a "
             "single spinning disk thrashes."
         )
-        run_row_l.addWidget(self._workers_edit)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Workers, Add to queue, the primary last.
+        self._action_row = foot_row(self, "Convert", on_run=self.runRequested, on_queue=self.queueRequested,
+                                    queue_tip="Add this conversion to the Job Queue instead of running it now.",
+                                    before=(workers_lbl, self._workers_edit))
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folders", 1, 2), ("Plate", 3, 9), ("Channels", 10, 11))
 
         # The readout and Convert/Queue buttons sit above the acquisition plate, not
         # below it -- every other Datasets page puts its primary action above
@@ -578,6 +545,7 @@ class OmeImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._channels_lay.setContentsMargins(0, 0, 0, 0)
         self._channels_lay.setSpacing(theme.Spacing.xs)
         outer.addWidget(self._channels_host)
+        self._channels_host.setVisible(False)       # shown with its rows, once a file is read
 
 
 

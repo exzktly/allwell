@@ -20,17 +20,16 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from util.well_token import canonical_well_label
 from widgets._support import set_variant
 from datasets.core.dataset_paths import preview_wells
@@ -84,54 +83,22 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         # Wrap in a scroll area — see datasets/concatenate/view.py's
         # _build_ui for why (the dashboard's plate map used to render
         # illegibly small at the app's default window height).
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Merge Plates", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Merge Plates",
             "Join two different datasets along the well axis into one — the "
             "well-axis sibling of Concatenate Datasets, which joins the same dataset "
             "across time. A well present in both is refused, not stitched: "
-            "remap dataset 2's wells onto free positions first if they overlap.",
-            self,
-        )
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "remap dataset 2's wells onto free positions first if they overlap.")
 
         self._build_equation_row(outer)
         self._build_remap_row(outer)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("Merge", self)
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("Add to queue", self)
-        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(self, "Merge", on_run=self.runRequested,
+                                    on_queue=self.queueRequested, queue_tip="Add this run to the Job Queue instead of running it now.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folders", 1, 2), ("Placement", 3, 5))
 
         self._build_status_section(outer)
 

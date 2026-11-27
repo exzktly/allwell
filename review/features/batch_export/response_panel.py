@@ -189,7 +189,7 @@ class ResponseBatchExportPanel(BatchExportPanel):
         layout.addWidget(build_hline_separator(None))
 
         self._build_summary_label(layout)
-        self._build_run_row(layout, button_text="▶  Run Response Batch Export")
+        self._build_run_row(layout, button_text="Run batch export")
         layout.addStretch(1)
 
     # ── the run summary ──────────────────────────────────────────────────

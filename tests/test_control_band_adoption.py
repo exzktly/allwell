@@ -22,7 +22,8 @@ longer exists, and the module that now owns that page's row is listed in its
 place. The design language adds one more, decided per page by its row in
 ``_Docs/Markdowns/DESIGN_LANGUAGE_TRACKER.md``: a page that is a form or a
 dashboard rather than a plot carries its controls in a card's heading, not in a
-band (§6) — Analyze's output pane became the Run card that way (row D22).
+band (§6) — Analyze's output pane became the Run card that way (row D22), and
+the Datasets tool pages, whose band held nothing, lost it (row D24).
 Removing an entry any other way is the regression this file exists to catch, so
 a commit that does it says which page went away and which module inherited the
 row, or which tracker row made it a card.
@@ -44,7 +45,6 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 _BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot")
 
 ADOPTED = (
-    "datasets/tab.py",                          # Datasets — the tool pages
     "review/core/centre_view.py",          # Plotting — all five sub-tabs
     "review/features/barplot/tab_view.py",
     "review/features/distribution/tab_view.py",

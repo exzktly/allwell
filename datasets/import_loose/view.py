@@ -24,16 +24,13 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
-    QHBoxLayout,
     QLabel,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.tool_page import cards, foot_row, into_card, tool_page
+from datasets.core.log_panel import LogPanelMixin
 from core.safe import swallowed
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from util.schema_infer import infer_from_dir
@@ -113,39 +110,15 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # Wrap in a scroll area — see datasets/concatenate/view.py's
         # _build_ui for why (the dashboard's plate map used to render
         # illegibly small at the app's default window height).
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Zip Loose Folder", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Zip Loose Folder",
             "Sort a folder of loose, ungrouped TIFs into one archive per well — "
             "the layout Analyze reads. By default it writes a new folder and "
             "leaves your images where they are; tick <b>Group in place</b> to "
             "sort them where they sit and delete the loose originals instead. "
             "Analyze does this for you when it meets a folder of loose TIFs, in "
             "place and without asking, so use this page when you want to check "
-            "the split first or keep the originals.",
-            self,
-        )
-        blurb.setTextFormat(Qt.RichText)
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "the split first or keep the originals.", rich=True)
 
         self._src_field = PathField(
             "Loose-TIF folder", pick=folder_picker("Select folder of loose TIFs"))
@@ -214,21 +187,13 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._dest_field.changed.connect(self._refresh_run_enabled)
         outer.addWidget(self._dest_field)
 
-        run_row = QWidget(self)
-        run_row_l = QHBoxLayout(run_row)
-        run_row_l.setContentsMargins(0, 0, 0, 0)
-        run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("Zip folder", self)
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.runRequested)
-        run_row_l.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("Add to queue", self)
-        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        run_row_l.addWidget(self._queue_btn)
-        run_row_l.addStretch(1)
-        outer.addWidget(run_row, 0, Qt.AlignLeft)
+        # The foot row (datasets/core/tool_page.py): why it cannot run yet, Add to queue, the primary last.
+        self._action_row = foot_row(self, "Zip folder", on_run=self.runRequested,
+                                    on_queue=self.queueRequested, queue_tip="Add this run to the Job Queue instead of running it now.")
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Filenames", 2, 8))
+        into_card(outer, "Folders", [self._src_field, self._dest_field])
 
         self._build_status_section(outer)
 

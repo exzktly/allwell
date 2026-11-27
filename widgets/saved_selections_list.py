@@ -71,7 +71,6 @@ _LST_MIN_H = 300
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"
 _EYE_OFF = "○"
-_KEBAB = "⋯"
 _CHEV_C = "▸"
 _CHEV_O = "▾"
 
@@ -216,7 +215,10 @@ class _SelectionRow(QFrame):
 
         self._kebab = QToolButton(top)
         self._kebab.setObjectName("RowGhost")
-        self._kebab.setText(_KEBAB)
+        from widgets import icons
+        self._kebab.setIcon(icons.make_icon("more-horizontal", 14))    # the drawn icon, not a "⋯" in the text
+        self._kebab.setToolTip("More")
+        self._kebab.setAccessibleName("More")
         self._kebab.setCursor(Qt.PointingHandCursor)
         self._kebab.clicked.connect(
             lambda: self.kebabRequested.emit(self._id, self._kebab))

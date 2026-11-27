@@ -167,7 +167,7 @@ def test_a_pop_out_that_is_not_a_dialog_fits_the_phone_and_its_close_closes_it(q
     _open(qapp, shell, popout)
 
     assert popout.frameGeometry() == UPRIGHT
-    assert _foot_texts(popout) == ["Close ✕"]
+    assert _foot_texts(popout) == ["Close"]
     close = popout.findChild(QPushButton, "PhoneWindowClose")
     assert _on_screen(close, UPRIGHT)
     assert close.height() >= phone_layout.touch_px(shell.unit(), phone_layout.TOUCH_MIN_PT)

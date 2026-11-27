@@ -20,17 +20,15 @@ from __future__ import annotations
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QFrame,
     QLabel,
     QMenu,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import tool_page
 from ui import theme
 from widgets.flow_layout import FlowLayout
-from datasets.core.log_panel import hrule as _hrule
 from services.job_kinds import FOLDER_SOURCE_KINDS, KIND_LABEL, input_targets
 from services.job_queue import JobSpec, JobState, downstream_ids, lineage
 from datasets.job_queue.row import JobRow
@@ -98,26 +96,8 @@ class JobQueuePage(QWidget):
         # for why. A long job list would otherwise be crushed into whatever
         # space is left, the same problem the other six pages were fixed
         # against.
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(self._scroll)
-
-        content = QWidget(self._scroll)
-        self._scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Job Queue", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        self._scroll, outer = tool_page(
+            self, "Job Queue",
             "Line up Analyze runs and Datasets tools to work through "
             "unattended, in order. One job runs at a time — except that an "
             "Analyze run on a remote host, and a Watch Folder job, can each "
@@ -126,12 +106,7 @@ class JobQueuePage(QWidget):
             "own page would show, since there's no one there to ask. "
             "Pause winds the running job down and keeps what it has finished, "
             "so starting the queue again — even in a new session — carries on "
-            "from there. Stop discards whatever is in flight.",
-            self,
-        )
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "from there. Stop discards whatever is in flight.")
 
         outer.addWidget(self._build_header())
         outer.addWidget(self._build_summary())

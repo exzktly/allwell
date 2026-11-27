@@ -11,7 +11,7 @@ import pytest
 
 tifffile = pytest.importorskip("tifffile")
 
-from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea, QWidget  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -218,8 +218,8 @@ def test_plate_is_capped_and_sits_below_the_readout_and_convert_button(qapp):
     assert page._plate.maximumWidth() == 330
     assert page._plate.maximumHeight() == 210
 
-    content = page.layout().itemAt(0).widget().widget()
-    outer = content.layout()
+    column = page.findChild(QWidget, "ToolPageColumn")      # the tool page's column (datasets/core/tool_page.py)
+    outer = column.layout()
     widgets = [outer.itemAt(i).widget() for i in range(outer.count())]
     readout_idx = widgets.index(page._readout)
     run_row_idx = widgets.index(page._run_btn.parentWidget())

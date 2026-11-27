@@ -30,7 +30,6 @@ from core.safe import swallowed
 from ui import theme
 from widgets.context_banner import ContextBanner
 from services.job_kinds import INPUT_TARGETS
-from widgets.page_body import build_page_body
 from widgets.rail_nav import RailNav
 from widgets.page_stack import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
@@ -69,6 +68,9 @@ class _Feature:
     # for a job without a second name -> kind map to keep in step. None for a
     # page that is not a queueable tool (the Job Queue's own page).
     kind: str | None = None
+    # The eyebrow the tool is listed under in the rail (design language §6, *Datasets*): Combine, Convert or
+    # Maintain. A new tool names its group; the rail draws a caption wherever the group changes.
+    group: str = ""
 
 
 def _build_concatenate(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
@@ -238,24 +240,24 @@ def _fill_from_queue(controller, kind: str, target: str, job_id: str, fill) -> N
 
 _FEATURES: tuple[_Feature, ...] = (
     _Feature(name="Concatenate Datasets", icon="copy", build=_build_concatenate,
-             kind="concatenate"),
-    _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import,
-             kind="ome_import"),
-    _Feature(name="Convert CZI", icon="microscope", build=_build_czi_import,
-             kind="czi_import"),
-    _Feature(name="Convert ND2", icon="microscope", build=_build_nd2_import,
-             kind="nd2_import"),
-    _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate,
-             kind="validate"),
-    _Feature(name="Subset / Split", icon="boxes", build=_build_subset,
-             kind="subset"),
-    _Feature(name="Zip Loose Folder", icon="download", build=_build_import_loose,
-             kind="import_loose"),
+             kind="concatenate", group="Combine"),
     _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates,
-             kind="merge_plates"),
+             kind="merge_plates", group="Combine"),
+    _Feature(name="Subset / Split", icon="boxes", build=_build_subset,
+             kind="subset", group="Combine"),
+    _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import,
+             kind="ome_import", group="Convert"),
+    _Feature(name="Convert CZI", icon="microscope", build=_build_czi_import,
+             kind="czi_import", group="Convert"),
+    _Feature(name="Convert ND2", icon="microscope", build=_build_nd2_import,
+             kind="nd2_import", group="Convert"),
+    _Feature(name="Zip Loose Folder", icon="download", build=_build_import_loose,
+             kind="import_loose", group="Convert"),
+    _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate,
+             kind="validate", group="Maintain"),
     _Feature(name="Watch Folder", icon="eye", build=_build_watch_folder,
-             kind="watch_folder"),
-    _Feature(name="Automation", icon="waypoints", build=_build_automation),
+             kind="watch_folder", group="Maintain"),
+    _Feature(name="Automation", icon="waypoints", build=_build_automation, group="Maintain"),
 )
 
 
@@ -569,20 +571,23 @@ class DatasetsTab(QWidget):
         splitter.addWidget(self._build_sidebar())
         splitter.setStretchFactor(0, 0)
 
-        # The tool pages carry their own Run controls down inside each page, so
-        # this band holds nothing — but every main page in the app starts with
-        # one, and adding it here is what keeps this pane's content level with
-        # Review's and Analyze's instead of starting a band's height higher
-        # (widgets/page_body.py).
+        # No band: a tool page is a form, its controls in cards and its actions in a foot row (design language
+        # §6, datasets/core/tool_page.py), so a band here held nothing — an empty strip across the top of every
+        # page (``tests/_layout_checks.no_empty_band``).
         page_host = QWidget(self)
-        _band, page_body = build_page_body(page_host)
+        host_layout = QVBoxLayout(page_host)
+        host_layout.setContentsMargins(0, 0, 0, 0)
         self._pages = NamedPageStack(page_host)
-        page_body.layout().addWidget(self._pages, 1)
+        host_layout.addWidget(self._pages, 1)
         splitter.addWidget(page_host)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([260, 900])
 
+        group = None
         for feat in _FEATURES:
+            if feat.group != group:
+                group = feat.group
+                self._nav.addCaption(group)
             self._nav.addItem(feat.name, icon=feat.icon, key=feat.name)
             page, teardown = feat.build(self)
             self._pages.addPage(feat.name, page)

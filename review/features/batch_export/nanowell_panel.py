@@ -241,7 +241,7 @@ class NanowellBatchExportPanel(BatchExportPanel):
 
         layout.addWidget(build_hline_separator(None))
         self._build_summary_label(layout)
-        self._build_run_row(layout, button_text="▶  Run Nanowells Batch Export")
+        self._build_run_row(layout, button_text="Run batch export")
         layout.addStretch(1)
 
     def _combo_row(self, layout: QVBoxLayout, label: str, choices, tip: str) -> QComboBox:

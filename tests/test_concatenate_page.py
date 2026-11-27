@@ -29,13 +29,10 @@ def qapp():
 _run_worker_to_completion = run_worker_to_completion
 
 
-def test_run_button_restores_its_play_glyph_when_not_running(qapp):
-    """Regression guard: every other Datasets tool's run button restores its
-    "▶ " glyph once a run finishes (Validate's "Check", Subset's
-    "▶  Subset", OME-TIFF's "Convert", Merge Plates'
-    "Merge") -- Concatenate's was the one holdout, dropping back to a bare
-    "Concatenate" with no glyph, which read as a different, unstarted-looking
-    control next to its own "Concatenating…" running label."""
+def test_run_button_restores_its_label_when_not_running(qapp):
+    """Regression guard: the run button goes back to its own label once a run finishes, rather than keeping the
+    running label "Concatenating…" — the label every Datasets tool's run button restores. (It carried a "▶ "
+    glyph once; the design language draws no glyphs in labels, tracker row D13.)"""
     from datasets.concatenate.view import ConcatenatePage
 
     page = ConcatenatePage()

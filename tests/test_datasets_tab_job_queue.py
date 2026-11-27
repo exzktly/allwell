@@ -528,9 +528,10 @@ def test_current_help_page_is_safe_before_the_rail_exists(qapp, tmp_path):
 
 # ── the left rail ────────────────────────────────────────────────────────────
 
-def test_the_rail_lists_the_tools_and_carries_no_caption_above_them(qapp,
-                                                                    tmp_path):
-    """The left column is the tool list, with nothing restating the pane.
+def test_the_rail_lists_the_tools_under_their_groups_and_nothing_naming_the_pane(qapp,
+                                                                                  tmp_path):
+    """The left column is the tool list under the design language's three eyebrows — Combine, Convert, Maintain
+    (§6, *Datasets*, tracker row D24) — with nothing restating the pane.
 
     It carried a "DATASETS" caption above the rail, under a comment claiming
     it matched Review's sidebar. Review has no such thing — its rail head is
@@ -552,7 +553,14 @@ def test_the_rail_lists_the_tools_and_carries_no_caption_above_them(qapp,
         texts = [w.text().strip()
                  for w in tab._left_sidebar.findChildren(QLabel)
                  if w.text().strip()]
-        assert texts == [feat.name for feat in _FEATURES]
+        want, group = [], None
+        for feat in _FEATURES:
+            if feat.group != group:
+                group = feat.group
+                want.append(group.upper())           # an eyebrow, set in capitals
+            want.append(feat.name)
+        assert texts == want
+        assert [t for t in texts if t.isupper()] == ["COMBINE", "CONVERT", "MAINTAIN"]
     finally:
         tab.shutdown()
 

@@ -11023,7 +11023,7 @@ holds the jobs a plan becomes, and the Runs tab what each use of one did.
   each with its settings and where its input comes from ("source from step
   1"). Paths that follow the input are written as ‹input›, ‹input's folder› and
   ‹input name›; a fixed path is shown as it is.
-- **▶ Apply to…** queues the recipe on a folder or file you choose, as the
+- **Apply to…** queues the recipe on a folder or file you choose, as the
   queue's own Recipes menu does, and takes you to the Queue tab.
 - **Rename…**, **Duplicate** (a copy to change), **Export…** (a file to send
   to a colleague or another computer), **Delete…** (jobs already queued from it
@@ -11367,7 +11367,7 @@ opens — fill the phone's screen in phone layout, whichever way the phone is he
 What does not fit scrolls with a finger, and rows of controls that would run off
 the side are stacked. The window's own buttons (OK and Cancel, or Open folder,
 Clear and Close) sit in a bar along its bottom edge, in reach however far you
-have scrolled, and a **Close ✕** there does what the window's title-bar ✕ does —
+have scrolled, and a **Close** there does what the window's title-bar ✕ does —
 it is not added when the window's own Close or Cancel is already in that bar.
 Small questions (Yes / No) keep their own size. Switching back to the desktop
 layout gives an open window its desktop size again. The Windows file pickers

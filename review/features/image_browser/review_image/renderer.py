@@ -447,8 +447,8 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
 
 #: Why a frame has no outlines and the cell tools are off. ``{overlays}`` is the sentence about nanowell overlays.
 NO_LABEL_MAP_NANOWELL = ("No label map: this nanowell run records cells as points, not outlines.{overlays} "
-                         "Delete / Crop / Edit are unavailable.")
-NO_LABEL_MAP = "No label map for this frame: the image is shown without outlines. Delete / Crop / Edit are unavailable."
+                         "“Delete cell”, “Crop cells” and “Edit” are unavailable.")
+NO_LABEL_MAP = "No label map for this frame: the image is shown without outlines. “Delete cell”, “Crop cells” and “Edit” are unavailable."
 OVERLAYS_NOT_IN_BUILD = " Nanowell overlays are not in this build."
 
 

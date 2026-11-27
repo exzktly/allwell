@@ -14,16 +14,15 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFrame,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
+from datasets.core.tool_page import tool_page
 from ui import theme
 from datasets.core.log_panel import hrule as _hrule
 from widgets.flow_layout import FlowLayout
@@ -66,33 +65,12 @@ class RecipesPage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Recipes", self)  # the Recipes tab of Automation
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Recipes",
             "A recipe is a chain of jobs saved as a plan — a watch, a conversion "
             "and an Analyze run, say — that you apply to each new acquisition. Applying one "
             "adds its jobs to the Job Queue. Save a recipe from any queued job's "
-            "⋯ menu: “Save chain as recipe…”.", self)
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "⋯ menu: “Save chain as recipe…”.")
 
         top = QWidget(self)
         tl = FlowLayout(top, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
@@ -132,7 +110,7 @@ class RecipesPage(QWidget):
         al = FlowLayout(actions, h_spacing=theme.Spacing.sm, v_spacing=theme.Spacing.xs)
         self._buttons: dict[str, QPushButton] = {}
         for key, text, variant, signal in (
-                ("apply", "▶  Apply to…", "primary", self.applyRequested),
+                ("apply", "Apply to…", "primary", self.applyRequested),
                 ("rename", "Rename…", "default", self.renameRequested),
                 ("duplicate", "Duplicate", "default", self.duplicateRequested),
                 ("export", "Export…", "default", self.exportRequested),

@@ -16,18 +16,14 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
-    QLabel,
     QListWidget,
     QListWidgetItem,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
-from ui import theme
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.tool_page import cards, foot_row, tool_page
+from datasets.core.log_panel import LogPanelMixin
 from widgets.path_field import PathField, folder_picker
 from datasets.core.pending_inputs import RUN_WAITS, any_pending, apply_pending
 from datasets.core.dataset_paths import preview_wells
@@ -73,40 +69,15 @@ class ValidatePage(LogPanelMixin, QWidget):
         # Wrap in a scroll area — see datasets/concatenate/view.py's
         # _build_ui for why (the dashboard's plate map used to render
         # illegibly small at the app's default window height).
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Validate & Repair", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Validate & Repair",
             "Check what an Analyze run actually finished, and repair the "
             "metadata a crashed or partial run can leave stale — never "
             "measurement data or images.",
-            self,
-        )
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        blurb.setToolTip(
-            "A crash or partial run can leave pipeline_info.json advertising "
-            "more than out/ actually holds. Repairs touch only the "
-            "availability lists, stale cell overrides, and leftover staging "
-            "files."
-        )
-        outer.addWidget(blurb)
+            help_tip="A crash or partial run can leave pipeline_info.json advertising "
+                     "more than out/ actually holds. Repairs touch only the "
+                     "availability lists, stale cell overrides, and leftover staging "
+                     "files.")
 
         self._dataset_field = PathField(
             "Dataset folder", pick=folder_picker("Select dataset folder"),
@@ -114,33 +85,21 @@ class ValidatePage(LogPanelMixin, QWidget):
         self._dataset_field.changed.connect(self._on_dataset_changed)
         outer.addWidget(self._dataset_field)
 
-        btn_row = QWidget(self)
-        bl = QHBoxLayout(btn_row)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.primary("Check", self)
-        self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self.checkRequested)
-        bl.addWidget(self._run_btn)
-        # Second, right after the primary action -- matching every other
-        # Datasets tool's run-row ordering (Run, then +Queue, then any
-        # secondary actions specific to this tool).
-        self._queue_btn = buttons.default("Add to queue", self)
-        self._queue_btn.setToolTip("Add this check to the Job Queue instead of running it now.")
-        self._queue_btn.setEnabled(False)
-        self._queue_btn.clicked.connect(self.queueRequested)
-        bl.addWidget(self._queue_btn)
+        # The two follow-ups a check can offer sit between Add to queue and the primary Check, which is last
+        # (the foot row, datasets/core/tool_page.py).
         self._repair_btn = buttons.default("Apply repairs", self)
         self._repair_btn.setEnabled(False)
         self._repair_btn.clicked.connect(self.applyRepairsRequested)
-        bl.addWidget(self._repair_btn)
         self._complete_btn = buttons.default("Complete this run in Analyze", self)
         self._complete_btn.setVisible(False)
         self._complete_btn.clicked.connect(
             lambda: self.completeRunRequested.emit(self._dataset_root))
-        bl.addWidget(self._complete_btn)
-        bl.addStretch(1)
-        outer.addWidget(btn_row)
+        self._action_row = foot_row(self, "Check", on_run=self.checkRequested, on_queue=self.queueRequested,
+                                    queue_tip="Add this check to the Job Queue instead of running it now.",
+                                    after=(self._repair_btn, self._complete_btn))
+        outer.addWidget(self._action_row)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Dataset", 1, 1))
 
         self._build_status_section(outer)
 

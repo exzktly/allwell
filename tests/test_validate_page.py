@@ -99,13 +99,10 @@ def test_a_report_reveals_the_findings_list(qapp, tmp_path):
     ctrl.shutdown()
 
 
-def test_queue_button_is_second_in_the_run_row(qapp):
-    """Regression guard: +Queue used to sit third, after Apply repairs, the
-    only Datasets tool whose secondary action came before the queue button —
-    every other tool's run row is Run, then +Queue, then anything tool-
-    specific. Buried third, +Queue also used to fall past the point where
-    Apply repairs' 240px-wide ToolTip made a narrow window need a horizontal
-    scroll to reach it."""
+def test_the_foot_row_is_queue_then_the_follow_ups_then_check_last(qapp):
+    """The foot row every Datasets tool shares (datasets/core/tool_page.py): the reason, Add to queue, then the
+    tool's own follow-ups, then the primary action last. Validate's Apply repairs used to come before the queue
+    button, the one tool whose secondary action did."""
     from datasets.validate.controller import ValidateController
 
     ctrl = ValidateController()
@@ -113,9 +110,8 @@ def test_queue_button_is_second_in_the_run_row(qapp):
     btn_row = page._run_btn.parentWidget()
     widgets = [btn_row.layout().itemAt(i).widget() for i in range(btn_row.layout().count())]
     widgets = [w for w in widgets if w is not None]
-    assert widgets.index(page._queue_btn) == 1
-    assert widgets.index(page._run_btn) == 0
-    assert widgets.index(page._repair_btn) > widgets.index(page._queue_btn)
+    assert widgets.index(page._queue_btn) < widgets.index(page._repair_btn) < widgets.index(page._run_btn)
+    assert widgets[-1] is page._run_btn
 
 
 def test_dataset_field_flags_a_folder_missing_in_and_out(qapp, tmp_path):

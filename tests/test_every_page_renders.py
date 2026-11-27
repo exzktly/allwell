@@ -94,16 +94,6 @@ DESIGN_PENDING: dict[tuple[str, str], str] = {
     ("Spatial", "label inside"): "D15",
     ("Statistics", "band rows"): "D15",
     ("Statistics", "label inside"): "D15",
-    ("datasets/Automation", "empty band"): "D25",
-    ("datasets/Concatenate Datasets", "empty band"): "D24",
-    ("datasets/Convert CZI", "empty band"): "D24",
-    ("datasets/Convert ND2", "empty band"): "D24",
-    ("datasets/Convert OME-TIFF", "empty band"): "D24",
-    ("datasets/Merge Plates", "empty band"): "D24",
-    ("datasets/Subset / Split", "empty band"): "D24",
-    ("datasets/Validate & Repair", "empty band"): "D24",
-    ("datasets/Watch Folder", "empty band"): "D25",
-    ("datasets/Zip Loose Folder", "empty band"): "D24",
     ("smFISH", "label inside"): "D17",
 }
 

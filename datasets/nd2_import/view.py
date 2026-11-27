@@ -33,16 +33,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, Signal
+from PySide6.QtCore import QSignalBlocker, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -51,7 +49,7 @@ from core.safe import swallow
 from core.worker_bridge import run_off_thread
 from datasets.core.channel_roles_row import ChannelRolesMixin
 from datasets.core.dataset_fields import promote_open_button
-from datasets.core.log_panel import LogPanelMixin, hrule as _hrule
+from datasets.core.log_panel import LogPanelMixin
 from datasets.core.timepoint_picker import TimepointPicker
 from datasets.nd2_import.dashboard import Nd2ImportDashboard
 from datasets.nd2_import.nd2_import_compute import (
@@ -66,6 +64,7 @@ from datasets.nd2_import.nd2_import_compute import (
 )
 from pipeline.nd2_explode import WELL_SOURCES, timepoint_tokens
 from pipeline.nd2_read import Nd2Layout
+from datasets.core.tool_page import cards, foot_row, tool_page
 from ui import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -153,39 +152,15 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         # Wrapped in a scroll area for the same reason every other Datasets
         # page is: the dashboard's plate map renders illegibly small at the
         # app's default window height otherwise.
-        page_layout = QVBoxLayout(self)
-        page_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-        page_layout.addWidget(scroll)
-
-        content = QWidget(scroll)
-        scroll.setWidget(content)
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
-                                 theme.Spacing.lg, theme.Spacing.lg)
-        outer.setSpacing(theme.Spacing.md)
-
-        heading = QLabel("Convert ND2", self)
-        heading.setProperty("textRole", "sectionHeading")
-        outer.addWidget(heading)
-        outer.addWidget(_hrule(self))
-
-        blurb = QLabel(
+        scroll, outer = tool_page(
+            self, "Convert ND2",
             "Turn a Nikon <tt>.nd2</tt> plate scan into a dataset folder: one "
             "TIF per channel, well, field and timepoint, grouped into one "
             "archive per well — the layout Analyze reads. Z stacks are "
             "max-projected and each stage position is kept as its own field, "
             "never stitched. Wells normally come from the position names "
             "NIS-Elements saved with the acquisition; a file whose positions "
-            "are unnamed can be laid over a plate grid instead.",
-            self,
-        )
-        blurb.setTextFormat(Qt.RichText)
-        blurb.setProperty("textRole", "help")
-        blurb.setWordWrap(True)
-        outer.addWidget(blurb)
+            "are unnamed can be laid over a plate grid instead.", rich=True)
 
         self._src_field = PathField("ND2 file", pick=self._pick_source,
                                     validator=self._source_rule)
@@ -201,6 +176,8 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._build_params(outer)
         self._build_channels(outer)
         self._build_actions(outer)
+        # The page's rows in cards, as the design language's tool page has them (datasets/core/tool_page.py).
+        cards(outer, ("Folders", 1, 2), ("Plate", 3, 7), ("Channels", 10, 11))
         self._build_status_section(outer)
 
     def _sub_heading(self, text: str, outer: QVBoxLayout) -> QLabel:
@@ -354,30 +331,19 @@ class Nd2ImportPage(ChannelRolesMixin, LogPanelMixin, QWidget):
         self._channels_lay.setContentsMargins(0, 0, 0, 0)
         self._channels_lay.setSpacing(theme.Spacing.xs)
         outer.addWidget(self._channels_host)
+        self._channels_host.setVisible(False)       # shown with its rows, once a file is read
 
     def _build_actions(self, outer: QVBoxLayout) -> None:
-        row = QWidget(self)
-        layout = QHBoxLayout(row)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(theme.Spacing.sm)
-        self._run_btn = buttons.default("Convert", row)
-        set_variant(self._run_btn, "primary")
-        self._run_btn.clicked.connect(self.runRequested.emit)
-        layout.addWidget(self._run_btn)
-        self._queue_btn = buttons.default("Add to queue", row)
-        set_variant(self._queue_btn, "default")
-        self._queue_btn.setToolTip("Add this conversion to the Job Queue "
-                                   "instead of running it now")
-        self._queue_btn.clicked.connect(self.queueRequested.emit)
-        layout.addWidget(self._queue_btn)
-        self._open_btn = buttons.default("Open dataset in Analyze", row)
-        set_variant(self._open_btn, "default")
+        # The foot row (datasets/core/tool_page.py): why it cannot convert yet, Add to queue, then Convert last;
+        # "Open dataset in Analyze", shown once a conversion has finished, sits between them.
+        self._open_btn = buttons.default("Open dataset in Analyze", self)
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(
             lambda: self.openInAnalyzeRequested.emit(self._dest_root))
-        layout.addWidget(self._open_btn)
-        layout.addStretch(1)
-        outer.addWidget(row)
+        self._action_row = foot_row(self, "Convert", on_run=self.runRequested.emit, on_queue=self.queueRequested.emit,
+                                    queue_tip="Add this conversion to the Job Queue instead of running it now",
+                                    after=(self._open_btn,))
+        outer.addWidget(self._action_row)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         self.build_log_header(outer, "Convert ND2 output")

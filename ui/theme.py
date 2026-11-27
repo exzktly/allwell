@@ -730,6 +730,11 @@ def qss() -> str:
     _check = _icon_path("check.svg")
     _link_row_home = link_row_qss("HomeRecentTile")
     _row_remove_home = row_remove_qss("HomeRecentTileRemove")
+    # The six text roles and the unset value (ui/text_roles.py), last among the label rules so a role is what
+    # a label that carries one looks like. Imported here, not at module scope: that module builds Qt labels,
+    # and this one is read by every widget before Qt is needed.
+    from ui import text_roles as _text_roles
+    _roles = _text_roles.qss(c, t)
     return f"""
 * {{
     font-family: {t.family};
@@ -2080,6 +2085,7 @@ QLabel#PlateWellDetail {{
     color: {c.text_secondary};
     padding: {s.xs}px 0px;
 }}
+{_roles}
 """ + (_touch_qss(_TOUCH_UNIT[0]) if _TOUCH_UNIT[0] else "")
 
 

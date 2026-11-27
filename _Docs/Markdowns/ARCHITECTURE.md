@@ -1623,6 +1623,9 @@ allwell/
 │   │                              both, alongside domain/well_palette.py, whose 96 rank colours
 │   │                              this module re-exports). Its class values are the blue palette
 │   ├── palettes.py             ← the palettes as data: the grey bundle, role by role (§8)
+│   ├── text_roles.py           ← the six text roles (page title, section heading, eyebrow, body,
+│   │                              label/help, number) as QLabel builders, their sheet rules, and
+│   │                              NOT_SET, how an unset value reads (§8)
 │   ├── palette_setting.py      ← the palette the user chose (stored, offered in the rail head's
 │   │                              Palette menu) and the start-up order that applies it (§8)
 │   ├── help_topics.py          ← Qt-free: which manual heading documents which page (help drawer)
@@ -22379,6 +22382,15 @@ states a control passes through, `titlebar` and `rail` the shell's regions, and
 `border_subtle` the seams between those regions. There is one quieter ink, not
 two: a reader that wants text quieter than a label takes `text_secondary`, or
 `text_disabled` where what it draws is disabled.
+
+**Every piece of text is one of six roles** (`ui/text_roles.py`): a page title
+(17 semibold), a section heading (15 semibold), an eyebrow (12 semibold, capitals,
+tracked, secondary ink), body text (13), a label or help (12, secondary ink) and a
+number (12, monospace). Each builder returns a `QLabel` carrying a `textRole`
+property; `text_roles.qss` writes one rule per role, and `theme.qss()` includes
+it last among the label rules. An unset value reads `NOT_SET` — *not set* — in
+the disabled ink, through `show_value`. `tests/test_text_roles.py` measures each
+role's polished font and ink in every palette.
 
 Every palette is measured against the design language's floors by
 `tests/test_theme_contrast.py`, from the tokens: primary and secondary text

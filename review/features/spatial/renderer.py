@@ -95,12 +95,22 @@ def render_spatial(ctx) -> None:
 
 # ── faceted grid (one panel per selected well) ───────────────────────────────
 
-def _grid_shape(n: int) -> tuple[int, int]:
-    """Rows × cols for *n* panels, kept roughly square so maps and
-    distributions both stay legible."""
+#: The narrowest a well's panel is drawn, in inches: a map with its tick numbers and axis label needs about this.
+_MIN_PANEL_W_IN = 2.2
+
+
+def _grid_shape(n: int, aspect: float = 1.0, width_in: float | None = None) -> tuple[int, int]:
+    """Rows × cols for *n* panels, each kept roughly square on a figure *aspect*
+    (width / height) times as wide as it is tall, so maps and distributions both
+    stay legible, and no narrower than ``_MIN_PANEL_W_IN`` when the figure's
+    *width_in* is given. A square grid on a phone held upright drew four wells
+    two abreast in a strip too narrow for them, and the right column's labels
+    ran past the figure's edge; there they are stacked."""
     if n <= 1:
         return 1, 1
-    cols = int(math.ceil(math.sqrt(n)))
+    cols = max(1, min(n, int(round(math.sqrt(n * max(aspect, 0.05))))))
+    if width_in is not None:                       # never narrower than a map can be read at
+        cols = max(1, min(cols, int(width_in // _MIN_PANEL_W_IN)))
     rows = int(math.ceil(n / cols))
     return rows, cols
 
@@ -108,7 +118,8 @@ def _grid_shape(n: int) -> tuple[int, int]:
 def _render_frames_grid(fig, st) -> None:
     frames = st.frames
     n = len(frames)
-    rows, cols = _grid_shape(n)
+    width, height = fig.get_size_inches()
+    rows, cols = _grid_shape(n, width / max(height, 0.01), width)
     for i, payload in enumerate(frames):
         ax = fig.add_subplot(rows, cols, i + 1)
         _render_one_panel(ax, st, payload)

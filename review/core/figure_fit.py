@@ -94,10 +94,12 @@ def keep_labels_on_figure(fig, renderer) -> bool:
     # Only axes the subplot parameters place: one placed by hand (``add_axes``) would not move, and asking again on
     # every draw would never settle.
     placed = [ax for ax in fig.axes if ax.get_subplotspec() is not None]
-    # Nor a figure that also has axes placed by hand (a colour bar, a key): moving the subplots would move them into
-    # it — a Heat Map's cell labels ran into its colour bar's numbers.
-    if len(placed) != len(fig.axes):
+    # Nor a figure that also has axes placed by hand (a key): moving the subplots would move them into it — a Heat
+    # Map's cell labels ran into its colour bar's numbers. An axes placed by a locator beside a subplot (a colour bar
+    # appended with ``make_axes_locatable``) moves with it, and counts as placed.
+    if any(ax.get_subplotspec() is None and ax.get_axes_locator() is None for ax in fig.axes):
         return False
+    every = list(fig.axes)
     lefts = [ax.yaxis.label.get_window_extent(renderer).x0 for ax in placed
              if ax.yaxis.label.get_visible() and ax.yaxis.label.get_text().strip()]
     lefts += [t.get_window_extent(renderer).x0 for ax in placed for t in ax.get_yticklabels()
@@ -125,6 +127,18 @@ def keep_labels_on_figure(fig, renderer) -> bool:
         bottom = fig.subplotpars.bottom + (low + 4.0) / fig.bbox.height
         if bottom < fig.subplotpars.top - 0.2:
             fig.subplots_adjust(bottom=bottom)
+            moved = True
+    # And at the right: a colour bar's numbers and label past the figure's right edge — the margin a style pass sets
+    # left a Heat Map's two-line label 4 px over at a desk with the inspector open.
+    rights = [lab.get_window_extent(renderer).x1 for ax in every for lab in (ax.yaxis.label, ax.xaxis.label)
+              if lab.get_visible() and lab.get_text().strip()]
+    rights += [t.get_window_extent(renderer).x1 for ax in every for t in ax.get_yticklabels(which="both")
+               if t.get_visible() and t.get_text().strip()]
+    over = max(rights, default=0.0) - fig.bbox.width
+    if over > 0.5 and fig.bbox.width > 0:
+        right = fig.subplotpars.right - (over + 4.0) / fig.bbox.width
+        if right > fig.subplotpars.left + 0.2:
+            fig.subplots_adjust(right=right)
             moved = True
     return moved
 

@@ -300,3 +300,23 @@ def test_a_key_too_large_to_clear_a_label_anywhere_is_made_smaller():
     figure_fit.keep_keys_off_labels(fig, r)
     assert all(t.get_fontsize() < 13 for t in legend.get_texts())
     assert covered() < before
+
+
+def test_a_colour_bar_label_past_the_right_edge_pulls_the_right_margin_in():
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+    from review.core import figure_fit
+
+    fig = _agg(4.0, 3.0)
+    ax = fig.add_subplot(1, 1, 1)
+    fig.subplots_adjust(right=0.97)
+    cax = make_axes_locatable(ax).append_axes("right", size="4%", pad=0.08)
+    cax.yaxis.tick_right()                          # a colour bar's numbers and label are on its right
+    cax.yaxis.set_label_position("right")
+    cax.set_ylabel("GFP Mean Intensity\n(mean above threshold)", fontsize=12)
+    fig.canvas.draw()
+    r = fig.canvas.get_renderer()
+    assert cax.yaxis.label.get_window_extent(r).x1 > fig.bbox.width
+    assert figure_fit.keep_labels_on_figure(fig, r)
+    fig.canvas.draw()
+    assert cax.yaxis.label.get_window_extent(fig.canvas.get_renderer()).x1 <= fig.bbox.width + 1

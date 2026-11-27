@@ -1,8 +1,8 @@
 """LutSelector — pick a colour-map (LUT) for review-image display.
 
 A trigger button showing the current LUT's gradient + name, with a reverse-LUT
-toggle and a reset button next to it; clicking the trigger opens a `Popover`
-with a searchable, categorised list (Perceptual / Diverging / Categorical /
+toggle and a reset button next to it; clicking the trigger hands its host
+(``listRequested``) a searchable, categorised list to show as a page (Perceptual / Diverging / Categorical /
 Cyclic), each row a `GradientStrip` + monospace name, and a ``n / m`` match-count
 in the search header.
 
@@ -39,7 +39,6 @@ from PySide6.QtWidgets import (
 
 from ui import theme
 from widgets.gradient_strip import GradientStrip
-from widgets.popover import Popover
 from widgets.search_input import SearchInput
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -138,6 +137,11 @@ class _LutRow(QWidget):
 
 class LutSelector(QWidget):
     lutChanged = Signal(str, bool)   # (name, reversed)
+    #: The trigger was pressed: the searchable list, for the host to show as a
+    #: page (an inspector). The selector opens no surface of its own.
+    listRequested = Signal(QWidget)
+    #: A map was picked from the list (also when it is the one already set).
+    listPicked = Signal()
 
     def __init__(self, parent: QWidget | None = None, *,
                  lut: str = "viridis", reversed: bool = False,
@@ -175,7 +179,7 @@ class LutSelector(QWidget):
         self._trigger_name.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         tl.addWidget(self._trigger_strip, 1)
         tl.addWidget(self._trigger_name, 0)
-        self._trigger.clicked.connect(self._open_popover)
+        self._trigger.clicked.connect(self._open_list)
         lay.addWidget(self._trigger, 1)
 
         self._reverse_btn = QToolButton(self)
@@ -196,7 +200,7 @@ class LutSelector(QWidget):
         self._reset_btn.clicked.connect(lambda: self.setLut(self._default, False))
         lay.addWidget(self._reset_btn)
 
-        self._popover: Popover | None = None
+        self._list: QWidget | None = None
         self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
@@ -230,17 +234,24 @@ class LutSelector(QWidget):
         if on != self._reversed:
             self.setLut(self._lut, on)
 
-    def _open_popover(self) -> None:
-        if self._popover is None:
-            self._popover = self._build_popover()
+    def listWidget(self) -> QWidget:
+        """The searchable list of colour maps, built on first use. It is this
+        selector's child, hidden, until a host shows it."""
+        if self._list is None:
+            self._list = self._build_list()
+            self._list.hide()
+        return self._list
+
+    def _open_list(self) -> None:
+        content = self.listWidget()
         # ensure the search box is cleared each open
         self._search.setText("")
         self._apply_filter("")
-        self._popover.popup(self._trigger, side="bottom", align="start")
+        self.listRequested.emit(content)
 
-    def _build_popover(self) -> Popover:
-        pop = Popover(self.window() if self.window() is not self else None)
-        content = QWidget()
+    def _build_list(self) -> QWidget:
+        content = QWidget(self)
+        content.setObjectName("LutList")
         v = QVBoxLayout(content)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(theme.Spacing.sm)
@@ -271,8 +282,7 @@ class LutSelector(QWidget):
         iv.addStretch(1)
         scroll.setWidget(inner)
         v.addWidget(scroll, 1)
-        pop.setContentWidget(content)
-        return pop
+        return content
 
     def _apply_filter(self, text: str) -> None:
         q = (text or "").strip().lower()
@@ -298,8 +308,7 @@ class LutSelector(QWidget):
 
     def _pick(self, name: str) -> None:
         self.setLut(name, self._reversed)
-        if self._popover is not None:
-            self._popover.close()
+        self.listPicked.emit()       # the host leaves the list's page
 
     # ── style ────────────────────────────────────────────────────────────
     def _build_qss(self) -> str:

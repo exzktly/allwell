@@ -126,3 +126,64 @@ def _settled(ctx, picker: MultiSelect, on_change: Callable[[list], None], settle
         timer.start()
 
     return _on_change
+
+
+# ── a colour ─────────────────────────────────────────────────────────────────
+
+_COLOURS, _COLOUR_HANDLER = "_aw_colour_pages", "_aw_colour_handler"
+
+
+def open_colour(ctx, anchor: QWidget, *, key: str, title: str, color,
+                on_pick: Callable[[object], None], recents: Iterable = (),
+                tab: str = "display") -> QWidget | None:
+    """Show the colour page in the inspector, from the swatch *anchor*.
+
+    *on_pick* is called with a ``QColor`` on every change — a swatch, the
+    custom picker, a hex value. Pressing *anchor* again while its page is on
+    show leaves the page (and ``None`` is returned). One page per anchor,
+    re-seeded on every open."""
+    from widgets.colour_page import ColourPage
+
+    if anchor is None:
+        return None
+    mine = getattr(anchor, _COLOURS, None)
+    if mine is None:
+        mine = {}
+        setattr(anchor, _COLOURS, mine)
+    page = mine.get(key)
+    if page is None or not shiboken6.isValid(page):
+        page = ColourPage(anchor, recents=list(recents) or None)
+        page.setObjectName(f"ColourPage:{key}")
+        page.hide()
+        page.colorPicked.connect(lambda c, p=page: getattr(p, _COLOUR_HANDLER)(c))
+        mine[key] = page
+    if inspector_service.is_showing(ctx, page):
+        inspector_service.pop(ctx)
+        return None
+    setattr(page, _COLOUR_HANDLER, on_pick)
+    page.setColor(color)
+    inspector_service.push(ctx, key, title, page, tab=tab, anchor=anchor)
+    return page
+
+
+# ── a colour map ─────────────────────────────────────────────────────────────
+
+def wire_lut_selector(ctx, selector, *, key: str, title: str = "Colour map", tab: str = "display") -> None:
+    """Show *selector*'s searchable list of colour maps as a page of the
+    inspector when its trigger is pressed, and leave the page when a map is
+    picked. The selector (``widgets.lut_selector.LutSelector``) opens no
+    surface of its own; this is the host it hands its list to."""
+
+    def _show(content: QWidget) -> None:
+        if inspector_service.is_showing(ctx, content):
+            inspector_service.pop(ctx)
+            return
+        inspector_service.push(ctx, key, title, content, tab=tab, anchor=selector)
+
+    def _picked() -> None:
+        content = selector.listWidget()
+        if inspector_service.is_showing(ctx, content):
+            inspector_service.pop(ctx)
+
+    selector.listRequested.connect(_show)
+    selector.listPicked.connect(_picked)

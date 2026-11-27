@@ -15,12 +15,6 @@ from tests import _surface_guards as scan
 #: ``pending Snn`` names the row of the surfaces plan that removes it; one
 #: starting ``kept`` is permanent and says why.
 POPOVERS: dict[tuple[str, str], str] = {
-    ('review/features/image_browser/cell_browser/tab_view.py', '_cb_pick_color'):
-        'pending S14: the colour page',
-    ('review/features/image_browser/review_image/controller.py', 'pick_review_image_color'):
-        'pending S14: the colour page',
-    ('widgets/lut_selector.py', 'LutSelector._build_popover'):
-        'pending S15: the colour-map list as a page',
     ('widgets/saved_selections_list.py', 'SavedSelectionsList._on_recolour_requested'):
         'pending S14: the colour page',
     ('widgets/saved_selections_list.py', '_SelectionRow._open_compose_popover'):

@@ -122,6 +122,8 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # button) in place of the legacy QComboBox of mpl colormap names.
     from widgets.lut_selector import LutSelector
     cmap_cb = reg.register("_heatmap_cmap_cb", LutSelector(disp))
+    from review.core.inspector_pages import wire_lut_selector
+    wire_lut_selector(ctx, cmap_cb, key="heatmap/colour_map")
     # Seed with the first option (matches the legacy default).
     _initial_cmap = _CMAP_OPTIONS[0] if _CMAP_OPTIONS else "viridis"
     _initial_rev = _initial_cmap.endswith("_r")

@@ -301,19 +301,16 @@ def _paint_cb_swatch(btn, rgb) -> None:
 
 
 def _cb_pick_color(ctx, channel: str, index: int, swatch_btn) -> None:
-    """Open a colour popover for *channel*; picking stages the per-channel tint
+    """Show the colour page for *channel*; picking stages the per-channel tint
     (applied on the next Generate)."""
     from PySide6.QtGui import QColor
-    from widgets.color_swatch_row import ColorSwatchRow
-    from widgets.popover import Popover
+
+    from review.core.inspector_pages import open_colour
 
     iv = getattr(ctx.state, "image_view", None)
     if iv is None:
         return
     r, g, b = _cb_effective_tint(iv, channel, index)
-    pop = Popover(swatch_btn)
-    row = ColorSwatchRow(allow_custom=True)
-    row.setCurrentColor(QColor(r, g, b))
 
     def _apply(c, _ch=channel, _btn=swatch_btn) -> None:
         if not c.isValid():
@@ -321,9 +318,8 @@ def _cb_pick_color(ctx, channel: str, index: int, swatch_btn) -> None:
         iv.set_tint(_ch, (c.red(), c.green(), c.blue()))
         _paint_cb_swatch(_btn, (c.red(), c.green(), c.blue()))
 
-    row.colorPicked.connect(_apply)
-    pop.setContentWidget(row)
-    pop.popup(swatch_btn, side="bottom", align="start")
+    open_colour(ctx, swatch_btn, key=f"cell_browser/colour/{channel}", title=f"{channel} colour",
+                color=QColor(r, g, b), on_pick=_apply)
 
 
 def cell_browser_refresh_lut_rows(ctx) -> None:

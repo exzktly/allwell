@@ -579,6 +579,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     cmap_row = _row(controls, "Colormap")
     from widgets.lut_selector import LutSelector
     cmap = LutSelector(cmap_row, lut="Greys", reversed=True, default="Greys")
+    from review.core.inspector_pages import wire_lut_selector
+    wire_lut_selector(ctx, cmap, key="playground/colour_map")
     cmap.lutChanged.connect(lambda *_a: on_change())
     cmap_row.layout().addWidget(cmap)
     app._playground_cmap_cb = cmap

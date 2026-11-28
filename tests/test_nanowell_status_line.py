@@ -1,4 +1,4 @@
-"""The Nanowells page's status line (``status_view``, ``SURFACES_TRACKER.md`` row S20): one chip under the figure per
+"""The Nanowells page's status line (``status_view``, the surfaces work): one chip under the figure per
 condition that shapes it — Subset, excluded wells, a Distribution window, Cell Gating, a Resolve walk — each opening
 the page that owns it, and no line at all when nothing applies.
 

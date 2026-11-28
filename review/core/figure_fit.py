@@ -2,8 +2,8 @@
 
 A figure's room is only certain once it is drawn — the card around it resizes, the inspector opens beside the page, a
 phone turns, the style pass sets the type size — so these run on the canvas's ``draw_event`` and ask for one more draw
-only when they changed something, which settles. They were written for the Nanowells page (``SURFACES_TRACKER.md`` row
-S22) and run on every plot card through ``ui_helpers.apply_plot_card_decorators`` (row S31): tick labels that run into
+only when they changed something, which settles. They were written for the Nanowells page and run on every plot card through
+``ui_helpers.apply_plot_card_decorators`` (the surfaces work's every-page tour, which they made pass): tick labels that run into
 each other are thinned, and a y label that starts left of the figure widens the left margin.
 
 Qt-free: matplotlib only.

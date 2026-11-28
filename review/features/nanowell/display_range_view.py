@@ -11,7 +11,7 @@ store whenever it draws, which would change the page's range without anyone touc
 One setting, offered in one place: the **Display range** row of the page's Display tab, reading the range in force
 and opening the *min* / *max* / **Auto** page. It was a button beside each place the image channel is offered — the
 crop strip, the pop-out, the Extremes view and the Array view's Image — four buttons for one value, which crowded the
-band (``SURFACES_TRACKER.md`` row S19); every picture still follows it. Blank fields are Auto: each picture takes its
+band (the surfaces work, #1374 and after); every picture still follows it. Blank fields are Auto: each picture takes its
 own percentile scale, as it did before there was a control.
 """
 

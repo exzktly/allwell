@@ -109,8 +109,8 @@ def _controls_sheet(shell, qapp, name: str, phone: bool) -> Iterator[str]:
 
 
 #: The pages whose inspector pages the tour opens, each once, on the first of the page's views that offers it: the
-#: Nanowells page (``SURFACES_TRACKER.md`` row S22, "every inspector page on all six screens"). Every page's would
-#: be the whole app's; it is where the rows that built the inspector ended.
+#: Nanowells page, whose views share most of the inspector's pages ("every inspector page on all six screens"). Every
+#: page's would be the whole app's.
 INSPECTOR_PAGES_OF = ("Nanowells/",)
 
 

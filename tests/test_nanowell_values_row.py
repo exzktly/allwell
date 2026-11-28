@@ -1,4 +1,4 @@
-"""The Nanowells band's **Values** row and its Display tab's one **Display range** row (``SURFACES_TRACKER.md`` S19).
+"""The Nanowells band's **Values** row and its Display tab's one **Display range** row (the surfaces work).
 
 The six settings of which nanowells count and how their values are normalised — Baseline and its average, Rim
 focus, Fixed cohort, the moving average and Responding above — moved off the band onto the Values page of the Data

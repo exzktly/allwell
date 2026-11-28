@@ -5,7 +5,7 @@ Four things narrow or annotate what the page draws without being part of any one
 takes the page over while it runs. Each was said somewhere different — the Subset in its combo's colour, the
 excluded wells by a band button that came and went, the window by a strip that appeared between the band and the
 figure, the gating in a sentence of the footer, the walk by a guide card above the figure — so a figure narrowed
-three ways looked like one narrowed by none (``SURFACES_TRACKER.md`` row S20).
+three ways looked like one narrowed by none (the surfaces work, #1374 and after).
 
 The line holds one chip per condition that applies, in that order, each reading what it is (``Subset: … ›``,
 ``Excluded: 2 wells``, ``Window: 1.2–3.4 ›``, ``Cell Gating: 1,204 cells left out ›``, ``Resolve: 3 of 17 · B04 at

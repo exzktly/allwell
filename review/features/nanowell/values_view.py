@@ -2,7 +2,7 @@
 
 The band was three rows on every view — the central selections, these settings, and the open view's own controls —
 and at a 1,500 px window the second row alone was full: one more control wrapped the band onto a fourth line, taking the
-figure's height (``SURFACES_TRACKER.md`` row S19). The surfaces plan puts a sub-option on a page of the inspector,
+figure's height (the surfaces work, #1374 and after). The surfaces plan puts a sub-option on a page of the inspector,
 reached by a band row that reads its value (decision 5, *every row shows its current value*), so these six settings
 moved off the band onto the **Values** page of the Data tab:
 

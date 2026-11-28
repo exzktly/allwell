@@ -1,4 +1,4 @@
-"""The Nanowells figures keep their words inside a narrow or short figure (``SURFACES_TRACKER.md`` row S22).
+"""The Nanowells figures keep their words inside a narrow or short figure (the surfaces work).
 
 The every-page tour measured the page's figures on six screens and found sentences running past a phone's figure,
 keys starting left of it, titles over its top, tick labels running together and the Extremes montage drawn off a

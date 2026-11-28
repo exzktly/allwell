@@ -83,7 +83,7 @@ def _row_of(ctx, name: str) -> int:
 #: together … positions, channel, timepoint, well. [Then] subset and normalization related: rim focus, subset,
 #: baseline, exclude. [Then] viewing related: anchors, … Image." They were three rows; the normalisation settings
 #: are on the Values page now (``values_view``), read from one row, and the groups follow one another in one flow
-#: (``SURFACES_TRACKER.md`` row S19). One entry per view: the controls of each group the view shows.
+#: (the surfaces work). One entry per view: the controls of each group the view shows.
 _CENTRAL = ("_nw_metric_cb", "_nw_channel_cb")
 _FILTER = ("_nw_subset_cb", "_nw_values_btn")
 _ONE_WELL = (_CENTRAL + ("_nw_well_cb", "_nw_tp_cb"), _FILTER + ("_nw_exclude_well_btn",))

@@ -41,7 +41,7 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
@@ -64,6 +64,9 @@ class _RailNavRow(QFrame):
     """
 
     clicked = Signal(str)
+    #: The row was shown or hidden by its host (phone layout hides two), which
+    #: may empty or refill its group's caption.
+    shownChanged = Signal()
 
     def __init__(self, key: str, label: str, *, icon: str | None,
                  parent: QWidget) -> None:
@@ -193,6 +196,14 @@ class _RailNavRow(QFrame):
             icons.make_pixmap(self._icon_name, token, self._glyph_px, dpr or 1.0)
         )
 
+    def setVisible(self, visible: bool) -> None:
+        # ``show()`` and ``hide()`` come through here too (Qt's are not
+        # virtual; they call this one), so every host's change is reported.
+        was = self.isHidden()
+        super().setVisible(visible)
+        if self.isHidden() != was:
+            self.shownChanged.emit()
+
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton and self.isEnabled():
             self.clicked.emit(self._key)
@@ -265,7 +276,12 @@ class RailNav(QFrame):
         self._order.append(k)
         self._entries.append(row)
         self._place(row)
-        row.installEventFilter(self)
+        # Told by the row itself rather than by an event filter: a filter on the
+        # rows ran Python for every event they received — each touch, hover and
+        # paint — to notice two of them, and a tap on ☰ in phone layout under
+        # Windows 365 crashed the app inside it (an access violation on the
+        # filter's first line, called from the event loop).
+        row.shownChanged.connect(self._sync_captions)
         self._sync_captions()
         if self._current is None:
             self._set_current_internal(k, emit=False)
@@ -288,13 +304,6 @@ class RailNav(QFrame):
     def captions(self) -> list[str]:
         """The group captions in order, as given to :meth:`addCaption`."""
         return [e._group_text for e in self._entries if isinstance(e, _RailNavCaption)]
-
-    def eventFilter(self, obj, ev):
-        # A row shown or hidden by its host (phone layout hides two) may empty
-        # or refill its group.
-        if ev.type() in (QEvent.ShowToParent, QEvent.HideToParent) and obj in self._entries:
-            self._sync_captions()
-        return super().eventFilter(obj, ev)
 
     def _groups(self) -> list[tuple[QLabel | None, list[_RailNavRow]]]:
         """The entries split at each caption: ``(caption or None, its rows)``."""

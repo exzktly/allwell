@@ -48,7 +48,10 @@ def tour(win, qapp, *, kind: str, wells: set[str], phone: bool) -> Iterator[str]
             prepare(win, qapp, kind, name, wells)
             yield name
             yield from _controls_sheet(shell, qapp, name, phone)
-            yield from _inspector_pages(review, qapp, name, seen)
+            # On the nanowell dataset only: on the others the Nanowells page shows its empty state, and the pages
+            # opened over it would be measured as pages with nothing to show.
+            if kind == "nanowell":
+                yield from _inspector_pages(review, qapp, name, seen)
     if kind == "mini":
         win._on_titlebar_mode_seg(2)
         pump(qapp)

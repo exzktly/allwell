@@ -360,7 +360,9 @@ class BandForm:
                 self._undo.append(lambda i=item, f=painter: (
                     i.removeEventFilter(f), f.deleteLater(),
                     i.setProperty("sheetValue", None), self._repolish(i), i.update()))
-                return parts[0]
+                # A button's text doubles a literal "&" (a lone one marks a shortcut letter); the form's label is a
+                # QLabel, which would show both.
+                return parts[0].replace("&&", "&")
         return ""
 
     def _stretch(self, w: QWidget) -> None:

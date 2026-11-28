@@ -243,7 +243,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # Reserve top margin for the (sometimes long) title so it doesn't get
     # cropped — the default ``top=0.9`` clipped titles like
     # "MCHERRY Mean Intensity — Mean above threshold — t = 12 h".
-    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.10, right=0.94)
+    # The right margin holds the colour bar's numbers and its label beside the bar: at 0.94 a two-line label ran
+    # 4 px past the figure's right edge at a desk with the inspector open.
+    fig.subplots_adjust(top=0.88, bottom=0.10, left=0.10, right=0.91)
     # Reserve a persistent colorbar axes via make_axes_locatable so each
     # redraw can refill it in place. Letting fig.colorbar(im, ax=ax)
     # allocate a fresh axes every redraw was the cause of the heatmap

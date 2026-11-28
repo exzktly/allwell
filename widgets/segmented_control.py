@@ -69,6 +69,9 @@ class _Segment(QToolButton):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         if text:
             self.setText(text)
+            # QToolButton's default style is icon-only, which ``paintEvent`` reads as "no text": a segment given text
+            # and no icon drew a blank button wherever no style sheet set the style for it (the inspector's tabs).
+            self.setToolButtonStyle(Qt.ToolButtonTextOnly)
         if icon is not None and not icon.isNull():
             self.setIcon(icon)
             self.setToolButtonStyle(

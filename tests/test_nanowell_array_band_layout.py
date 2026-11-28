@@ -1,5 +1,6 @@
-"""The Nanowells band, measured: three rows of related controls on every view at 1500 px with the app's stylesheet, walking or not, and no control
-moving when a layer, a colouring, a preset, the positions, the image or the overlays change.
+"""The Nanowells band, measured: one flow of related controls in the same order on every view — the central
+selections, the narrowings, the view's own controls — at most two lines at 1500 px with the app's stylesheet, walking
+or not, and no control moving when a layer, a colouring, a preset, the positions, the image or the overlays change.
 
 Asked for: "the arrays tab needs a UX expert to fix the menu and buttons across the top; they're a mess" — the band
 had three ragged rows, and a walk of the Anchor queue added its group in front. Geometry, so the UI lane (local only):
@@ -59,6 +60,15 @@ def _settle(qtbot, ctx, width: int) -> None:
     QApplication.processEvents()
 
 
+def _place_of(ctx, name: str) -> tuple[int, int]:
+    """Where the control *name* is read on the band: its line (``_row_of``), then how far along it."""
+    host = _band(ctx)._scope_host
+    widget = ctx.widgets.get(name)
+    while widget.parentWidget() is not host:
+        widget = widget.parentWidget()
+    return _row_of(ctx, name), widget.x()
+
+
 def _row_of(ctx, name: str) -> int:
     """Which of the band's rows (``_rows``) the control *name* sits on."""
     host = _band(ctx)._scope_host
@@ -69,59 +79,57 @@ def _row_of(ctx, name: str) -> int:
     return max(k for k, top in enumerate(tops) if widget.y() >= top - 16)
 
 
-#: The band's rows, the same on every view, as the user laid them out: "Basic/central selectors need to go together
-#: … positions, channel, timepoint, well on row 1. Row 2 is subset and normalization related: rim focus, subset,
-#: baseline, exclude. Row 3 are viewing related: anchors, … Image." One entry per view: the controls of each row the
-#: view shows.
+#: The band's groups, in the same order on every view, as the user laid them out: "Basic/central selectors need to go
+#: together … positions, channel, timepoint, well. [Then] subset and normalization related: rim focus, subset,
+#: baseline, exclude. [Then] viewing related: anchors, … Image." They were three rows; the normalisation settings
+#: are on the Values page now (``values_view``), read from one row, and the groups follow one another in one flow
+#: (the surfaces work). One entry per view: the controls of each group the view shows.
 _CENTRAL = ("_nw_metric_cb", "_nw_channel_cb")
-_FILTER = ("_nw_rim_focus_box", "_nw_subset_cb", "_nw_baseline_cb")
-_AVERAGES = ("_nw_cohort_box", "_nw_baseline_moving_spin", "_nw_moving_spin")
+_FILTER = ("_nw_subset_cb", "_nw_values_btn")
 _ONE_WELL = (_CENTRAL + ("_nw_well_cb", "_nw_tp_cb"), _FILTER + ("_nw_exclude_well_btn",))
 _ROWS_BY_VIEW = {
     "array": ((*_ONE_WELL[0], "_nw_positions_seg"), _ONE_WELL[1],
               ("_nw_image_cb", "_nw_layers_btn", "_nw_anchor_btn", "_nw_clear_anchor_btn", "_nw_rerun_btn")),
-    "distribution": (_CENTRAL, _FILTER + _AVERAGES + ("_nw_responding_edit",), ("_nw_axis_seg",)),
-    "statistics": (_CENTRAL + ("_nw_tp_cb",), _FILTER + _AVERAGES, ("_nw_control_cb",)),
-    # QC and Identity draw no nanowell's value, so neither shows Metric, Channel, Rim focus, Subset or Baseline
-    # (asked for: "if it has no role on that tab, it shouldn't be displayed"): QC is its viewing row alone, and
-    # Identity's first two rows hold only its well, timepoint and Exclude.
+    "distribution": (_CENTRAL, _FILTER, ("_nw_axis_seg",)),
+    "statistics": (_CENTRAL + ("_nw_tp_cb",), _FILTER, ("_nw_control_cb",)),
+    # QC and Identity draw no nanowell's value, so neither shows Metric, Channel, the Subset or Values (asked for:
+    # "if it has no role on that tab, it shouldn't be displayed"): QC is its viewing group alone, and Identity's
+    # first two groups hold only its well, timepoint and Exclude.
     "qc": (("_nw_qc_wells_seg", "_nw_qc_walk_btn", "_nw_queue_btn", "_nw_qc_rerun_btn"),),
     "extremes": (*_ONE_WELL, ("_nw_extremes_spin", "_nw_extremes_metrics_box")),
     "identity": (("_nw_well_cb", "_nw_tp_cb"), ("_nw_exclude_well_btn",),
                  ("_nw_identity_mode_seg", "_nw_goto_origin_btn")),
-    "trajectories": (_CENTRAL, _FILTER + _AVERAGES),
+    "trajectories": (_CENTRAL, _FILTER),
     "position": (_CENTRAL + ("_nw_tp_cb",), _FILTER),
 }
 
+#: The most lines the band takes at a 1500 px window, on any view. Three while the band was three rows; measured at
+#: two now on Distribution, Array, Extremes, Identity and Statistics, one on the rest.
+_MOST_LINES_AT_1500 = 2
+
 
 @pytest.mark.parametrize("view", sorted(_ROWS_BY_VIEW))
-def test_every_view_keeps_the_same_three_rows(qc_page, themed, qtbot, view):
-    """Central selections · filters and normalisation · viewing, in that order on every view, at a wide and a narrower
-    window: a row that does not fit wraps within itself and never takes another row's controls onto it.
+def test_every_view_keeps_the_same_order_in_one_flow(qc_page, themed, qtbot, view):
+    """Central selections · narrowings · viewing, in that reading order on every view, at a wide and a narrower
+    window, and at most :data:`_MOST_LINES_AT_1500` lines at 1500 px.
 
     The three widths are one window resized, as a person resizes it, rather than a page built per width: the page
-    is ~2 s to build and a band whose rows depended on the widths it had been at before would be a defect too."""
+    is ~2 s to build and a band whose order depended on the widths it had been at before would be a defect too."""
     from review.features.nanowell import controller as nwc
 
     ctx = qc_page
     nwc.set_view(ctx, view)
     for width in (1700, 1500, 1200):
         _settle(qtbot, ctx, width)
-        rows = [{_row_of(ctx, name) for name in names} for names in _ROWS_BY_VIEW[view]]
-        # In order, and no two rows share a line: each row's last line is above the next row's first.
-        assert all(max(a) < min(b) for a, b in zip(rows, rows[1:])), (view, width, rows)
-        # Wide enough for one line each from 1700 px. At 1500 the filter row ended 2 px short of the edge, and the
-        # moving average's Trailing / Centred choice (agreed beside the window it shapes) wraps Distribution's
-        # *Responding above* onto a second line of that row there — within the row, which the check above holds.
-        # The row's action zone ends in the three fixed buttons, in words — Display, Style, Share — where it held
-        # an icon and Save, so Distribution's filter row needs 1700 px for one line where 1600 did.
-        if width == 1700:
-            assert rows == [{k} for k in range(len(rows))], (view, width, rows)
+        places = [[_place_of(ctx, name) for name in names] for names in _ROWS_BY_VIEW[view]]
+        # In order: each group's last control is read before the next group's first.
+        assert all(max(a) < min(b) for a, b in zip(places, places[1:])), (view, width, places)
+        if width == 1500:
+            assert len(_rows(ctx)) <= _MOST_LINES_AT_1500, (view, _rows(ctx))
 
 
 def test_the_excluded_chip_follows_exclude(qc_page, themed, qtbot):
-    """*Excluded (n)* names wells: it sits on the second row, right after Exclude, on every view — never after the
-    viewing row's controls."""
+    """*Excluded (n)* names wells: it sits right after Exclude, on every view — never after the viewing controls."""
     from review.features.nanowell import controller as nwc
 
     ctx = qc_page
@@ -131,33 +139,31 @@ def test_the_excluded_chip_follows_exclude(qc_page, themed, qtbot):
         _settle(qtbot, ctx, 1500)
         chip = ctx.widgets.get("_nw_excluded_wells_btn")
         assert chip.isVisibleTo(ctx.window)
-        assert _row_of(ctx, "_nw_excluded_wells_btn") == _row_of(ctx, "_nw_subset_cb"), view
         host = _band(ctx)._scope_host
         order = [host.layout().itemAt(i).widget() for i in range(host.layout().count())]
         group = chip.parentWidget() if chip.parentWidget() is not host else chip
         assert order.index(group) == order.index(ctx.widgets.get("_nw_exclude_group")) + 1, view
 
 
-def test_the_row_breaks_are_shown_on_every_view(qc_page, themed, qtbot):
-    from review.features.nanowell import controller as nwc
-    from review.features.nanowell.state import VIEWS
-
+def test_the_band_has_no_row_breaks(qc_page, themed, qtbot):
+    """One flow: no break forces a line, so a window wide enough for the band reads it on one."""
     ctx = qc_page
     host = _band(ctx)._scope_host
-    breaks = [w for w in host.children() if getattr(w, "objectName", lambda: "")() == "FlowBreak"]
-    assert len(breaks) == 2
-    for view in VIEWS:
-        nwc.set_view(ctx, view)
-        QApplication.processEvents()
-        assert all(b.isVisibleTo(host) for b in breaks), view
+    assert [w for w in host.children() if getattr(w, "objectName", lambda: "")() == "FlowBreak"] == []
 
 
-def test_a_walk_keeps_the_array_band_to_three_rows(qc_page, themed, qtbot):
+def test_a_walk_stands_in_the_well_s_place_and_adds_at_most_one_line(qc_page, themed, qtbot):
+    """The walk's controls stand where Well and Timepoint were, among the central selections, never in front of the
+    band. They are wider than the two they replace (a position, Back, Skip, One per well and Stop: measured 1,500 px
+    takes the Array band from two lines to three), so a walk may add one line — the three rows the band always had
+    while walking, never more."""
     from review.features.nanowell import _anchor_queue as aq
     from review.features.nanowell import anchor_queue_compute as aqc
 
     ctx = qc_page
     st = ctx.state.feature_slice("nanowell")
+    _settle(qtbot, ctx, 1500)
+    lines = len(_rows(ctx))
     # A queue standing on this well, its label as wide as a long walk makes it.
     queue = aqc.AnchorQueue([aqc.QueueItem("A01", "t_a")] * 47, index=11, data_dir=str(ctx.state.dataset.data_dir))
     st.anchor_queue = queue
@@ -165,7 +171,8 @@ def test_a_walk_keeps_the_array_band_to_three_rows(qc_page, themed, qtbot):
     ctx.widgets.get("_nw_queue_lbl").setText("12 of 47 · B04 at 24h")
     _settle(qtbot, ctx, 1500)
     assert aq.active_queue(ctx) is queue and ctx.widgets.get("_nw_queue_lbl").isVisibleTo(ctx.window)
-    assert len(_rows(ctx)) == 3, _rows(ctx)
+    assert len(_rows(ctx)) <= lines + 1 <= 3, _rows(ctx)
+    assert _place_of(ctx, "_nw_queue_lbl") < _place_of(ctx, "_nw_subset_cb")
     st.anchor_queue = None
 
 

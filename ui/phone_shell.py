@@ -1115,6 +1115,16 @@ SHARE_TEXT = "Share ▾"
 SHARE_GLYPH = "⇪"
 
 
+def _rows_of(fig) -> int:
+    """The most rows of axes *fig*'s grids lay out: what a phone's plot is made tall enough for."""
+    rows = 1
+    for ax in fig.axes:
+        spec = ax.get_subplotspec()
+        if spec is not None:
+            rows = max(rows, spec.get_gridspec().nrows)
+    return rows
+
+
 class PhoneShell(QObject):
     """Owns phone layout's controls and drives the switch both ways."""
 
@@ -1379,7 +1389,10 @@ class PhoneShell(QObject):
         self._strip = QWidget()
         self._strip.setObjectName("PhoneStrip")
         self._strip.setAttribute(Qt.WA_StyledBackground, True)
-        QHBoxLayout(self._strip).addStretch(1)
+        # No stretch item: a spacer is an item of the layout, so it cost the strip a touch gap of its own on each
+        # side, and upright "Response Curves ▾" was 14 px short of its name. The page button takes the room left over
+        # instead (``_place_page_controls``).
+        QHBoxLayout(self._strip)
 
         # ⋯: text size, reload, help, the app log, and the way back to the
         # desk — one flat menu, no submenus.
@@ -1487,7 +1500,7 @@ class PhoneShell(QObject):
             for i, b in enumerate(self.strip_buttons()):
                 band_lay.insertWidget(at + i, b, 0, Qt.AlignVCenter)
         else:
-            strip_lay.insertWidget(0, self.page_button)
+            strip_lay.insertWidget(0, self.page_button, 1)
             strip_lay.addWidget(self.wells_button)
             strip_lay.addWidget(self.controls_button)
             strip_lay.addWidget(self.share_button)
@@ -1668,6 +1681,7 @@ class PhoneShell(QObject):
         if on:
             scale_canvas(w, self.plot_factor())
             self.size_canvas(w, True)
+            self._follow_rows(w)
 
     @staticmethod
     def _adapt_custom(w: QWidget, on: bool) -> None:
@@ -1884,7 +1898,9 @@ class PhoneShell(QObject):
         self._place_page_controls(landscape=on and land)
         if on:
             strip_lay = self._strip.layout()
-            strip_lay.setContentsMargins(self.pt(8), self.pt(4), self.pt(8), self.pt(4))
+            # A narrow edge, not a touch gap: upright, four slots share ~430 px, and 8 pt each side left
+            # "Response Curves ▾" elided to "Respo…ves".
+            strip_lay.setContentsMargins(self.pt(2), self.pt(4), self.pt(2), self.pt(4))
             strip_lay.setSpacing(self.pt(phone_layout.TOUCH_GAP_PT))
             self._strip.setFixedHeight(self.pt(phone_layout.TOP_BAR_PT))
             for b in self.strip_buttons():
@@ -1938,17 +1954,37 @@ class PhoneShell(QObject):
             except RuntimeError:
                 swallowed()  # canvas deleted while the list was walked
 
+    def _follow_rows(self, c) -> None:
+        """Size *c* again whenever a draw finds its figure's rows of axes changed: a page that lays its panels out
+        again after showing (Spatial stacking four wells on a phone held upright) kept the height of the old grid,
+        and each map was drawn a few pixels tall. Connected once per canvas; only phone layout acts on it."""
+        if c.property("_awFollowsRows"):
+            return
+        c.setProperty("_awFollowsRows", True)
+
+        def resize(canvas=c) -> None:
+            try:
+                if phone_layout.is_on() and _rows_of(canvas.figure) != canvas.property("_awRows"):
+                    self.size_canvas(canvas, True)
+            except RuntimeError:
+                swallowed()  # the canvas was deleted before the turn came
+
+        def on_draw(_event, canvas=c) -> None:
+            # Once the draw is over, never inside it: resizing the canvas while it paints re-enters Qt's layout, and
+            # a phone tour run crashed there (exit 139, and a layout item read back as another object).
+            if phone_layout.is_on() and _rows_of(canvas.figure) != canvas.property("_awRows"):
+                QTimer.singleShot(0, resize)
+
+        c.mpl_connect("draw_event", on_draw)
+
     def size_canvas(self, c, on: bool) -> None:
         base = c.property("_awMinH")
         if on:
             if base is None:
                 base = c.minimumHeight()
                 c.setProperty("_awMinH", base)
-            rows = 1
-            for ax in c.figure.axes:
-                spec = ax.get_subplotspec()
-                if spec is not None:
-                    rows = max(rows, spec.get_gridspec().nrows)
+            rows = _rows_of(c.figure)
+            c.setProperty("_awRows", rows)
             c.setMinimumHeight(max(int(base), rows * self.pt(PLOT_ROW_PT)))
         elif base is not None:
             c.setMinimumHeight(int(base))

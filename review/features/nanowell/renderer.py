@@ -341,7 +341,12 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
     rows, cols = _grid(len(panels))
     bottom = 0.10 if footer_out else 0.10 + _FOOTER_BASE + _line_step(fig) * _FOOTER_LINES
     top, key_bottom, key_h = _head_room(fig, floor_top=0.86, title_pt=_PANEL_TITLE_PT)
-    _adjust(fig, left=0.07, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
+    # The left margin in points — the y tick numbers and the y label beside them — rather than a share: with the
+    # inspector open beside the page the figure is narrower and its type the same size, and at 7% "Cell count"
+    # started 8 px left of the figure.
+    label_pt = _PREF_PT * (GRID_TYPE_SCALE if len(panels) > 1 else SINGLE_TYPE_SCALE)
+    left = min(0.2, max(0.07, (_POSITION_TICKS_PT + 3 * 1.3 * label_pt + 8.0) / max(_figure_pt(fig)[0], 1.0)))
+    _adjust(fig, left=left, right=0.98, top=top, bottom=bottom, wspace=0.12 if rows * cols > 1 else 0.2,
                         hspace=0.62)
     axes = [fig.add_subplot(rows, cols, i + 1) for i in range(len(panels))] if panels else []
     rings = {tuple(site): colour for site, colour in zip(map(tuple, selected), selection_colours())}
@@ -367,6 +372,14 @@ def render_distribution(fig, model: DistributionModel, *, selected=(), spacing: 
             _ink(ax.set_ylabel(_wrap_label(model.label, rows), color=inks[1]))
         if i + cols >= len(panels) and model.x_label:
             _ink(ax.set_xlabel(model.x_label, color=inks[1], labelpad=ax._aw_gutter_pt))
+    # The room under the lowest panels, measured rather than a share: their tick labels, the counts written under
+    # each swarm (the gutter) and the x label, at the panels' type size. A tenth of a desk card's short figure cut the
+    # "Time (h)" and "excl. 1" under them off at its foot.
+    if axes:
+        under_pt = max(getattr(ax, "_aw_gutter_pt", 0.0) for ax in axes) + 2.9 * _PREF_PT * scale + 8.0
+        need = (bottom - 0.10) + under_pt / max(_figure_pt(fig)[1], 1.0)
+        if need > bottom:
+            _adjust(fig, bottom=need)
     footer = _footer(fig, model, inks, panels, densities, hidden, style=style, smooth=smooth,
             hist=hist[0] if hist else None, as_dots=as_dots,
             crowded=any(getattr(ax, "_aw_crowded", False) for ax in axes),
@@ -402,16 +415,35 @@ def _wrapped_to_figure(fig, lines: list, *, left: float = 0.07, size_pt: float =
 _FOOTER_MAX_SHARE = 0.38
 
 
+#: Points of a figure's height kept for its plot, title and axis labels before a footer may have any: on a short figure
+#: (a phone on its side) a footer allowed 38% of the height left the Position and Array views' axes a few pixels tall.
+_PLOT_ROOM_PT = 170.0
+
+
+def _footer_share(fig, share: float = _FOOTER_MAX_SHARE) -> float:
+    """The most of *fig*'s height a footer may take: *share*, or less on a figure too short to keep
+    :data:`_PLOT_ROOM_PT` for the plot above it — never less than a line or two."""
+    height = max(_figure_pt(fig)[1], 1.0)
+    return min(share, max(0.12, 1.0 - _PLOT_ROOM_PT / height))
+
+
 def _footer_that_fits(fig, lines: list, share: float = _FOOTER_MAX_SHARE) -> list:
     """*lines* (already broken to the figure's width) cut to what *share* of the figure's height holds: the leading
     lines, then one saying how many were left out and how to read them. A phone's figure is a few hundred points tall
     and its footer is many lines of its narrow width, which was drawn over the panels' lowest part, the time axis
     included; a figure with room for every line is returned whole."""
-    fit = max(2, int(share / _line_step(fig)))
+    fit = max(2, int(_footer_share(fig, share) / _line_step(fig)))
     if len(lines) <= fit:
         return lines
-    left_out = len(lines) - (fit - 1)
-    return lines[:fit - 1] + [f"… {left_out} more line{'s' if left_out != 1 else ''}: enlarge the card to read them."]
+    # The line saying how many were left out is broken to the figure's width like the lines it stands for, and the
+    # lines it became are given up for it: on a phone it ran past the figure's right edge (485 px on a 406 px figure).
+    for keep in range(fit - 1, -1, -1):
+        left_out = len(lines) - keep
+        said, _first = _wrapped_to_figure(
+            fig, [f"… {left_out} more line{'s' if left_out != 1 else ''}: enlarge the card to read them."])
+        if keep + len(said) <= fit or keep == 0:
+            return lines[:keep] + said
+    return lines
 
 
 def _wrap_label(label: str, rows: int) -> str:
@@ -864,6 +896,28 @@ def _value_key(fig, decoration) -> None:
         _ink(text, muted=True)
 
 
+def _width_pt(text: str, size_pt: float) -> float:
+    """*text*'s width in points at *size_pt*, in the face the figures are drawn in: measured from the glyphs'
+    outlines (``TextToPath``), which needs no renderer, so a montage can be laid out before it is drawn. An estimate
+    from an average glyph either named "10 h · ranked" too wide for a desk's column or let it run into the next one
+    on a phone."""
+    from matplotlib.font_manager import FontProperties
+    from matplotlib.textpath import TextToPath
+
+    if not text:
+        return 0.0
+    return max(TextToPath().get_text_width_height_descent(line, FontProperties(size=size_pt), ismath=False)[0]
+               for line in text.split("\n"))
+
+
+def _size_to_fit(text: str, width_pt: float, size_pt: float, smallest: float) -> float:
+    """*size_pt*, or the smaller size at which *text* fits *width_pt*, never below *smallest*."""
+    width = _width_pt(text, size_pt)
+    return size_pt if width <= width_pt or width <= 0 else max(smallest, size_pt * width_pt / width)
+
+
+
+
 def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None),
                    at: tuple[float, float] | None = None) -> None:
     """The occupancy colours' key at the figure's top right: every figure coloured by occupancy class carries one,
@@ -901,8 +955,17 @@ def _occupancy_key(fig, title: str, *, baseline: str = "", starting=(None, None)
     theme_paired_colours(coll, screen=screen, publication=publication)
     muted = _inks(key)[2]
     said = [part for part in (baseline, "" if all(kept) else "faint: filtered out") if part]
-    _ink(key.text(4.0, 0.5, title + (f" ({'; '.join(said)})" if said else "") + ":", ha="right",
-                  va="center", fontsize=ANNOTATION_PT + 0.5, color=muted, gid="nw-legend"), muted=True)
+    # The title ends where the first dot begins and runs leftwards; on a phone's narrow figure it ran past the
+    # figure's left edge ("Cells at baseline (earliest):" from -96 px), so it is broken to the room it has there.
+    # Fitted as it is drawn, to the room between the figure's left edge and the first dot (``_fitted_text_class``):
+    # made smaller first, to two thirds of its size, and only then broken. The key is one line high, and the
+    # style pass sets the type size after this, so a title broken here ran three lines over the panels' titles.
+    heading = title + (f" ({'; '.join(said)})" if said else "") + ":"
+    item = _fitted_text_class()(4.0, 0.5, heading, ha="right", va="center", fontsize=ANNOTATION_PT + 0.5,
+                                color=muted, linespacing=1.0, gid="nw-legend", smallest=0.66,
+                                room=lambda t, r: t.get_transform().transform((4.0, 0.5))[0] - 4.0)
+    key._add_text(item)                  # among the axes' texts, where every reader of the figure's words looks
+    _ink(item, muted=True)
     for xk, label, k in zip([4.2, 5.4, 6.6, 7.8, 9.0], ["0", "1", "2", "3+", "?"], kept):
         _ink(key.text(xk + 0.2, 0.5, label, ha="left", va="center", fontsize=ANNOTATION_PT + 0.5, color=muted,
                       gid="nw-legend", alpha=1.0 if k else 0.35), muted=True)
@@ -1394,7 +1457,9 @@ def _extremes_layout(fig, blocks, cols: int, top: float = _EXT_TOP, bottom: floa
         per_col = (w - 0.2 - n_blocks * _EXT_LABELS_W - (n_blocks - 1) * _EXT_BLOCK_GAP) / (cols * n_blocks)
         n_rows = max(rows) if beside else sum(rows)
         per_row = (h - top - bottom - (1 if beside else len(blocks)) * _EXT_HEADER) / n_rows
-        side = max(min(per_col, per_row) - _EXT_GAP, 0.2)
+        # No floor above what the figure holds: a floor of 0.2 in ran a short figure's montage (a phone on its side)
+        # off its foot. A crop too small for its words writes fewer of them (``_ExtremesDrawing``).
+        side = max(min(per_col, per_row) - _EXT_GAP, 0.05)
         if best is None or side > best.side + 1e-6:
             best = _ExtremesLayout(side, beside, side >= _EXT_MIN_SIDE_WITH_METRICS, top, bottom)
     return best
@@ -1482,12 +1547,25 @@ def render_site_rows(fig, model, blocks, crops: dict, *, label: str, empty: str,
     width_pt = draw.w_in * 72 * 0.96
     text = "\n".join(_fit_text(part, width_pt, _EXT_CAPTION_PT)
                      for part in draw.caption(head, columns, note, image_channel).split("\n"))
-    need = _EXT_CAPTION_Y * draw.h_in + (text.count("\n") + 1) * _EXT_CAPTION_PT * _EXT_CAPTION_LEADING / 72 + 0.06
-    if need > bottom + 0.01 and bottom == _EXT_BOTTOM:
+    line_in = _EXT_CAPTION_PT * _EXT_CAPTION_LEADING / 72
+    need = _EXT_CAPTION_Y * draw.h_in + (text.count("\n") + 1) * line_in + 0.06
+    # The caption may take the figure's height but for room for a montage: on a short figure (a phone on its side)
+    # its six lines took more than the montage had, and it was written over the crops.
+    most = max(draw.h_in - layout.top - _EXT_HEADER * len(blocks) - 0.3, _EXT_BOTTOM)
+    # Laid out again once, and only when that gives the caption more room: on a figure too short for any more, the
+    # same room asked for again recursed without end.
+    if min(need, most) > bottom + 0.01 and bottom == _EXT_BOTTOM:
         return render_site_rows(fig, model, blocks, crops, label=label, empty=empty, title=title, head=head,
                                 note=note, cells=cells, timepoints=timepoints, metrics=metrics, numbers=numbers,
                                 image_channel=image_channel, display_range=display_range, with_well=with_well,
-                                bottom=need, tp_names=tp_names)
+                                bottom=min(need, most), tp_names=tp_names)
+    room = max(1, int((bottom - _EXT_CAPTION_Y * draw.h_in - 0.06) / line_in + 1e-6))
+    caption_lines = text.split("\n")
+    if len(caption_lines) > room:
+        cut = len(caption_lines) - room + 1
+        text = "\n".join(caption_lines[:room - 1] + [_fit_text(
+            f"… {cut} more line{'s' if cut != 1 else ''}: enlarge the card to read them.", width_pt,
+            _EXT_CAPTION_PT).split("\n")[0]])
     _ink(fig.text(0.02, 1 - 0.2 / draw.h_in, heading, fontsize=_EXT_TITLE_PT, color=ink, va="top",
                   gid="nw-extremes-title"))
     _ink(fig.text(0.02, _EXT_CAPTION_Y, text, fontsize=_EXT_CAPTION_PT, color=faint, va="bottom",
@@ -1510,6 +1588,9 @@ class _ExtremesDrawing:
         self.pending = False
         self.tp_names: dict = {}
         self.metrics_cut = False                         # some crop had more metrics than its line holds
+        self.unsaid: set = set()                         # why crops too small to say it have no picture
+        self.ranked_unsaid = False                       # the ranked column too narrow to be named so
+        self.values_unsaid = False                       # the crops too small for their fold change
         self.numbers = True                              # the numbers are written on the crops (Metrics box)
         self.with_well = False                           # the row labels name the well (rows from several wells)
         self.tally: dict = {}
@@ -1541,20 +1622,35 @@ class _ExtremesDrawing:
         return x_start, y_top - sum(_EXT_HEADER + n * self.row_h for n in rows[:k])
 
     def block_header(self, bx: float, by: float, title: str, columns) -> None:
-        self.text(bx, by - 0.16, title, color=self.ink, fontsize=8.5, fontweight="bold", gid="nw-extremes-block")
+        # The block's title takes the block's width, smaller where it would run past it (on a phone's narrow figure it
+        # ran past the figure's edge), and each column's name its column's: " · ranked" is left off a column too
+        # narrow for it — its outline marks it, and the caption says so — and the name made smaller where needed.
+        block_pt = (_EXT_LABELS_W + len(columns) * self.cell_w) * 72
+        self.text(bx, by - 0.16, title, color=self.ink, fontsize=_size_to_fit(title, block_pt, 8.5, 5.5),
+                  fontweight="bold", gid="nw-extremes-block")
+        cell_pt = self.cell_w * 72 - 2
         for j, tp in enumerate(columns):
-            self.text(bx + _EXT_LABELS_W + j * self.cell_w + self.layout.side / 2, by - _EXT_HEADER + 0.04,
-                      self.tp_names.get(tp, tp) + (" · ranked" if tp == self.model.timepoint else ""),
-                      color=self.ink, ha="center",
-                      va="bottom", fontsize=_EXT_VALUE_PT, gid="nw-extremes-tp")
+            name = self.tp_names.get(tp, tp)
+            said = name + " · ranked" if tp == self.model.timepoint else name
+            if _width_pt(said, _EXT_VALUE_PT) > cell_pt:
+                self.ranked_unsaid = self.ranked_unsaid or tp == self.model.timepoint
+                said = name
+            self.text(bx + _EXT_LABELS_W + j * self.cell_w + self.layout.side / 2, by - _EXT_HEADER + 0.04, said,
+                      color=self.ink, ha="center", va="bottom", fontsize=_size_to_fit(said, cell_pt, _EXT_VALUE_PT, 4.0),
+                      gid="nw-extremes-tp")
 
     def row_label(self, bx: float, y_crop_top: float, row) -> None:
+        # Two lines — the address, then the value — where the row is tall enough for them, else the address alone at
+        # the size the row holds: on a short figure two lines ran into the next row's label.
+        row_pt = self.row_h * 72
+        two = row_pt >= 2 * _EXT_LABEL_PT * 1.25
+        size = _EXT_LABEL_PT if two else max(4.0, min(_EXT_LABEL_PT, row_pt / 1.3))
         self.text(bx + _EXT_LABELS_W - 0.08, y_crop_top - self.layout.side / 2,
                   (f"#{row.rank}  {row.site[0]} " if self.with_well else f"#{row.rank}  ")
                   # The address alone, as the Array view writes it: "nanowell" made the label wider than its column
                   # (it ran off the figure's left edge); the montage's title and caption say what the rows are.
-                  + f"{row.site[1]},{row.site[2]}\n{self.value_text(row.value)}",
-                  color=self.ink, ha="right", va="center", fontsize=_EXT_LABEL_PT, gid="nw-extremes-row")
+                  + f"{row.site[1]},{row.site[2]}" + (f"\n{self.value_text(row.value)}" if two else ""),
+                  color=self.ink, ha="right", va="center", fontsize=size, gid="nw-extremes-row")
 
     def crop(self, x0: float, y_crop_top: float, site_crops, tp: str):
         """One crop's panel, or why it has none; returns the axes, which a click on selects its nanowell."""
@@ -1577,9 +1673,22 @@ class _ExtremesDrawing:
             self.pending = self.pending or site_crops is None
             said = "Cutting…" if site_crops is None else (crop.note if crop is not None else f"No row at {tp}.")
             # Broken to the crop's own width: ``wrap=True`` breaks at the figure's, and the sentence ran across its
-            # neighbours.
-            _ink(ax.text(0.5, 0.5, _fit_text(said, s * 72 * 0.9, 5.5), ha="center", va="center", fontsize=5.5,
-                         transform=ax.transAxes, color=self.faint, gid="nw-extremes-missing"), muted=True)
+            # neighbours. A crop too small for the sentence says "no crop", and the caption says why, once.
+            broken = _fit_text(said, s * 72 * 0.9, 5.5)
+            # Between the fold change written in the crop's top-left corner and the metrics along its foot
+            # (``crop_text``), with room for both: a sentence in a small crop ran into one or the other.
+            # Centred, so the same room above and below: the corner's line, or the foot's where it is taller.
+            reserved = 2 * max(1.2 * _EXT_VALUE_PT, 1.3 * _EXT_METRIC_PT if self.layout.metrics_shown else 0.0)
+            fits = (broken.count("\n") + 1) * 5.5 * 1.25 + reserved <= s * 72 * 0.9 and all(
+                _width_pt(line, 5.5) <= s * 72 * 0.95 for line in broken.split("\n"))
+            if not fits:
+                if site_crops is not None:
+                    self.unsaid.add(said.rstrip("."))
+                broken = "no crop" if site_crops is not None else "…"
+                fits = _width_pt(broken, 5.5) <= s * 72 * 0.95 and 5.5 * 1.25 + reserved <= s * 72 * 0.9
+            if fits:
+                _ink(ax.text(0.5, 0.5, broken, ha="center", va="center", fontsize=5.5, transform=ax.transAxes,
+                             color=self.faint, gid="nw-extremes-missing"), muted=True)
         if tp == self.model.timepoint:
             for spine in ax.spines.values():
                 spine.set_linewidth(1.6)
@@ -1590,6 +1699,11 @@ class _ExtremesDrawing:
         translucent band of the ground so they read over any image and take no room of their own."""
         ranked = tp == self.model.timepoint
         side_pt = self.layout.side * 72
+        if side_pt < _EXT_VALUE_PT * 2.4:
+            # Smaller than two lines of the fold change: written on the crop it covered the picture and ran into the
+            # next crop. The row's label carries the ranked value, and the caption says the crops are too small.
+            self.values_unsaid = True
+            return
         band = {"boxstyle": "square,pad=0.15", "facecolor": _inks(ax)[0], "alpha": 0.62, "linewidth": 0}
         _ink(ax.text(0.03, 0.97, self.value_text(row.values.get(tp, math.nan)),
                      transform=ax.transAxes, ha="left", va="top", fontsize=_EXT_VALUE_PT,
@@ -1619,6 +1733,10 @@ class _ExtremesDrawing:
                 + "".join(f" {_sentence(n_)}." for n_ in sorted(self.notes))
                 + (f" {_sentence(_cells_clause(self.tally))}." if self.tally else "")
                 + (f" Timepoints not shown: {', '.join(hidden)}." if hidden else "")
+                + "".join(f" No crop: {_sentence(n_)}." for n_ in sorted(self.unsaid))
+                + (" The ranked timepoint's crops are outlined." if self.ranked_unsaid else "")
+                + (" The crops are too small at this size to write their fold change on." if self.values_unsaid
+                   else "")
                 + (" The crops are too small at this size to write their metrics on: show fewer timepoints or "
                    "nanowells, widen the window, or pop out a nanowell to read them."
                    if not self.layout.metrics_shown and self.numbers else
@@ -1833,6 +1951,16 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     notes, _n = _wrapped_to_figure(fig, array_notes(scene, layers, label=label), left=_ARRAY_LEFT,
                                    size_pt=_ARRAY_FOOT_PT)
     step = _line_step(fig, _ARRAY_FOOT_PT)
+    # On a short figure the footer and the room kept for Notes are cut to what leaves the array its height
+    # (``_footer_share``): together they took the whole of a phone on its side, and the array was a sliver.
+    fit = max(2, int(_footer_share(fig) / step))
+    if len(lines) + len(notes) > fit:
+        lines = _footer_that_fits(fig, lines)
+        room = max(0, fit - len(lines))
+        if len(notes) > room:
+            # Said, not dropped: a Notes line cut for room is counted on the figure.
+            notes = notes[:room - 1] + [f"… {len(notes) - room + 1} more lines: enlarge the card to read them."] \
+                if room >= 1 else []
     # The colour bar's tick numbers and label sit to the axes' right, and take the room they need in points: a share
     # of the figure's width left them, on a narrow figure, with the label on the figure's edge.
     bar_room = 0.024 + _BAR_PT / max(_figure_pt(fig)[0], 1.0) + 0.01
@@ -1842,7 +1970,10 @@ def render_array(fig, scene, layers, *, label: str, image=None, image_note: str 
     entries = (key_entries(scene.sites, colour=layers.colour, styles=_STATE_STYLE, why=scene.why, dimmed=veiled)
                if layers.nanowells and len(scene.sites) else [])
     key_rows = -(-len(entries) // KEY_COLUMNS)
-    drawn = _array_axes(fig, scene, image, region, right=right, top=0.92 - max(key_rows - 1, 0) * _KEY_ROW,
+    # The title above the axes takes its room in points (9 pt type and its pad): a share of a short figure's height
+    # (a phone on its side) left it half above the figure's top edge.
+    top = min(0.92, 1.0 - 22.0 / max(_figure_pt(fig)[1], 1.0))
+    drawn = _array_axes(fig, scene, image, region, right=right, top=top - max(key_rows - 1, 0) * _KEY_ROW,
                         bottom=_FOOTER_BASE + (len(lines) + len(notes)
                                                + (_label_lines(fig) if layers.addresses or layers.values else 0)
                                                + 0.5) * step)
@@ -2255,8 +2386,97 @@ def render_message(fig, text: str, *, gid: str) -> None:
     ax = fig.add_subplot(1, 1, 1)
     ax.set_axis_off()
     _bg, _ink_colour, muted = _inks(ax)
-    _ink(ax.text(0.5, 0.5, text, ha="center", va="center", wrap=True, transform=ax.transAxes, fontsize=9,
-                 color=muted, gid=gid), muted=True)
+    # Broken to the figure's width each time it is drawn (``_fitted_text_class``): ``wrap=True`` left the measured
+    # extent one line, and a figure drawn at one size and then shown at another (a phone's sheet opening, the phone
+    # turned) kept breaks made for the first, so the sentence ran from left of the figure to past its right edge.
+    item = _fitted_text_class()(0.5, 0.5, text, ha="center", va="center", transform=ax.transAxes, fontsize=9, color=muted,
+                       gid=gid)
+    ax._add_text(item)                   # among the axes' texts, where every reader of the figure's words looks
+    _ink(item, muted=True)
+
+
+_FITTED_TEXT: list = []
+
+
+def _fitted_text_class():
+    """The ``matplotlib.text.Text`` subclass that breaks itself to its figure's width when drawn, built once on first
+    use so the module does not import matplotlib's text machinery when it is imported."""
+    if _FITTED_TEXT:
+        return _FITTED_TEXT[0]
+    from matplotlib.text import Text
+
+    class FittedText(Text):
+        """Text broken at spaces to the figure's width each time it is drawn, every word kept: the figure's width is
+        only known for certain when it is drawn, and it changes with the card around it."""
+
+        def __init__(self, *args, room=None, smallest: float = 1.0, **kwargs):
+            """*room* ``(text, renderer) -> pixels`` is the width a line may take (the figure's, by default);
+            *smallest* the share of its size the text may be made smaller to stay on one line before it is broken."""
+            super().__init__(*args, **kwargs)
+            self._aw_source = self.get_text()
+            self._aw_room = room
+            self._aw_smallest = smallest
+            self._aw_size = None
+            self._aw_fitted = None
+
+        def draw(self, renderer):
+            if renderer is not None and self.get_figure() is not None:
+                room = (self._aw_room(self, renderer) if self._aw_room is not None
+                        else self.get_figure().bbox.width * 0.92)
+                # The size it was given, or was last given from outside (a style pass setting the type size).
+                if self._aw_size is None or abs(self.get_fontsize() - self._aw_fitted) > 1e-6:
+                    self._aw_size = self.get_fontsize()
+                prop = self.get_fontproperties().copy()
+
+                def width(line: str, size: float) -> float:
+                    prop.set_size(size)
+                    return renderer.get_text_width_height_descent(line, prop, ismath=False)[0]
+
+                size = self._aw_size
+                widest = max(width(part, size) for part in self._aw_source.split("\n"))
+                if widest > room > 0:
+                    # A little under the exact ratio: a face's widths do not scale exactly with its size (hinting,
+                    # kerning), and text made smaller to the exact ratio measured a fraction over the room in the CI
+                    # runner's DejaVu Sans and was broken onto two lines all the same.
+                    size = max(self._aw_size * self._aw_smallest, 0.98 * self._aw_size * room / widest)
+                lines: list[str] = []
+                for part in self._aw_source.split("\n"):
+                    lines.extend(_greedy_lines(part, lambda line, at=size: width(line, at), room))
+                broken = "\n".join(lines)
+                if broken != Text.get_text(self):
+                    Text.set_text(self, broken)
+                Text.set_fontsize(self, size)
+                self._aw_fitted = size
+            super().draw(renderer)
+
+        def set_text(self, s):
+            self._aw_source = "" if s is None else str(s)
+            super().set_text(s)
+
+    _FITTED_TEXT.append(FittedText)
+    return FittedText
+
+
+def _greedy_lines(text: str, width, room: float) -> list[str]:
+    """*text* broken at spaces into lines no wider than *room* as *width* measures them; a word wider than the room on
+    its own is broken at the characters that fit (a file path has no spaces)."""
+    lines: list[str] = []
+    line = ""
+    for word in text.split(" "):
+        trial = f"{line} {word}" if line else word
+        if width(trial) <= room or not line:
+            line = trial
+        else:
+            lines.append(line)
+            line = word
+        while width(line) > room and len(line) > 1:
+            cut = len(line) - 1
+            while cut > 1 and width(line[:cut]) > room:
+                cut -= 1
+            lines.append(line[:cut])
+            line = line[cut:]
+    lines.append(line)
+    return lines
 
 
 def _ring(x, y, radius, colour):
@@ -2442,6 +2662,16 @@ def _draw_selected_trajectories(ax, panel, selected) -> None:
                 gid=TRAJECTORY_SELECTED_GID)
 
 
+#: Points the Position view's y tick labels take beside its axes ("100%", "1,000"): its left margin is measured from
+#: them and the y label rather than given as a share of a figure whose width varies four-fold.
+_POSITION_TICKS_PT = 36.0
+#: Narrower than this, in points, the Position view is laid out for a phone: its key inside the plot and its title
+#: and ring label in their short forms.
+_POSITION_NARROW_PT = 430.0
+#: Shorter than this, in points, the Position view's lower panel has no y label of its own.
+_POSITION_SHORT_PT = 300.0
+
+
 def render_position(fig, series, *, label: str, timepoint: str, note: str = "") -> None:
     """Metric against ring, per well (median and interquartile band), with each ring's excluded share below.
 
@@ -2462,12 +2692,23 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
     lines, _first = _wrapped_to_figure(fig, lines, left=0.08)
     lines = _footer_that_fits(fig, lines)
     step = _line_step(fig)
+    # The margins in points, then as shares of this figure: fixed shares left the y labels a few points on a phone
+    # (they started left of the figure) and the wells' key, outside the plot on the right, past its right edge.
+    fig_w, fig_h = (max(v, 1.0) for v in _figure_pt(fig))
+    label_pt = _PREF_PT * SINGLE_TYPE_SCALE
+    left = min(0.3, max(0.08, (_POSITION_TICKS_PT + 1.4 * label_pt + 10.0) / fig_w))
+    names = [_named(s) for s in series]
+    # On a narrow figure (a phone's) the wells' key goes inside the plot: outside on the right, the layout gave it
+    # most of the width and drew the plot a sliver beside it.
+    narrow = fig_w < _POSITION_NARROW_PT
+    key_pt = max([_width_pt(n, _PREF_PT * 0.5) for n in names + ["Well"]] or [0.0]) + 30.0
+    right = 0.97 if narrow else max(left + 0.3, min(0.88, 1.0 - (key_pt + 6.0) / fig_w))
     # The ring label is broken to the width of the axes it sits under, and the second line is room the axes give up.
-    ring_label = _fit_text("Ring (lattice steps from the central nanowell)", _figure_pt(fig)[0] * (0.88 - 0.08),
-                           _PREF_PT * SINGLE_TYPE_SCALE)
-    extra = (ring_label.count("\n") * 1.2 * _PREF_PT * SINGLE_TYPE_SCALE) / max(_figure_pt(fig)[1], 1.0)
-    _adjust(fig, left=0.08, right=0.88, top=0.90,
-                        bottom=0.10 + extra + _FOOTER_BASE + step * max(1, len(lines)))
+    ring_label = _fit_text("Ring (steps from the centre)" if narrow else
+                           "Ring (lattice steps from the central nanowell)", fig_w * (right - left), label_pt)
+    under = (ring_label.count("\n") + 2) * 1.25 * label_pt + 12.0           # the ring label and the tick labels
+    _adjust(fig, left=left, right=right, top=0.90,
+                        bottom=max(0.10, under / fig_h) + _FOOTER_BASE + step * max(1, len(lines)))
     for panel in (ax, share):
         _prepare_axes(panel, SINGLE_TYPE_SCALE)
     _bg, ink, muted = _inks(ax)
@@ -2481,17 +2722,21 @@ def render_position(fig, series, *, label: str, timepoint: str, note: str = "") 
         share.bar(s.rings + (k - (len(series) - 1) / 2) * width, s.excluded_share, width=width, color=colour)
     ax.set_ylabel(label, color=ink)
     _no_offset(ax)
-    _ink(ax.set_title(f"By ring from the central nanowell · {timepoint}", fontsize=10, fontweight="bold", loc="left",
-                      color=ink))
+    heading = f"By ring · {timepoint}" if narrow else f"By ring from the central nanowell · {timepoint}"
+    _ink(ax.set_title(heading, fontsize=_size_to_fit(heading, fig_w * (right - left), 10.0, 6.5), fontweight="bold",
+                      loc="left", color=ink))
     ax.tick_params(labelbottom=False)
     ax.grid(alpha=0.3)
     if series:
-        legend = ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=_PREF_PT * 0.5,
-                           title="Well")
+        legend = (ax.legend(loc="best", frameon=False, fontsize=_PREF_PT * 0.4, title="Well") if narrow else
+                  ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=_PREF_PT * 0.5,
+                            title="Well"))
         legend.get_title().set_color(ink)
         for text in legend.get_texts():
             text.set_color(ink)
-    share.set_ylabel("Excluded", color=muted)
+    # On a short figure (a phone on its side) the two panels' y labels, each centred on its panel, ran into each other:
+    # the share panel goes without one there, and the footer says what its bars are.
+    share.set_ylabel("" if fig_h < _POSITION_SHORT_PT else "Excluded", color=muted)
     share.set_ylim(0, 1)
     share.yaxis.set_major_locator(MaxNLocator(nbins=2))
     share.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))

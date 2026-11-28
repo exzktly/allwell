@@ -291,3 +291,24 @@ def test_per_sample_control_is_a_row_of_fold_change_and_opens_a_page_over_it(qtb
     assert insp.currentWidget() is panels.panel_of(fold).content, "Back did not return to Fold change"
     svc.close(ctx)
     assert editor.isHidden() and editor.parentWidget() is window
+
+
+def test_an_ampersand_in_a_panel_s_title_is_drawn_as_written(qtbot):
+    """A button reads a lone "&" as the mark of its shortcut letter: "Colour & split" was drawn "Colour _split", the
+    ampersand dropped and the space under it underlined. The button doubles it, and a phone form's label, a QLabel,
+    reads it back single."""
+    from PySide6.QtWidgets import QWidget
+
+    from review.core import inspector_panels as panels
+    from widgets.control_band import ControlBand
+
+    host = QWidget()
+    qtbot.addWidget(host)
+    band = ControlBand(host)
+    button, _content, _layout = panels.make_popover_button("Colour & split", band, tab="data")
+    band.add_action(button)
+    assert button.text() == "Colour && split ›"
+    band.setForm(True)
+    from PySide6.QtWidgets import QLabel
+
+    assert "Colour & split" in [label.text() for label in band.findChildren(QLabel)]

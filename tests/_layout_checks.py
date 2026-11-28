@@ -210,12 +210,17 @@ def figure_tick_overlap(window: QWidget) -> list[Finding]:
             for ax in canvas.figure.axes:
                 for axis, lo_hi in ((ax.xaxis, ax.get_xlim()), (ax.yaxis, ax.get_ylim())):
                     lo, hi = sorted(lo_hi)
-                    drawn = [(tick.get_loc(), label.get_window_extent(renderer)) for tick, label in
-                             zip(axis.get_major_ticks(), axis.get_majorticklabels())
-                             if label.get_visible() and label.get_text().strip() and lo <= tick.get_loc() <= hi]
-                    drawn.sort(key=lambda item: item[0])
-                    for (_a_loc, a), (_b_loc, b) in zip(drawn, drawn[1:]):
-                        if min(a.x1, b.x1) - max(a.x0, b.x0) > 1.5 and min(a.y1, b.y1) - max(a.y0, b.y0) > 1.5:
+                    # Each tick with its own labels, one side at a time: ``get_majorticklabels`` lists only the
+                    # shown ones, so zipping it with the ticks paired a tick with another's label as soon as one was
+                    # hidden, and measured a label outside the limits against one inside.
+                    for side in ("label1", "label2"):
+                        drawn = [(tick.get_loc(), getattr(tick, side).get_window_extent(renderer))
+                                 for tick in axis.get_major_ticks()
+                                 if getattr(tick, side).get_visible() and getattr(tick, side).get_text().strip()
+                                 and lo <= tick.get_loc() <= hi]
+                        drawn.sort(key=lambda item: item[0])
+                        if any(min(a.x1, b.x1) - max(a.x0, b.x0) > 1.5 and min(a.y1, b.y1) - max(a.y0, b.y0) > 1.5
+                               for (_a_loc, a), (_b_loc, b) in zip(drawn, drawn[1:])):
                             found.append(Finding("ticks", "FigureCanvas", "neighbouring tick labels overlap"))
                             break
         except Exception as exc:

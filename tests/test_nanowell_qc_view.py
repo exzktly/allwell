@@ -192,7 +192,7 @@ def test_the_qc_view_draws_the_whole_plate_with_nothing_selected(qc_page):
     # Every well needs a look here (A02's partial), so every well has a row; the figure says how many and which.
     assert drawn.wells == ["A01", "A02", "B01"]
     fig = ctx.widgets.get("_nw_fig")
-    assert [t.get_text() for t in fig.texts if t.get_gid() == "nw-qc-summary"] == [
+    assert [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-qc-summary"] == [
         "5 of 6 timepoints need a look, in 3 of 3 wells."]
     hatched = {c.aw_state: c.get_hatch() for c in drawn.ax.collections if c.get_gid().endswith("-hatch")}
     assert hatched == {"anchor_waiting": "----", "partial": "\\\\\\\\", "not_checked": "...."}
@@ -290,7 +290,7 @@ def test_the_queue_button_says_what_it_walks_and_one_per_well_visibly_changes_it
     per_well.click()
     assert queue_btn.text() == "Resolve: 2 timepoints"
     fig = ctx.widgets.get("_nw_fig")
-    assert [t.get_text() for t in fig.texts if t.get_gid() == "nw-qc-message"] == [
+    assert [t.get_text().replace("\n", " ") for t in fig.texts if t.get_gid() == "nw-qc-message"] == [
         "Press Resolve to step through the 2 not addressed timepoints, each opened where it is fixed with what to do, "
         "or click any cell to start at it. Problem chooses the class."]
 
@@ -341,7 +341,7 @@ def test_problem_chooses_one_class_and_each_opens_where_it_is_fixed(qc_page, qtb
     assert isinstance(ctx.widgets.get("_nw_qc_walk_partial"), QRadioButton)
     assert (problem.text(), queue_btn.text()) == ("Problem: not addressed ›", "Resolve: 2 timepoints")
     walk_partial = ctx.widgets.get("_nw_qc_walk_partial")
-    assert walk_partial.text() == "partial — some nanowells left out (1)"
+    assert walk_partial.text() == "partial (1)"
     ctx.widgets.get("_nw_qc_walk_inconclusive").click()
     assert (problem.text(), queue_btn.text()) == ("Problem: inconclusive ›", "Resolve: 1 timepoint")
     assert st.anchor_queue_states == ("inconclusive",) and not walk_partial.isChecked()

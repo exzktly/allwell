@@ -52,6 +52,7 @@ UI_LANE_FILES: dict[str, str] = {
     "test_bar_relative_to_popover_fit.py": "the Fold change popover grows with the Then relative to row",
     # ── reusable widgets (widgets/), no app knowledge ──────────────────────
     "test_a_plate_keeps_its_size.py": "plate height-for-width beside a growing sibling",
+    "test_segment_draws_its_text.py": "a segmented control's text is painted under the app's style sheet (pixels)",
     "test_button_row.py": "a button row wraps instead of widening its host",
     "test_chip_group.py": "ChipGroup press/selection behaviour of a bare widget",
     "test_color_picker_popover.py": "the colour picker's SV square and hue strip",
@@ -232,6 +233,9 @@ NANOWELL_FEATURE_FILES: dict[str, str] = {
     "test_nanowell_dataset_carry.py": "Subset and Merge Plates carry a dataset's nanowell tables (tracker P10b, P10c), driven …",
     "test_nanowell_dataset_tools.py": "Subset, Merge Plates and Concatenate refuse nanowell results they cannot carry, by name; …",
     "test_nanowell_display_range.py": "The Nanowells page's **Display range**: a *min* / *max* / **Auto** brightness window for …",
+    "test_nanowell_values_row.py": "the Nanowells band's Values row and its page, and the Display tab's one Display range row",
+    "test_nanowell_status_line.py": "the Nanowells status line: a chip per condition shaping the figure, each opening the page that owns it",
+    "test_nanowell_figures_fit_narrow.py": "the Nanowells figures keep their words inside a phone-sized or short figure",
     "test_nanowell_edge_points_vectorised.py": "``nanowell_detect._edge_points`` is vectorised over its rays without changing a bit",
     "test_nanowell_site_rows.py": "Extremes and the Distribution window draw their rows of crops through one renderer",
     "test_nanowell_window_slots.py": "a Distribution window drawn around one well's swarm takes that well, not the wells beside it or the column it grazes",

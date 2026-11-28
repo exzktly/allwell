@@ -116,7 +116,7 @@ PAGES = {
     "Distribution": (False, True, True),
     "Multivariate": (False, True, True),
     "Spatial": (False, True, True),
-    "Nanowells": (False, True, True),
+    "Nanowells": (True, True, True),        # Display holds the page's one Display range row
 }
 
 

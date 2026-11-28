@@ -11,6 +11,8 @@ The page fixture's latest timepoint is ``t_a``, where A01's nanowells hold 2, 4,
 
 from __future__ import annotations
 
+from review.features.nanowell.values_view import is_offered
+
 import csv
 import math
 
@@ -98,7 +100,7 @@ def test_a_cut_typed_on_the_page_is_stated_with_each_well_s_fraction_and_drawn(p
 
     st = _loaded(qtbot, page)
     edit = page.widgets.get("_nw_responding_edit")
-    assert edit.isVisible() and edit.text() == ""
+    assert is_offered(page, edit) and edit.text() == ""
     assert "Fraction responding is not computed: no threshold is set for Cell count (Responding above)." \
         in _footer(page)
     assert _cut_lines(page) == []

@@ -1,6 +1,6 @@
 """How many surfaces are open at once, measured on real widgets.
 
-The rule (``SURFACES_TRACKER.md`` §2, decision 2): while an inspector page, a
+The rule (ARCHITECTURE.md, the inspector and window rules): while an inspector page, a
 menu or a window is open, nothing it contains may open a second transient
 surface, except an alert or the operating system's file dialog. So the number
 of transient surfaces open at any moment — :func:`depth` — is never more than

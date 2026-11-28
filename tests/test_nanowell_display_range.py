@@ -6,7 +6,8 @@ the page, kept for all renders until changed again. Every picture of the page's 
 pop-out, the Extremes montage, the Array view's full-resolution image — is drawn on it, and it is the page's own
 (``NanowellState.display_ranges``), kept with its settings.
 
-Driven through the real buttons and the real popover fields in the minimal shell of ``tests/test_nanowell_page.py``;
+Driven through the real **Display range** row of the page's Display tab and the real fields of its page — the one
+place the range is set — in the minimal shell of ``tests/test_nanowell_page.py``;
 what is checked is read back from the drawn images (their ``clim`` and pixels), never from the state the figure was
 drawn from. Each range is chosen so that it and the percentile scale it replaces give different numbers.
 """
@@ -28,7 +29,7 @@ from tests.test_nanowell_page import _click_dot, _loaded, page  # noqa: E402,F40
 
 
 def _set_range(qtbot, ctx, button_name: str, low: str, high: str) -> None:
-    """Open the Display range under *button_name* with a click and type *low* and *high*, as a user does."""
+    """Open the Display range page from *button_name* with a click and type *low* and *high*, as a user does."""
     button = ctx.widgets.get(button_name)
     qtbot.mouseClick(button, Qt.LeftButton)
     lo_edit, hi_edit = ctx.widgets.get("_nw_range_lo_edit"), ctx.widgets.get("_nw_range_hi_edit")
@@ -49,7 +50,7 @@ def _strip_ready(qtbot, ctx):
 
 
 # ── the crops ────────────────────────────────────────────────────────────────
-def test_a_range_typed_beside_the_strip_draws_the_strip_and_the_pop_out_on_it(page, qtbot, known_crops):  # noqa: F811
+def test_a_range_typed_on_the_display_tab_draws_the_strip_and_the_pop_out_on_it(page, qtbot, known_crops):  # noqa: F811
     _strip_ready(qtbot, page)
     combined = np.concatenate([c.image.ravel() for c in known_crops.values()])
     auto = tuple(round(float(v), 6) for v in np.percentile(combined, [1, 99]))
@@ -57,13 +58,12 @@ def test_a_range_typed_beside_the_strip_draws_the_strip_and_the_pop_out_on_it(pa
     window = _press_pop_out(qtbot, page)
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
 
-    _set_range(qtbot, page, "_nw_strip_range_btn", "2", "50")
+    _set_range(qtbot, page, "_nw_display_range_btn", "2", "50")
 
     assert _clims(page, "_nw_strip_fig") == [(2.0, 50.0), (2.0, 50.0)]
     assert _clims(page, "_nw_popout_fig") == [(2.0, 50.0), (2.0, 50.0)]
     assert window.isVisible()
-    for name in ("_nw_strip_range_btn", "_nw_extremes_range_btn", "_nw_array_range_btn"):
-        assert page.widgets.get(name).text() == "Range: 2–50"
+    assert page.widgets.get("_nw_display_range_btn").text() == "Display range: 2–50 ›"
     caption = [t.get_text() for t in page.widgets.get("_nw_popout_fig").texts if t.get_gid() == "nw-crop-grid-caption"]
     assert "every panel on the display range 2 to 50" in caption[0]
 
@@ -71,18 +71,18 @@ def test_a_range_typed_beside_the_strip_draws_the_strip_and_the_pop_out_on_it(pa
 def test_auto_gives_the_pictures_back_their_own_scale(page, qtbot, known_crops):  # noqa: F811
     _strip_ready(qtbot, page)
     before = _clims(page, "_nw_strip_fig")
-    _set_range(qtbot, page, "_nw_strip_range_btn", "2", "50")
+    _set_range(qtbot, page, "_nw_display_range_btn", "2", "50")
     assert _clims(page, "_nw_strip_fig") != before
     qtbot.mouseClick(page.widgets.get("_nw_range_auto_btn"), Qt.LeftButton)
     assert _clims(page, "_nw_strip_fig") == before
-    assert page.widgets.get("_nw_strip_range_btn").text() == "Range: auto"
+    assert page.widgets.get("_nw_display_range_btn").text() == "Display range: auto ›"
     assert (page.widgets.get("_nw_range_lo_edit").text(), page.widgets.get("_nw_range_hi_edit").text()) == ("", "")
 
 
 def test_a_range_whose_high_is_not_above_its_low_is_not_taken(page, qtbot, known_crops):  # noqa: F811
     _strip_ready(qtbot, page)
     before = _clims(page, "_nw_strip_fig")
-    _set_range(qtbot, page, "_nw_strip_range_btn", "50", "2")
+    _set_range(qtbot, page, "_nw_display_range_btn", "50", "2")
     assert _clims(page, "_nw_strip_fig") == before
     assert nwc.display_range(page) is None
 
@@ -100,14 +100,14 @@ def test_a_range_set_on_the_page_is_kept_for_every_render_until_changed_here(pag
     nwc.redraw(page)
     assert _clims(page, "_nw_strip_fig") == auto                        # unset here: still Auto
 
-    _set_range(qtbot, page, "_nw_strip_range_btn", "4", "40")
+    _set_range(qtbot, page, "_nw_display_range_btn", "4", "40")
     page.state.image_view.set_lut(key, 0.0, 1.0)
     for view in ("trajectories", "extremes", "array", "distribution"):  # other renders, and back
         nwc.set_view(page, view)
     _click_dot(qtbot, page, ("A01", 1, 0))
     nwc.redraw(page)
     assert _clims(page, "_nw_strip_fig") == [(4.0, 40.0), (4.0, 40.0)]
-    assert page.widgets.get("_nw_array_range_btn").text() == "Range: 4–40"
+    assert page.widgets.get("_nw_display_range_btn").text() == "Display range: 4–40 ›"
 
 
 def test_the_range_is_kept_with_the_page_s_settings():
@@ -167,7 +167,7 @@ def test_the_extremes_montage_is_drawn_on_the_range(extremes_page, qtbot):
     _choose_extremes(qtbot, ctx)
     images = [im for ax in ctx.widgets.get("_nw_fig").axes for im in ax.get_images()]
     assert images and all(im.get_clim() != (5.0, 7.0) for im in images)
-    _set_range(qtbot, ctx, "_nw_extremes_range_btn", "5", "7")
+    _set_range(qtbot, ctx, "_nw_display_range_btn", "5", "7")
     images = [im for ax in ctx.widgets.get("_nw_fig").axes for im in ax.get_images()]
     assert images and all(im.get_clim() == (5.0, 7.0) for im in images)
     caption = [t.get_text() for t in ctx.widgets.get("_nw_fig").texts if t.get_gid() == "nw-extremes-caption"]
@@ -184,7 +184,7 @@ def test_the_full_resolution_image_is_drawn_on_the_range(qtbot, tmp_path):
     ctx, _in_dir = make_page.__wrapped__(qtbot, tmp_path)
     st = _full(qtbot, ctx)
     assert {t: _shade_at(st, x + 60, y + 60) for t, (x, y) in LEFT_TOP.items()} == SHADE
-    _set_range(qtbot, ctx, "_nw_array_range_btn", "1000", "3000")
+    _set_range(qtbot, ctx, "_nw_display_range_btn", "1000", "3000")
     assert {t: _shade_at(st, x + 60, y + 60) for t, (x, y) in LEFT_TOP.items()} == {
         "F0": 0, "F1": 127, "F2": 255, "F3": 255}
     assert "Full resolution, phase, from the raw tiles in A01.zip, on the display range 1000 to 3000." in _footer(ctx)
@@ -195,7 +195,7 @@ def test_setting_a_range_saves_the_page_s_settings(page, qtbot, known_crops, mon
     saved = []
     monkeypatch.setattr(nwc, "_save_soon", lambda ctx: saved.append(dict(ctx.state.feature_slice("nanowell")
                                                                              .to_config()["display_ranges"])))
-    _set_range(qtbot, page, "_nw_strip_range_btn", "4", "40")
+    _set_range(qtbot, page, "_nw_display_range_btn", "4", "40")
     assert saved and saved[-1] == {nwc.display_key(page.state.feature_slice("nanowell")): [4.0, 40.0]}
 
 
@@ -203,9 +203,9 @@ def test_each_image_channel_keeps_its_own_range(page, qtbot, known_crops):  # no
     _strip_ready(qtbot, page)
     st = page.state.feature_slice("nanowell")
     assert st.data.image_channels, "the fixture needs a fluorescence channel to switch to"
-    _set_range(qtbot, page, "_nw_strip_range_btn", "4", "40")
+    _set_range(qtbot, page, "_nw_display_range_btn", "4", "40")
     nwc.set_image_channel(page, st.data.image_channels[0])
-    assert nwc.display_range(page) is None and page.widgets.get("_nw_strip_range_btn").text() == "Range: auto"
+    assert nwc.display_range(page) is None and page.widgets.get("_nw_display_range_btn").text() == "Display range: auto ›"
     nwc.set_image_channel(page, "")
     assert nwc.display_range(page) == (4.0, 40.0)
     qtbot.waitUntil(lambda: len(_images(page, "_nw_strip_fig")) == 2, timeout=10000)

@@ -72,7 +72,7 @@ def _walk_button(ctx, parent):
     (``resolve_compute.PICKABLE``) — a row whose page is a choice of one, not a menu of ticks. Not addressed,
     contradicted and inconclusive open with *Set anchor* on; partial opens on Identity to be looked at; not located
     opens to be looked at, or its well excluded."""
-    from PySide6.QtWidgets import QButtonGroup, QRadioButton
+    from PySide6.QtWidgets import QButtonGroup, QLabel, QRadioButton
 
     from review.core.inspector_panels import make_popover_button
 
@@ -84,11 +84,18 @@ def _walk_button(ctx, parent):
     group = QButtonGroup(page)
     actions = {}
     for state in rc.PICKABLE:
-        radio = QRadioButton(rc.CLASSES[state].label, page)
+        name, _sep, said = rc.CLASSES[state].label.partition(" — ")
+        radio = QRadioButton(name, page)
+        radio.setToolTip(rc.CLASSES[state].label)
         group.addButton(radio)
         radio.clicked.connect(lambda _on=False, state=state: _set_walk(ctx, state))
         ctx.widgets.register(f"_nw_qc_walk_{state}", radio)
         lay.addWidget(radio)
+        if said:
+            note = QLabel(said[:1].upper() + said[1:], page)
+            note.setObjectName("Muted")
+            note.setWordWrap(True)
+            lay.addWidget(note)
         actions[state] = radio
     return button, actions
 
@@ -127,7 +134,10 @@ def refresh_qc_controls(ctx, st, on_view: bool, c: SimpleNamespace) -> None:
         blocked = action.blockSignals(True)
         action.setChecked(state == chosen)
         action.blockSignals(blocked)
-        action.setText(f"{rc.CLASSES[state].label} ({matrix.counts.get(state, 0) if matrix is not None else 0:,})")
+        # The class and its count on the choice, what it means on a wrapped line under it (``_walk_button``): the
+        # whole label on one line was 480 px, wider than a phone's Controls sheet, which then scrolled sideways.
+        name = rc.CLASSES[state].label.partition(" — ")[0]
+        action.setText(f"{name} ({matrix.counts.get(state, 0) if matrix is not None else 0:,})")
     from review.core import inspector_panels
     c.walk_btn._aw_problem_value["value"] = qc.WORDS[chosen] if chosen else ""
     inspector_panels.refresh(c.walk_btn)

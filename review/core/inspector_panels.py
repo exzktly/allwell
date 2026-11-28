@@ -188,7 +188,9 @@ def refresh(button: QWidget) -> None:
     panel = panel_of(button)
     if panel is None or not shiboken6.isValid(button):
         return
-    text = button_text(panel)
+    # "&" doubled: a button reads a lone "&" as the mark of its shortcut letter, so "Colour & split" was drawn as
+    # "Colour _split" — the ampersand dropped and the space underlined.
+    text = button_text(panel).replace("&", "&&")
     if button.text() != text:
         button.setText(text)
 

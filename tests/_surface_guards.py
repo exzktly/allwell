@@ -1,4 +1,4 @@
-"""The scans behind the surface guards (``SURFACES_TRACKER.md`` §5.2).
+"""The scans behind the surface guards (the surfaces rules ARCHITECTURE.md states).
 
 One scan per rule, each over the shared parsed trees (``tests/_repo_scan``), each
 returning sites as ``(file, function, line, what)``. A guard holds its sites

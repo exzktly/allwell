@@ -123,15 +123,15 @@ def test_the_pop_out_has_its_own_controls_and_each_changes_what_it_draws(page, q
     _click_dot(qtbot, page, ("A01", 1, 0))
     window = _press_pop_out(qtbot, page)
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
-    names = ("_nw_popout_image_channel_cb", "_nw_popout_range_btn", "_nw_popout_cells_box",
+    names = ("_nw_popout_image_channel_cb", "_nw_popout_cells_box",
              "_nw_popout_metrics_box", "_nw_popout_labels_box", "_nw_popout_go_to_btn")
     for name in names:
         widget = page.widgets.get(name)
         assert widget.window() is window and widget.isVisible(), name          # in the pop-out, not the page
-    # They start on the page's settings: the same channels as the strip's, the same range, the same boxes.
+    # They start on the page's settings: the same channels as the strip's, the same boxes. The display range is not
+    # among them: it is set in one place, the Display tab's row, and the pop-out's crops are drawn on it.
     strip_cb, own_cb = page.widgets.get("_nw_strip_image_channel_cb"), page.widgets.get("_nw_popout_image_channel_cb")
     assert [own_cb.itemText(i) for i in range(own_cb.count())] == [strip_cb.itemText(i) for i in range(strip_cb.count())]
-    assert page.widgets.get("_nw_popout_range_btn").text() == page.widgets.get("_nw_strip_range_btn").text()
     assert page.widgets.get("_nw_popout_metrics_box").isChecked() and page.widgets.get("_nw_popout_labels_box").isChecked()
     assert sorted(_popout_texts(page, "nw-crop-title")) == ["t_a", "t_c"]
     assert len(_popout_texts(page, "nw-crop-grid-caption")) == 1
@@ -148,11 +148,11 @@ def test_the_pop_out_has_its_own_controls_and_each_changes_what_it_draws(page, q
     # Cells: the strip's box follows the pop-out's.
     page.widgets.get("_nw_popout_cells_box").click()
     assert st.crop_cells is True and page.widgets.get("_nw_strip_cells_box").isChecked()
-    # The display range typed from the pop-out's button reaches its crops and every Range button.
+    # The display range set on the page reaches the pop-out's crops, and the Display tab's row reads it.
     nwc.set_display_range(page, 2.0, 50.0)
     qtbot.waitUntil(lambda: len(_images(page, "_nw_popout_fig")) == 2, timeout=10000)
     assert [im.get_clim() for im in _images(page, "_nw_popout_fig")] == [(2.0, 50.0), (2.0, 50.0)]
-    assert page.widgets.get("_nw_popout_range_btn").text() == "Range: 2–50"
+    assert page.widgets.get("_nw_display_range_btn").text() == "Display range: 2–50 ›"
     page.widgets.get("_nw_popout_labels_box").click()
     assert st.popout_labels is True and sorted(_popout_texts(page, "nw-crop-title")) == ["t_a", "t_c"]
     window.hide()

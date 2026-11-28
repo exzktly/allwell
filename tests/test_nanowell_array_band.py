@@ -89,16 +89,18 @@ def test_each_image_control_says_the_reason_it_is_greyed(qc_page):
     assert _reason(ctx, "_nw_image_cb") is None
     assert _reason(ctx, "_nw_array_image_channel_cb") == ("The run montage is the phase image only: choose Image ▸ "
                                                          "Full resolution to draw a channel.")
-    assert _reason(ctx, "_nw_array_range_btn") == ("The display range applies to Image ▸ Full resolution; the run "
-                                                   "montage is drawn as the run saved it.")
+    # The Display range is the page's one row for every picture of the channel — the crops and the Extremes montage
+    # as well as this image — so no Image setting greys it.
+    rng = ctx.widgets.get("_nw_display_range_btn")
+    assert rng.isEnabled()
     image.setCurrentIndex([image.itemData(i) for i in range(image.count())].index("off"))
-    assert _reason(ctx, "_nw_array_range_btn") == "Image is Off."
+    assert rng.isEnabled()
     assert _reason(ctx, "_nw_one_btn") == ("No image is drawn (Image Off, or Lattice positions): there is no image "
                                            "pixel to match.")
     ctx.widgets.get("_nw_positions_seg").setCurrentIndex(1)           # Lattice
     lattice = "Lattice positions have no image under them: choose Positions ▸ Measured."
     assert _reason(ctx, "_nw_image_cb") == lattice
-    assert _reason(ctx, "_nw_array_range_btn") == lattice
+    assert rng.isEnabled()
 
 
 def test_set_anchor_says_which_of_its_conditions_is_missing(montage_page):

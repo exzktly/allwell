@@ -57,12 +57,14 @@ def after_draw(ctx, st, model) -> None:
     drawn from and draw the window on it. (The check is here, not in ``redraw``, which is at the complexity cap.)"""
     _nwc()._call(ctx, "_nw_details_refresh")            # the footer the figure no longer writes
     if st.view != "distribution":
+        _nwc()._call(ctx, "_nw_status_refresh")         # the chips under the figure: Cell Gating's comes with a draw
         return
     st.window_model = model
     window, result = current(st)
     if window is not None and st.hits is not None:
         draw_window(st.hits, window, result)
     _nwc()._call(ctx, "_nw_window_refresh")
+    _nwc()._call(ctx, "_nw_status_refresh")
     _nwc()._call(ctx, "_nw_popout_window_refresh")
 
 
@@ -302,6 +304,7 @@ def use_window_as_subset(ctx) -> None:
     else:
         st.windows[key] = window                         # not a subset after all: the window stays as it was
     nwc._call(ctx, "_nw_window_refresh")
+    nwc._call(ctx, "_nw_status_refresh")
     nwc._call(ctx, "_nw_popout_window_refresh")
     nwc.draw_popout(ctx)
 

@@ -940,6 +940,12 @@ def apply_plot_card_decorators(ctx, card, tab_name: str, *, part: str = "") -> N
     strip and crops pop-out. It is passed on only when given, so a decorator
     that knows nothing of parts is called exactly as before.
     """
+    # Every card's figure keeps its words on it as drawn: crowded tick labels thinned, a y label off the left edge
+    # moved on (``figure_fit``).
+    canvas = getattr(card, "canvas", None)
+    if canvas is not None:
+        from review.core.figure_fit import keep_ticks_apart
+        keep_ticks_apart(canvas)
     extra = {"part": part} if part else {}
     for descriptor in ctx.features.with_hook("plot_card_decorator"):
         try:

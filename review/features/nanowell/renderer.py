@@ -2435,7 +2435,10 @@ def _fitted_text_class():
                 size = self._aw_size
                 widest = max(width(part, size) for part in self._aw_source.split("\n"))
                 if widest > room > 0:
-                    size = max(self._aw_size * self._aw_smallest, self._aw_size * room / widest)
+                    # A little under the exact ratio: a face's widths do not scale exactly with its size (hinting,
+                    # kerning), and text made smaller to the exact ratio measured a fraction over the room in the CI
+                    # runner's DejaVu Sans and was broken onto two lines all the same.
+                    size = max(self._aw_size * self._aw_smallest, 0.98 * self._aw_size * room / widest)
                 lines: list[str] = []
                 for part in self._aw_source.split("\n"):
                     lines.extend(_greedy_lines(part, lambda line, at=size: width(line, at), room))

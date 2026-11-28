@@ -8,6 +8,8 @@ phone's size, with no app: the tour itself is the slow lane's (``tests/test_ever
 
 from __future__ import annotations
 
+import pytest
+
 import matplotlib
 
 matplotlib.use("agg")
@@ -45,7 +47,15 @@ def test_a_message_is_broken_to_the_figure_it_is_shown_at_not_the_one_it_was_dra
     assert " ".join(text.get_text().split()).replace(" ", "") == LONG.replace(" ", "")      # every word kept
 
 
-def test_a_fitted_text_is_made_smaller_before_it_is_broken():
+@pytest.mark.parametrize("face", [None, "DejaVu Sans"])     # this machine's face, and the CI runner's
+def test_a_fitted_text_is_made_smaller_before_it_is_broken(face):
+    import matplotlib
+
+    with matplotlib.rc_context({"font.family": face} if face else {}):
+        _fitted_text_is_made_smaller_before_it_is_broken()
+
+
+def _fitted_text_is_made_smaller_before_it_is_broken():
     # A figure whose room (92% of its width) is 80% of the text's width at 12 pt, measured in whatever face this
     # machine draws in: a fixed width fitted the app's font and was too narrow for the CI runner's wider DejaVu Sans.
     probe = _figure(10.0, 2.0)
